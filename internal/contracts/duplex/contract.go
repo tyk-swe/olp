@@ -4,7 +4,7 @@
 // owns only the setup fields each profile must gate (route model binding and
 // transcription-only declarations) and each provider's terminal usage
 // evidence. The gateway owns sockets, admission and settlement.
-package duplexcontract
+package duplex
 
 import (
 	"slices"

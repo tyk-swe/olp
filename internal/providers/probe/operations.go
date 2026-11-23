@@ -9,11 +9,11 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -44,7 +44,7 @@ func ConfigurationCertifiable(transport connectors.Config, tuple connection.Capa
 	if transport.ProfileID == "gemini-live" {
 		return tuple.Operation == "realtime" && tuple.Surface == "gemini" && tuple.Mode == "realtime" && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
-	if duplexcontract.IsProfile(transport.ProfileID) {
+	if duplex.IsProfile(transport.ProfileID) {
 		return tuple.Operation == "realtime" && tuple.Surface == "native" && tuple.Mode == "realtime" && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
 	if tuple.Operation == "batch" {
@@ -64,7 +64,7 @@ func ConfigurationCertifiable(transport connectors.Config, tuple connection.Capa
 // embeddings or rerank dialect, is probed with the first unary tuple it can
 // certify.
 func DefaultTuple(transport connectors.Config) connection.Capability {
-	if duplexcontract.IsProfile(transport.ProfileID) {
+	if duplex.IsProfile(transport.ProfileID) {
 		if tuple := (connection.Capability{Operation: "realtime", Surface: "native", Mode: "realtime"}); Probeable(transport, tuple) {
 			return tuple
 		}
@@ -109,17 +109,17 @@ func Probeable(transport connectors.Config, tuple connection.Capability) bool {
 }
 
 func (p *Prober) certifyOperation(ctx context.Context, t Target, model string, tuple connection.Capability, codec operations.Dialect) error {
-	template, err := operationplan.Compile(operationplan.Config{Provider: t.Connection.Transport(), Model: model, Operation: tuple.Operation})
+	template, err := unary.Compile(unary.Config{Provider: t.Connection.Transport(), Model: model, Operation: tuple.Operation})
 	if err != nil {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation contract could not be compiled."}
 	}
 	// Certification invokes the target's native probe and validates its full
 	// response. It does not certify every cross-dialect request or client contract.
-	source, err := operationplan.Parse(codec.Identity.ID, codec.Probe("certification"), 1<<20)
+	source, err := unary.Parse(codec.Identity.ID, codec.Probe("certification"), 1<<20)
 	if err != nil {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation probe is invalid."}
 	}
-	plan, err := template.Bind(source, operationplan.Context{Route: "certification", ClientContract: operations.RawVectorClient})
+	plan, err := template.Bind(source, unary.Context{Route: "certification", ClientContract: operations.RawVectorClient})
 	if err != nil {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "The native operation probe cannot bind its configured defaults."}
 	}
@@ -146,7 +146,7 @@ func (p *Prober) certifyOperation(ctx context.Context, t Target, model string, t
 	return nil
 }
 
-func (p *Prober) pollOperation(ctx context.Context, t Target, plan *operationplan.Plan, submit string, header http.Header) ([]byte, error) {
+func (p *Prober) pollOperation(ctx context.Context, t Target, plan *unary.Plan, submit string, header http.Header) ([]byte, error) {
 	location, err := plan.PollLocation(submit, header)
 	if err != nil {
 		return nil, &Failure{Reason: ProviderProtocolError, Detail: "The upstream polling location is invalid."}
@@ -198,7 +198,7 @@ func (p *Prober) pollOperation(ctx context.Context, t Target, plan *operationpla
 	return nil, &Failure{Reason: GatewayTimeout, Detail: "The upstream operation did not finish within the probe deadline."}
 }
 
-func (p *Prober) cancelOperationPoll(ctx context.Context, t Target, plan *operationplan.Plan, location string) {
+func (p *Prober) cancelOperationPoll(ctx context.Context, t Target, plan *unary.Plan, location string) {
 	method, target, ok := plan.CancelPoll(location)
 	if !ok || method == "" || target == "" {
 		return

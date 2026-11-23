@@ -35,13 +35,13 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -1118,7 +1118,7 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 							t.Fatalf("select operation = %t, error = %v", selected, err)
 						}
 					} else {
-						source, err := operationplan.Parse("openai-embeddings", body, 64<<10)
+						source, err := unary.Parse("openai-embeddings", body, 64<<10)
 						if err != nil {
 							t.Fatal(err)
 						}

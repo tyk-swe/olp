@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 

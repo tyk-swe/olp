@@ -14,7 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
 )
 
 func (p *Prober) certifyRealtime(ctx context.Context, t Target, model string) error {
@@ -27,12 +27,12 @@ func (p *Prober) certifyRealtime(ctx context.Context, t Target, model string) er
 
 func (p *Prober) certifyNativeDuplex(ctx context.Context, t Target, model string) error {
 	transport := t.Connection.Transport()
-	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: transport, Model: model})
+	template, err := duplex.Compile(duplex.Config{Provider: transport, Model: model})
 	if err != nil {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "The native duplex contract could not be compiled."}
 	}
 	switch template.Transport() {
-	case duplexcontract.TransportWebSocket:
+	case duplex.TransportWebSocket:
 		endpoint, err := transport.DuplexURL(model)
 		if err != nil {
 			return &Failure{Reason: InvalidEndpoint, Detail: "The selected profile cannot address this realtime model."}
@@ -40,7 +40,7 @@ func (p *Prober) certifyNativeDuplex(ctx context.Context, t Target, model string
 		return p.certifyWebSocketDial(ctx, t, endpoint, func(ctx context.Context, conn *websocket.Conn) error {
 			return probeNativeDuplexSetup(ctx, conn, template, transport, model)
 		})
-	case duplexcontract.TransportBedrockBidi:
+	case duplex.TransportBedrockBidi:
 		endpoint, err := transport.BedrockDuplexEndpoint()
 		if err != nil {
 			return &Failure{Reason: InvalidEndpoint, Detail: "The selected profile cannot address this realtime model."}
@@ -112,7 +112,7 @@ func (p *Prober) certifyWebSocketDial(ctx context.Context, t Target, endpoint st
 	return nil
 }
 
-func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template *duplexcontract.Template, transport connectors.Config, model string) error {
+func probeNativeDuplexSetup(ctx context.Context, conn *websocket.Conn, template *duplex.Template, transport connectors.Config, model string) error {
 	if !template.SetupAck() {
 		return nil
 	}

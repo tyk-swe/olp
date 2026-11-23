@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 )
 
 // executionDebits reports financial exposure, not invoice charges. Accounting

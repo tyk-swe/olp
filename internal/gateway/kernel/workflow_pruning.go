@@ -8,6 +8,8 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/decision"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -17,8 +19,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -239,7 +239,7 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 	if !ok {
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
-	source, err := operationplan.Parse(decision.SystemOne, body, int(s.Config.MaxBodyBytes))
+	source, err := unary.Parse(decision.SystemOne, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		if policy.Revision.OnError == guardrails.FailOpen {
 			return nil, nil
@@ -270,7 +270,7 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 	if problem != nil {
 		return nil, problem
 	}
-	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	result := runAttempts(stepCtx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
 	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.Log)

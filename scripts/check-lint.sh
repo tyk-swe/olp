@@ -76,3 +76,25 @@ while read -r package imports; do
     fi
   done
 done < <(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/gateway/...)
+
+module_edges() {
+  go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/... | awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="$1" '
+    function module(path, rest) {
+      if (index(path, root) != 1) return ""
+      rest = substr(path, length(root) + 1)
+      sub(/\/.*/, "", rest)
+      return rest
+    }
+    {
+      from = module($1)
+      for (i = 2; i <= NF; i++) {
+        to = module($i)
+        if (to != "" && to != from && from " " to != allowed) print from, to
+      }
+    }' | sort -u
+}
+if ! loop=$(module_edges "domain catalog" | tsort 2>&1 >/dev/null); then
+  echo "$loop" >&2
+  echo "check-lint: modules under internal/ import each other in a cycle. Move the shared piece into internal/domain or inject it from cmd/olp" >&2
+  exit 1
+fi

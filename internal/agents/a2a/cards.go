@@ -14,7 +14,7 @@ import (
 	legacy "github.com/a2aproject/a2a-go/a2a"
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
-	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 )
 
 const maxCardBytes = 1 << 20

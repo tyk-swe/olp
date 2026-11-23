@@ -1,6 +1,7 @@
 package personal
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -9,20 +10,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/mcp/registration"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-type Server struct {
-	access *access.Server
-	grants *Store
+type ServerToolsets interface {
+	Toolset(ctx context.Context, serverID string) (string, routing.MCPToolsetTool, error)
 }
 
-func New(a *access.Server) *Server {
-	return &Server{access: a, grants: NewStore(a.Pool, a.Installation, a.Auth, a.Keys, a.Egress)}
+type Server struct {
+	access  *access.Server
+	servers ServerToolsets
+	grants  *Store
+}
+
+func New(a *access.Server, servers ServerToolsets) *Server {
+	return &Server{access: a, servers: servers, grants: NewStore(a.Pool, a.Installation, a.Auth, a.Keys, a.Egress)}
 }
 
 type StandingState string
@@ -129,21 +134,21 @@ func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error
 		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key UUID.")
 	}
 	keyID := keyUUID.String()
-	server, err := registration.Load(r.Context(), s.access.Pool, id, false)
+	serverProject, tool, err := s.servers.Toolset(r.Context(), id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := p.Project(&server.ProjectID, authz.Change); err != nil {
+	if err := p.Project(&serverProject, authz.Change); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var project string
 	if err := s.access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL`, keyID).Scan(&project); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if project != server.ProjectID {
+	if project != serverProject {
 		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The API key was not found.")
 	}
-	bound, err := Bind(keyauthority.Authority{ID: keyID, ProjectID: &project}, routing.MCPToolsetTool{ServerID: id, Endpoint: server.Endpoint, OAuth: server.OAuth})
+	bound, err := Bind(keyauthority.Authority{ID: keyID, ProjectID: &project}, tool)
 	if err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
 	}

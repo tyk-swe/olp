@@ -12,13 +12,13 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
+| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/access/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
 | Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
 | Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
+| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
-| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
+| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/contracts/` (the strict contract compilers `interaction/`, `unary/`, `duplex/` and `media/`), `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
@@ -99,7 +99,8 @@ administrative dispatch.
 
 `grants/personal` owns personal OAuth, Entra exchange, renewal, and delegated
 signing for MCP and agent calls. Configure-time validation remains with
-registration over the shared types in `grants/config`.
+registration over the shared types in `domain/grantconfig`. Registration hands
+`grants/personal` its server lookup through the constructor in `cmd/olp`.
 
 ## Runtime and immutable sources
 
@@ -272,6 +273,11 @@ package instead.
   behavior, including its SQL, validation and routes. A new package goes in
   `internal/domain` when it does no I/O, in `internal/platform` when it is
   infrastructure no single module owns, and next to its module otherwise.
+- Modules under `internal` never import each other in a cycle, counting each
+  top-level directory as one module. The one allowed pair is
+  `internal/domain` and the signed reference catalog. When two modules need
+  each other, move the shared vocabulary into `internal/domain` or inject the
+  collaborator from `cmd/olp`.
 - `internal/access` is the management kit and holds no feature. It
   authenticates callers, registers routes, runs write transactions and records
   audit rows. A new resource gets its own package that imports the kit.
@@ -708,7 +714,7 @@ stale versions cannot reduce holds. `internal/usage/ingest` joins existing
 observed-fact persistence with idempotent result settlement. Run totals and
 reservations are never additional usage charges.
 
-Pure `agentcontract` and `prompts` definitions are distinct from execution and
+Pure `domain/agentcontract` and `prompts` definitions are distinct from execution and
 management. Published contracts join immutable runtime snapshots. Snapshot copies
 own their OAuth configuration and task bounds. Live authority independently checks
 keys, project/resource allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
@@ -730,9 +736,9 @@ types. Card validation and dispatch use the same resolved credential. Protocol
 adapters map execution failures to client responses and replace upstream task
 identifiers with public identifiers.
 
-`agents/tasks` owns task admission, persistence, settlement, callback capabilities
-and cancellation claims. `release` authenticates live owners and authorizes pinned
-callback resources through that capability API, without owning task SQL. Consumer
+`agents/tasks` owns task admission, persistence, settlement and cancellation
+claims. `release` reads and counts callback capabilities, authenticates live
+owners and authorizes pinned callback resources. Consumer
 requests, operator requests and the bounded background monitor share remote task
 operations while retaining their own authorization rules.
 

@@ -1,4 +1,4 @@
-package duplexcontract
+package duplex
 
 import (
 	"strconv"

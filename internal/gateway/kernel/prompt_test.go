@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/prompts"
 	"github.com/tyk-swe/olp/internal/routing"
 )

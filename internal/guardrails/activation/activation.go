@@ -1,4 +1,4 @@
-package guardrails
+package activation
 
 import (
 	"context"
@@ -7,8 +7,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 type Publisher func(ctx context.Context, tx pgx.Tx, actor string) error
@@ -24,7 +25,7 @@ type Lineage interface {
 	Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error
 }
 
-func Activation(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, authz.Principal) (httpkit.Reply, error) {
+func Handler(server *access.Server, publish Publisher, lineage Lineage, param, resource string) func(*http.Request, authz.Principal) (httpkit.Reply, error) {
 	return func(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, param)
 		if err != nil {
@@ -42,7 +43,7 @@ func Activation(server *access.Server, publish Publisher, lineage Lineage, param
 			if err != nil {
 				return Head{}, err
 			}
-			return head, p.Project(ProjectPointer(head.Project), authz.Change)
+			return head, p.Project(guardrails.ProjectPointer(head.Project), authz.Change)
 		}, func(tx pgx.Tx, p authz.Principal, head Head) (httpkit.Reply, access.Event, error) {
 			if err := httpkit.Match(r, head.ETag); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
@@ -61,6 +62,6 @@ func Activation(server *access.Server, publish Publisher, lineage Lineage, param
 	}
 }
 
-func ActivationRefused() error {
+func Refused() error {
 	return httpkit.Invalid("revision_id", "Choose a revision owned by this resource.")
 }

@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 

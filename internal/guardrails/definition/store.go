@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -93,7 +94,7 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) erro
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return guardrails.ActivationRefused()
+		return activation.Refused()
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor)
 	return err
@@ -101,8 +102,8 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) erro
 
 type lineage struct{}
 
-func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (guardrails.Head, error) {
-	var head guardrails.Head
+func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (activation.Head, error) {
+	var head activation.Head
 	err := tx.QueryRow(ctx, "SELECT COALESCE(project_id::text,'installation'),etag::text,retired_at IS NOT NULL FROM olp.guardrails WHERE id=$1 FOR UPDATE", id).Scan(&head.Project, &head.ETag, &head.Retired)
 	return head, err
 }

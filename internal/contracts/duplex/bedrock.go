@@ -1,4 +1,4 @@
-package duplexcontract
+package duplex
 
 import (
 	"github.com/tyk-swe/olp/internal/domain/oif"

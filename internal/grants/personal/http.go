@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 )
 
 type authorizeRequest struct {

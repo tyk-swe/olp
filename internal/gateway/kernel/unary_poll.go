@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -35,7 +35,7 @@ type unaryExchange struct {
 	ctx        context.Context
 	x          *Call
 	state      *attemptState
-	plan       *operationplan.Plan
+	plan       *unary.Plan
 	client     *http.Client
 	bound      *boundExchange
 	fact       *events.AttemptFact

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 	"github.com/tyk-swe/olp/internal/platform/database"
 

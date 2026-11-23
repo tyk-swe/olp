@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/media"
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/staging"
 )
 
@@ -177,7 +177,7 @@ func exactParts(parts []staging.Field, model string) []staging.Field {
 }
 
 func multipartDefault(name string, raw json.RawMessage) ([]staging.Field, *Error) {
-	if mediacontract.RepeatedMultipartDefault(name) {
+	if media.RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
 			return nil, configuredFailure(name, "requires a nonempty array of strings in multipart")

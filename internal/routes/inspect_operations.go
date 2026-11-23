@@ -9,12 +9,12 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	mediacontract "github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 )
 
 func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
@@ -60,7 +60,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	if !ok || codec.Operation.ID != operation || mode != "unary" || surface != "native" && surface != codec.Surface {
 		return nil, nil, nil, httpkit.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
 	}
-	request, err := operationplan.Parse(dialect, raw, 1<<20)
+	request, err := unary.Parse(dialect, raw, 1<<20)
 	if err != nil {
 		return nil, nil, nil, httpkit.Invalid("request", "Use a valid native operation source.")
 	}
@@ -74,11 +74,11 @@ func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.R
 	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
-		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
+		template, err := unary.Compile(unary.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
-		plan, err := template.Bind(source, operationplan.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
+		plan, err := template.Bind(source, unary.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}

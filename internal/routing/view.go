@@ -6,14 +6,14 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 )
 
 type View struct{ snapshot *Snapshot }
@@ -198,12 +198,12 @@ func (v *View) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	return copyPointer(template), ok
 }
 
-func (v *View) DuplexTemplate(slug, target string) (*duplexcontract.Template, bool) {
+func (v *View) DuplexTemplate(slug, target string) (*duplex.Template, bool) {
 	template, ok := v.snapshot.DuplexTemplate(slug, target)
 	return copyPointer(template), ok
 }
 
-func (v *View) MediaTemplate(slug, target, operation string) (*mediacontract.Template, bool) {
+func (v *View) MediaTemplate(slug, target, operation string) (*media.Template, bool) {
 	template, ok := v.snapshot.MediaTemplate(slug, target, operation)
 	return copyPointer(template), ok
 }
@@ -213,7 +213,7 @@ func (v *View) DurableTemplate(slug, target string) (*DurableTemplate, bool) {
 	return copyPointer(template), ok
 }
 
-func (v *View) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
+func (v *View) OperationTemplate(slug, target, operation string) (*unary.Template, bool) {
 	template, ok := v.snapshot.OperationTemplate(slug, target, operation)
 	return copyPointer(template), ok
 }

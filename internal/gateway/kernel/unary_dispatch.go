@@ -9,11 +9,11 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -31,7 +31,7 @@ type unaryRun struct {
 
 type unarySent struct {
 	fact     events.AttemptFact
-	plan     *operationplan.Plan
+	plan     *unary.Plan
 	raw      []byte
 	cancel   context.CancelFunc
 	timer    *time.Timer
@@ -50,7 +50,7 @@ func (sent unarySent) release() {
 	}
 }
 
-func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+func (s *Server) unaryAttempt(ctx context.Context, x *Call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 	if x.guard.engine != nil {
 		x.guard.ctx = ctx
 	}
@@ -108,7 +108,7 @@ func (run unaryRun) send(fact events.AttemptFact) (unarySent, *attemptEnd) {
 	return sent, nil
 }
 
-func (run unaryRun) replyLimit(plan *operationplan.Plan) int {
+func (run unaryRun) replyLimit(plan *unary.Plan) int {
 	limit := plan.Receipt().Obligations.MaxBodyBytes
 	if run.server.Config.MaxResponseBytes > 0 {
 		return min(limit, int(run.server.Config.MaxResponseBytes))
@@ -116,7 +116,7 @@ func (run unaryRun) replyLimit(plan *operationplan.Plan) int {
 	return limit
 }
 
-func (run unaryRun) decode(sent unarySent) (operationplan.Result, events.AttemptFact, *attemptEnd) {
+func (run unaryRun) decode(sent unarySent) (unary.Result, events.AttemptFact, *attemptEnd) {
 	run.state.settled = true
 	result, err := sent.plan.Decode(sent.raw)
 	measured := sent.fact
@@ -131,7 +131,7 @@ func (run unaryRun) decode(sent unarySent) (operationplan.Result, events.Attempt
 	return result, measured, ended(ClassProtocol, &AttemptFailure{contractCode: "fidelity_protocol_violation"})
 }
 
-func (run unaryRun) inspect(sent unarySent, result operationplan.Result) *attemptEnd {
+func (run unaryRun) inspect(sent unarySent, result unary.Result) *attemptEnd {
 	x := run.x
 	if guardErr := sent.parallel.join(x, true); guardErr != nil {
 		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
@@ -145,7 +145,7 @@ func (run unaryRun) inspect(sent unarySent, result operationplan.Result) *attemp
 	return nil
 }
 
-func (run unaryRun) inspectOutput(plan *operationplan.Plan, result operationplan.Result) error {
+func (run unaryRun) inspectOutput(plan *unary.Plan, result unary.Result) error {
 	x := run.x
 	texts, err := plan.GuardrailOutput(result)
 	if err != nil {
@@ -166,7 +166,7 @@ func (run unaryRun) finishTrace(fact events.AttemptFact) {
 	run.trace.Finish(fact.Class, fact.Status)
 }
 
-func (run unaryRun) fail(fact events.AttemptFact, parallel *parallelGuardrail, end *attemptEnd) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+func (run unaryRun) fail(fact events.AttemptFact, parallel *parallelGuardrail, end *attemptEnd) (events.AttemptFact, unary.Result, *AttemptFailure) {
 	f := run.failure(parallel, end)
 	failed := fact
 	failed.Class = f.class
@@ -180,7 +180,7 @@ func (run unaryRun) fail(fact events.AttemptFact, parallel *parallelGuardrail, e
 	}
 	failed.RecordEvidence(f.billingUncertain())
 	run.finishTrace(failed)
-	return failed, operationplan.Result{}, f
+	return failed, unary.Result{}, f
 }
 
 func (run unaryRun) failure(parallel *parallelGuardrail, end *attemptEnd) *AttemptFailure {
@@ -200,7 +200,7 @@ func (run unaryRun) failure(parallel *parallelGuardrail, end *attemptEnd) *Attem
 	return &f
 }
 
-func (run unaryRun) succeed(fact events.AttemptFact, result operationplan.Result) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+func (run unaryRun) succeed(fact events.AttemptFact, result unary.Result) (events.AttemptFact, unary.Result, *AttemptFailure) {
 	done := fact
 	done.Class = ClassSuccess
 	done.Duration = run.server.Now().Sub(fact.StartedAt)
