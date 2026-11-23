@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"strings"
 	"testing"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/inference"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
@@ -26,6 +26,51 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestGeneratedA2ANumericIDsRoundTrip(t *testing.T) {
+	for _, id := range []string{"16777217", "9007199254740993", "123.456789123456789"} {
+		t.Run(id, func(t *testing.T) {
+			data := []byte(`{"jsonrpc":"2.0","id":` + id + `}`)
+			var request inference.A2ARequest
+			if err := json.Unmarshal(data, &request); err != nil {
+				t.Fatal(err)
+			}
+			requestID, err := request.Id.AsA2ARequestId1()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outgoing inference.A2ARequest_Id
+			if err := outgoing.FromA2ARequestId1(requestID); err != nil {
+				t.Fatal(err)
+			}
+			wireID, err := json.Marshal(outgoing)
+			if err != nil || string(wireID) != id {
+				t.Errorf("encoded request ID = %s, error = %v, want %s", wireID, err, id)
+			}
+			var response inference.A2AResponse
+			if err := json.Unmarshal(data, &response); err != nil {
+				t.Fatal(err)
+			}
+			responseID, err := response.Id.AsA2AResponseId1()
+			if err != nil || fmt.Sprint(responseID) != id {
+				t.Errorf("decoded response ID = %v, error = %v, want %s", responseID, err, id)
+			}
+		})
+	}
+}
+
+func TestGeneratedA2AKeepsNumericStringsAsStrings(t *testing.T) {
+	var response inference.A2AResponse
+	if err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":"16777217"}`), &response); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := response.Id.AsA2AResponseId0(); err != nil || id != "16777217" {
+		t.Fatalf("decoded string ID = %q, error = %v", id, err)
+	}
+	if id, err := response.Id.AsA2AResponseId1(); err == nil {
+		t.Fatalf("string ID was also decoded as the numeric ID %v", id)
+	}
+}
 
 type runtimeFixture struct {
 	authority keyauthority.Authority
@@ -186,15 +231,32 @@ func TestA2AHTTPVersionsAndSingleCredentialResolution(t *testing.T) {
 					}
 					return encoded
 				}()
-				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"request","method":%q,"params":%s}`, method, params)
-				request := httptest.NewRequest(http.MethodPost, "/a2a/"+revision.PublicationID, strings.NewReader(body))
-				request.Header.Set("Content-Type", "application/json")
-				request.Header.Set("Authorization", "Bearer consumer-secret")
-				request.Header.Set("A2A-Version", strings.TrimPrefix(version, "a2a-"))
-				response := httptest.NewRecorder()
-				mux.ServeHTTP(response, request)
-				if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("public-task")) || bytes.Contains(response.Body.Bytes(), []byte("private-task")) || bytes.Contains(response.Body.Bytes(), []byte("private-context")) {
-					t.Fatalf("incorrect public response (%d): %s", response.Code, response.Body.String())
+				body := fmt.Appendf(nil, `{"jsonrpc":"2.0","id":"request","method":%q,"params":%s}`, method, params)
+				var request inference.CallA2AAgentJSONRequestBody
+				if err := json.Unmarshal(body, &request); err != nil {
+					t.Fatal(err)
+				}
+				gateway := httptest.NewServer(mux)
+				defer gateway.Close()
+				client, err := inference.NewClientWithResponses(gateway.URL, inference.WithHTTPClient(gateway.Client()), inference.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
+					request.Header.Set("Authorization", "Bearer consumer-secret")
+					return nil
+				}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				editors := func() []inference.RequestEditorFn {
+					if version == "a2a-1.0.0" {
+						return []inference.RequestEditorFn{inference.WithA2AVersion(inference.A2AVersion10)}
+					}
+					return nil
+				}()
+				response, err := client.CallA2AAgentWithResponse(t.Context(), uuid.MustParse(revision.PublicationID), request, editors...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode() != http.StatusOK || !bytes.Contains(response.Body, []byte("public-task")) || bytes.Contains(response.Body, []byte("private-task")) || bytes.Contains(response.Body, []byte("private-context")) {
+					t.Fatalf("incorrect public response (%d): %s", response.StatusCode(), response.Body)
 				}
 				if len(sends) != 1 || len(credentials) != 1 || len(dispatch.settled) != 1 || len(dispatch.uncertain) != 0 {
 					t.Fatalf("send did not use one credential and one settled dispatch: sends=%d credentials=%d settled=%d unknown=%d", len(sends), len(credentials), len(dispatch.settled), len(dispatch.uncertain))
@@ -202,7 +264,7 @@ func TestA2AHTTPVersionsAndSingleCredentialResolution(t *testing.T) {
 				if (<-sends) != method {
 					t.Fatal("wrong upstream method for protocol")
 				}
-				if streaming && response.Header().Get("Content-Type") != "text/event-stream" {
+				if streaming && response.ContentType() != "text/event-stream" {
 					t.Fatal("stream was not returned as SSE")
 				}
 			})

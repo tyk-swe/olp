@@ -88,7 +88,7 @@ func assessThreadAccount(now time.Time, evidence ThreadAccountEvidence) threadAc
 	}
 }
 
-func AssessThreadStatus(now time.Time, retired bool, accounts []ThreadAccountEvidence) ThreadStatus {
+func AssessThreadStatus(now time.Time, bindingUnavailable bool, accounts []ThreadAccountEvidence) ThreadStatus {
 	assessments := slices.Collect(func(yield func(threadAccountAssessment) bool) {
 		for _, account := range accounts {
 			if !yield(assessThreadAccount(now, account)) {
@@ -111,7 +111,7 @@ func AssessThreadStatus(now time.Time, retired bool, accounts []ThreadAccountEvi
 		}
 	})...)
 	switch {
-	case retired || slices.ContainsFunc(accounts, func(account ThreadAccountEvidence) bool { return !account.Eligible }):
+	case bindingUnavailable || slices.ContainsFunc(accounts, func(account ThreadAccountEvidence) bool { return !account.Eligible }):
 		return ThreadStatus{Status: ThreadUnavailable, CheckedAt: now, LastObservedAt: lastObserved}
 	case len(blocking) > 0:
 		return ThreadStatus{Status: ThreadUnavailable, CheckedAt: now, LastObservedAt: lastObserved, RetryAt: knownDeadline(blocking)}

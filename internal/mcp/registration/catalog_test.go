@@ -66,14 +66,27 @@ func TestDiffCatalogsNamesChangedFields(t *testing.T) {
 }
 
 func TestDiffCatalogsTreatsReorderedSchemaAsUnchanged(t *testing.T) {
-	saved := []routing.MCPTool{catalogTool("lookup", "Look up", `{"type":"object","properties":{"id":{"type":"string","minLength":1}}}`)}
-	discovered := []routing.MCPTool{catalogTool("lookup", "Look up", `{"properties":{"id":{"minLength":1,"type":"string"}},"type":"object"}`)}
+	saved := []routing.MCPTool{catalogTool("lookup", "Look up", `{"type":"object","properties":{"id":{"type":"integer","maximum":1000}}}`)}
+	discovered := []routing.MCPTool{catalogTool("lookup", "Look up", `{"properties":{"id":{"maximum":1e3,"type":"integer"}},"type":"object"}`)}
 	added, removed, modified := diffCatalogs(saved, discovered)
 	if len(added) != 0 || len(removed) != 0 || len(modified) != 0 {
 		t.Fatalf("reordered schema reported as a change: added=%v removed=%v modified=%v", added, removed, modified)
 	}
 	if added == nil || removed == nil || modified == nil {
 		t.Fatal("diff lists must stay non-nil so they encode as empty arrays")
+	}
+}
+
+func TestDiffCatalogsPreservesLargeSchemaBounds(t *testing.T) {
+	saved := []routing.MCPTool{catalogTool("lookup", "Look up", `{"type":"object","properties":{"id":{"type":"integer","maximum":9007199254740992}}}`)}
+	discovered := []routing.MCPTool{catalogTool("lookup", "Look up", `{"type":"object","properties":{"id":{"type":"integer","maximum":9007199254740993}}}`)}
+	_, _, modified := diffCatalogs(saved, discovered)
+	if len(modified) != 1 || modified[0].Name != "lookup" || !reflect.DeepEqual(modified[0].ChangedFields, []string{"input_schema"}) {
+		t.Fatalf("modified = %+v", modified)
+	}
+	if string(modified[0].SavedInputSchema) != string(saved[0].InputSchema) ||
+		string(modified[0].DiscoveredInputSchema) != string(discovered[0].InputSchema) {
+		t.Fatalf("schemas = %+v", modified[0])
 	}
 }
 

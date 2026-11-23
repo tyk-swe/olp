@@ -1407,6 +1407,81 @@ func TestUsageReportsKeepWholePeriodAllocationAndCompleteness(t *testing.T) {
 	}
 }
 
+func TestReconciliationContinuesExcludingCallerPaidSpendAfterRollup(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []struct {
+		name          string
+		legacy        bool
+		operatorSpend string
+	}{{"durable", false, "8.25"}, {"legacy", true, "5.75"}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			checkCallerPaidSpendAfterRollup(t, scenario.legacy, scenario.operatorSpend)
+		})
+	}
+}
+
+func checkCallerPaidSpendAfterRollup(t *testing.T, legacy bool, operatorSpend string) {
+	t.Helper()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	day := f.observedAt.Truncate(24 * time.Hour)
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.commitment_schedules
+		(provider_id,provider_revision_id,provider_name,provider_kind,amount,currency,period,effective_at)
+		VALUES($1,$2,'reconciliation fixture','openai_compatible',5,'USD','day',$3)`,
+		f.providerID, uuid.NewString(), day); err != nil {
+		t.Fatal(err)
+	}
+	for _, sample := range []struct {
+		caller     bool
+		cost       string
+		commitment bool
+	}{{false, "3.25", false}, {true, "7.5", false}, {false, "0", true}, {true, "0", true}} {
+		attempt := f.attempt(1)
+		event, err := usage.NewAccountingEvent(f.event(attempt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := ingest.PersistEvent(ctx, pool, event); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
+			t.Fatalf("persist reconciliation sample %+v: %v, %v", sample, result.Outcome, err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE olp.attempt_usage_facts SET caller_credential=$2,
+			estimated_cost=$3::text::numeric,commitment_period=CASE WHEN $4 THEN 'day' END,
+			commitment_amount=CASE WHEN $4 THEN 5 END,commitment_weight=CASE WHEN $4 THEN 1 END
+			WHERE attempt_id=$1`, attempt.ID, sample.caller, sample.cost, sample.commitment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if legacy {
+		result, err := pool.Exec(ctx, `UPDATE olp.commitment_periods SET legacy=true WHERE provider_id=$1 AND bucket_start=$2`, f.providerID, day)
+		if err != nil || result.RowsAffected() != 1 {
+			t.Fatalf("mark fixture period legacy: %v, %v", result, err)
+		}
+	}
+	check := func() {
+		t.Helper()
+		rows, err := reports.ReconciliationSpend(ctx, pool, day, day.Add(24*time.Hour), []string{f.providerID})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("reconciliation returned %+v, %v", rows, err)
+		}
+		row := rows[0]
+		if strings.TrimRight(row.AttributedCost, "0") != operatorSpend || row.PricedAttempts != 2 || row.ExcludedCallerAttempts != 2 {
+			t.Fatalf("reconciliation returned %+v, want gateway spend %s and two excluded caller attempts", row, operatorSpend)
+		}
+		totals, err := reports.ReadSummary(ctx, pool, reports.Filters{Start: day, End: day.Add(24 * time.Hour),
+			ProviderID: &f.providerID, Projects: reports.AllProjects()}, day.Add(24*time.Hour))
+		if err != nil || strings.TrimRight(strings.TrimRight(totals.AllocatedCommitment, "0"), ".") != "5" {
+			t.Fatalf("usage summary commitment = %q, want 5, error = %v", totals.AllocatedCommitment, err)
+		}
+	}
+	check()
+	if result, err := retention.RunMaintenance(ctx, pool, day.AddDate(0, 0, 91)); err != nil || result.UsageRows != 4 {
+		t.Fatalf("rollup returned %+v, %v", result, err)
+	}
+	check()
+}
+
 func TestBudgetThresholdNotificationsUseBudgetBasis(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -2699,6 +2774,57 @@ func TestStoredDeliveryPayloadNumbersReachWebhookUnchanged(t *testing.T) {
 	want := map[string]string{"event": `"key.expiring"`, "total": "12345678901234567890", "rate": "0.1000000000000000055511151231257827"}
 	if !maps.Equal(got, want) {
 		t.Errorf("delivered fields = %v, want %v", got, want)
+	}
+}
+
+func TestInterruptedFinalNotificationRecordsUnknownOutcome(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	sending := make(chan struct{}, 1)
+	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		sending <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(receiver.Close)
+	destination, rule, delivery := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+			VALUES($1,'retry',$2,$3,$1,$4)`, []any{destination, receiver.URL, f.projectID, f.ownerID}},
+		{`INSERT INTO olp.notification_rules(id,name,project_id,event,subject_kind,subject_id,destination_id,etag,created_by)
+			VALUES($1,'retry',$2,'key.expiring','api_key',$3,$4,$1,$5)`, []any{rule, f.projectID, f.keyID, destination, f.ownerID}},
+		{`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status,attempts,last_error_code,last_attempt_at)
+			VALUES($1,$2,'key.expiring','final-attempt',false,'{}','failed',4,'http_5xx',now()-interval '1 hour')`, []any{delivery, rule}},
+	} {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+		notifications.RunDelivery(ctx, notifications.DeliveryConfig{Pool: pool, NewID: uuid.NewString, Now: time.Now,
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: notifications.NewSender(policy)})
+	}()
+	select {
+	case <-sending:
+		cancel()
+	case <-ctx.Done():
+		t.Fatal("final notification attempt never reached the receiver")
+	}
+	<-done
+	var status, lastError string
+	var attempts int
+	if err := pool.QueryRow(t.Context(), `SELECT status,last_error_code,attempts FROM olp.notification_deliveries WHERE id=$1`, delivery).
+		Scan(&status, &lastError, &attempts); err != nil || status != "failed" || lastError != "outcome_unknown" || attempts != 5 {
+		t.Fatalf("interrupted attempt left status=%s error=%s attempts=%d, query error=%v", status, lastError, attempts, err)
 	}
 }
 

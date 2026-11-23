@@ -28,7 +28,8 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 	defer tx.Rollback(ctx)
 	in := Admission{Route: route, APIKeyID: key}
 	var authority keyauthority.Authority
-	if err := codeAuthorityFor(ctx, tx, in, &authority, codeThreadStatus); err != nil {
+	current, err := codeAuthorityDocument(ctx, tx, in, &authority, codeThreadStatus)
+	if err != nil {
 		if _, refusal := errors.AsType[*codemode.Refusal](err); refusal {
 			return none, threadNotFound()
 		}
@@ -52,6 +53,10 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 	if err != nil {
 		return none, err
 	}
+	pinUnavailable := slices.ContainsFunc(pins, func(pin codemode.Pin) bool {
+		_, err := current.ResolvePinnedModel(codemode.Operation{Model: pin.Model}, []codemode.Pin{pin})
+		return err != nil || !slices.Contains(route.Models, pin.TargetModel)
+	})
 	tree, principals := codeTree(binding, pins)
 	evidence := make([]codemode.ThreadAccountEvidence, 0, len(tree))
 	for _, accountID := range tree {
@@ -68,7 +73,7 @@ func (s *Store) ThreadStatus(ctx context.Context, route codemode.Route, key stri
 		}
 		evidence = append(evidence, account)
 	}
-	return codemode.AssessThreadStatus(now.UTC(), retired, evidence), nil
+	return codemode.AssessThreadStatus(now.UTC(), retired || pinUnavailable, evidence), nil
 }
 
 func threadLineage(ctx context.Context, tx pgx.Tx, table string, parentID *string, identity codemode.Identity) error {

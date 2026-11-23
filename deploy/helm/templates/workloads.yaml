@@ -28,6 +28,7 @@
 {{- end -}}
 {{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
+{{- $tracingEnabled := and (ne $componentName "worker") $tracingEndpoint -}}
 {{- if $component.enabled }}
 {{ $mediaSpoolCapacity := int64 $root.Values.mediaSpool.capacityBytes -}}
 apiVersion: apps/v1
@@ -98,7 +99,7 @@ spec:
               value: {{ $root.Values.metrics.tenantLabels | quote }}
             - name: OLP_METRICS_SERIES_CAP
               value: {{ $root.Values.metrics.seriesCap | quote }}
-            {{- if $tracingEndpoint }}
+            {{- if $tracingEnabled }}
             - name: OLP_OTLP_TRACES_ENDPOINT
               value: {{ $tracingEndpoint | quote }}
             - name: OLP_TRACE_SAMPLE_RATIO
@@ -260,7 +261,7 @@ spec:
             - name: auth-hmac-key
               mountPath: /run/secrets/auth-hmac-key
               readOnly: true
-            {{- if and $tracingEndpoint $tracingHeadersSecretName }}
+            {{- if and $tracingEnabled $tracingHeadersSecretName }}
             - name: otlp-headers
               mountPath: /run/secrets/otlp-headers
               readOnly: true
@@ -292,7 +293,7 @@ spec:
             items:
               - key: {{ required "config.authHmacKeySecretKey is required" $root.Values.config.authHmacKeySecretKey | quote }}
                 path: key
-        {{- if and $tracingEndpoint $tracingHeadersSecretName }}
+        {{- if and $tracingEnabled $tracingHeadersSecretName }}
         - name: otlp-headers
           secret:
             secretName: {{ $tracingHeadersSecretName | quote }}

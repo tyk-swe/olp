@@ -27,6 +27,8 @@ type Runner struct {
 
 var groups = map[string]string{"keys": "api-keys", "config": "configuration"}
 
+const maxJSONInputBytes = 4 << 20
+
 var (
 	errInvalidJSONInput = errors.New("input file must contain JSON")
 	errLargeJSONInput   = errors.New("JSON input exceeds 4 MiB or cannot be read")
@@ -333,17 +335,21 @@ func checkOptions(opts options, names ...string) error {
 }
 
 func readJSON(path string) (json.RawMessage, error) {
+	return readBoundedJSON(path, maxJSONInputBytes, errLargeJSONInput)
+}
+
+func readBoundedJSON(path string, limit int, sizeError error) (json.RawMessage, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, errors.New("cannot open JSON input file")
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)+1))
 	if err != nil {
-		return nil, errors.New("JSON input exceeds 4 MiB or cannot be read")
+		return nil, sizeError
 	}
-	if len(data) > 4<<20 {
-		return nil, errLargeJSONInput
+	if len(data) > limit {
+		return nil, sizeError
 	}
 	if !json.Valid(data) {
 		return nil, errInvalidJSONInput

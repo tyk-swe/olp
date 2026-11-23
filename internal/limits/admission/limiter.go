@@ -156,17 +156,8 @@ func (l *Limiter) repaired(ctx context.Context, ownerID string, decision error, 
 	return again()
 }
 
-type MembershipEntry struct {
-	Member string
-	Active bool
-}
-
-func (l *Limiter) SyncSharedMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
-	synced := make([]scripts.MembershipEntry, len(entries))
-	for i, entry := range entries {
-		synced[i] = scripts.MembershipEntry(entry)
-	}
-	return l.scripts.SyncMembership(ctx, lookup, generation, synced)
+func (l *Limiter) SyncSharedMemberships(ctx context.Context, generation int64, updates []limits.SharedMembership) error {
+	return l.scripts.SyncMemberships(ctx, generation, updates)
 }
 
 func (l *Limiter) InstallSnapshot(ctx context.Context, s limits.Snapshot) (limits.Installed, error) {

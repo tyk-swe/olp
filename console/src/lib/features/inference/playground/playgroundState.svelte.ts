@@ -93,6 +93,13 @@ export function resolvePlaygroundPlan(
         (inspectOptions as readonly string[]).includes(input.inspectDialect)
       ? input.inspectDialect
       : undefined;
+  const inspectionSurface = !registeredNative
+    ? input.surface
+    : publicNativeOperations.has(operation)
+      ? ((['openai', 'gemini'] as const).find((surface) =>
+          inspectionDialects(operation, surface).includes(nativeDialect)
+        ) ?? 'native')
+      : 'native';
   const client: PlaygroundClient =
     operation === 'realtime'
       ? { kind: 'realtime' }
@@ -134,14 +141,7 @@ export function resolvePlaygroundPlan(
     activeOperation: operation,
     submissionError,
     inspection: {
-      surface:
-        dialect === 'gemini-decisions'
-          ? 'gemini'
-          : publicNativeOperations.has(operation)
-            ? 'openai'
-            : registeredNative
-              ? 'native'
-              : input.surface,
+      surface: inspectionSurface,
       mode:
         operation === 'realtime'
           ? 'realtime'

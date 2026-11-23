@@ -20,14 +20,16 @@
 
 <PageHeader
   title="Playground"
-  description="Test an active route with your signed-in session. No saved proxy key is required, and prompt or output content is not persisted."
+  description="Test an active route from the console. Basic runs use your signed-in session."
 />
 <div class="privacy-note">
   <span aria-hidden="true">◉</span>
   <p>
-    <strong>Ephemeral content</strong><br />Input and output exist only for this
-    browser request. Operational request history is not created by playground
-    runs.
+    <strong>Request retention</strong><br />When request metadata retention is
+    enabled, Request Explorer can show route, timing, and usage information.
+    Standard runs keep prompts and outputs out of request history. Negotiated
+    tool recovery can retain the source request and original response encrypted
+    for up to 24 hours.
   </p>
 </div>
 

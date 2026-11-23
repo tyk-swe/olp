@@ -67,7 +67,7 @@ if #KEYS == 3 then
   member = ARGV[#ARGV - 1]
   ARGV[#ARGV] = nil
   ARGV[#ARGV] = nil
-  if member_generation == nil or type(member) ~= "string" or #member < 1 or #member > 128 then
+  if member_generation == nil or type(member) ~= "string" or #member < 1 or #member > 128 or string.sub(member, 1, 1) == "@" then
     return failure("invalid_arguments")
   end
 end
@@ -150,8 +150,25 @@ if member ~= nil then
   if kind ~= "none" and kind ~= "hash" then
     return failure("malformed_rate_state", window_id)
   end
-  local stored = redis.call("HGET", KEYS[3], member)
-  if stored == false then
+  local state = redis.call("HMGET", KEYS[3], "@generation", "@ceiling", member)
+  local installed, ceiling, stored = state[1], state[2], state[3]
+  if installed ~= false or ceiling ~= false then
+    local installed_generation = parse_safe_unsigned_integer(installed)
+    local stored_ceiling = parse_safe_unsigned_integer(ceiling)
+    if installed_generation == nil or stored_ceiling == nil then
+      return failure("malformed_rate_state", window_id)
+    end
+    if installed_generation < member_generation or stored_ceiling == 0 or stored == false or string.sub(stored, 1, 1) == "-" then
+      return failure("stale_membership", window_id)
+    end
+    if parse_safe_unsigned_integer(stored) == nil then
+      return failure("malformed_rate_state", window_id)
+    end
+    if tpm_limit < 1 then
+      return failure("invalid_arguments")
+    end
+    tpm_limit = stored_ceiling
+  elseif stored == false then
     redis.call("HSET", KEYS[3], member, member_generation)
   else
     local departed = string.sub(stored, 1, 1) == "-"

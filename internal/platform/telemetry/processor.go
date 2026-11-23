@@ -101,7 +101,12 @@ func (p *boundedSpanProcessor) send(ctx context.Context, kind controlKind) error
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.done:
-		return errors.New("telemetry: trace export worker exited before answering")
+		select {
+		case err := <-ack:
+			return err
+		default:
+			return errors.New("telemetry: trace export worker exited before answering")
+		}
 	}
 }
 

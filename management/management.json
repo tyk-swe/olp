@@ -69207,6 +69207,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The billing import is disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [

@@ -17,6 +17,49 @@ import (
 const fixtureBaselineID = "00000000-0000-0000-0000-000000000001"
 const fixtureCandidateID = "00000000-0000-0000-0000-000000000002"
 
+func TestConfigurationApplyReadsLargeSavedPlan(t *testing.T) {
+	t.Parallel()
+	entry := `{"id":"` + strings.Repeat("a", 120) + `"}`
+	document := `{"pricing":[` + strings.Repeat(entry+",", (maxJSONInputBytes-1024)/(len(entry)+1)) + entry + `]}`
+	runner, output, path := fixtureRunner(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/configuration/export":
+			io.WriteString(w, `{"digest":"destination"}`)
+		case "/api/v1/configuration/plan":
+			io.WriteString(w, `{"digest":"planned"}`)
+		case "/api/v1/configuration/apply":
+			var request struct {
+				Document json.RawMessage `json:"document"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || string(request.Document) != document {
+				t.Errorf("apply did not send the planned document, decode error = %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"digest":"applied"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := filepath.Join(filepath.Dir(path), "plan.json")
+	if err := runner.Run(t.Context(), []string{"config", "plan", "--file", path, "--output", plan}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(plan)
+	if err != nil || info.Size() <= maxJSONInputBytes {
+		t.Fatalf("expected a saved plan larger than the document limit, got %v (%v)", info, err)
+	}
+	if err := runner.Run(t.Context(), []string{"config", "apply", "--plan-file", plan, "--idempotency-key", "large-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"digest":"applied"`) {
+		t.Fatalf("apply output = %s", output)
+	}
+}
+
 func fixtureRunner(t *testing.T, handler http.HandlerFunc) (Runner, *bytes.Buffer, string) {
 	t.Helper()
 	server := httptest.NewServer(handler)

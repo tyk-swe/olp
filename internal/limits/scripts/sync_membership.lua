@@ -1,11 +1,3 @@
--- Record shared quota membership at one release generation. An entry is the
--- generation that made the member current, or its negation once the member
--- left, so a replica holding an older snapshot cannot reserve in this group
--- after the move. Entries are never deleted here, which keeps the group
--- accountable while leases taken under it can still settle.
--- KEYS: the group's members hash, sharing the group's hash tag.
--- ARGV: generation, then member and state pairs, state 1 for a current
---       member and 0 for one that left.
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
 
 local function parse_safe_unsigned_integer(raw)
@@ -23,37 +15,46 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(normalized)
 end
 
-if #KEYS ~= 1 or #ARGV < 3 or #ARGV % 2 ~= 1 then
+if #KEYS ~= 1 or #ARGV < 2 then
   return redis.error_reply("invalid membership arguments")
 end
 local generation = parse_safe_unsigned_integer(ARGV[1])
-if generation == nil then
+local ceiling = parse_safe_unsigned_integer(ARGV[2])
+if generation == nil or ceiling == nil or (ceiling == 0) ~= (#ARGV == 2) then
   return redis.error_reply("invalid membership arguments")
 end
+
+local active = {}
+for index = 3, #ARGV do
+  local member = ARGV[index]
+  if type(member) ~= "string" or #member < 1 or #member > 128 or string.sub(member, 1, 1) == "@" then
+    return redis.error_reply("invalid membership arguments")
+  end
+  active[member] = true
+end
+
 local kind = redis.call("TYPE", KEYS[1]).ok
 if kind ~= "none" and kind ~= "hash" then
   return redis.error_reply("invalid membership state")
 end
-
-local applied = 0
-for index = 2, #ARGV, 2 do
-  local member = ARGV[index]
-  local state = ARGV[index + 1]
-  if type(member) ~= "string" or #member < 1 or #member > 128 or (state ~= "0" and state ~= "1") then
-    return redis.error_reply("invalid membership arguments")
+local stored = redis.call("HGET", KEYS[1], "@generation")
+if stored ~= false then
+  local installed = parse_safe_unsigned_integer(stored)
+  if installed == nil then
+    return redis.error_reply("invalid membership state")
   end
-  local stored = redis.call("HGET", KEYS[1], member)
-  local stored_generation = -1
-  if stored ~= false then
-    local departed = string.sub(stored, 1, 1) == "-"
-    stored_generation = parse_safe_unsigned_integer(departed and string.sub(stored, 2) or stored)
-    if stored_generation == nil then
-      return redis.error_reply("invalid membership state")
-    end
-  end
-  if generation >= stored_generation then
-    redis.call("HSET", KEYS[1], member, state == "1" and generation or "-" .. generation)
-    applied = applied + 1
+  if generation <= installed then
+    return 0
   end
 end
-return applied
+
+for _, member in ipairs(redis.call("HKEYS", KEYS[1])) do
+  if string.sub(member, 1, 1) ~= "@" and not active[member] then
+    redis.call("HSET", KEYS[1], member, "-" .. ARGV[1])
+  end
+end
+for index = 3, #ARGV do
+  redis.call("HSET", KEYS[1], ARGV[index], ARGV[1])
+end
+redis.call("HSET", KEYS[1], "@generation", ARGV[1], "@ceiling", ARGV[2])
+return 1

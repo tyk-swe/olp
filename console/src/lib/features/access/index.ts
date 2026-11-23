@@ -9,7 +9,8 @@ export { getApiKey, listApiKeys } from './api-keys/api.js';
 export { apiKeyKeys } from './api-keys/apiKeyKeys.js';
 export {
   budgetStateNote,
-  budgetWindowState
+  budgetWindowState,
+  currentBudgetLimit
 } from './api-keys/budgetPresentation.js';
 export { listOrganizations } from './organizations/api.js';
 export { organizationKeys } from './organizations/organizationKeys.js';

@@ -6,6 +6,7 @@
     kind,
     azure,
     editing,
+    savedEnabled,
     scopeLabel,
     busy,
     onSubmit,
@@ -16,6 +17,7 @@
     kind: string;
     azure: boolean;
     editing: boolean;
+    savedEnabled: boolean;
     scopeLabel: string;
     busy: boolean;
     onSubmit: (event: SubmitEvent) => void;
@@ -273,7 +275,7 @@
         <button
           class="button button-secondary"
           type="button"
-          disabled={busy}
+          disabled={busy || !savedEnabled}
           onclick={onRunNow}>Run now</button
         >
         <button
@@ -284,5 +286,10 @@
         >
       {/if}
     </div>
+    {#if editing && !savedEnabled}
+      <p class="section-help">
+        Enable and save the billing import to run it manually.
+      </p>
+    {/if}
   </fieldset>
 </form>

@@ -31,7 +31,7 @@ const rollupSQL = `WITH candidates AS (
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution, end_user_digest, budget_exempt, agent_principal_id, delegation_pair_digest, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
+                attribution, end_user_digest, budget_exempt, caller_credential, agent_principal_id, delegation_pair_digest, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
                 commitment_weight, commitment_amount, commitment_period, charge,
                 list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,
                 charge_status <> 'not_billable' AND (NOT usage_complete OR unpriced OR NOT EXISTS(
@@ -54,7 +54,8 @@ const rollupSQL = `WITH candidates AS (
          estimate_reported_input_tokens, estimate_attempt_count,
          commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count,
          list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions,focus_cost_detail_missing,focus_charge_detail_missing,
-         no_applicable_price_count, missing_price_component_count, incomplete_usage_unpriced_count)
+         no_applicable_price_count, missing_price_component_count, incomplete_usage_unpriced_count,
+         caller_credential, reconcil_caller_attempts)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, COALESCE(delegation_pair_digest,''),
@@ -98,17 +99,22 @@ const rollupSQL = `WITH candidates AS (
  bool_or(focus_cost_detail_missing),bool_or(focus_charge_detail_missing),
              COUNT(*) FILTER (WHERE unpriced_cause = 'no_applicable_price'),
              COUNT(*) FILTER (WHERE unpriced_cause = 'missing_price_component'),
-             COUNT(*) FILTER (WHERE unpriced_cause = 'incomplete_usage')
+             COUNT(*) FILTER (WHERE unpriced_cause = 'incomplete_usage'),
+             caller_credential,
+             COUNT(*) FILTER (WHERE NOT response_cache AND charge_status <> 'not_billable' AND (caller_credential OR budget_exempt))
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
                 budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance,
-                commitment_amount, commitment_period, agent_principal_id, COALESCE(delegation_pair_digest,'')
+                commitment_amount, commitment_period, agent_principal_id, COALESCE(delegation_pair_digest,''), caller_credential
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         focus_cost_detail_missing = attempt_usage_hourly.focus_cost_detail_missing OR EXCLUDED.focus_cost_detail_missing,
         focus_charge_detail_missing = attempt_usage_hourly.focus_charge_detail_missing OR EXCLUDED.focus_charge_detail_missing,
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
+        reconcil_caller_attempts = COALESCE(attempt_usage_hourly.reconcil_caller_attempts,
+          CASE WHEN attempt_usage_hourly.budget_exempt THEN attempt_usage_hourly.provider_request_count - attempt_usage_hourly.provider_cache_hit_count ELSE 0 END)
+          + EXCLUDED.reconcil_caller_attempts,
         model_request_count = attempt_usage_hourly.model_request_count + EXCLUDED.model_request_count,
         target_request_count = attempt_usage_hourly.target_request_count + EXCLUDED.target_request_count,
         training_tokens=attempt_usage_hourly.training_tokens+EXCLUDED.training_tokens,

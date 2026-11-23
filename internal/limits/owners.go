@@ -90,3 +90,9 @@ func SharedQuotaLookup(groupID string) string { return "sg_" + SimpleUUID(groupI
 func SharedQuotaMember(providerID, model string) string {
 	return SimpleUUID(uuid.NewSHA1(sharedQuotaNamespace, []byte(providerID+"\x00"+model)).String())
 }
+
+type SharedMembership struct {
+	Lookup  string
+	Ceiling int64
+	Members []string
+}

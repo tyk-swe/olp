@@ -64,9 +64,12 @@ func TestBillingImportJourney(t *testing.T) {
 	if paused["enabled"] != false || paused["credential_configured"] != true || stable(paused["scope"].(map[string]any)) != `{"project_ids":["proj_b","proj_a"]}` {
 		t.Fatalf("pausing kept %v, want the stored credential and scope", paused)
 	}
-	queued := s.Want(owner, "POST", path+"/run", nil, harness.Idempotent(), http.StatusAccepted)
-	if queued["etag"] == paused["etag"] {
-		t.Fatalf("queueing a run kept etag %v", queued["etag"])
+	refused := s.Want(owner, "POST", path+"/run", nil, harness.Idempotent(), http.StatusConflict)
+	if refused["type"] != "https://openllmproxy.dev/problems/billing_import_disabled" {
+		t.Fatalf("run refused with %v, want billing_import_disabled", refused)
+	}
+	if unchanged := s.Want(owner, "GET", path, nil, nil, http.StatusOK); stable(unchanged) != stable(paused) {
+		t.Fatalf("running a disabled import changed it: %v", unchanged)
 	}
 
 	day := func(offset int) string { return time.Now().UTC().AddDate(0, 0, offset).Format(time.DateOnly) }
@@ -92,6 +95,11 @@ func TestBillingImportJourney(t *testing.T) {
 		t.Fatalf("reconciliation:\n%s\nwant\n%s", got, want)
 	}
 
+	enabled := s.Want(owner, "PUT", path, map[string]any{"enabled": true}, harness.Idempotent(harness.ETag(paused)), http.StatusOK)
+	queued := s.Want(owner, "POST", path+"/run", nil, harness.Idempotent(), http.StatusAccepted)
+	if queued["etag"] == enabled["etag"] {
+		t.Fatalf("queueing a run kept etag %v", queued["etag"])
+	}
 	s.Want(owner, "DELETE", path, nil, harness.ETag(queued), http.StatusNoContent)
 	s.Want(owner, "GET", path, nil, nil, http.StatusNotFound)
 }

@@ -54,7 +54,7 @@ var (
 	ErrMalformedState     = errors.New("distributed limit state is malformed")
 	ErrUnexpectedResponse = errors.New("distributed limit script returned an unexpected response")
 	ErrUninitializedCost  = errors.New("cost state awaits PostgreSQL reconciliation for the current UTC window")
-	ErrStaleMembership    = errors.New("shared quota membership moved past this replica")
+	ErrStaleMembership    = errors.New("shared quota membership is stale")
 )
 
 type ServiceError struct{ Err error }

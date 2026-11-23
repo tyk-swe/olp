@@ -1400,6 +1400,17 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 		t.Fatalf("a response the caller asked not to store answered %d and left %d stored, want 200 and the two stored before", answered.StatusCode, len(kept))
 	}
 
+	provider := g.snapshot.Providers[g.fixture.providerID]
+	provider.ProjectID = &g.fixture.projectID
+	provider.SharedTokenQuotas = []routing.SharedTokenQuota{{Model: model, Group: "responses", TokensPerMinute: 100000}}
+	g.snapshot.Providers[g.fixture.providerID] = provider
+	g.republish(t, func(*routing.Route) {})
+	_, refused := g.send(t, "POST", "/v1/responses", map[string]string{"Authorization": "Bearer owner", "Content-Type": json}, continuation, 400)
+	if !strings.Contains(string(refused), `"unbounded_work_budget"`) || len(upstream.sent("POST /responses")) != 3 {
+		t.Fatalf("continuation with a shared quota answered %s, want a budget refusal before the provider", refused)
+	}
+	t.Logf("POST /v1/responses with previous_response_id and a shared token quota: HTTP 400 %s", refused)
+
 	if got := g.call(t, "owner", "DELETE", "/v1/responses/"+first.ID, "", "", 200); !got.Deleted || got.ID != first.ID {
 		t.Fatalf("response delete = %+v", got)
 	}
