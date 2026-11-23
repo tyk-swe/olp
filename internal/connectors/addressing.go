@@ -311,3 +311,31 @@ func (c Config) RealtimeHangupURL(model, callID string) (string, error) {
 	}
 	return c.ResourceURL(model, "realtime/calls/"+url.PathEscape(callID)+"/hangup", nil)
 }
+
+func (c Config) ResponsesPath(suffix string) string {
+	if c.Kind == KindAzureOpenAI && c.Hosting() != "azure-v1" && c.Hosting() != "azure-responses-legacy" {
+		return "deployments/responses" + suffix
+	}
+	return "responses" + suffix
+}
+
+func (c Config) BatchLineEndpoint(endpoint string) string {
+	if c.Kind != KindAzureOpenAI {
+		return endpoint
+	}
+	return wire.CanonicalBatchEndpoint(endpoint)
+}
+
+func (c Config) RequestIDHeader(endpoint *url.URL) string {
+	if c.Kind != KindAnthropic || withoutDefaultHTTPSPort(endpoint).String() != DefaultEndpoint(KindAnthropic, "", "")+"/messages" {
+		return ""
+	}
+	return "Request-Id"
+}
+
+func withoutDefaultHTTPSPort(u *url.URL) *url.URL {
+	if u.Scheme != "https" || u.Port() != "443" {
+		return u
+	}
+	return &url.URL{Scheme: u.Scheme, Opaque: u.Opaque, User: u.User, Host: u.Hostname(), Path: u.Path, RawPath: u.RawPath, OmitHost: u.OmitHost, ForceQuery: u.ForceQuery, RawQuery: u.RawQuery, Fragment: u.Fragment, RawFragment: u.RawFragment}
+}

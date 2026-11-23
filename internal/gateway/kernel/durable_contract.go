@@ -80,10 +80,7 @@ func (s *Server) ValidateBatchInput(part *staging.Part, model string, provider *
 			return "", 0, resources.ErrContract
 		}
 		path, ok := get(doc.Root(), "url")
-		classificationPath := path
-		if provider.Kind == "azure_openai" {
-			classificationPath = wire.CanonicalBatchEndpoint(path)
-		}
+		classificationPath := provider.Connector().BatchLineEndpoint(path)
 		if !ok || classificationPath != "/v1/chat/completions" && classificationPath != "/v1/responses" && classificationPath != "/v1/embeddings" || endpoint != "" && endpoint != path {
 			return "", 0, resources.ErrContract
 		}

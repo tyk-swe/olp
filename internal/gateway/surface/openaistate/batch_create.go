@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -65,7 +66,7 @@ func (s surface) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	p, route, e := s.kernel.ResolveResource(r.Context(), x, authority, file, "batch", kernel.RetainedNewWork)
 	if e != nil {
-		if refusal := kernel.FireworksBatchRefusal(x, x.Route); refusal != nil {
+		if refusal := fireworksBatchRefusal(x, x.Route); refusal != nil {
 			e = refusal
 		}
 		s.kernel.Refuse(x, w, e)
@@ -135,8 +136,8 @@ func (s surface) planBatch(ctx context.Context, x *kernel.Call, authority keyaut
 	if e != nil {
 		return batchPlan{}, e
 	}
-	if p.Provider.VendorID == "groq" && request.endpoint != "/v1/chat/completions" {
-		return batchPlan{}, fault.InvalidRequest("unsupported_parameter", "Groq batches currently support only /v1/chat/completions.", new("endpoint"))
+	if e := kernel.BatchEndpointRefusal(p, request.endpoint, "endpoint"); e != nil {
+		return batchPlan{}, e
 	}
 	adapter, ok := p.Provider.Connector().FilesBatchesAdapter()
 	if !ok {
@@ -195,7 +196,7 @@ func managedBatchShape(source oif.Document, vendor string, adapter connectors.Ba
 }
 
 func (s surface) strictBatchAdmission(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *kernel.DurableDocument, p *kernel.Pin) *fault.Error {
-	if refusal := kernel.StrictBatchTargetRefusal(p); refusal != nil {
+	if refusal := strictBatchTargetRefusal(p); refusal != nil {
 		return refusal
 	}
 	if kernel.DurableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.kernel.Deps.Resources.Encrypted() {
@@ -301,7 +302,7 @@ func filesBatchBody(request batchCreateRequest, file *resources.Resource, p *ker
 
 func openAIBatchBody(source oif.Document, upstreamFile string, p *kernel.Pin, window kernel.BatchWindow) ([]byte, *fault.Error) {
 	upstreamWindow := "24h"
-	if p.Provider.VendorID == "groq" {
+	if _, declared := vendors.BatchWindowFor(p.Provider.VendorID); declared {
 		upstreamWindow = window.Label
 	}
 	changes := []oif.Change{

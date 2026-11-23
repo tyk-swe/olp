@@ -246,3 +246,7 @@ func (c Config) filesBatchesService() (filesBatchesService, bool) {
 	}
 	return filesBatchesServices[i], true
 }
+
+func (c Config) NativeOpenAI() bool { return c.Kind == KindOpenAI || c.Kind == KindAzureOpenAI }
+
+func (c Config) CountsCachedContents() bool { return c.Kind == KindGemini }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -90,8 +92,8 @@ func BatchCompletionWindow(source oif.Document, vendor string) (BatchWindow, *fa
 	if !ok {
 		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
 	}
-	minimum, maximum := completionWindowRange(vendor)
-	if hours < minimum || hours > maximum {
+	served, _ := vendors.BatchWindowFor(vendor)
+	if hours < served.MinHours || hours > served.MaxHours {
 		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
 	}
 	return BatchWindow{Label: raw, Length: time.Duration(hours) * time.Hour}, nil
@@ -115,15 +117,12 @@ func windowHours(raw string) (int, bool) {
 	}
 }
 
-func completionWindowRange(vendor string) (int, int) {
-	switch vendor {
-	case "groq":
-		return 24, 168
-	case "mistral":
-		return 1, 168
-	default:
-		return 24, 24
+func BatchEndpointRefusal(p *Pin, endpoint, pointer string) *fault.Error {
+	served := vendors.BatchEndpointsFor(p.Provider.VendorID)
+	if len(served) == 0 || slices.Contains(served, endpoint) {
+		return nil
 	}
+	return fault.InvalidRequest("unsupported_parameter", "This provider's batches support only "+strings.Join(served, ", ")+".", new(pointer))
 }
 
 func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p *Pin, intent BatchIntent) (batchSubmission, *fault.Error) {

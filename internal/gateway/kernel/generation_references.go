@@ -137,7 +137,7 @@ func generationCacheInput(resource *resources.Resource, p *Pin) (int64, bool) {
 		Tokens        *int64 `json:"total_token_count"`
 		NoCachedTools bool   `json:"no_cached_tools"`
 	}
-	if json.Unmarshal(resource.Metadata, &metadata) != nil || p.Provider.Kind != "gemini" || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.Provider.Connector().Model(p.Model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
+	if json.Unmarshal(resource.Metadata, &metadata) != nil || !p.Provider.Connector().CountsCachedContents() || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.Provider.Connector().Model(p.Model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
 		return 0, false
 	}
 	return *metadata.Tokens, true

@@ -59,7 +59,7 @@ func (s surface) responseCall(w http.ResponseWriter, r *http.Request, use kernel
 }
 
 func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *resources.Resource, p *kernel.Pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *fault.Error {
-	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), suffix), query)
+	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath(suffix), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -178,7 +178,7 @@ func (s surface) cancelResponse(w http.ResponseWriter, r *http.Request) {
 
 func (s surface) deleteResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
-		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath("/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
@@ -223,7 +223,7 @@ func (s surface) responseInputItems(w http.ResponseWriter, r *http.Request) {
 				query.Set(name, value)
 			}
 		}
-		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath("/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
