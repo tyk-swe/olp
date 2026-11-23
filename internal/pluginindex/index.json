@@ -24,6 +24,21 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:25Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "6fa626c3fd1773d8a46259e296de596d7d9e67e3e733e2771ba946a5adb610e2",
+          "abi_version": 1,
+          "size_bytes": 5353122,
+          "origins": [
+            "https://auth.openai.com",
+            "https://chatgpt.com"
+          ],
+          "profiles": [
+            "codex-subscription"
+          ],
+          "commit": "531354f829421e75b190defe406dc9049af7d111",
+          "reviewed_at": "2026-10-05T16:09:39Z"
         }
       ]
     },
@@ -52,6 +67,24 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:27Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "2a05291aa160d7da24ec1882833b03d485fb77e776566772137d21c16ec4ddd5",
+          "abi_version": 1,
+          "size_bytes": 5232739,
+          "origins": [
+            "https://api.kimi.ai",
+            "https://api.kimi.com",
+            "https://www.kimi.ai",
+            "https://www.kimi.com"
+          ],
+          "profiles": [
+            "kimi-code",
+            "kimi-code-cn"
+          ],
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:18Z"
         }
       ]
     },
@@ -80,6 +113,24 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:28Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "8eb35eacad9c85849de09753fb11938a34cd5e6d2583c84f0e2f5a658dc07f38",
+          "abi_version": 1,
+          "size_bytes": 5232910,
+          "origins": [
+            "https://api.minimax.cn",
+            "https://api.minimax.io",
+            "https://platform.minimax.cn",
+            "https://platform.minimax.io"
+          ],
+          "profiles": [
+            "minimax-plan",
+            "minimax-plan-cn"
+          ],
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:19Z"
         }
       ]
     },
@@ -104,6 +155,20 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:30Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "31dde5563966b14d5f545ae1c111c3576c20f8c2d2476b889238e74d4390024a",
+          "abi_version": 1,
+          "size_bytes": 5231011,
+          "origins": [
+            "https://opencode.ai"
+          ],
+          "profiles": [
+            "opencode-go"
+          ],
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:22Z"
         }
       ]
     },
@@ -132,6 +197,24 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:31Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "4d167fd39d99b0fb82929cc8ac9f23b33febef9ee48ccb656928861aa36777ca",
+          "abi_version": 1,
+          "size_bytes": 5233140,
+          "origins": [
+            "https://bailian.console.aliyun.com",
+            "https://modelstudio.console.alibabacloud.com",
+            "https://token-plan.ap-southeast-1.maas.aliyuncs.com",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com"
+          ],
+          "profiles": [
+            "qwen-token-plan",
+            "qwen-token-plan-cn"
+          ],
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:21Z"
         }
       ]
     },
@@ -159,6 +242,23 @@
           ],
           "commit": "fe9e1bdd677ce9b17afe4eeb4ae3c9fe58732ee0",
           "reviewed_at": "2026-11-23T09:40:33Z"
+        },
+        {
+          "version": "0.1.0",
+          "digest": "0a958052a76092ef220a34cc9c72594d3b5333d83fb6c0fd762755771da3aee9",
+          "abi_version": 1,
+          "size_bytes": 5232160,
+          "origins": [
+            "https://api.z.ai",
+            "https://open.bigmodel.cn",
+            "https://z.ai"
+          ],
+          "profiles": [
+            "bigmodel-coding-plan",
+            "zai-coding-plan"
+          ],
+          "commit": "e40d4ab68847e68522fb6a997300e508a2d31157",
+          "reviewed_at": "2026-10-27T09:40:24Z"
         }
       ]
     }

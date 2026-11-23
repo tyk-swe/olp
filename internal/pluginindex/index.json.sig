@@ -2,7 +2,7 @@
   "signatures": [
     {
       "key_id": "dev-2026a",
-      "signature": "DBsIAOG2k3RiE3UJE1l728TraHudYLiGg2y24HL3YsP2uQK6JAlyVQDmwICz1ADq8Zy9Ct3OYxKdipJ8BvckBw=="
+      "signature": "EPK9lltdutADSi1ESlMbM3L1Y5nS4fHerZk1T1LEh6RHOkykWXUZrP9CniaNGjPZXT3j3NpYiiUI7eSvsADLCw=="
     }
   ]
 }
