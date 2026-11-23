@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeclient"
 	"github.com/tyk-swe/olp/internal/operatorcli"
 )
 

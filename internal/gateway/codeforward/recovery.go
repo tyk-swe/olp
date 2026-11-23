@@ -9,8 +9,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 
 	"github.com/tyk-swe/olp/internal/upstream"
 )

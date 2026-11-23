@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/codemode/codeplans"
+	"github.com/tyk-swe/olp/internal/codemode/codexauth"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
