@@ -175,7 +175,7 @@ type Manager struct {
 	syncSharedQuotas func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
 
 	mu        sync.RWMutex
-	taskStore taskCapabilityStore
+	taskStore taskCapabilityDatabase
 	authority authorityState
 	release   *Release
 	failed    int64

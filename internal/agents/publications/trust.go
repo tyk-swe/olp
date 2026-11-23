@@ -3,8 +3,8 @@ package publications
 import (
 	"reflect"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 )
 
 // AuthorizeTrustChange keeps destination/card/credential trust installation-

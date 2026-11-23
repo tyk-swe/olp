@@ -42,7 +42,7 @@ contract does not declare cannot be mounted. Handlers may demand more with
 less. Mutations call `Reauthorize` inside their transaction, after the
 installation lock, so they commit only under authority that is still current.
 
-`internal/authz/policy.go` decides who holds each operation:
+`internal/access/authz/policy.go` decides who holds each operation:
 
 <!-- operations -->
 | Operation | Owner | Operator | Developer | Viewer | Installation-wide | Management tokens |

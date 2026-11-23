@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -93,7 +94,7 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return guardrails.ActivationRefused()
+		return activation.Refused()
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_policy_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor)
 	return err
@@ -119,9 +120,9 @@ func anyRetired(ctx context.Context, q database.Queryer, revisionIDs []string) (
 
 type lineage struct{}
 
-func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (guardrails.Head, error) {
+func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (activation.Head, error) {
 	p, err := lock(ctx, tx, id)
-	return guardrails.Head{Project: p.ProjectID, ETag: p.ETag, Retired: p.RetiredAt != nil}, err
+	return activation.Head{Project: p.ProjectID, ETag: p.ETag, Retired: p.RetiredAt != nil}, err
 }
 
 func (lineage) Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error {

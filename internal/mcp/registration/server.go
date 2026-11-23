@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -27,6 +27,14 @@ type Server struct {
 
 func New(a *access.Server, policy *egress.Policy, executables *Executables) *Server {
 	return &Server{executables: executables, access: a, egress: policy}
+}
+
+func (s *Server) Toolset(ctx context.Context, id string) (string, routing.MCPToolsetTool, error) {
+	server, err := Load(ctx, s.access.Pool, id, false)
+	if err != nil {
+		return "", routing.MCPToolsetTool{}, err
+	}
+	return server.ProjectID, routing.MCPToolsetTool{ServerID: id, Endpoint: server.Endpoint, OAuth: server.OAuth}, nil
 }
 
 type Definition struct {

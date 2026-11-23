@@ -3,11 +3,11 @@ package kernel
 import (
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -39,7 +39,7 @@ type targetPreparation struct {
 }
 
 type unaryAdmission struct {
-	plan               *operationplan.Plan
+	plan               *unary.Plan
 	estimate           int64
 	parameters         routing.Names
 	receipt            oif.Receipt

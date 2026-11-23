@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -19,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -263,7 +263,7 @@ func (s *Server) runSemanticGuardrail(ctx context.Context, parent *Call, d guard
 func (s *Server) executeSemanticEmbeddings(ctx context.Context, x *Call, route *routing.Route, body []byte) ([]byte, *Outcome, error) {
 	if route.Fidelity.Strict() {
 		codec, _ := operationregistry.Lookup("openai-embeddings")
-		source, parseErr := operationplan.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
+		source, parseErr := unary.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
 		if parseErr != nil {
 			return nil, nil, guardrails.ErrSurface
 		}
@@ -276,7 +276,7 @@ func (s *Server) executeSemanticEmbeddings(ctx context.Context, x *Call, route *
 		if admissionErr := s.admitClassifier(embeddingCtx, x); admissionErr != nil {
 			return nil, &Outcome{Err: admissionErr}, nil
 		}
-		result := runAttempts(embeddingCtx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+		result := runAttempts(embeddingCtx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 			return s.unaryAttempt(attemptCtx, x, a, p, slot, fact)
 		}})
 		return result.result.Body, &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}, nil
@@ -322,7 +322,7 @@ func (s *Server) executeRuleEvaluator(ctx context.Context, x *Call, route *routi
 			body, _ = json.Marshal(map[string]string{"model": route.Slug, "input": text})
 		}
 		codec, _ := operationregistry.Lookup(dialect)
-		source, parseErr := operationplan.Parse(dialect, body, int(s.Config.MaxBodyBytes))
+		source, parseErr := unary.Parse(dialect, body, int(s.Config.MaxBodyBytes))
 		if parseErr != nil {
 			return nil, nil, guardrails.ErrSurface
 		}
@@ -334,7 +334,7 @@ func (s *Server) executeRuleEvaluator(ctx context.Context, x *Call, route *routi
 		if e := s.admitClassifier(ctx, x); e != nil {
 			return nil, &Outcome{Err: e}, nil
 		}
-		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+		result := runAttempts(ctx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 		return result.result.Body, &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}, nil

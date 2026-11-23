@@ -11,17 +11,17 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/providerconfig"
 )
@@ -207,12 +207,12 @@ type Snapshot struct {
 	CodeConnections      map[string]Configuration  `json:"code_connections,omitempty"`
 	codeRevisions        map[string]codeRevision
 	interactions         map[string]map[string]*interaction.Template
-	operations           map[string]map[string]*operationplan.Template
-	media                map[string]map[string]*mediacontract.Template
+	operations           map[string]map[string]*unary.Template
+	media                map[string]map[string]*media.Template
 	durable              map[string]map[string]*DurableTemplate
 	realtime             map[string]map[string]*RealtimeTemplate
 	webrtc               map[string]map[string]*RealtimeTemplate
-	duplex               map[string]map[string]*duplexcontract.Template
+	duplex               map[string]map[string]*duplex.Template
 	Generation           Generation          `json:"generation"`
 	Providers            map[string]Provider `json:"providers"`
 	Routes               map[string]Route    `json:"routes"`
@@ -377,12 +377,12 @@ func (s *Snapshot) Compile() error {
 		}
 	}
 	next.interactions = make(map[string]map[string]*interaction.Template)
-	next.operations = make(map[string]map[string]*operationplan.Template)
-	next.media = make(map[string]map[string]*mediacontract.Template)
+	next.operations = make(map[string]map[string]*unary.Template)
+	next.media = make(map[string]map[string]*media.Template)
 	next.durable = make(map[string]map[string]*DurableTemplate)
 	next.realtime = make(map[string]map[string]*RealtimeTemplate)
 	next.webrtc = make(map[string]map[string]*RealtimeTemplate)
-	next.duplex = make(map[string]map[string]*duplexcontract.Template)
+	next.duplex = make(map[string]map[string]*duplex.Template)
 	for slug, r := range next.Routes {
 		templates, err := next.compileRouteExecution(r)
 		if err != nil {

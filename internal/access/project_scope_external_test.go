@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func TestProjectAuthorityForInvestigations(t *testing.T) {

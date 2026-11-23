@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 

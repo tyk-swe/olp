@@ -8,11 +8,11 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
 
@@ -141,8 +141,8 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 	return nil
 }
 
-func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
-	templates := map[string]*operationplan.Template{}
+func (s *Snapshot) compileOperations(route Route) (map[string]*unary.Template, error) {
+	templates := map[string]*unary.Template{}
 	for _, op := range route.Operations {
 		if op == PassthroughOperation {
 			continue
@@ -191,7 +191,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
+			template, err := unary.Compile(unary.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 			if err != nil {
 				return nil, err
 			}
@@ -215,7 +215,7 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*RealtimeTemplate, e
 		if provider.ProfileID == "gemini-live" {
 			continue
 		}
-		if duplexcontract.IsProfile(provider.ProfileID) {
+		if duplex.IsProfile(provider.ProfileID) {
 			continue
 		}
 		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
@@ -274,17 +274,17 @@ func (s *Snapshot) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool)
 	return template, ok
 }
 
-func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Template, error) {
+func (s *Snapshot) compileDuplex(route Route) (map[string]*duplex.Template, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*duplexcontract.Template)
+	templates := make(map[string]*duplex.Template)
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
 			return nil, fmt.Errorf("route target references an unavailable provider")
 		}
-		if !duplexcontract.IsProfile(provider.ProfileID) {
+		if !duplex.IsProfile(provider.ProfileID) {
 			continue
 		}
 		if !provider.Supports(target.ProviderModel, "realtime", "native", "realtime") {
@@ -293,7 +293,7 @@ func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Templa
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified duplex parameter defaults", target.ID)
 		}
-		template, err := duplexcontract.Compile(duplexcontract.Config{Provider: provider.Connector(), Model: target.ProviderModel})
+		template, err := duplex.Compile(duplex.Config{Provider: provider.Connector(), Model: target.ProviderModel})
 		if err != nil {
 			return nil, err
 		}
@@ -302,16 +302,16 @@ func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Templa
 	return templates, nil
 }
 
-func (s *Snapshot) DuplexTemplate(slug, target string) (*duplexcontract.Template, bool) {
+func (s *Snapshot) DuplexTemplate(slug, target string) (*duplex.Template, bool) {
 	template, ok := s.duplex[slug][target]
 	return template, ok
 }
 
-func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template, error) {
+func (s *Snapshot) compileMedia(route Route) (map[string]*media.Template, error) {
 	if !route.Fidelity.Strict() {
 		return nil, nil
 	}
-	templates := map[string]*mediacontract.Template{}
+	templates := map[string]*media.Template{}
 	for _, op := range route.Operations {
 		if !vendors.IsMediaOperation(op) {
 			continue
@@ -321,7 +321,7 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op})
+			template, err := media.Compile(media.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op})
 			if err != nil {
 				return nil, err
 			}
@@ -331,7 +331,7 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 	return templates, nil
 }
 
-func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract.Template, bool) {
+func (s *Snapshot) MediaTemplate(slug, target, operation string) (*media.Template, bool) {
 	template, ok := s.media[slug][operation+"/"+target]
 	return template, ok
 }
@@ -372,7 +372,7 @@ func (s *Snapshot) DurableTemplate(slug, target string) (*DurableTemplate, bool)
 	template, ok := s.durable[slug][target]
 	return template, ok
 }
-func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
+func (s *Snapshot) OperationTemplate(slug, target, operation string) (*unary.Template, bool) {
 	template, ok := s.operations[slug][operation+"/"+target]
 	return template, ok
 }

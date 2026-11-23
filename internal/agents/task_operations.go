@@ -7,8 +7,8 @@ import (
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 )
 
 type ownedTask struct {

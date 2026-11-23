@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/guardrails/vendor"
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 )
 
 type Spec interface {

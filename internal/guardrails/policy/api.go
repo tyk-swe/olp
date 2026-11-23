@@ -8,9 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
 
 type Evaluator func(*http.Request, authz.Principal, guardrails.Pinned, guardrails.Application) (guardrails.Result, error)
@@ -19,12 +20,12 @@ type BatchEvaluator func(*http.Request, authz.Principal, []guardrails.PinnedAppl
 
 type API struct {
 	server        *access.Server
-	publish       guardrails.Publisher
+	publish       activation.Publisher
 	evaluate      Evaluator
 	evaluateBatch BatchEvaluator
 }
 
-func NewAPI(server *access.Server, publish guardrails.Publisher, evaluate Evaluator, evaluateBatch BatchEvaluator) *API {
+func NewAPI(server *access.Server, publish activation.Publisher, evaluate Evaluator, evaluateBatch BatchEvaluator) *API {
 	return &API{server: server, publish: publish, evaluate: evaluate, evaluateBatch: evaluateBatch}
 }
 
@@ -34,7 +35,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/guardrail-policies/{policy_id}", a.get)
 	a.server.Route(mux, "PUT /api/v1/guardrail-policies/{policy_id}", a.update, access.MaxBody(128<<10))
 	a.server.Route(mux, "DELETE /api/v1/guardrail-policies/{policy_id}", a.retire)
-	a.server.Route(mux, "POST /api/v1/guardrail-policies/{policy_id}/activate", guardrails.Activation(a.server, a.publish, lineage{}, "policy_id", "guardrail_policies"))
+	a.server.Route(mux, "POST /api/v1/guardrail-policies/{policy_id}/activate", activation.Handler(a.server, a.publish, lineage{}, "policy_id", "guardrail_policies"))
 	a.server.Route(mux, "GET /api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}", a.revision)
 	a.server.Route(mux, "POST /api/v1/guardrails/evaluate", a.apply, access.MaxBody(guardrails.MaxContentBytes))
 	a.server.Route(mux, "POST /api/v1/guardrails/run-fixtures", a.runFixtures, access.MaxBody(maxFixtureRunBytes))

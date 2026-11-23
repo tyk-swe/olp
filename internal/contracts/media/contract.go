@@ -1,6 +1,6 @@
 // Package mediacontract owns the strict native media contract. It deliberately
 // has no dependency on the media transport or the gateway's Attempt owner.
-package mediacontract
+package media
 
 import (
 	"bytes"

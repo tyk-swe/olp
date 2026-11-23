@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
 )
 
 func TestPresentedInferenceKeyShapes(t *testing.T) {

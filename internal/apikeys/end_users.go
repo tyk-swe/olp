@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 )
 
 func (a *API) lookupEndUser(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

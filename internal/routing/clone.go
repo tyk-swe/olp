@@ -6,9 +6,9 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 )
 
 // Clone owns all published configuration values. Derived contracts are omitted

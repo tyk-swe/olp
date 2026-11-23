@@ -1,4 +1,4 @@
-package identity
+package pluginidentity
 
 import "regexp"
 

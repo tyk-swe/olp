@@ -1,6 +1,6 @@
 // Package operationplan compiles strict unary contracts without a generation
 // representation. Live authority, retries and accounting remain gateway-owned.
-package operationplan
+package unary
 
 import (
 	"bytes"

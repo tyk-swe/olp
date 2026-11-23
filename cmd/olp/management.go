@@ -13,9 +13,9 @@ import (
 	"github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/auditlog"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/budgets"
 	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
@@ -36,7 +36,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/reports"
 
 	"github.com/tyk-swe/olp/internal/guardrails/policy"
-	"github.com/tyk-swe/olp/internal/guardrails/preview"
+	"github.com/tyk-swe/olp/internal/routes/guardrailpreview"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
@@ -63,6 +63,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/managementtools"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/notifications"
@@ -130,7 +131,7 @@ func (m Management) registerGuardrails(mux *http.ServeMux) {
 		return results, guardrailsHTTPError(err)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publish).Register(mux)
-	preview.Register(m.Access, mux, m.Runtime.Release)
+	guardrailpreview.Register(m.Access, mux, m.Runtime.Release)
 }
 
 func guardrailsMember(p authz.Principal) kernel.Member {
@@ -163,7 +164,7 @@ func guardrailsHTTPError(err error) error {
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
-	management.NewMCP(m.Access, mux).Register(mux)
+	managementtools.NewMCP(m.Access, mux).Register(mux)
 	m.Identity.Register(mux)
 	projects.New(m.Access).Register(mux)
 	notifications.NewManagement(m.Access, *m.Egress).Register(mux)
@@ -176,9 +177,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	runs.NewManagement(m.Access).Register(mux)
 	tasks.NewManagement(m.Access).Register(mux)
 	investigations.NewManagement(m.Access).Register(mux)
-	registration.New(m.Access, m.Egress, registration.NewExecutables(m.Unconfined, m.Access.Pool)).Register(mux)
+	mcpServers := registration.New(m.Access, m.Egress, registration.NewExecutables(m.Unconfined, m.Access.Pool))
+	mcpServers.Register(mux)
 	accounting.NewManagement(m.Access).Register(mux)
-	personal.New(m.Access).Register(mux)
+	personal.New(m.Access, mcpServers).Register(mux)
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, AuthenticateKey: m.catalogAuthority, Origin: m.Access.Origin}).Register(mux)

@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
@@ -17,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -107,7 +107,7 @@ func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body [
 	// this dialect's operation on its native surface in the terminal envelope.
 	x.unary = &unaryCall{dialect: codec, route: model, surface: surface}
 	x.mode = "unary"
-	source, err := operationplan.Parse(dialect, body, int(s.Config.MaxBodyBytes))
+	source, err := unary.Parse(dialect, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		return true, err
 	}
@@ -117,7 +117,7 @@ func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body [
 	x.unary.source = source
 	return true, nil
 }
-func (x *Call) unaryPlan(provider *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
+func (x *Call) unaryPlan(provider *routing.Provider, targetID, model string) (*unary.Plan, error) {
 	prepared, err := x.preparation().operation(providerPreparationKey(provider, targetID, model), true, func() (unaryAdmission, error) {
 		return x.buildUnary(targetID)
 	})
@@ -143,7 +143,7 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	if len(clientValues) == 1 {
 		client = clientValues[0]
 	}
-	plan, err := template.Bind(x.unary.source, operationplan.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
+	plan, err := template.Bind(x.unary.source, unary.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
 	if err != nil {
 		return unaryAdmission{}, err
 	}
@@ -157,7 +157,7 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	}, nil
 }
 
-func (x *Call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
+func (x *Call) prepareOperationGuardrails(plan *unary.Plan) ([]guardrails.Evidence, error) {
 	if !x.guard.engine.HasPhase(guardrails.Input) && !x.guard.engine.HasPhase(guardrails.InputParallel) {
 		return nil, nil
 	}
@@ -273,12 +273,12 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call) (*O
 	if e != nil {
 		return fail(e)
 	}
-	var result attemptOutcome[operationplan.Result]
+	var result attemptOutcome[unary.Result]
 	if x.cacheHit() {
 		s.recordCacheHit(x)
 		result.result.Body = x.cache.entry.Body
 	} else {
-		result = runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+		result = runAttempts(ctx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 	}

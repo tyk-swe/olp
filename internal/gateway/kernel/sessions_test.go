@@ -13,8 +13,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -218,7 +218,7 @@ func TestVertexNativeVideoUsage(t *testing.T) {
 		Endpoint:    "https://us-central1-aiplatform.googleapis.com/v1/projects/audit-project/locations/us-central1/publishers/google",
 		CloudRegion: "us-central1", CloudProject: "audit-project", AuthMode: "service_account",
 	}
-	template, err := duplexcontract.Compile(duplexcontract.Config{Provider: config, Model: "audit-model"})
+	template, err := duplex.Compile(duplex.Config{Provider: config, Model: "audit-model"})
 	if err != nil {
 		t.Fatal(err)
 	}

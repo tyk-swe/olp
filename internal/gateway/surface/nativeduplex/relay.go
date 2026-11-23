@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -20,11 +20,11 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (s surface) duplexDial(ctx context.Context, x *kernel.Call, p *kernel.Pin, template *duplexcontract.Template) (kernel.DuplexPeer, *fault.Error) {
+func (s surface) duplexDial(ctx context.Context, x *kernel.Call, p *kernel.Pin, template *duplex.Template) (kernel.DuplexPeer, *fault.Error) {
 	switch template.Transport() {
-	case duplexcontract.TransportBedrockBidi:
+	case duplex.TransportBedrockBidi:
 		return s.dialBedrockDuplex(ctx, x, p)
-	case duplexcontract.TransportWebSocket:
+	case duplex.TransportWebSocket:
 		endpoint, err := p.Provider.Connector().DuplexURL(p.Model)
 		if err != nil {
 			return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The duplex profile cannot address this model.")
@@ -71,12 +71,12 @@ type duplexRelay struct {
 	client    kernel.DuplexPeer
 	upstream  kernel.DuplexPeer
 	token     string
-	observer  *duplexcontract.Observer
-	transport duplexcontract.Transport
+	observer  *duplex.Observer
+	transport duplex.Transport
 	maxBytes  int
 }
 
-func (s surface) relayNativeDuplex(ctx context.Context, x *kernel.Call, p *kernel.Pin, client, upstream kernel.DuplexPeer, token string, observer *duplexcontract.Observer, transport duplexcontract.Transport, maxBytes int) (*wire.Usage, bool, error) {
+func (s surface) relayNativeDuplex(ctx context.Context, x *kernel.Call, p *kernel.Pin, client, upstream kernel.DuplexPeer, token string, observer *duplex.Observer, transport duplex.Transport, maxBytes int) (*wire.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	st := &duplexRelay{surface: s, ctx: ctx, x: x, p: p, client: client, upstream: upstream, token: token, observer: observer, transport: transport, maxBytes: maxBytes}
@@ -206,7 +206,7 @@ func (st *duplexRelay) reauthorize() (relayEnd, bool) {
 func (st *duplexRelay) converge(initial relayEnd, pending int, done chan relayEnd) (*wire.Usage, bool, error) {
 	first, remaining := initial, pending
 	code := websocket.CloseStatus(first.err)
-	if st.transport == duplexcontract.TransportBedrockBidi && !first.client && st.observer.PendingResponse() && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+	if st.transport == duplex.TransportBedrockBidi && !first.client && st.observer.PendingResponse() && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
 		first.err = fmt.Errorf("%w: %v", errDuplexIncomplete, first.err)
 		code = websocket.StatusInternalError
 	}
@@ -228,7 +228,7 @@ func (st *duplexRelay) converge(initial relayEnd, pending int, done chan relayEn
 		end := <-done
 		deliveryFailed = deliveryFailed || end.deliveryFailed
 	}
-	if st.transport == duplexcontract.TransportBedrockBidi && first.client && !errors.Is(first.err, context.Canceled) && !errors.Is(first.err, context.DeadlineExceeded) && (st.observer.PendingResponse() || deliveryFailed) {
+	if st.transport == duplex.TransportBedrockBidi && first.client && !errors.Is(first.err, context.Canceled) && !errors.Is(first.err, context.DeadlineExceeded) && (st.observer.PendingResponse() || deliveryFailed) {
 		return st.observer.Usage(), false, fmt.Errorf("%w: %v", errDuplexClientClosed, first.err)
 	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
