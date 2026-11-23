@@ -68,20 +68,14 @@ type Contract struct {
 	// operation's certification rests on it and the reviewed codec, since
 	// proving a media model by generating with it would be billed.
 	AccountProbe string
-	// BatchWindow is the completion window range the vendor's batch API
-	// accepts and is sent; without one batches run in the fixed 24 hours.
 	BatchWindow *BatchWindow
-	// BatchEndpoints restrict batch lines to these endpoints; empty admits
-	// every endpoint the batch adapter serves.
 	BatchEndpoints []string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
 }
 
-// BatchWindow is an inclusive range of batch completion windows in hours.
 type BatchWindow struct{ MinHours, MaxHours int }
 
-// BatchWindowFor is the vendor's declared batch window, or the fixed 24 hours.
 func BatchWindowFor(vendor string) (BatchWindow, bool) {
 	i, ok := index[vendor]
 	if !ok || contracts[i].BatchWindow == nil {
@@ -90,8 +84,6 @@ func BatchWindowFor(vendor string) (BatchWindow, bool) {
 	return *contracts[i].BatchWindow, true
 }
 
-// BatchEndpointsFor are the only batch line endpoints a vendor serves, or
-// nil when the batch adapter decides.
 func BatchEndpointsFor(vendor string) []string {
 	i, ok := index[vendor]
 	if !ok {
