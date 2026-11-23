@@ -8,14 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/guardstream"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -50,8 +48,6 @@ func (s *Server) boundGuardrails(x *Call, engine *guardrails.Engine) *guardrails
 		Plugin: s.pluginGuardrail,
 	}))
 }
-
-const errContentPolicyBlocked guardrails.Failure = "content_policy_blocked"
 
 func guardrailError(err error) *fault.Error {
 	if err == nil {
@@ -133,13 +129,6 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 			return guardrailError(err)
 		}
 		if err := x.guard.engine.ValidateStream(x.Snapshot().GuardrailWindow()); err != nil {
-			if x.Route.ContentPolicy != nil {
-				for _, rule := range x.Route.ContentPolicy.Rules {
-					if rule.Phase == contentpolicy.PhaseOutput {
-						return PolicyUnavailable("content_policy_streaming_requires_unary", "This migrated output policy requires a buffered unary response.")
-					}
-				}
-			}
 			return guardrailError(err)
 		}
 	}
@@ -199,9 +188,6 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
 	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
-	if x.Strict() && x.guard.engine.HasLegacyInput() {
-		evaluation.LegacyInputTexts = contentpolicy.InputTexts(document)
-	}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
 		for _, segment := range surface.Segments {
 			if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
@@ -213,7 +199,6 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 	if recoverable && x.workflow != nil && len(result.Recovery) > 0 {
 		x.workflowRecovery = result.Recovery
 	}
-	err = x.legacyGuardrailError(result, err)
 	if err != nil {
 		return guardrailInput{document: document, segments: result.Segments, decisions: result.Decisions}, err
 	}
@@ -230,7 +215,7 @@ func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrails.Evid
 	}
 	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: segments, InternalModel: x.guard.internal}, x.guard.masks)
 	x.guard.input = segments
-	return result.Decisions, x.legacyGuardrailError(result, err)
+	return result.Decisions, err
 }
 
 func (x *Call) inspectOperationOutput(texts []operations.Text) error {
@@ -240,7 +225,7 @@ func (x *Call) inspectOperationOutput(texts []operations.Text) error {
 	}
 	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Output, Segments: segments, InternalModel: x.guard.internal}, nil)
 	x.guard.record(result.Decisions)
-	return x.legacyGuardrailError(result, err)
+	return err
 }
 
 func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
@@ -266,13 +251,6 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 			}
 		}
 	}
-	if x.Strict() && x.guard.engine.HasLegacyOutput() {
-		if err := interaction.CheckLegacyOutputCoverage(x.family, doc); err != nil {
-			result, _ := x.guard.engine.Unavailable(guardrails.Output)
-			x.guard.record(result.Decisions)
-			return body, &responseLocalRefusal{cause: err}
-		}
-	}
 	surface, err := guardrails.NativeSurface(doc, true)
 	if err != nil {
 		result, e := x.guard.engine.Unavailable(guardrails.Output)
@@ -290,7 +268,6 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	}
 	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Output, Segments: slices.Concat(segments, guardrails.InputProvenance(x.guard.input)), InternalModel: x.guard.internal}, x.guard.masks)
 	x.guard.record(result.Decisions)
-	err = x.legacyGuardrailError(result, err)
 	if err != nil {
 		return body, err
 	}
@@ -405,35 +382,10 @@ func (x *Call) GuardrailSurfaceGate(route *routing.Route) *fault.Error {
 		result, err := engine.Unavailable()
 		x.guard.record(result.Decisions)
 		if err != nil {
-			if legacy := policySurfaceGate(route); legacy != nil {
-				return legacy
-			}
 			return guardrailError(err)
 		}
 	}
-	return policySurfaceGate(route)
-}
-
-func (x *Call) legacyGuardrailError(result guardrails.Result, err error) error {
-	if !x.Snapshot().HasGuardrails() {
-		return err
-	}
-	for _, evidence := range result.Decisions {
-		d := x.Snapshot().GuardrailDefinition(evidence.Revision)
-		if d.LegacyRuleID == "" {
-			continue
-		}
-		if evidence.Outcome == guardrails.Blocked || evidence.Outcome == guardrails.Redacted {
-			recordDecision(x, contentpolicy.Decision{RuleID: d.LegacyRuleID, Phase: string(evidence.Phase), Action: string(evidence.Action), Outcome: string(evidence.Outcome)})
-		}
-	}
-	if errors.Is(err, guardrails.ErrBlocked) && len(result.Decisions) > 0 {
-		last := result.Decisions[len(result.Decisions)-1]
-		if x.Snapshot().GuardrailDefinition(last.Revision).LegacyRuleID != "" {
-			return errContentPolicyBlocked
-		}
-	}
-	return err
+	return nil
 }
 
 func guardrailAuthorizer(s *Server, x *Call) func(*routing.Route) *fault.Error {

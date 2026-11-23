@@ -10,7 +10,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
@@ -97,9 +96,6 @@ func Validate(e *Event) (*Validated, error) {
 	}
 	if err := guardrails.ValidateEvidence(e.GuardrailDecisions); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
-	}
-	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
-		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
 	}
 	if err := validateUsageDimensions(e.tokenQuantities()); err != nil {
 		return nil, fmt.Errorf("%w: request %w", ErrInvalidEvent, err)

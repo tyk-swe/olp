@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -23,16 +23,13 @@ func TestGeminiDecisionRoute(t *testing.T) {
 	inline := input(`{"type":"image","data":"AA==","mime_type":"image/png"}`)
 	remote := input(`{"type":"document","uri":"https://example.test/form.pdf","mime_type":"application/pdf"}`)
 	splitText := input(`[{"type":"text","text":"sec"},{"type":"text","text":"ret"}]`)
-	blockSecret := &contentpolicy.Policy{
-		Rules: []contentpolicy.Rule{{ID: "secret", Phase: contentpolicy.PhaseInput, Pattern: "secret", Action: contentpolicy.ActionBlock}},
-	}
 	for _, tc := range []struct {
 		name, body, result string
 		reason             string
 		want, calls        int
 		withoutUsage       bool
 		allowFetch         bool
-		policy             *contentpolicy.Policy
+		blockSecret        bool
 	}{
 		{name: "native answers and usage", body: request, result: answer, want: http.StatusOK, calls: 1},
 		{name: "different answer key", body: request, result: strings.Replace(answer, `"access":`, `"other":`, 1), want: http.StatusBadGateway, reason: "fidelity_protocol_violation", calls: 1},
@@ -51,8 +48,8 @@ func TestGeminiDecisionRoute(t *testing.T) {
 		{name: "select a PDF page range", body: input(`{"type":"document","data":"AA==","mime_type":"application/pdf","processing":{"type":"static","page_options":{"start_page":1,"end_page":2,"content_layers":["page_text"]}}}`), result: answer, want: http.StatusOK, calls: 1},
 		{name: "remote input needs opt in", body: remote, want: http.StatusBadRequest, reason: "content_egress"},
 		{name: "remote input with opt in", body: remote, result: answer, want: http.StatusOK, calls: 1, allowFetch: true},
-		{name: "input policy sees joined text", body: splitText, want: http.StatusBadRequest, reason: "content_policy_blocked", policy: blockSecret},
-		{name: "input policy refuses opaque media", body: inline, want: http.StatusBadRequest, reason: "policy_conflict", policy: blockSecret},
+		{name: "input guardrail sees joined text", body: splitText, want: http.StatusBadRequest, reason: "guardrail_blocked", blockSecret: true},
+		{name: "input guardrail refuses opaque media", body: inline, want: http.StatusUnprocessableEntity, reason: "guardrail_surface_unavailable", blockSecret: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -65,9 +62,12 @@ func TestGeminiDecisionRoute(t *testing.T) {
 				snapshot.Providers[a.ID] = a
 				route := snapshot.Routes[routeSlug]
 				route.Operations, route.Targets, route.MaxAttempts = []string{"decision"}, route.Targets[:1], 1
-				route.ProviderFetchedDocuments, route.ContentPolicy = tc.allowFetch, tc.policy
+				route.ProviderFetchedDocuments = tc.allowFetch
 				snapshot.Routes[routeSlug] = route
 			})
+			if tc.blockSecret {
+				installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
+			}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost || r.URL.RequestURI() != "/a/v1beta/decisions" || r.Header.Get("X-Goog-Api-Key") != secretA || r.Header.Get("Authorization") != "" {
 					t.Errorf("incorrect upstream method, path, or credentials")

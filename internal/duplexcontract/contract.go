@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
@@ -63,7 +62,6 @@ func IsProfile(profileID string) bool {
 type Config struct {
 	Provider connectors.Config
 	Model    string
-	Policy   *contentpolicy.Policy
 }
 
 type Template struct {
@@ -77,7 +75,6 @@ func refuse(code, field, requirement, message string) error {
 
 func Compile(c Config) (*Template, error) {
 	provider := c.Provider.Clone()
-	policy := c.Policy.Clone()
 	p, err := provider.Profile()
 	if err != nil || provider.ValidateProfile() != nil {
 		return nil, refuse("target_capability", "/profile", "explicit_profile", "Native duplex requires a registered versioned provider profile.")
@@ -100,9 +97,6 @@ func Compile(c Config) (*Template, error) {
 		if _, modelErr := provider.DuplexBoundModel(c.Model); modelErr != nil {
 			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
-	}
-	if policy != nil && len(policy.Rules) > 0 {
-		return nil, refuse("policy_conflict", "/content_policy", "inspectable_policy", "Native duplex frames cannot be admitted with a content policy this relay cannot enforce.")
 	}
 	if len(provider.SemanticHeaders) > 0 || len(provider.QuerySettings) > 0 {
 		return nil, refuse("target_capability", "/provider", "unchanged_duplex_handshake", "Native duplex has no qualified provider handshake overrides or implicit defaults.")

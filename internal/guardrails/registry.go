@@ -10,7 +10,6 @@ import (
 // Registry is serialized into the immutable runtime release. Policy entries
 // point at exact definition revisions; attachments point at exact policies.
 type Registry struct {
-	MigratedRoutes       map[string]bool           `json:"migrated_routes,omitempty"`
 	Definitions          map[string]Revision       `json:"definitions,omitempty"`
 	Policies             map[string]PolicyRevision `json:"policies,omitempty"`
 	Attachments          []Attachment              `json:"attachments,omitempty"`
@@ -133,14 +132,8 @@ func (r *Registry) resolve(b Boundary) ([]resolvedEntry, error) {
 		return nil, nil
 	}
 	organization := r.ProjectOrganizations[b.ProjectID]
-	legacyFirst := func(a Attachment) int {
-		if a.Scope == RouteScope && r.MigratedRoutes[a.ScopeID] && r.Policies[a.PolicyRevisionID].PolicyID == a.ID {
-			return 0
-		}
-		return 1
-	}
 	attachments := slices.SortedStableFunc(slices.Values(slices.DeleteFunc(slices.Clone(r.Attachments), func(a Attachment) bool { return !b.matches(a, organization) })), func(x, y Attachment) int {
-		return cmp.Or(cmp.Compare(scopeRanks[x.Scope], scopeRanks[y.Scope]), cmp.Compare(legacyFirst(x), legacyFirst(y)), cmp.Compare(x.Order, y.Order), strings.Compare(x.ID, y.ID))
+		return cmp.Or(cmp.Compare(scopeRanks[x.Scope], scopeRanks[y.Scope]), cmp.Compare(x.Order, y.Order), strings.Compare(x.ID, y.ID))
 	})
 	var entries []resolvedEntry
 	for _, a := range attachments {
@@ -237,10 +230,6 @@ func (r *Registry) Clone() *Registry {
 		return nil
 	}
 	out := *r
-	out.MigratedRoutes = make(map[string]bool, len(r.MigratedRoutes))
-	for id, v := range r.MigratedRoutes {
-		out.MigratedRoutes[id] = v
-	}
 	out.Definitions = make(map[string]Revision, len(r.Definitions))
 	for id, d := range r.Definitions {
 		d.Configuration = slices.Clone(d.Configuration)

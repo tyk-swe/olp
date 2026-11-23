@@ -36,9 +36,6 @@ func guardrailKey(g Guardrail) portable { return keyOf(g.Project, g.Name) }
 func policyKey(p Policy) portable { return keyOf(p.Project, p.Name) }
 
 func Parse(document contract.ConfigurationDocument) (Section, error) {
-	if err := refuseLegacy(document); err != nil {
-		return Section{}, err
-	}
 	definitions, err := parseGuardrails(promotion.ValueOf(document.Guardrails))
 	if err != nil {
 		return Section{}, err
@@ -91,15 +88,7 @@ func Read(ctx context.Context, q database.Queryer) (Section, error) {
 	if err != nil {
 		return Section{}, err
 	}
-	stored, err := readStored(ctx, q, projectName)
-	if err != nil {
-		return Section{}, err
-	}
-	legacy, err := readLegacyRoutes(ctx, q, projectName)
-	if err != nil {
-		return Section{}, err
-	}
-	return merge(append([]Section{stored}, legacy...)), nil
+	return readStored(ctx, q, projectName)
 }
 
 func Render(section Section) (Fragment, error) {
@@ -118,14 +107,6 @@ func Render(section Section) (Fragment, error) {
 		GuardrailPolicies:    promotion.Optional(promotion.Map(policies, renderPolicy)),
 		GuardrailAttachments: promotion.Optional(promotion.Map(attachments, renderAttachment)),
 	}, nil
-}
-
-func merge(sections []Section) Section {
-	return Section{
-		Guardrails:  slices.Concat(promotion.Map(sections, func(s Section) []Guardrail { return s.Guardrails })...),
-		Policies:    slices.Concat(promotion.Map(sections, func(s Section) []Policy { return s.Policies })...),
-		Attachments: slices.Concat(promotion.Map(sections, func(s Section) []Attachment { return s.Attachments })...),
-	}
 }
 
 func projectID(directory promotion.Directory, name string) (*string, error) {

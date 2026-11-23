@@ -152,7 +152,7 @@ func planDefinition(ctx context.Context, q database.Queryer, directory promotion
 		return promotion.Conflict(contract.ConfigurationPlanItemKindGuardrail, key, "The owning project is not declared or present at the destination."), nil
 	}
 	if !present {
-		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable bounded content-policy definition."), nil
+		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable guardrail definition."), nil
 	}
 	current, err := definition.FindActive(ctx, q, id, g.Name)
 	if err != nil {

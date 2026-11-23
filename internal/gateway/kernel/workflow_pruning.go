@@ -8,7 +8,6 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/decision"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -143,29 +142,6 @@ func (x *Call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 	for index, segment := range segments {
 		if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) {
 			segments[index].Text = surface.Replacement(index, "[recovered content omitted]")
-		}
-	}
-	compiled, problem := compiledPolicy(x.Route)
-	if problem != nil {
-		return nil, nil, problem
-	}
-	if compiled != nil {
-		for _, rule := range compiled.Input {
-			matched := false
-			for index, segment := range segments {
-				if !rule.Re.MatchString(segment.Text) {
-					continue
-				}
-				matched = true
-				if rule.Action == contentpolicy.ActionBlock {
-					recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-					return nil, nil, fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
-				}
-				segments[index].Text = rule.Re.ReplaceAllLiteralString(segment.Text, rule.Replacement)
-			}
-			if matched {
-				recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
-			}
 		}
 	}
 	document, err = surface.Apply(segments)

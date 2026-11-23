@@ -2,7 +2,6 @@ package routes
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -41,19 +40,4 @@ func SlugProjectIDs(ctx context.Context, q database.Queryer, slugs []string) ([]
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[*string])
-}
-
-type LegacyContentPolicy struct {
-	Slug             string
-	ProjectID        *string
-	ContentPolicy    json.RawMessage
-	OverallTimeoutMS int
-}
-
-func ReadLegacyContentPolicies(ctx context.Context, q database.Queryer) ([]LegacyContentPolicy, error) {
-	rows, err := q.Query(ctx, "SELECT r.slug,r.project_id::text,v.content_policy,v.overall_timeout_ms FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE v.content_policy IS NOT NULL AND v.content_policy<>'null'::jsonb ORDER BY r.slug")
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[LegacyContentPolicy])
 }

@@ -22,7 +22,6 @@ const draft: RouteDraft = {
   overall_timeout_ms: 30000,
   max_attempts: 2,
   fidelity: { mode: 'strict' },
-  content_policy: null,
   targets: [
     {
       id: 'target-id',
@@ -143,7 +142,7 @@ afterEach(() => {
 });
 
 describe('route draft editor', () => {
-  it('hydrates a draft and maintains operation and policy choices', async () => {
+  it('hydrates a draft and maintains operation choices', async () => {
     serveEditor();
     const state = await editor();
     expect(state.targets).toMatchObject([{ providerModelId: 'model-id' }]);
@@ -151,17 +150,11 @@ describe('route draft editor', () => {
 
     state.toggleOperation('embeddings', true);
     state.toggleOperation('embeddings', true);
-    state.addPolicyRule();
     flushSync();
 
     expect(state.operations).toEqual(['generation', 'embeddings']);
-    expect(state.policyRules).toMatchObject([
-      { phase: 'input', action: 'block' }
-    ]);
     expect(state.hasUnsavedChanges).toBe(true);
-    state.removePolicyRule(0);
     state.toggleOperation('embeddings', false);
-    expect(state.policyRules).toEqual([]);
     expect(state.operations).toEqual(['generation']);
   });
 
@@ -181,39 +174,6 @@ describe('route draft editor', () => {
     expect(state.hasUnsavedChanges).toBe(false);
     expect(state.sync.snapshotEtag).toBe('version-2');
     expect(state.notice).toContain('Draft saved');
-  });
-
-  it('saves new content policy rules after removing a middle rule', async () => {
-    const { replace } = serveEditor();
-    const saved = vi.fn<(body: unknown) => void>();
-    replace.mockImplementationOnce(async (request) => {
-      saved(await request.json());
-      return json({ ...draft, etag: 'version-2' });
-    });
-    const state = await editor();
-    const addRule = (pattern: string) => {
-      state.addPolicyRule();
-      state.policyRules = state.policyRules.map((rule) =>
-        rule.pattern ? rule : { ...rule, pattern }
-      );
-    };
-    addRule('first');
-    addRule('removed');
-    addRule('third');
-    state.removePolicyRule(1);
-    addRule('replacement');
-
-    await state.save(draft);
-
-    expect(saved).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        content_policy: {
-          rules: ['first', 'third', 'replacement'].map((pattern) =>
-            expect.objectContaining({ pattern })
-          )
-        }
-      })
-    );
   });
 
   it('preserves edits made while a save is in flight', async () => {

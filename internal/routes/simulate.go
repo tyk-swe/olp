@@ -19,7 +19,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
@@ -216,7 +215,7 @@ func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err := p.Project(d.ProjectID, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
+	if err := ValidateFidelity(d.Fidelity); err != nil {
 		return httpkit.Reply{}, err
 	}
 	live, err := s.resolve(r.Context(), s.Access.Pool, d.Targets)
@@ -301,19 +300,12 @@ func draftSimulationRoute(ctx context.Context, q database.Queryer, d *draft, rou
 	if err != nil {
 		return routing.Route{}, err
 	}
-	var content *contentpolicy.Policy
-	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
-		content, err = contentpolicy.Decode(d.ContentPolicy)
-		if err != nil {
-			return routing.Route{}, err
-		}
-	}
 	policy, _, err := loadPolicy(ctx, q, "route-draft", d.ID, false)
 	if err != nil {
 		return routing.Route{}, err
 	}
 	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
-	route.ProjectID, route.Behavior, route.ContentPolicy, route.Policy = d.ProjectID, behavior, content, policy
+	route.ProjectID, route.Behavior, route.Policy = d.ProjectID, behavior, policy
 	return route, nil
 }
 

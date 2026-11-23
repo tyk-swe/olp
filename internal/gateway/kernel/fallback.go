@@ -170,8 +170,7 @@ func (s *Server) fallBack(ctx context.Context, x *Call, conditions []string) boo
 }
 
 // useRoute moves the request to route. Provider preparation depends on the
-// route's fidelity and content policy, and the session seed on its affinity,
-// so both start over.
+// route's fidelity, and the session seed on its affinity, so both start over.
 func (x *Call) useRoute(route *routing.Route, via usage.LegVia) {
 	x.walk = x.walk.Move(route, via == usage.ViaSelector)
 	x.routeLeg = routeLeg{Route: route}

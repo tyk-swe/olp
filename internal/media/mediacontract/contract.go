@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -23,7 +22,6 @@ const maxDocumentBytes = 64 << 20
 type Config struct {
 	Provider                                 connectors.Config
 	ProviderID, RevisionID, Model, Operation string
-	Policy                                   *contentpolicy.Policy
 }
 
 type Template struct {
@@ -31,7 +29,6 @@ type Template struct {
 	profile   connectors.Profile
 	defaults  map[string]json.RawMessage
 	origins   map[string]oif.Origin
-	policy    *contentpolicy.Compiled
 	serving   oif.ServingIdentity
 }
 
@@ -44,7 +41,6 @@ func reject(code, field, requirement, message string) error {
 // collection and cannot claim equivalence with a provider project-wide list.
 func Compile(c Config) (*Template, error) {
 	c.Provider = c.Provider.Clone()
-	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, reject("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
@@ -67,23 +63,6 @@ func Compile(c Config) (*Template, error) {
 	if err != nil {
 		return nil, reject("target_capability", "/defaults", "native_defaults", "The media defaults are invalid.")
 	}
-	if err := contentpolicy.Validate(c.Policy); err != nil {
-		return nil, err
-	}
-	if c.Policy != nil {
-		for _, rule := range c.Policy.Rules {
-			if rule.Action != contentpolicy.ActionBlock {
-				return nil, reject("policy_conflict", "/content_policy", "semantic_preservation", "Strict media policies cannot mutate the native request or result.")
-			}
-			if rule.Phase == contentpolicy.PhaseOutput || c.Operation != "image_generation" && c.Operation != "speech" {
-				return nil, reject("policy_conflict", "/content_policy", "inspectable_media", "This media operation has no complete content-policy inspection contract.")
-			}
-		}
-	}
-	policy, err := contentpolicy.Compile(c.Policy)
-	if err != nil {
-		return nil, err
-	}
 	serving := c.Provider.ServingIdentity(c.ProviderID, c.RevisionID, c.Model)
 	origins := map[string]oif.Origin{}
 	for _, item := range provenance {
@@ -98,7 +77,7 @@ func Compile(c Config) (*Template, error) {
 			break
 		}
 	}
-	return &Template{op: c.Operation, model: c.Provider.Model(c.Model), profile: p, defaults: defaults, origins: origins, policy: policy, serving: serving}, nil
+	return &Template{op: c.Operation, model: c.Provider.Model(c.Model), profile: p, defaults: defaults, origins: origins, serving: serving}, nil
 }
 
 func (t *Template) Serving() oif.ServingIdentity { return t.serving }
@@ -124,8 +103,6 @@ type Input struct {
 	JSON        []byte       // exact candidate-specific outbound JSON
 	Parts       []Part       // exact outbound multipart order
 	CallerParts []Part       // accepted caller order before admitted overlays
-	// PolicyBudget optionally reserves work before each input regexp match.
-	PolicyBudget func(int) error
 }
 
 type Bound struct {
@@ -259,9 +236,6 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 	effectiveRequest, err := source.WithChanges(changes...)
 	if err != nil || effectiveRequest.Document().Raw() != effective.Raw() {
 		return Bound{}, reject("target_capability", "/request", "exact_media_overlay", "The native media request differs from its admitted source overlays.")
-	}
-	if err := t.inspectJSONInput(effective, in.PolicyBudget); err != nil {
-		return Bound{}, err
 	}
 	return Bound{Descriptor: d, Source: source, Effective: effectiveRequest, Receipt: t.receipt(d, dispositions)}, nil
 }
@@ -405,36 +379,6 @@ func multipartDefaultParts(name string, raw json.RawMessage) []Part {
 	}
 	text = compact.String()
 	return []Part{{Name: name, Text: &text}}
-}
-
-func (t *Template) inspectJSONInput(doc oif.Document, reserve func(int) error) error {
-	if !t.policy.HasInput() {
-		return nil
-	}
-	known := map[string]bool{"model": true, "prompt": true, "input": true, "voice": true, "n": true, "size": true, "quality": true, "response_format": true, "style": true, "user": true, "background": true, "moderation": true, "output_compression": true, "output_format": true, "partial_images": true, "stream": true, "instructions": true, "speed": true, "stream_format": true}
-	for _, member := range doc.Root().Members() {
-		if !known[member.Name] {
-			return reject("policy_conflict", "/request", "inspectable_native_option", "A native media option has no qualified content-policy coverage.")
-		}
-		if member.Name == "model" {
-			continue
-		}
-		value, ok := member.Value.Text()
-		if !ok {
-			continue
-		}
-		for _, rule := range t.policy.Input {
-			if reserve != nil {
-				if err := reserve(len(value)); err != nil {
-					return err
-				}
-			}
-			if rule.Re.MatchString(value) {
-				return reject("content_policy_blocked", "/request", "content_policy", "The effective native media request was blocked.")
-			}
-		}
-	}
-	return nil
 }
 
 // JSONResult retains the complete bounded native source, including unknown

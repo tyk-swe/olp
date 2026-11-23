@@ -58,7 +58,6 @@ type wireEvent struct {
 	Origin                  *Origin               `json:"origin"`
 	ParentRequestID         *string               `json:"parent_request_id"`
 	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions"`
-	PolicyDecisions         *[]wireDecision       `json:"policy_decisions"`
 	BudgetGroupID           *string               `json:"budget_group_id"`
 	ProviderID              *string               `json:"provider_id"`
 	RouteSlug               *string               `json:"route_slug"`
@@ -192,13 +191,6 @@ type wireUsage struct {
 	// prices. Both are omitted when absent.
 	ToolCalls map[string]int64 `json:"tool_calls,omitempty"`
 	Batch     bool             `json:"batch,omitempty"`
-}
-
-type wireDecision struct {
-	RuleID  *string `json:"rule_id"`
-	Phase   *string `json:"phase"`
-	Action  *string `json:"action"`
-	Outcome *string `json:"outcome"`
 }
 
 type wireRouting struct {

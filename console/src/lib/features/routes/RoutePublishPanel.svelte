@@ -63,17 +63,10 @@
     <label for="simulation-mode">Transport mode</label>
 
     <select id="simulation-mode" bind:value={editor.simulationMode}>
-      {#each modesFor(editor.simulationOperation).filter((mode) => !(mode === 'streaming' && editor.outputPolicyActive)) as mode (mode)}
+      {#each modesFor(editor.simulationOperation) as mode (mode)}
         <option value={mode}>{mode}</option>
       {/each}
     </select>
-
-    {#if editor.outputPolicyActive}
-      <p class="policy-note" role="status">
-        Output content-policy rules require unary buffering — streaming is
-        unavailable on this route.
-      </p>
-    {/if}
 
     <RoutingPreferencesForm
       bind:value={editor.routingPreferences}

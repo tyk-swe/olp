@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -196,67 +194,6 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 	}
 	if len(blocked.Decisions) != 1 || blocked.Decisions[0].Outcome != "blocked" {
 		t.Fatalf("blocked tool arguments kept no decision evidence: %+v", blocked.Decisions)
-	}
-}
-
-func TestPublishedPolicySurvivesMutationOfReturnedCompiledRules(t *testing.T) {
-	h := newHarness(t, Config{})
-	h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
-		route := snapshot.Routes[routeSlug]
-		route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "secret", Phase: contentpolicy.PhaseInput, Pattern: "secret", Action: contentpolicy.ActionBlock}}}
-		snapshot.Routes[routeSlug] = route
-	})
-	route := h.rt.release.Snapshot().Route(routeSlug)
-	compiled := route.CompiledContentPolicy()
-	if err := compiled.Input[0].Re.UnmarshalText([]byte("public")); err != nil {
-		t.Fatal(err)
-	}
-	compiled.Input[0].Action = contentpolicy.ActionRedact
-	compiled.Policy.Rules[0].Pattern = "public"
-	resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"secret"}]`)
-	if resp.StatusCode != http.StatusBadRequest || body["error"].(map[string]any)["code"] != "content_policy_blocked" {
-		t.Fatalf("published policy changed through returned rules: %d %v", resp.StatusCode, body)
-	}
-	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
-		t.Fatalf("blocked request reached providers: %d", calls)
-	}
-}
-
-func TestMigratedInputBlocksCanonicalToolSchema(t *testing.T) {
-	for _, pattern := range []string{`"type":"string"`, "^term$", "^string$"} {
-		t.Run(pattern, func(t *testing.T) {
-			testMigratedInputBlocksToolSchema(t, pattern)
-		})
-	}
-}
-
-func testMigratedInputBlocksToolSchema(t *testing.T, pattern string) {
-	h := strictHarness(t, nil)
-	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", fmt.Sprintf(`{"rules":[{"id":"schema","pattern":%q}]}`, pattern))
-	current := h.rt.release
-	snapshot := current.Snapshot().Clone()
-	definition := snapshot.Guardrails.Definitions["revision"]
-	definition.LegacyRuleID = "schema"
-	snapshot.Guardrails.Definitions["revision"] = definition
-	credentials := map[string][]byte{}
-	for _, provider := range snapshot.Providers {
-		for _, slot := range provider.Slots {
-			if slot.CredentialID != nil {
-				credentials[*slot.CredentialID], _ = current.Credential(*slot.CredentialID)
-			}
-		}
-	}
-	installed, err := release.NewRelease(current.ID, current.Sequence, snapshot, credentials)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.rt.release = installed
-	resp, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"term":{"type":"string"}}}}}]`)
-	if resp.StatusCode != http.StatusBadRequest || errorCode(t, body) != "content_policy_blocked" {
-		t.Fatalf("migrated input did not block canonical tool schema: %d %v", resp.StatusCode, body)
-	}
-	if calls := h.mock.count("a") + h.mock.count("b"); calls != 0 {
-		t.Fatalf("blocked request reached providers: %d", calls)
 	}
 }
 

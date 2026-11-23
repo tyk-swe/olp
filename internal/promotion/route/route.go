@@ -1,14 +1,12 @@
 package route
 
 import (
-	"bytes"
 	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -40,7 +38,6 @@ type Route struct {
 	MaxAttempts          int             `json:"max_attempts"`
 	Targets              []Target        `json:"targets"`
 	RoutingPolicy        *routing.Policy `json:"routing_policy"`
-	ContentPolicy        json.RawMessage `json:"content_policy,omitempty"`
 	Fidelity             json.RawMessage `json:"fidelity,omitempty"`
 	ExposeUpstreamModels bool            `json:"expose_upstream_models,omitempty"`
 	Retired              bool            `json:"retired,omitempty"`
@@ -93,7 +90,7 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 func trimmed(r Route) Route {
 	return Route{
 		Behavior: r.Behavior, Slug: strings.TrimSpace(r.Slug), Project: promotion.Trimmed(r.Project), Operations: r.Operations,
-		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts, RoutingPolicy: r.RoutingPolicy, ContentPolicy: r.ContentPolicy,
+		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts, RoutingPolicy: r.RoutingPolicy,
 		Fidelity: r.Fidelity, ExposeUpstreamModels: r.ExposeUpstreamModels, Retired: r.Retired,
 		Targets: promotion.Map(r.Targets, func(t Target) Target {
 			return Target{Provider: strings.TrimSpace(t.Provider), ProviderModel: strings.TrimSpace(t.ProviderModel), Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow}
@@ -119,9 +116,6 @@ func validate(i int, r Route, first map[string]int, providers map[string]provide
 	}
 	if err := (routing.Route{Fidelity: fidelity, Behavior: r.Behavior}).ValidateCaching(); err != nil {
 		return httpkit.Invalid(prefix+".cache", err.Error())
-	}
-	if err := routes.ValidateFidelityPolicy(r.Fidelity, r.ContentPolicy); err != nil {
-		return err
 	}
 	if first[r.Slug] != i {
 		return httpkit.Invalid(prefix+".slug", "Route slugs must be unique.")
@@ -155,12 +149,8 @@ func validate(i int, r Route, first map[string]int, providers map[string]provide
 }
 
 func validatePassthrough(r Route, fidelity routing.RouteFidelity) error {
-	policy, err := decodeContentPolicy(r.ContentPolicy)
-	if err != nil {
-		return err
-	}
 	route := routing.Route{
-		Slug: r.Slug, Operations: r.Operations, OverallTimeout: int64(r.OverallTimeoutMS), MaxAttempts: r.MaxAttempts, Fidelity: fidelity, Behavior: r.Behavior, ContentPolicy: policy,
+		Slug: r.Slug, Operations: r.Operations, OverallTimeout: int64(r.OverallTimeoutMS), MaxAttempts: r.MaxAttempts, Fidelity: fidelity, Behavior: r.Behavior,
 		Targets: promotion.Map(r.Targets, func(t Target) routing.Target {
 			return routing.Target{ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: int64(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
 		}),
@@ -186,16 +176,9 @@ func validateTarget(prefix string, j int, t Target, project *string, providers m
 	return nil
 }
 
-func decodeContentPolicy(raw json.RawMessage) (*contentpolicy.Policy, error) {
-	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return nil, nil
-	}
-	return contentpolicy.Decode(raw)
-}
-
 func Render(c Configuration) ([]contract.ConfigurationRouteEntry, *[]contract.ConfigurationTemplateEntry, error) {
 	sorted := slices.SortedFunc(slices.Values(c.Routes), func(a, b Route) int { return strings.Compare(a.Slug, b.Slug) })
-	converted, err := promotion.Convert[[]contract.ConfigurationRouteEntry](promotion.Map(sorted, withoutContentPolicy))
+	converted, err := promotion.Convert[[]contract.ConfigurationRouteEntry](sorted)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -208,13 +191,6 @@ func Render(c Configuration) ([]contract.ConfigurationRouteEntry, *[]contract.Co
 		return nil, nil, err
 	}
 	return rendered, &templates, nil
-}
-
-func withoutContentPolicy(r Route) Route {
-	return Route{
-		Behavior: r.Behavior, Slug: r.Slug, Project: r.Project, Operations: r.Operations, OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
-		Targets: r.Targets, RoutingPolicy: r.RoutingPolicy, Fidelity: r.Fidelity, ExposeUpstreamModels: r.ExposeUpstreamModels, Retired: r.Retired,
-	}
 }
 
 func slugOf(r Route) string { return r.Slug }

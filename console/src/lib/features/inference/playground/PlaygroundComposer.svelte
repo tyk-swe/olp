@@ -133,12 +133,6 @@
       <small id="model-help"
         >Choose an active route suggestion or enter its public slug.</small
       >
-      {#if playground.outputPolicyActive}<small
-          class="policy-note"
-          role="status"
-          >This route enforces an output content policy — streaming requests are
-          rejected. Playground runs are unary and still permitted.</small
-        >{/if}
       <div id="route-status">
         {#if playground.routes.isPending}
           <small class="inline-status" role="status"
@@ -260,12 +254,7 @@
         />
         Stream the response</label
       >
-      {#if playground.outputPolicyActive}<small
-          class="policy-note"
-          role="status"
-          >Output content policy requires unary responses — streaming is
-          disabled.</small
-        >{:else if playground.streamEnabled && playground.streamCheck === 'checking'}<small
+      {#if playground.streamEnabled && playground.streamCheck === 'checking'}<small
           class="inline-status"
           role="status">Checking streaming eligibility…</small
         >{:else if playground.streamEnabled && playground.streamCheckMessage}<small

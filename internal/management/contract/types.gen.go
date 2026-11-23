@@ -1788,15 +1788,12 @@ func (e ConfigurationCodePoolKind) Valid() bool {
 
 // Defines values for ConfigurationDocumentApiVersion.
 const (
-	OpenllmproxyDevconfigv1 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v1"
 	OpenllmproxyDevconfigv2 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v2"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationDocumentApiVersion enum.
 func (e ConfigurationDocumentApiVersion) Valid() bool {
 	switch e {
-	case OpenllmproxyDevconfigv1:
-		return true
 	case OpenllmproxyDevconfigv2:
 		return true
 	default:
@@ -2488,42 +2485,6 @@ func (e ConfigurationWorkloadMappingScopes) Valid() bool {
 	case ConfigurationWorkloadMappingScopesTools:
 		return true
 	case ConfigurationWorkloadMappingScopesTracesWrite:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ContentPolicyRuleAction.
-const (
-	ContentPolicyRuleActionBlock  ContentPolicyRuleAction = "block"
-	ContentPolicyRuleActionRedact ContentPolicyRuleAction = "redact"
-)
-
-// Valid indicates whether the value is a known member of the ContentPolicyRuleAction enum.
-func (e ContentPolicyRuleAction) Valid() bool {
-	switch e {
-	case ContentPolicyRuleActionBlock:
-		return true
-	case ContentPolicyRuleActionRedact:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ContentPolicyRulePhase.
-const (
-	ContentPolicyRulePhaseInput  ContentPolicyRulePhase = "input"
-	ContentPolicyRulePhaseOutput ContentPolicyRulePhase = "output"
-)
-
-// Valid indicates whether the value is a known member of the ContentPolicyRulePhase enum.
-func (e ContentPolicyRulePhase) Valid() bool {
-	switch e {
-	case ContentPolicyRulePhaseInput:
-		return true
-	case ContentPolicyRulePhaseOutput:
 		return true
 	default:
 		return false
@@ -4279,7 +4240,6 @@ func (e InteractionInspectionRepresentation) Valid() bool {
 // Defines values for InteractionInspectionStatus.
 const (
 	InteractionInspectionStatusAdmitted     InteractionInspectionStatus = "admitted"
-	InteractionInspectionStatusBlocked      InteractionInspectionStatus = "blocked"
 	InteractionInspectionStatusIncompatible InteractionInspectionStatus = "incompatible"
 	InteractionInspectionStatusNotEvaluated InteractionInspectionStatus = "not_evaluated"
 	InteractionInspectionStatusNotInspected InteractionInspectionStatus = "not_inspected"
@@ -4290,8 +4250,6 @@ const (
 func (e InteractionInspectionStatus) Valid() bool {
 	switch e {
 	case InteractionInspectionStatusAdmitted:
-		return true
-	case InteractionInspectionStatusBlocked:
 		return true
 	case InteractionInspectionStatusIncompatible:
 		return true
@@ -10546,12 +10504,9 @@ type ConfigurationGuardrail struct {
 	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
 	Name          string                         `json:"name"`
 	OnError       *ConfigurationGuardrailOnError `json:"on_error,omitempty"`
-
-	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy    *ContentPolicy             `json:"policy,omitempty"`
-	Project   string                     `json:"project"`
-	TimeoutMs *int64                     `json:"timeout_ms,omitempty"`
-	Type      ConfigurationGuardrailType `json:"type"`
+	Project       string                         `json:"project"`
+	TimeoutMs     *int64                         `json:"timeout_ms,omitempty"`
+	Type          ConfigurationGuardrailType     `json:"type"`
 }
 
 // ConfigurationGuardrailOnError defines model for ConfigurationGuardrail.OnError.
@@ -10853,8 +10808,7 @@ type ConfigurationRouteEntry struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
 
 	// ExposeUpstreamModels Explicitly disclose upstream model names in route catalogs.
 	ExposeUpstreamModels *bool `json:"expose_upstream_models,omitempty"`
@@ -10871,7 +10825,7 @@ type ConfigurationRouteEntry struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 
 	// Project Project name, or null for an installation-wide route
@@ -11123,31 +11077,6 @@ type ConnectionOptions struct {
 	VendorId                 nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
-// ContentPolicy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-type ContentPolicy struct {
-	Rules []ContentPolicyRule `json:"rules"`
-}
-
-// ContentPolicyRule defines model for ContentPolicyRule.
-type ContentPolicyRule struct {
-	// Action Redaction is permitted only on transformed routes; strict routes accept block rules.
-	Action ContentPolicyRuleAction `json:"action"`
-	Id     string                  `json:"id"`
-
-	// Pattern Go RE2 expression; must not match the empty string.
-	Pattern string                 `json:"pattern"`
-	Phase   ContentPolicyRulePhase `json:"phase"`
-
-	// Replacement Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.
-	Replacement *string `json:"replacement,omitempty"`
-}
-
-// ContentPolicyRuleAction Redaction is permitted only on transformed routes; strict routes accept block rules.
-type ContentPolicyRuleAction string
-
-// ContentPolicyRulePhase defines model for ContentPolicyRule.Phase.
-type ContentPolicyRulePhase string
-
 // ContinueGrantEnrollmentRequest defines model for ContinueGrantEnrollmentRequest.
 type ContinueGrantEnrollmentRequest struct {
 	// Input What the upstream returned after the operator signed in: the whole loopback callback URL it redirected the browser to, or the code it displayed.
@@ -11357,12 +11286,9 @@ type CreateGuardrailRequest struct {
 	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
 	Name          string                         `json:"name"`
 	OnError       *CreateGuardrailRequestOnError `json:"on_error,omitempty"`
-
-	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy    *ContentPolicy             `json:"policy,omitempty"`
-	ProjectId openapi_types.UUID         `json:"project_id"`
-	TimeoutMs *int64                     `json:"timeout_ms,omitempty"`
-	Type      CreateGuardrailRequestType `json:"type"`
+	ProjectId     openapi_types.UUID             `json:"project_id"`
+	TimeoutMs     *int64                         `json:"timeout_ms,omitempty"`
+	Type          CreateGuardrailRequestType     `json:"type"`
 }
 
 // CreateGuardrailRequestOnError defines model for CreateGuardrailRequest.OnError.
@@ -11578,8 +11504,7 @@ type CreateRouteDraftRequest struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
@@ -11593,7 +11518,7 @@ type CreateRouteDraftRequest struct {
 	Operations       *[]string              `json:"operations,omitempty"`
 	OverallTimeoutMs int64                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
@@ -12382,15 +12307,12 @@ type GuardrailResponse struct {
 	Id               openapi_types.UUID                    `json:"id"`
 	Name             string                                `json:"name"`
 	OnError          *GuardrailResponseOnError             `json:"on_error,omitempty"`
-
-	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy     ContentPolicy                `json:"policy"`
-	ProjectId  openapi_types.UUID           `json:"project_id"`
-	RetiredAt  nullable.Nullable[time.Time] `json:"retired_at"`
-	Revision   int64                        `json:"revision"`
-	RevisionId openapi_types.UUID           `json:"revision_id"`
-	TimeoutMs  *int64                       `json:"timeout_ms,omitempty"`
-	Type       GuardrailResponseType        `json:"type"`
+	ProjectId        openapi_types.UUID                    `json:"project_id"`
+	RetiredAt        nullable.Nullable[time.Time]          `json:"retired_at"`
+	Revision         int64                                 `json:"revision"`
+	RevisionId       openapi_types.UUID                    `json:"revision_id"`
+	TimeoutMs        *int64                                `json:"timeout_ms,omitempty"`
+	Type             GuardrailResponseType                 `json:"type"`
 }
 
 // GuardrailResponseOnError defines model for GuardrailResponse.OnError.
@@ -12406,11 +12328,8 @@ type GuardrailRevisionResponse struct {
 	GuardrailId   openapi_types.UUID                `json:"guardrail_id"`
 	Id            openapi_types.UUID                `json:"id"`
 	OnError       *GuardrailRevisionResponseOnError `json:"on_error,omitempty"`
-
-	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy    ContentPolicy `json:"policy"`
-	Revision  int64         `json:"revision"`
-	TimeoutMs *int64        `json:"timeout_ms,omitempty"`
+	Revision      int64                             `json:"revision"`
+	TimeoutMs     *int64                            `json:"timeout_ms,omitempty"`
 }
 
 // GuardrailRevisionResponseOnError defines model for GuardrailRevisionResponse.OnError.
@@ -14283,14 +14202,6 @@ type PluginRewrite struct {
 // PluginRewriteOp set replaces the member, default sets it unless the request has it, and delete removes it.
 type PluginRewriteOp string
 
-// PolicyDecision Metadata-only record of one content policy rule that matched; never carries matched text, offsets, pattern, or payload.
-type PolicyDecision struct {
-	Action  string `json:"action"`
-	Outcome string `json:"outcome"`
-	Phase   string `json:"phase"`
-	RuleId  string `json:"rule_id"`
-}
-
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
 	// Configured Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal.
@@ -15914,8 +15825,7 @@ type ReplaceRouteDraftRequest struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
@@ -15929,7 +15839,7 @@ type ReplaceRouteDraftRequest struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
@@ -16022,15 +15932,12 @@ type RequestDetailResponse struct {
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
 	// ParentRequestId The caller request a shadow or classifier request derives from.
-	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
-	PayloadCaptured bool                                  `json:"payload_captured"`
-
-	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
-	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
-	Route               string                   `json:"route"`
-	RuntimeGenerationId openapi_types.UUID       `json:"runtime_generation_id"`
-	StartedAt           time.Time                `json:"started_at"`
-	StatusCode          nullable.Nullable[int32] `json:"status_code,omitempty"`
+	ParentRequestId     nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
+	PayloadCaptured     bool                                  `json:"payload_captured"`
+	Route               string                                `json:"route"`
+	RuntimeGenerationId openapi_types.UUID                    `json:"runtime_generation_id"`
+	StartedAt           time.Time                             `json:"started_at"`
+	StatusCode          nullable.Nullable[int32]              `json:"status_code,omitempty"`
 
 	// StorageByteSeconds Exact byte-seconds, without monetary rounding.
 	StorageByteSeconds nullable.Nullable[string] `json:"storage_byte_seconds,omitempty"`
@@ -16154,15 +16061,12 @@ type RequestSummary struct {
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
 	// ParentRequestId The caller request a shadow or classifier request derives from.
-	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
-	PayloadCaptured bool                                  `json:"payload_captured"`
-
-	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
-	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
-	Route               string                   `json:"route"`
-	RuntimeGenerationId openapi_types.UUID       `json:"runtime_generation_id"`
-	StartedAt           time.Time                `json:"started_at"`
-	StatusCode          nullable.Nullable[int32] `json:"status_code,omitempty"`
+	ParentRequestId     nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
+	PayloadCaptured     bool                                  `json:"payload_captured"`
+	Route               string                                `json:"route"`
+	RuntimeGenerationId openapi_types.UUID                    `json:"runtime_generation_id"`
+	StartedAt           time.Time                             `json:"started_at"`
+	StatusCode          nullable.Nullable[int32]              `json:"status_code,omitempty"`
 
 	// StorageByteSeconds Exact byte-seconds, without monetary rounding.
 	StorageByteSeconds nullable.Nullable[string] `json:"storage_byte_seconds,omitempty"`
@@ -16457,7 +16361,7 @@ type RouteBehavior struct {
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
@@ -16547,7 +16451,6 @@ type RouteDraftDetailResponse struct {
 
 	// Certification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 	Certification RouteDraftDetailResponseCertification `json:"certification"`
-	ContentPolicy nullable.Nullable[ContentPolicy]      `json:"content_policy"`
 	CreatedAt     time.Time                             `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
@@ -16565,7 +16468,7 @@ type RouteDraftDetailResponse struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
 
 	// ProjectId Owning project; null means installation-wide.
@@ -16790,10 +16693,9 @@ type RouteRetry map[string]RetryRule
 
 // RouteRevisionDiffResponse defines model for RouteRevisionDiffResponse.
 type RouteRevisionDiffResponse struct {
-	BehaviorAfter        RouteBehavior `json:"behavior_after"`
-	BehaviorBefore       RouteBehavior `json:"behavior_before"`
-	BehaviorChanged      bool          `json:"behavior_changed"`
-	ContentPolicyChanged bool          `json:"content_policy_changed"`
+	BehaviorAfter   RouteBehavior `json:"behavior_after"`
+	BehaviorBefore  RouteBehavior `json:"behavior_before"`
+	BehaviorChanged bool          `json:"behavior_changed"`
 
 	// FidelityAfter Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 	FidelityAfter RouteFidelity `json:"fidelity_after"`
@@ -16837,7 +16739,6 @@ type RouteRevisionResponse struct {
 
 	// Certification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 	Certification RouteRevisionResponseCertification `json:"certification"`
-	ContentPolicy nullable.Nullable[ContentPolicy]   `json:"content_policy"`
 	Fallbacks     []RouteFallback                    `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
@@ -16850,7 +16751,7 @@ type RouteRevisionResponse struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 
@@ -18177,10 +18078,7 @@ type UpdateGuardrailRequest struct {
 	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
 	Name          string                         `json:"name"`
 	OnError       *UpdateGuardrailRequestOnError `json:"on_error,omitempty"`
-
-	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy    *ContentPolicy `json:"policy,omitempty"`
-	TimeoutMs *int64         `json:"timeout_ms,omitempty"`
+	TimeoutMs     *int64                         `json:"timeout_ms,omitempty"`
 }
 
 // UpdateGuardrailRequestOnError defines model for UpdateGuardrailRequest.OnError.
@@ -18318,8 +18216,7 @@ type UpdatePublishedRouteRequest struct {
 	Cache  nullable.Nullable[ResponseCachePolicy] `json:"cache,omitempty"`
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
-	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	CallerCostExempt *bool `json:"caller_cost_exempt,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
@@ -18333,7 +18230,7 @@ type UpdatePublishedRouteRequest struct {
 	Operations       []string               `json:"operations"`
 	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
-	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching, guardrails and content policies at plan and publication.
+	// Passthrough Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.
 	Passthrough nullable.Nullable[PassthroughConfig] `json:"passthrough,omitempty"`
 	PromptCache nullable.Nullable[PromptCachePolicy] `json:"prompt_cache,omitempty"`
 

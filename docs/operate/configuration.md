@@ -444,8 +444,7 @@ Network secrets have separately sealed provider references. See
 omitted profiles select Automatic kind-derived endpoints and transformed routes.
 
 Guardrail configuration uses typed definitions, ordered `guardrail_policies`,
-and additive `guardrail_attachments`. Version 1 imports are normalized explicitly;
-version 2 artifacts cannot mix `content_policy` with the new fields. See
+and additive `guardrail_attachments`. See
 [Guardrails](../use/guardrails.md) for lifecycles, portable references and examples.
 
 ### Response-cache intent

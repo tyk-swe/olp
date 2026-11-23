@@ -180,9 +180,8 @@ func (s *Server) prepare(ctx context.Context, x *Call, authorize func(*routing.R
 	return s.planNamed(ctx, x)
 }
 
-// planCanonical plans x.route for a canonical request and applies the route's
-// content policy to it. A selector that delegates moves the request on to its
-// route, which is planned in turn.
+// planCanonical plans x.route for a canonical request. A selector that
+// delegates moves the request on to its route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	if x.named().ToolExecution == "gateway" && x.Route.Fidelity.Strict() {
 		return fault.InvalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
@@ -249,17 +248,14 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 		}
 		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
-			session.semantic, session.decisions = err, prepared.policyDecisions
+			session.semantic = err
 			return nil, err
 		}
-		return prepared.candidate, nil
+		return prepared, nil
 	}
 	options.Preferences = x.legPreferences()
-	_, delegated, failure := session.selectPlan(ctx, options)
-	if failure != nil || delegated {
-		return failure
-	}
-	return s.enforceContentPolicy(x)
+	_, _, failure := session.selectPlan(ctx, options)
+	return failure
 }
 
 // WriteAdmissionOverload renders the surface's 503 rejection. The public

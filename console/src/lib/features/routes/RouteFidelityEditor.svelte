@@ -7,10 +7,6 @@
   const changed = $derived(
     !editor.isNew && saved !== undefined && mode !== saved
   );
-  const conflict = $derived(
-    mode === 'strict' &&
-      editor.policyRules.some((rule) => rule.action === 'redact')
-  );
   function change(value: string) {
     editor.fidelity = { mode: value as FidelityMode };
     editor.touch();
@@ -48,10 +44,6 @@
     </p>{:else}<p class="muted">
       Transformed routes may translate between dialects, redact content and use
       providers without a profile.
-    </p>{/if}
-  {#if conflict}<p class="inline-problem" role="alert">
-      This draft combines strict fidelity with redaction. Use blocking rules or
-      declare the route transformed before activation.
     </p>{/if}
 </section>
 

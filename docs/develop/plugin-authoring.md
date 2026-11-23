@@ -252,7 +252,7 @@ Hosting: plugin.Hosting{
 },
 ```
 
-OLP runs both around its built-in codecs, so codecs, content policy and usage
+OLP runs both around its built-in codecs, so codecs, guardrails and usage
 accounting see plain dialect bodies:
 
 1. OLP prepares the dialect's request, then applies the rewrites in order. The

@@ -183,7 +183,7 @@ func (r targetPreparation) discard(planning bool) targetPreparation {
 		guardrailDecisions: r.guardrailDecisions,
 		provider: preparedProvider{
 			admitted: r.provider.admitted, parameters: retainedParameters(r.provider.parameters, planning),
-			demand: r.provider.demand, receipt: r.provider.receipt, policyDecisions: r.provider.policyDecisions,
+			demand: r.provider.demand, receipt: r.provider.receipt,
 			guardrailSegments: r.provider.guardrailSegments, guardrailDecisions: r.provider.guardrailDecisions,
 		},
 		unary: unaryAdmission{
@@ -250,15 +250,6 @@ func (p *requestPreparation) activate(attempt routing.Attempt) {
 			p.targets[other] = record.discard(false)
 		}
 	}
-}
-
-func (p *requestPreparation) hasProviders() bool {
-	for _, record := range p.targets {
-		if record.provider.demand != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // requiresParameters is fixed by the policies of this route leg. Only those

@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -45,7 +44,6 @@ type Envelope struct {
 
 	EvaluatorGuardrailID string
 	GuardrailDecisions   []guardrails.Evidence
-	PolicyDecisions      []contentpolicy.Decision
 	UserID               string
 	Route                string
 	RouteRevisionID      string

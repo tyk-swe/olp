@@ -28,7 +28,6 @@ type revisionRow struct {
 	OverallTimeoutMS int
 	MaxAttempts      int
 	Targets          []routing.PublishedTarget
-	ContentPolicy    []byte
 	Fidelity         []byte
 	Behavior         []byte
 	SourceDraftID    string
@@ -37,12 +36,12 @@ type revisionRow struct {
 	Policy           *routing.Policy
 }
 
-const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity,v.behavior"
+const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity,v.behavior"
 
 func scanRevision(row pgx.Row) (*revisionRow, error) {
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
+	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -72,7 +71,7 @@ func loadRevision(ctx context.Context, q database.Queryer, routeID, ref string) 
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return behaviorJSON(map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy), "fidelity": json.RawMessage(v.Fidelity)}, v.Behavior)
+	return behaviorJSON(map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "fidelity": json.RawMessage(v.Fidelity)}, v.Behavior)
 }
 
 type routeRow struct {
@@ -115,7 +114,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	var r routeRow
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
+	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -319,8 +318,7 @@ func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply
 		"operations_added": opsAdded, "operations_removed": opsRemoved,
 		"targets_added": added, "targets_removed": removed, "targets_changed": changed,
 		"routing_policy_changed": !SamePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
-		"content_policy_changed": !bytes.Equal(bytes.TrimSpace(from.ContentPolicy), bytes.TrimSpace(to.ContentPolicy)),
-		"fidelity_changed":       !bytes.Equal(bytes.TrimSpace(from.Fidelity), bytes.TrimSpace(to.Fidelity)), "fidelity_before": json.RawMessage(from.Fidelity), "fidelity_after": json.RawMessage(to.Fidelity),
+		"fidelity_changed": !bytes.Equal(bytes.TrimSpace(from.Fidelity), bytes.TrimSpace(to.Fidelity)), "fidelity_before": json.RawMessage(from.Fidelity), "fidelity_after": json.RawMessage(to.Fidelity),
 		"behavior_changed": !sameBehavior(from.Behavior, to.Behavior), "behavior_before": behaviorJSON(map[string]any{}, from.Behavior), "behavior_after": behaviorJSON(map[string]any{}, to.Behavior),
 	}), nil
 }
@@ -359,7 +357,7 @@ func (s *Server) restoreRevision(r *http.Request, _ authz.Principal) (httpkit.Re
 		}
 		content := DraftContent{
 			Slug: v.Slug, Operations: v.Operations, OverallTimeoutMS: v.OverallTimeoutMS, MaxAttempts: v.MaxAttempts, Targets: targets,
-			ContentPolicy: v.ContentPolicy, Fidelity: v.Fidelity, Behavior: behavior,
+			Fidelity: v.Fidelity, Behavior: behavior,
 		}
 		if err = StageDraft(r.Context(), tx, NewDraft{ID: draftID, CreatedBy: p.UserID(), ProjectID: project, BasedOn: &v.ID}, etag, content); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

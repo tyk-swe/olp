@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -109,16 +108,15 @@ type Event struct {
 	Origin          Origin  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
-	GuardrailDecisions []guardrails.Evidence    `json:"guardrail_decisions,omitempty"`
-	PolicyDecisions    []contentpolicy.Decision `json:"policy_decisions,omitempty"`
-	BudgetGroupID      *string                  `json:"budget_group_id"`
-	ProviderID         *string                  `json:"provider_id"`
-	RouteSlug          string                   `json:"route_slug"`
-	UpstreamModel      *string                  `json:"upstream_model"`
-	Operation          string                   `json:"operation"`
-	Surface            string                   `json:"surface"`
-	RequestStartedAt   time.Time                `json:"request_started_at"`
-	RequestCompletedAt time.Time                `json:"request_completed_at"`
+	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
+	BudgetGroupID      *string               `json:"budget_group_id"`
+	ProviderID         *string               `json:"provider_id"`
+	RouteSlug          string                `json:"route_slug"`
+	UpstreamModel      *string               `json:"upstream_model"`
+	Operation          string                `json:"operation"`
+	Surface            string                `json:"surface"`
+	RequestStartedAt   time.Time             `json:"request_started_at"`
+	RequestCompletedAt time.Time             `json:"request_completed_at"`
 	// HTTPOutcomePending is used only by retained generation templates. Their
 	// financial evidence may settle before the original HTTP exchange ends.
 	// Snapshot timestamps remain valid, but persistence leaves its final HTTP

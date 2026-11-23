@@ -9,7 +9,6 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/export/capture"
@@ -97,7 +96,6 @@ type Call struct {
 	workflowRecovery      []guardrails.Segment
 	workflowRecoveryCalls []string
 	operationOverride     string
-	policyDecisions       []contentpolicy.Decision
 
 	captureContext context.Context
 	capture        *capture.Collector

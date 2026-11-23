@@ -8,12 +8,10 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
@@ -30,7 +28,6 @@ type preparedProvider struct {
 	demand             *routing.TokenDemand
 	plan               *interaction.Plan
 	receipt            *oif.Receipt
-	policyDecisions    []contentpolicy.Decision
 	guardrailSegments  []guardrails.Segment
 	guardrailDecisions []guardrails.Evidence
 }
@@ -140,9 +137,8 @@ func (x *Call) buildStrict(targetID, model string) (preparedProvider, error) {
 	if err != nil {
 		return preparedProvider{}, err
 	}
-	decisions, err := plan.CheckInput()
 	var input guardrailInput
-	if err == nil && x.guard.engine != nil {
+	if x.guard.engine != nil {
 		document := plan.EffectiveRequest().OIF().Document()
 		if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), document); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guard.engine.OnlyTypeSafe()) {
 			result, failure := x.guard.engine.Unavailable()
@@ -161,7 +157,7 @@ func (x *Call) buildStrict(targetID, model string) (preparedProvider, error) {
 	admitted, demand := x.preparedEstimate(model, effective)
 	return preparedProvider{
 		plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()},
-		parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: input.segments,
+		parameters: effective.parameters, guardrailSegments: input.segments,
 		guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
 	}, err
 }
@@ -174,48 +170,6 @@ func (x *Call) buildTransformed(provider *routing.Provider, model string) (prepa
 	native, err := wire.NewRequest(invocation.Wire, x.generation.parsed.Route, x.generation.parsed.Stream, invocation.Prepared.Document())
 	if err != nil {
 		return preparedProvider{}, err
-	}
-	var decisions []contentpolicy.Decision
-	compiled, policyErr := compiledPolicy(x.Route)
-	if policyErr != nil {
-		return preparedProvider{}, policyErr
-	}
-	if e := inputPolicyWireGate(x.Route, compiled, invocation.Wire); e != nil {
-		return preparedProvider{}, e
-	}
-	if compiled != nil {
-		for _, rule := range compiled.Input {
-			matched, blocked := false, false
-			next, err := protocols.InspectInputText(native, func(text string) (string, bool) {
-				if !rule.Re.MatchString(text) {
-					return text, false
-				}
-				matched = true
-				if rule.Action == contentpolicy.ActionBlock {
-					blocked = true
-					return text, true
-				}
-				return rule.Re.ReplaceAllLiteralString(text, rule.Replacement), false
-			})
-			if err != nil {
-				return preparedProvider{}, PolicyUnavailable("content_policy_surface_unavailable", "The request could not be safely inspected by the route's content policy.")
-			}
-			if blocked {
-				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-				return preparedProvider{policyDecisions: decisions}, fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
-			}
-			if matched {
-				native = next
-				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
-			}
-		}
-		if len(decisions) > 0 {
-			prepared, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), native.OIF().Document(), oif.ExplicitTransform, "declared effective invocation content policy")
-			if err != nil {
-				return preparedProvider{}, err
-			}
-			invocation.Prepared = prepared.WithProvenance(invocation.Prepared.Provenance()...)
-		}
 	}
 	input, err := x.preparedGuardrailInput(invocation.Wire, native.OIF().Document())
 	if err != nil {
@@ -235,13 +189,13 @@ func (x *Call) buildTransformed(provider *routing.Provider, model string) (prepa
 	effective := x.summarize(native)
 	admitted, demand := x.preparedEstimate(model, effective)
 	return preparedProvider{
-		invocation: invocation, parameters: effective.parameters, policyDecisions: decisions,
+		invocation: invocation, parameters: effective.parameters,
 		guardrailSegments: input.segments, guardrailDecisions: input.decisions, admitted: admitted, demand: demand,
 	}, nil
 }
 
 // preparedEstimate prices the request for a target that is sent a request of its
-// own, because a profile, a strict contract or a content policy rewrote it: the
+// own, because a profile, a strict contract or a guardrail rewrote it: the
 // larger of the caller's request and that one, each counted for the family of
 // the model it goes to. The reservation is the larger of the two; the input an
 // attempt records is the larger input with the less trustworthy provenance of
@@ -274,9 +228,9 @@ func (x *Call) preparedEstimate(model string, effective requestSummary) (admitte
 
 // automatic reports that a provider is sent the caller's request with its own
 // parameter defaults applied, and nothing a profile, a strict contract or a
-// content policy would rewrite.
+// guardrail would rewrite.
 func (x *Call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && x.family != wire.Completions && !x.Strict() && (x.Route == nil || x.Route.ContentPolicy == nil) && x.guard.engine == nil
+	return provider.ProfileID == "" && x.family != wire.Completions && !x.Strict() && x.guard.engine == nil
 }
 
 type encodedRequest struct {
@@ -292,36 +246,27 @@ type effectiveOutput struct {
 
 const keptEncodings = 4
 
-type candidatePreparation struct {
-	candidate       *routing.CandidatePreparation
-	policyDecisions []contentpolicy.Decision
-}
-
 type generationRequest struct {
 	document          oif.Document
 	wire              wire.Format
 	config            connectors.Config
 	plan              *interaction.Plan
-	policyDecisions   []contentpolicy.Decision
 	guardrailSegments []guardrails.Segment
 }
 
-func (x *Call) prepareCandidate(provider *routing.Provider, targetID, model string) (candidatePreparation, error) {
+func (x *Call) prepareCandidate(provider *routing.Provider, targetID, model string) (*routing.CandidatePreparation, error) {
 	if x.unary != nil {
 		prepared, err := x.unaryAdmission(provider, targetID, model)
-		return candidatePreparation{candidate: &routing.CandidatePreparation{Parameters: prepared.parameters}}, err
+		return &routing.CandidatePreparation{Parameters: prepared.parameters}, err
 	}
 	if x.automatic(provider) {
 		_, err := x.preparation().encoded(providerPreparationKey(provider, targetID, model), func() (encodedRequest, error) {
 			return x.buildEncoding(provider, model)
 		})
-		return candidatePreparation{}, err
+		return nil, err
 	}
 	prepared, err := x.preparedProvider(provider, targetID, model)
-	return candidatePreparation{
-		candidate:       &routing.CandidatePreparation{Parameters: prepared.parameters, Demand: prepared.demand},
-		policyDecisions: prepared.policyDecisions,
-	}, err
+	return &routing.CandidatePreparation{Parameters: prepared.parameters, Demand: prepared.demand}, err
 }
 
 func (x *Call) buildEncoding(provider *routing.Provider, model string) (encodedRequest, error) {
@@ -360,7 +305,7 @@ func (x *Call) generationRequest(provider *routing.Provider, targetID, model str
 	}
 	return generationRequest{
 		document: prepared.invocation.Prepared.Document(), wire: prepared.invocation.Wire,
-		config: config, plan: prepared.plan, policyDecisions: prepared.policyDecisions, guardrailSegments: prepared.guardrailSegments,
+		config: config, plan: prepared.plan, guardrailSegments: prepared.guardrailSegments,
 	}, nil
 }
 
@@ -434,15 +379,6 @@ func (x *Call) recordEstimate(fact *events.AttemptFact, a routing.Attempt) {
 	if admitted, err := x.attemptEstimate(&provider, a.TargetID, a.UpstreamModel); err == nil {
 		fact.EstimatedInputTokens, fact.EstimateProvenance = admitted.input, string(admitted.provenance)
 	}
-}
-
-// inputPolicyWireGate refuses a destination wire the input rules cannot
-// inspect, so an input policy never dispatches a body it has not seen.
-func inputPolicyWireGate(route *routing.Route, compiled *contentpolicy.Compiled, encodedWire wire.Format) *fault.Error {
-	if compiled == nil || len(compiled.Input) == 0 || protocols.InputInspectable(encodedWire) {
-		return nil
-	}
-	return PolicyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(encodedWire)+"` provider wire.")
 }
 
 // prepareTransformed applies key retention policy after translation and provider

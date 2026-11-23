@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
@@ -23,7 +22,6 @@ const maxBodyBytes = 64 << 20
 type Config struct {
 	Provider                                 connectors.Config
 	ProviderID, RevisionID, Model, Operation string
-	Policy                                   *contentpolicy.Policy
 	AllowProviderFetchedDocuments            bool
 }
 type Context struct {
@@ -37,7 +35,6 @@ type Template struct {
 	codec    operations.Dialect
 	defaults map[string]json.RawMessage
 	origins  []connectors.DefaultProvenance
-	policy   *contentpolicy.Compiled
 	serving  oif.ServingIdentity
 	inputs   map[string]bool
 }
@@ -60,7 +57,6 @@ type Result struct {
 	View      oif.View
 	Body      []byte
 	Usage     *operations.Usage
-	Decisions []contentpolicy.Decision
 }
 
 func fail(code, field, requirement, message string) error {
@@ -68,7 +64,6 @@ func fail(code, field, requirement, message string) error {
 }
 func Compile(config Config) (*Template, error) {
 	config.Provider = config.Provider.Clone()
-	config.Policy = config.Policy.Clone()
 	p, err := config.Provider.Profile()
 	if err != nil || config.Provider.ValidateProfile() != nil {
 		return nil, fail("target_capability", "/profile", "explicit_profile", "A registered versioned operation profile is required.")
@@ -84,20 +79,6 @@ func Compile(config Config) (*Template, error) {
 	if err != nil {
 		return nil, fail("target_capability", "/defaults", "native_defaults", "The operation defaults are invalid.")
 	}
-	if contentpolicy.Validate(config.Policy) != nil {
-		return nil, fail("policy_conflict", "/content_policy", "valid_policy", "The content policy is invalid.")
-	}
-	if config.Policy != nil {
-		for _, rule := range config.Policy.Rules {
-			if rule.Action != contentpolicy.ActionBlock {
-				return nil, fail("policy_conflict", "/content_policy", "semantic_preservation", "Strict operation plans require non-mutating content policies.")
-			}
-		}
-	}
-	policy, err := contentpolicy.Compile(config.Policy)
-	if err != nil {
-		return nil, err
-	}
 	serving := config.Provider.ServingIdentity(config.ProviderID, config.RevisionID, config.Model)
 	var schema struct {
 		Required []string `json:"required"`
@@ -107,7 +88,7 @@ func Compile(config Config) (*Template, error) {
 	for _, name := range schema.Required {
 		inputs[name] = true
 	}
-	return &Template{config: config, profile: p, codec: codec, defaults: defaults, origins: origins, policy: policy, serving: serving, inputs: inputs}, nil
+	return &Template{config: config, profile: p, codec: codec, defaults: defaults, origins: origins, serving: serving, inputs: inputs}, nil
 }
 func Parse(dialect string, body []byte, maxBytes int) (oif.Request, error) {
 	d, ok := operationregistry.Lookup(dialect)
@@ -399,10 +380,6 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 	if p.template.codec.Usage != nil {
 		usage = p.template.codec.Usage(view)
 	}
-	decisions, err := p.checkOutput(p.template.codec, envelope)
-	if err != nil {
-		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
-	}
 	output := doc
 	if p.mapping != nil {
 		output, err = p.mapping.Project(p.source, envelope, view, p.route)
@@ -414,16 +391,8 @@ func (p *Plan) Decode(body []byte) (Result, error) {
 		}
 	}
 	if err != nil {
-		return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, err
+		return Result{Envelope: envelope, View: view, Usage: usage}, err
 	}
 	projected, _ := oif.NewResult(p.source.Descriptor(), output, oif.Complete)
-	if p.mapping != nil {
-		codec, _ := operationregistry.Lookup(p.source.Descriptor().Dialect.ID)
-		more, checkErr := p.checkOutput(codec, projected)
-		decisions = append(decisions, more...)
-		if checkErr != nil {
-			return Result{Envelope: envelope, View: view, Usage: usage, Decisions: decisions}, checkErr
-		}
-	}
-	return Result{Envelope: envelope, projected: projected, View: view, Body: output.Bytes(), Usage: usage, Decisions: decisions}, nil
+	return Result{Envelope: envelope, projected: projected, View: view, Body: output.Bytes(), Usage: usage}, nil
 }

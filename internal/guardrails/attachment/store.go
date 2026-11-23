@@ -81,22 +81,8 @@ func requirePolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, t target) 
 		return err
 	}
 	ownedBy := func(id *string) bool { return project != nil && id != nil && *project == *id }
-	switch {
-	case t.Scope == guardrails.ProjectScope && !ownedBy(&t.ScopeID), t.owned() && !ownedBy(t.owner):
+	if t.Scope == guardrails.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
 		return httpkit.Invalid("scope_id", "The policy must belong to this project.")
-	case t.Scope == guardrails.RouteScope && t.Order == 0:
-		return refuseMigratedPosition(ctx, tx, t.ScopeID)
-	}
-	return nil
-}
-
-func refuseMigratedPosition(ctx context.Context, tx pgx.Tx, route string) error {
-	var migrated bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_policies p JOIN olp.routes r ON r.latest_revision_id=p.managed_route_revision_id WHERE r.id=$1)", route).Scan(&migrated); err != nil {
-		return err
-	}
-	if migrated {
-		return httpkit.Invalid("order", "Position zero preserves this route's migrated content policy; choose a later position.")
 	}
 	return nil
 }

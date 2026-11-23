@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -42,46 +41,45 @@ type RequestSummary struct {
 	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
 	ContainerSessions  map[string]int64 `json:"container_sessions"`
 
-	CacheResult             *string                  `json:"cache_result"`
-	EvaluatorGuardrailID    *string                  `json:"evaluator_guardrail_id,omitempty"`
-	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
-	ID                      string                   `json:"id"`
-	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
-	APIKeyID                *string                  `json:"api_key_id"`
-	Origin                  string                   `json:"origin"`
-	ParentRequestID         *string                  `json:"parent_request_id"`
-	Route                   string                   `json:"route"`
-	Operation               string                   `json:"operation"`
-	Surface                 string                   `json:"surface"`
-	StartedAt               time.Time                `json:"started_at"`
-	CompletedAt             *time.Time               `json:"completed_at"`
-	StatusCode              *int32                   `json:"status_code"`
-	ErrorClass              *string                  `json:"error_class"`
-	TotalLatencyMS          *int64                   `json:"total_latency_ms"`
-	FirstByteMS             *int64                   `json:"first_byte_ms"`
-	AttemptCount            int32                    `json:"attempt_count"`
-	InputTokens             *int64                   `json:"input_tokens"`
-	OutputTokens            *int64                   `json:"output_tokens"`
-	CachedInputTokens       *int64                   `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        *int64                   `json:"audio_input_tokens"`
-	CachedAudioInputTokens  *int64                   `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       *int64                   `json:"audio_output_tokens"`
-	ImageInputTokens        *int64                   `json:"image_input_tokens"`
-	CachedImageInputTokens  *int64                   `json:"cached_image_input_tokens"`
-	ImageOutputTokens       *int64                   `json:"image_output_tokens"`
-	EstimatedCost           *string                  `json:"estimated_cost"`
-	Charge                  *string                  `json:"charge"`
-	Currency                *string                  `json:"currency"`
-	Unpriced                *bool                    `json:"unpriced"`
-	UsageComplete           *bool                    `json:"usage_complete"`
-	EndUserDigest           string                   `json:"end_user_digest"`
-	Attribution             map[string]string        `json:"attribution"`
-	GuardrailDecisions      []guardrails.Evidence    `json:"guardrail_decisions"`
-	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
-	PayloadCaptured         bool                     `json:"payload_captured"`
+	CacheResult             *string               `json:"cache_result"`
+	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id,omitempty"`
+	BudgetBoundary          string                `json:"budget_boundary,omitempty"`
+	ID                      string                `json:"id"`
+	RuntimeGenerationID     string                `json:"runtime_generation_id"`
+	APIKeyID                *string               `json:"api_key_id"`
+	Origin                  string                `json:"origin"`
+	ParentRequestID         *string               `json:"parent_request_id"`
+	Route                   string                `json:"route"`
+	Operation               string                `json:"operation"`
+	Surface                 string                `json:"surface"`
+	StartedAt               time.Time             `json:"started_at"`
+	CompletedAt             *time.Time            `json:"completed_at"`
+	StatusCode              *int32                `json:"status_code"`
+	ErrorClass              *string               `json:"error_class"`
+	TotalLatencyMS          *int64                `json:"total_latency_ms"`
+	FirstByteMS             *int64                `json:"first_byte_ms"`
+	AttemptCount            int32                 `json:"attempt_count"`
+	InputTokens             *int64                `json:"input_tokens"`
+	OutputTokens            *int64                `json:"output_tokens"`
+	CachedInputTokens       *int64                `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                `json:"image_output_tokens"`
+	EstimatedCost           *string               `json:"estimated_cost"`
+	Charge                  *string               `json:"charge"`
+	Currency                *string               `json:"currency"`
+	Unpriced                *bool                 `json:"unpriced"`
+	UsageComplete           *bool                 `json:"usage_complete"`
+	EndUserDigest           string                `json:"end_user_digest"`
+	Attribution             map[string]string     `json:"attribution"`
+	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions"`
+	PayloadCaptured         bool                  `json:"payload_captured"`
 }
 
 // AttemptDetail is one provider attempt of a request, with the routing
@@ -159,7 +157,7 @@ const requestProjection = `r.id::text, r.runtime_generation_id::text, r.api_key_
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
         u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
         u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
-        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.guardrail_decisions, r.end_user_digest,
+        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.guardrail_decisions, r.end_user_digest,
         r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text,r.cache_result,u.training_tokens,u.storage_byte_seconds,u.cache_token_seconds,u.container_sessions
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.training_tokens)::bigint AS training_tokens,SUM(f.storage_byte_seconds)::text AS storage_byte_seconds,SUM(f.cache_token_seconds)::text AS cache_token_seconds,
@@ -192,7 +190,7 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
 		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
 		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
-		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.GuardrailDecisions, &s.EndUserDigest,
+		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.GuardrailDecisions, &s.EndUserDigest,
 		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID, &s.CacheResult, &s.TrainingTokens, &s.StorageByteSeconds, &s.CacheTokenSeconds, &s.ContainerSessions}
 }
 

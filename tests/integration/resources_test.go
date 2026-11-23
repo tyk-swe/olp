@@ -555,8 +555,8 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 		VALUES ($1,$2,$3,1,$4,$5,$6)`, routeID, slug, fixture.ownerID, revisionID, uuid.NewString(), fixture.projectID); err != nil {
 		g.t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior)
-		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,$8,'{}')`,
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity,behavior)
+		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',$8,'{}')`,
 		revisionID, routeID, slug, encoded(g.t, g.plan.operations), targets, uuid.NewString(), fixture.ownerID,
 		encoded(g.t, routing.RouteFidelity{Mode: cmp.Or(g.plan.fidelity, routing.FidelityTransformed)})); err != nil {
 		g.t.Fatal(err)

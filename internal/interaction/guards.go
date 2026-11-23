@@ -27,11 +27,6 @@ func (p *Plan) ValidateResult(result oif.Result) error {
 			return err
 		}
 	}
-	if p.template.policy.HasOutput() {
-		if err := outputPolicyCoverage(p.Wire(), document); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 func validateAnthropicTextResult(document oif.Document) error {
@@ -171,117 +166,6 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 	case wire.Gemini:
 		if candidates, present := root.Lookup("candidates"); present && candidates.Kind() != oif.Array {
 			return guardFailure("/events/candidates", "candidate_grammar")
-		}
-	}
-	return nil
-}
-
-// CheckLegacyOutputCoverage preserves the native coverage requirement when a
-// route's legacy output policy is executed by the guardrail engine.
-func CheckLegacyOutputCoverage(encodedWire wire.Format, document oif.Document) error {
-	return outputPolicyCoverage(encodedWire, document)
-}
-
-func outputPolicyCoverage(encodedWire wire.Format, document oif.Document) error {
-	fail := func() error {
-		return incompatible("policy_conflict", "/result", "output_policy_coverage", "The output policy cannot inspect native opaque or nontext result content.")
-	}
-	root := document.Root()
-	var contents []oif.Value
-	switch encodedWire {
-	case wire.Completions:
-		if !onlyMembers(root, "id object created model choices usage system_fingerprint service_tier") {
-			return fail()
-		}
-		for _, choice := range member(root, "choices").Elements() {
-			if !onlyMembers(choice, "index text finish_reason logprobs") || !emptyOptional(member(choice, "logprobs")) {
-				return fail()
-			}
-			contents = append(contents, member(choice, "text"))
-		}
-	case wire.Chat:
-		if !onlyMembers(root, "id object created model choices usage system_fingerprint service_tier") {
-			return fail()
-		}
-		for _, choice := range member(root, "choices").Elements() {
-			if !onlyMembers(choice, "index message finish_reason logprobs") || !emptyOptional(member(choice, "logprobs")) {
-				return fail()
-			}
-			message := member(choice, "message")
-			if !onlyMembers(message, "role content refusal annotations") || !emptyOptional(member(message, "annotations")) {
-				return fail()
-			}
-			contents = append(contents, member(message, "content"), member(message, "refusal"))
-		}
-	case wire.Responses:
-		if !onlyMembers(root, "id object created_at status background error incomplete_details instructions max_output_tokens max_tool_calls model output parallel_tool_calls previous_response_id prompt_cache_key reasoning safety_identifier service_tier store temperature text tool_choice tools top_logprobs top_p truncation usage user metadata conversation") {
-			return fail()
-		}
-		for _, item := range member(root, "output").Elements() {
-			if !onlyMembers(item, "id type status role content") || valueText(member(item, "type")) != "message" {
-				return fail()
-			}
-			contents = append(contents, member(item, "content"))
-		}
-	case wire.Anthropic:
-		if !onlyMembers(root, "id type role model content stop_reason stop_sequence usage") {
-			return fail()
-		}
-		contents = append(contents, member(root, "content"))
-	case wire.Gemini:
-		if !onlyMembers(root, "candidates usageMetadata modelVersion responseId promptFeedback") {
-			return fail()
-		}
-		if feedback, present := root.Lookup("promptFeedback"); present && !onlyMembers(feedback, "blockReason safetyRatings") {
-			return fail()
-		}
-		for _, candidate := range member(root, "candidates").Elements() {
-			if !onlyMembers(candidate, "index content finishReason safetyRatings avgLogprobs tokenCount") {
-				return fail()
-			}
-			content := member(candidate, "content")
-			if !onlyMembers(content, "role parts") {
-				return fail()
-			}
-			for _, part := range member(content, "parts").Elements() {
-				if !onlyMembers(part, "text") {
-					return fail()
-				}
-				contents = append(contents, member(part, "text"))
-			}
-		}
-	default:
-		return fail()
-	}
-	for _, content := range contents {
-		if content.Kind() == oif.Null || content.Kind() == oif.Absent || content.Kind() == oif.String {
-			continue
-		}
-		if content.Kind() != oif.Array {
-			return fail()
-		}
-		for _, part := range content.Elements() {
-			if !onlyMembers(part, "type text refusal annotations logprobs") || !emptyOptional(member(part, "annotations")) || !emptyOptional(member(part, "logprobs")) || !slices.Contains([]string{"text", "output_text", "refusal"}, valueText(member(part, "type"))) {
-				return fail()
-			}
-		}
-	}
-	return nil
-}
-
-func emptyOptional(value oif.Value) bool {
-	return value.Kind() == oif.Absent || value.Kind() == oif.Null || value.Kind() == oif.Array && len(value.Elements()) == 0
-}
-
-func outputRequestCoverage(encodedWire wire.Format, document oif.Document) error {
-	for _, path := range []string{"/tools", "/toolConfig", "/reasoning", "/reasoning_effort", "/thinking", "/generationConfig/thinkingConfig"} {
-		if value, present := document.Lookup(path); present && !emptyOptional(value) {
-			return incompatible("policy_conflict", path, "output_policy_coverage", "The requested native output or tool state has no complete inspection contract for this output policy.")
-		}
-	}
-	for _, path := range []string{"/logprobs", "/top_logprobs", "/generationConfig/responseLogprobs", "/generationConfig/logprobs"} {
-		if value, present := document.Lookup(path); present && value.Kind() != oif.Null && (encodedWire == wire.Completions && path == "/logprobs" || value.Raw() != "false" && value.Raw() != "0") {
-			return incompatible("policy_conflict", path, "output_policy_coverage", "Native token alternatives are outside this output policy's inspection contract.")
 		}
 	}
 	return nil

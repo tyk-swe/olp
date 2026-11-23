@@ -234,8 +234,6 @@ func (r Route) ValidatePassthrough() error {
 		return conflict("A pass-through route cannot mirror traffic to a shadow target.")
 	case r.Fidelity.Mode == FidelityTransformed:
 		return conflict("A pass-through route is neither strict nor transformed and cannot declare translation.")
-	case r.ContentPolicy != nil && len(r.ContentPolicy.Rules) > 0:
-		return conflict("A pass-through route cannot carry guardrails or a content policy.")
 	case r.Cache != nil || r.PromptCache != nil:
 		return conflict("A pass-through route cannot use response caching.")
 	case len(r.Fallbacks) > 0:

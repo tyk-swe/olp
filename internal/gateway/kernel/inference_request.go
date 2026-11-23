@@ -437,11 +437,7 @@ func (q inferenceRequest) project(authority keyauthority.Authority, body []byte)
 	if e != nil {
 		return stored, e
 	}
-	enforced, e := q.server.enforceContentOutput(q.x, referenced)
-	if e != nil {
-		return referenced, e
-	}
-	return enforced, nil
+	return referenced, nil
 }
 
 func (q inferenceRequest) stored(authority keyauthority.Authority, body []byte) ([]byte, *fault.Error) {

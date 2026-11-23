@@ -39,7 +39,6 @@ type revision struct {
 	ID            string          `json:"id"`
 	GuardrailID   string          `json:"guardrail_id"`
 	Revision      int64           `json:"revision"`
-	Policy        json.RawMessage `json:"policy"`
 	CreatedAt     time.Time       `json:"created_at"`
 	Configuration json.RawMessage `json:"configuration"`
 	TimeoutMS     int64           `json:"timeout_ms"`
@@ -98,7 +97,7 @@ func (a *API) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error
 		return httpkit.Reply{}, err
 	}
 	value := revision{ID: revisionID, GuardrailID: id}
-	if err = a.server.Pool.QueryRow(r.Context(), "SELECT revision,policy,created_at,configuration,timeout_ms,on_error FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&value.Revision, &value.Policy, &value.CreatedAt, &value.Configuration, &value.TimeoutMS, &value.OnError); err != nil {
+	if err = a.server.Pool.QueryRow(r.Context(), "SELECT revision,created_at,configuration,timeout_ms,on_error FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&value.Revision, &value.CreatedAt, &value.Configuration, &value.TimeoutMS, &value.OnError); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(value, revisionID), nil

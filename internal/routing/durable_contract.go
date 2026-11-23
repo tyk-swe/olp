@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -14,7 +13,6 @@ import (
 type durableContractConfig struct {
 	Provider                      connectors.Config
 	ProviderID, RevisionID, Model string
-	Policy                        *contentpolicy.Policy
 }
 
 type DurableTemplate struct {
@@ -30,7 +28,6 @@ func durableRefusal(field, requirement, message string) error {
 
 func compileDurableContract(c durableContractConfig) (*DurableTemplate, error) {
 	c.Provider = c.Provider.Clone()
-	c.Policy = c.Policy.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, durableRefusal("/profile", "explicit_profile", "Strict batch requires a registered provider profile.")
@@ -44,9 +41,6 @@ func compileDurableContract(c durableContractConfig) (*DurableTemplate, error) {
 	defaults, _, err := c.Provider.DefaultsFor("batch", c.Model)
 	if err != nil || len(defaults) != 0 {
 		return nil, durableRefusal("/defaults", "native_defaults", "Strict batch has no qualified omission defaults.")
-	}
-	if contentpolicy.Validate(c.Policy) != nil || c.Policy != nil && len(c.Policy.Rules) != 0 {
-		return nil, operations.Error("policy_conflict", "/content_policy", "inspectable_batch", "Strict batch cannot inspect each queued item for this content policy.")
 	}
 	serving := c.Provider.ServingIdentity(c.ProviderID, c.RevisionID, c.Model)
 	return &DurableTemplate{provider: c.Provider, profile: p, model: c.Provider.Model(c.Model), serving: serving}, nil

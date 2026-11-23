@@ -329,7 +329,7 @@ func (s *Server) settlementTemplate(x *Call, p *Pin, surface, lineOperation stri
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(),
-		PolicyDecisions: x.policyDecisions, Route: x.Route.Slug, RouteRevisionID: x.Route.RevisionID,
+		Route: x.Route.Slug, RouteRevisionID: x.Route.RevisionID,
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt: now, CompletedAt: now, Attempts: []events.AttemptFact{fact},
 	})

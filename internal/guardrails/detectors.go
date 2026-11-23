@@ -16,8 +16,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 )
+
+const (
+	maxPatternRules      = 64
+	maxPatternBytes      = 512
+	maxTotalPatternBytes = 16 << 10
+	maxReplacementChars  = 128
+	defaultReplacement   = "[REDACTED]"
+)
+
+var patternID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 
 type Pattern struct {
 	ID          string  `json:"id"`
@@ -59,7 +68,7 @@ func compileRegex(raw json.RawMessage) (*patternDetector, error) {
 	if err := decodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if len(config.Rules) > contentpolicy.MaxRules {
+	if len(config.Rules) > maxPatternRules {
 		return nil, errors.New("too many regex rules")
 	}
 	return compilePatterns(config.Rules, "regex", "")
@@ -144,12 +153,12 @@ func compilePatterns(rules []Pattern, category, replacement string) (*patternDet
 	p := &patternDetector{}
 	total := 0
 	seen := map[string]bool{}
-	if len(rules) > contentpolicy.MaxRules {
+	if len(rules) > maxPatternRules {
 		return nil, errors.New("too many entity patterns")
 	}
 	for _, r := range rules {
 		total += len(r.Pattern)
-		if !contentpolicy.ValidRuleID(r.ID) || seen[r.ID] || len(r.Pattern) < 1 || len(r.Pattern) > contentpolicy.MaxPatternBytes || total > contentpolicy.MaxTotalPatternBytes || (r.Replacement != nil && (!utf8.ValidString(*r.Replacement) || utf8.RuneCountInString(*r.Replacement) > contentpolicy.MaxReplacementChars)) {
+		if !patternID.MatchString(r.ID) || seen[r.ID] || len(r.Pattern) < 1 || len(r.Pattern) > maxPatternBytes || total > maxTotalPatternBytes || (r.Replacement != nil && (!utf8.ValidString(*r.Replacement) || utf8.RuneCountInString(*r.Replacement) > maxReplacementChars)) {
 			return nil, errors.New("invalid bounded entity pattern")
 		}
 		seen[r.ID] = true
@@ -159,7 +168,7 @@ func compilePatterns(rules []Pattern, category, replacement string) (*patternDet
 		}
 		value := replacement
 		if value == "" {
-			value = contentpolicy.DefaultReplacement
+			value = defaultReplacement
 		}
 		if r.Replacement != nil {
 			value = *r.Replacement

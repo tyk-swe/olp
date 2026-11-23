@@ -65,7 +65,7 @@ func (s *Server) pendingGenerationUsage(x *Call, fact *events.AttemptFact, metad
 	ev, err := events.UsageEvent(events.Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
-		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(), Route: x.named().Slug,
 		Operation: x.family.Operation(), Surface: x.family.Surface(),
 		RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt:           x.request.startedAt, CompletedAt: now,

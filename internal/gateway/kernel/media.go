@@ -284,7 +284,7 @@ func (x *Call) encodeMedia(snapshot *routing.View, provider routing.Provider, ta
 	if !ok {
 		return encodedMedia{}, errors.New("compiled strict media contract unavailable")
 	}
-	input, err := media.ContractInput(x.media, call, effective, nil)
+	input, err := media.ContractInput(x.media, call, effective)
 	if err != nil {
 		return encodedMedia{}, err
 	}
