@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
@@ -29,9 +28,10 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/delivery"
@@ -53,8 +53,8 @@ type foundation struct {
 	public *http.ServeMux
 	// The inference pool is shared with the gateway so middleware and direct
 	// handler calls bound one capacity.
-	inferencePool  *admission.Pool
-	managementPool *admission.Pool
+	inferencePool  *concurrency.Pool
+	managementPool *concurrency.Pool
 	health         *observability.Cache
 	loss           *completeness.LossCounters
 	mediaGaps      *atomic.Uint64

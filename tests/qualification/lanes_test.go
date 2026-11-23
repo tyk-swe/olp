@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/tests/harness"
 

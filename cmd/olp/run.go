@@ -14,12 +14,12 @@ import (
 	"github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/surface"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -95,8 +95,8 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	defer closing(media.closer)
 	base := foundation{
 		config: c, log: log, stores: stores, core: core, media: media, public: public,
-		inferencePool:  admission.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout),
-		managementPool: admission.NewPool(c.MaxInFlightManagement),
+		inferencePool:  concurrency.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout),
+		managementPool: concurrency.NewPool(c.MaxInFlightManagement),
 		health:         observability.NewCache(), loss: &completeness.LossCounters{}, mediaGaps: &mediaGaps,
 	}
 	serving, err := newServing(base)

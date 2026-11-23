@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 )
 
 func (s *Server) projectAttributionPolicy(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

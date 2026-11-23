@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 

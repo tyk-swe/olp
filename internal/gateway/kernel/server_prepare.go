@@ -9,7 +9,6 @@ import (
 	"time"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/priority"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -20,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -357,11 +357,11 @@ func normalizedInlineMedia(value protocols.InlineMediaLimits) protocols.InlineMe
 	return protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
 }
 
-func inferencePool(cfg Config) *admission.Pool {
+func inferencePool(cfg Config) *concurrency.Pool {
 	if cfg.AdmissionPool != nil {
 		return cfg.AdmissionPool
 	}
-	return admission.NewPool(max(cfg.MaxInFlight, 1))
+	return concurrency.NewPool(max(cfg.MaxInFlight, 1))
 }
 
 func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *connectors.Auth) *codeforward.Forwarder {

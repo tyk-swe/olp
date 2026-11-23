@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"

@@ -6,7 +6,7 @@ import (
 	"math"
 
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )

@@ -5,7 +5,7 @@ VERSION = $(shell node -p "require('./package.json').version")
 LDFLAGS = -X main.Version=$(VERSION)
 
 AIR_VERSION := v1.67.4
-SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
+SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/plugins/pluginindex/index.json
 GOFMT_PATHS = \
 	cmd guardrails inference internal management plugin \
 	tests/e2e tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/harness tests/integration tests/qualification

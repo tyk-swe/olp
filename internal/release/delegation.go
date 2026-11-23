@@ -12,7 +12,7 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -321,7 +321,7 @@ func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID
 }
 
 func (m *Manager) delegationPair(project, key, agent string, member *string) (string, string) {
-	pair := attribution.DelegationPair(m.auth, project, key, agent, member)
+	pair := secrets.DelegationPair(m.auth, project, key, agent, member)
 	if member != nil {
 		return pair, *member
 	}

@@ -17,8 +17,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
@@ -26,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/realtimeresponses"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -48,7 +48,7 @@ type webrtcSession struct {
 	cancel    context.CancelFunc
 	started   time.Time
 	rejected  bool
-	admission *admission.Permit
+	admission *concurrency.Permit
 
 	settleOnce sync.Once
 	usageMu    sync.Mutex
@@ -263,7 +263,7 @@ func (t callTurn) refuse(e *fault.Error) { t.kernel.Refuse(t.x, t.w, e) }
 
 func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	x := s.kernel.SessionCall(w, r, wire.Realtime, "webrtc")
-	permit := admission.PermitFromContext(r.Context())
+	permit := concurrency.PermitFromContext(r.Context())
 	if permit == nil {
 		permit = s.kernel.Gate.Pool().AcquirePermit()
 	}
@@ -338,7 +338,7 @@ func (s surface) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 	t.launchCall(bg, cancel, sess, callReq, boundSession, controller)
 }
 
-func (s surface) admitCallCaller(x *kernel.Call, r *http.Request, permit *admission.Permit) (keyauthority.Authority, string, *fault.Error) {
+func (s surface) admitCallCaller(x *kernel.Call, r *http.Request, permit *concurrency.Permit) (keyauthority.Authority, string, *fault.Error) {
 	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions.")
 	}
@@ -354,7 +354,7 @@ func (s surface) admitCallCaller(x *kernel.Call, r *http.Request, permit *admiss
 	if e := x.RoutingControls(r, authority); e != nil {
 		return keyauthority.Authority{}, "", e
 	}
-	if !permit.Await(r.Context(), admission.ClassOf(x.Priority()), time.Time{}) {
+	if !permit.Await(r.Context(), concurrency.ClassOf(x.Priority()), time.Time{}) {
 		return keyauthority.Authority{}, "", fault.Overloaded
 	}
 	if e := x.NoteAttributionValues(r.Header.Values(attribution.Header), authority); e != nil {

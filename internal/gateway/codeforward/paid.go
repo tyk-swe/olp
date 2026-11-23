@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
-	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"

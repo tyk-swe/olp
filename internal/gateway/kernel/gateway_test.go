@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
@@ -33,7 +33,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -42,6 +41,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -1167,9 +1167,9 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 		{"normal", "normal", "", "normal"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			pool := admission.NewPool(1).Queue(2, 2*time.Second)
-			management := admission.NewPool(1)
-			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			pool := concurrency.NewPool(1).Queue(2, 2*time.Second)
+			management := concurrency.NewPool(1)
+			outer := &concurrency.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
 			h := newHarnessWrapped(t, Config{}, outer.Wrap)
 			critical := "critical"
 			authority := h.rt.keys[fullKey]
@@ -1177,7 +1177,7 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 			authority.Policy.Priority = &test.defaultPriority
 			h.rt.keys[fullKey] = authority
 			registry := prometheus.NewRegistry()
-			registry.MustRegister(admission.Metrics(pool, management))
+			registry.MustRegister(concurrency.Metrics(pool, management))
 			depth := func() map[string]float64 {
 				families, e := registry.Gather()
 				if e != nil {

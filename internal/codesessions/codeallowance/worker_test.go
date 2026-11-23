@@ -3,14 +3,15 @@ package codeallowance
 import (
 	"context"
 	"errors"
-	"github.com/tyk-swe/olp/internal/platform/workerhealth"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeplans"

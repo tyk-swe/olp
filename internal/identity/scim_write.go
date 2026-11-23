@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
 func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {

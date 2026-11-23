@@ -15,9 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
-	"github.com/tyk-swe/olp/internal/samlidentity"
 )
 
 const samlFlowTTL = 5 * time.Minute

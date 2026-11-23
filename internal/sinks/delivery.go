@@ -16,7 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/evidence"
+	"github.com/tyk-swe/olp/internal/export/eligibility"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -231,7 +231,7 @@ func (w *Worker) send(ctx context.Context, d *delivery) string {
 		egress.SignBody(req.Header, secret, body)
 		clear(secret)
 	}
-	admitted, err := evidence.Admit(bounded, w.Pool, d.stream, d.sourceID, d.projectID, d.creatorID)
+	admitted, err := eligibility.Admit(bounded, w.Pool, d.stream, d.sourceID, d.projectID, d.creatorID)
 	if err != nil {
 		return "evidence_unavailable"
 	}

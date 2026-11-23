@@ -1,4 +1,4 @@
-package evidence
+package eligibility
 
 import (
 	"context"

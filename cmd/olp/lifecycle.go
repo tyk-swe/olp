@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
@@ -217,7 +217,7 @@ func (r *running) startWorkers() {
 
 func (r *running) listen(startup context.Context) error {
 	c := r.config
-	live := []prometheus.Collector{runtimeMetrics(r.core.rt), admission.Metrics(r.inferencePool, r.managementPool), r.traces.Metrics(), r.core.business}
+	live := []prometheus.Collector{runtimeMetrics(r.core.rt), concurrency.Metrics(r.inferencePool, r.managementPool), r.traces.Metrics(), r.core.business}
 	private, err := observability.NewHandler(r.health, live...)
 	if err != nil {
 		return err
@@ -239,7 +239,7 @@ func (r *running) publicListener() []listenerConfig {
 	if !c.Mode.Public() {
 		return nil
 	}
-	pools := &admission.Public{
+	pools := &concurrency.Public{
 		Inference:        r.inferencePool,
 		Management:       r.managementPool,
 		InferenceEnabled: c.Mode.Inference(),

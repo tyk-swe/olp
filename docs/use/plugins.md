@@ -76,7 +76,7 @@ never widens; a new digest of the same plugin needs its own approval.
 ## Reviewed plugin index
 
 Every release ships a signed index of reviewed plugins,
-[`internal/pluginindex/index.json`](../../internal/pluginindex/index.json), which
+[`internal/plugins/pluginindex/index.json`](../../internal/plugins/pluginindex/index.json), which
 the binary verifies at start-up exactly as it verifies the
 [reference catalog](../develop/catalog.md#canonical-form-and-signature). For each plugin it
 lists the source repository and directory, and for each reviewed release the

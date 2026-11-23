@@ -38,7 +38,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/retainedworker"
+	"github.com/tyk-swe/olp/internal/resources/retainedworker"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
 

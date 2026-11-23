@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 type Operation string
