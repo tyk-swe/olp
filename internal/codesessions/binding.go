@@ -49,7 +49,7 @@ func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Bin
 		b.AccountID = parent.AccountID
 		b.Principal = parent.Principal
 	} else {
-		selection, err := codeAccount(ctx, tx, in, "", "", nil, in.Route.AllowanceOrdering)
+		selection, err := codeAccount(ctx, tx, in, "", "", nil)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
 				type hintResult struct {
@@ -59,7 +59,7 @@ func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Bin
 				hints := slices.Collect(func(yield func(hintResult) bool) {
 					for _, model := range in.Route.Models {
 						hinted := in.withOperation(codemode.Operation{Name: "connect_model", Model: model, Identity: in.Operation.Identity})
-						candidate, hintErr := codeAccount(ctx, tx, hinted, "", "", nil, in.Route.AllowanceOrdering)
+						candidate, hintErr := codeAccount(ctx, tx, hinted, "", "", nil)
 						if !yield(hintResult{selection: candidate, err: hintErr}) || hintErr == nil {
 							return
 						}
@@ -154,9 +154,9 @@ func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]str
 // else to another account the tree uses, else to the first available account
 // of an adapter the tree does not use yet. Nothing fails over: a tree account
 // that cools refuses a new model it serves as it refuses its pinned ones.
-func codePin(ctx context.Context, tx pgx.Tx, in Admission, b codemode.Binding, pins []codemode.Pin, bandOrdered bool) (codemode.Pin, codeSelection, error) {
+func codePin(ctx context.Context, tx pgx.Tx, in Admission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codeSelection, error) {
 	tree, principals := codeTree(b, pins)
-	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree, bandOrdered)
+	selection, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
 	if err != nil {
 		return codemode.Pin{}, selection, err
 	}

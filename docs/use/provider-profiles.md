@@ -291,10 +291,8 @@ configuration round trips; HTTP/HTTPS/SOCKS destination protection and pool
 isolation; media/resource/realtime TLS transport; and preserve-or-reject defaults.
 They are deterministic fixture evidence, not live-provider or quality evidence.
 
-A trusted in-process `connectors.RegisterProfile` can add a provider using an
-existing component composition and model bindings. The registry validates the
-composition. Executable configuration comes from [provider plugins](plugins.md)
-instead: WASM modules an owner installs, whose code OLP runs confined, or, in
+Providers beyond the built-in profiles come from [provider plugins](plugins.md),
+which are WASM modules an owner installs, whose code OLP runs confined, or, in
 the experimental [unconfined tier](plugins.md#unconfined-plugins-experimental),
 executables an owner permits. Their profiles name a built-in dialect. A plugin
 never defines a dialect, so adding a new dialect or lifecycle still requires its

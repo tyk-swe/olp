@@ -3,14 +3,12 @@
     chatToCodex = $bindable(),
     messagesToCodex = $bindable(),
     chatToAntigravity = $bindable(),
-    codexCLIIdentity = $bindable(),
-    allowanceOrdering = $bindable()
+    codexCLIIdentity = $bindable()
   }: {
     chatToCodex: boolean;
     messagesToCodex: boolean;
     chatToAntigravity: boolean;
     codexCLIIdentity: boolean;
-    allowanceOrdering: boolean;
   } = $props();
 </script>
 
@@ -72,18 +70,4 @@
   account suspension. Review the exact change and risk before enabling and
   publishing. Existing route administrators authorize this policy for eligible
   accounts in the route pool.
-</p>
-<label class="choice">
-  <input
-    id="code-allowance-ordering"
-    type="checkbox"
-    bind:checked={allowanceOrdering}
-  />
-  Order new conversations by allowance bands
-</label>
-<p>
-  Off by default. No requested model has a qualified mapping to an allowance
-  limit family yet, so this setting has no effect. Legacy eligibility remains in
-  force for new conversations, existing pins and model offers. Published
-  revisions retain this policy and established pins never move.
 </p>

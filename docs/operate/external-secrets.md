@@ -123,4 +123,4 @@ a new plan. Reference metadata participates in idempotency and desired-action
 comparison. Imported providers remain drafts, and must validate their pinned
 destination credential before activation.
 
-The browser-qualified [credential version example](../assets/external-credentials.png) shows a referenced version staged for activation without displaying its resolved value.
+The browser-qualified [credential version example](../images/external-credentials.png) shows a referenced version staged for activation without displaying its resolved value.

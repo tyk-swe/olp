@@ -17357,39 +17357,6 @@
             "type": "string",
             "description": "Chosen means weighted selection picked the account for a new pin, pin means an established conversation pin served without re-running selection, and connection means the tree connection account served."
           },
-          "band": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "healthy",
-              "unknown",
-              "low",
-              "exhausted",
-              null
-            ],
-            "description": "Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping."
-          },
-          "evidence": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "enum": [
-              "passive",
-              "active",
-              null
-            ],
-            "description": "Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation."
-          },
-          "evidence_observed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
           "skipped": {
             "type": "array",
             "items": {
@@ -17403,13 +17370,12 @@
                   "enum": [
                     "cooldown",
                     "busy",
-                    "band",
                     "weight",
                     "tree",
                     "unavailable"
                   ],
                   "type": "string",
-                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, weight means the weighted score picked another account of the same tier, and band means a lower allowance band under allowance ordering."
+                  "description": "Why the candidate did not serve: cooldown means a live health cooldown, busy means the account reached its local generation cap, unavailable means reported allowance exhaustion, tree means an earlier account of the conversation tree served, and weight means the weighted score picked another account of the same tier."
                 }
               },
               "required": [
@@ -17452,9 +17418,6 @@
           "root_id",
           "chosen_account_id",
           "reason",
-          "band",
-          "evidence",
-          "evidence_observed_at",
           "skipped",
           "recovery_envelope",
           "recovery_ordinal",
@@ -18397,10 +18360,6 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-          },
-          "allowance_ordering": {
-            "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -18557,10 +18516,6 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-          },
-          "allowance_ordering": {
-            "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -33905,10 +33860,6 @@
           "chat_to_codex": {
             "type": "boolean",
             "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-          },
-          "allowance_ordering": {
-            "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [

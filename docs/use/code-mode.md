@@ -32,10 +32,7 @@ profile only when the matching live lane in
 and its claims summary names that pair. Until then the console and this
 guide keep the no proven signal wording for that pair.
 
-No requested model currently has a qualified mapping to an allowance limit
-family, so allowance ordering has no effect and legacy eligibility remains in
-force for new roots, existing pins and model offers. Eligible accounts are
-selected using weights and cooldowns. Codex inference responses can supply
+Eligible accounts are selected using weights and cooldowns. Codex inference responses can supply
 passive observations, but OLP does not assume which models they cover. Active
 Codex reads and both MiniMax M
 Plan remains reads are held pending live qualification. Existing active
@@ -1077,11 +1074,8 @@ Primary and secondary windows are retained independently for each metered limit.
 Token and request counts also retain their own observation and reset times.
 Credits remain separate from those windows and from local budgets. Partial
 observations preserve other dimensions, and stale observations cannot replace
-newer ones. For a qualified allowance band, an observation stays fresh until its
-reported future reset, or for at most fifteen minutes when there is no future
-reset. No model has a qualified limit mapping today, so the allowance ordering
-setting has no effect. Legacy eligibility continues to treat passive exhaustion
-as unavailable until its supported reset, including when that reset is unknown.
+newer ones. Eligibility treats passive exhaustion as unavailable until its supported
+reset, including when that reset is unknown.
 Passing a retry
 or reset time permits another attempt once all eligibility checks pass, while
 reported allowance values remain tied to upstream observations. Never infer

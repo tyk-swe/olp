@@ -146,8 +146,8 @@ verified session public ID. Starting a new session retires views from the
 earlier session. A saved view never bypasses current permissions or retention,
 and each origin keeps separate browser storage.
 
-The browser-qualified [branding example](../assets/operator-identity.png) and
-[installation and saved-view example](../assets/independent-installations.png)
+The browser-qualified [branding example](../images/operator-identity.png) and
+[installation and saved-view example](../images/independent-installations.png)
 show the retained console layouts.
 
 ## Model catalog
@@ -193,7 +193,7 @@ disclosure is staged with its draft and takes effect when that draft is
 activated. A normal draft activation preserves the route's existing disclosure
 choice.
 
-The browser-qualified [catalog example](../assets/model-catalog.png) shows the
+The browser-qualified [catalog example](../images/model-catalog.png) shows the
 resulting authenticated catalog.
 
 ## Complete management workflows

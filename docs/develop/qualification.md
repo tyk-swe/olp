@@ -142,8 +142,8 @@ check details name variables and status codes only.
 The Codex key variable holds the contents of the account `auth.json`
 document described in the code mode guide. Every other key variable
 holds the coding plan key for its profile. The optional
-`OLP_LIVE_CODEX_AUTH_JSON_2` variable holds a second Codex account for
-the band check. A model variable names one native model the account
+`OLP_LIVE_CODEX_AUTH_JSON_2` variable holds a second Codex account, which
+gives the route a recovery target for the failover check. A model variable names one native model the account
 serves, because vendor model catalogues change outside this repository
 and no lane pins one.
 
@@ -166,11 +166,7 @@ passes only when the journey returns success and attempt diagnostics
 show the settled attempt. The Codex allowance check passes only when
 account diagnostics carry passive allowance windows after inference. Active
 reads remain disabled pending live qualification.
-Other adapters record `no_signal` for allowance in stage one. The band
-check needs the second Codex account and passes only when a selection
-decision carries allowance evidence. Without the second account it
-records `no_signal`. No requested-model-to-limit mapping is qualified today,
-so decisions do not yet carry band evidence. The cooldown and failover checks pass only on
+Other adapters record `no_signal` for allowance in stage one. The cooldown and failover checks pass only on
 evidence the lane actually observed in diagnostics. The lane induces
 neither exhaustion nor rejection, so both normally record `no_signal`,
 and that record withholds the matching claim instead of passing it. A
@@ -178,17 +174,14 @@ lane result is `pass` only when inference passes and, for Codex, the
 allowance check passes.
 
 The last report line is a claims summary. It names the adapter and
-profile pairs allowed to claim reset aware ordering, live inference,
-cooldown evidence, and failover evidence from this run. Reset aware
-ordering needs a passing lane with passing allowance and band checks.
-No adapter can earn that claim until a model-to-limit mapping is qualified. When lanes
+profile pairs allowed to claim live inference, cooldown evidence, and
+failover evidence from this run. When lanes
 are missing or red the matching lists are empty, and an empty list
 means no claim. The full reliability gate requires every live lane to
-execute its client, record its scope, and pass inference, band ordering,
-cooldown, and failover checks. The Codex lane also needs its allowance
-check. The current live lanes send protocol requests without executing
-the clients, and no model-to-limit mapping is qualified, so the full
-gate cannot pass yet. The report still preserves the scoped partial
+execute its client, record its scope, and pass inference, cooldown, and
+failover checks. The Codex lane also needs its allowance check. The
+current live lanes send protocol requests without executing the clients,
+so the full gate cannot pass yet. The report still preserves the scoped partial
 observations. The script exits non-zero whenever this evidence is
 missing or a required lane is red. The live
 report goes to `OLP_QUALIFY_LIVE_REPORT`, the harness refuses a live
@@ -200,8 +193,7 @@ The `qualify-code-live` workflow runs on manual dispatch, because push
 and pull request runs have no account secrets. It maps repository
 secrets of the same names to the variables above and runs
 `make qualify-code-live` with no step allowed to continue on error.
-Dispatch it before making any reset aware ordering or reliability
-claim for a release, and scope the claim to exactly the pairs the
+Dispatch it before making any reliability claim for a release, and scope the claim to exactly the pairs the
 green run summary names. A release with no green live run makes no
 such claim. The workflow is also reusable through `workflow_call`.
 When the repository variable `OLP_LIVE_QUALIFICATION` is set to
@@ -212,7 +204,7 @@ fixture-scoped, and the `check-docs` guard in
 `scripts/check-docs.mjs` enforces that scope. The guard rejects the
 exact claiming phrases `live-proven only`, `is live proven`,
 `are live proven`, and `live proven ordering`, plus their hyphenated
-and band or signal variants, in scoped documentation, and its test
+and signal variants, in scoped documentation, and its test
 applies the same rule to the code mode guide and console copy.
 Wording that defines the term without claiming it, such as counts as
 live proven only when a lane runs green, stays allowed. Claiming live

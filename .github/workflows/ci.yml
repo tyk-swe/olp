@@ -119,7 +119,6 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'scripts/check-dependencies.sh'
               - 'deploy/Dockerfile'
-              - 'deploy/Dockerfile.*'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
             scripts:

@@ -5537,10 +5537,6 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-            },
-            "allowance_ordering": {
-              "type": "boolean",
-              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -8301,10 +8297,6 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-            },
-            "allowance_ordering": {
-              "type": "boolean",
-              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -32385,10 +32377,6 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-            },
-            "allowance_ordering": {
-              "type": "boolean",
-              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [
@@ -37923,10 +37911,6 @@
             "chat_to_codex": {
               "type": "boolean",
               "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
-            },
-            "allowance_ordering": {
-              "type": "boolean",
-              "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
             }
           },
           "required": [

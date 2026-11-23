@@ -242,6 +242,20 @@ to a Valkey that answers it holds none, which happens once after a restart, a
 failover or `SCRIPT FLUSH`, and is cached from then on. Flushing the script cache
 is therefore safe; it costs one slower call per script.
 
+### Request metadata stream loss
+
+If the request metadata stream is lost before the persistence consumer reads it,
+for example after a Valkey failure without persistence, usage reports cannot
+recover those events. Record the loss as an explicit gap so reports and the
+`olp_request_metadata_consumer_healthy` signal stop treating it as pending work.
+Run `scripts/record-request-metadata-stream-loss.sh` with an incident
+identifier, the number of lost events, `exact` or `lower-bound` for how sure
+that count is, and the first and last affected times as whole-second UTC
+timestamps. The script needs `OLP_DATABASE_URL` and
+`OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap`. It writes one
+content-free gap row and an audit row, and running it again with the same
+incident identifier records nothing new.
+
 ## Routine checks
 
 1. Confirm readiness, release convergence and independently fresh key authority.

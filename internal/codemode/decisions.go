@@ -23,7 +23,6 @@ type SkipClass string
 
 const (
 	SkipCooldown    SkipClass = "cooldown"
-	SkipBand        SkipClass = "band"
 	SkipWeight      SkipClass = "weight"
 	SkipTree        SkipClass = "tree"
 	SkipUnavailable SkipClass = "unavailable"
@@ -37,12 +36,10 @@ type Candidate struct {
 	Busy      bool
 	Position  int
 	Score     float64
-	Band      Band
-	ResetAt   *time.Time
 }
 
 func (c Candidate) Eligible() bool {
-	return c.Available && !c.Busy && c.Band != BandExhausted
+	return c.Available && !c.Busy
 }
 
 func candidatePreferred(left, right Candidate) int {
@@ -55,23 +52,8 @@ func candidatePreferred(left, right Candidate) int {
 		}
 		return -1
 	}
-	if leftRank, rightRank := bandRank(left.Band), bandRank(right.Band); leftRank != rightRank {
-		return cmp.Compare(leftRank, rightRank)
-	}
 	if left.Score != right.Score {
 		return cmp.Compare(left.Score, right.Score)
-	}
-	if left.Band == BandLow && right.Band == BandLow {
-		switch {
-		case left.ResetAt == nil && right.ResetAt != nil:
-			return -1
-		case left.ResetAt != nil && right.ResetAt == nil:
-			return 1
-		case left.ResetAt != nil && right.ResetAt != nil:
-			if compared := right.ResetAt.Compare(*left.ResetAt); compared != 0 {
-				return compared
-			}
-		}
 	}
 	return cmp.Compare(right.AccountID, left.AccountID)
 }
@@ -104,8 +86,6 @@ func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount 
 					return SkipUnavailable
 				case candidate.Position > chosen.Position:
 					return SkipTree
-				case bandRank(candidate.Band) < bandRank(chosen.Band):
-					return SkipBand
 				default:
 					return SkipWeight
 				}
@@ -124,23 +104,20 @@ func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount 
 }
 
 type Decision struct {
-	ID                 string             `json:"id"`
-	AttemptID          *string            `json:"attempt_id"`
-	ProjectID          string             `json:"project_id"`
-	RouteID            string             `json:"route_id"`
-	RouteRevisionID    string             `json:"route_revision_id"`
-	APIKeyID           string             `json:"api_key_id"`
-	BindingID          string             `json:"binding_id"`
-	RootID             string             `json:"root_id"`
-	ChosenAccountID    string             `json:"chosen_account_id"`
-	Reason             DecisionReason     `json:"reason"`
-	Band               *Band              `json:"band"`
-	Evidence           *AllowanceEvidence `json:"evidence"`
-	EvidenceObservedAt *time.Time         `json:"evidence_observed_at"`
-	Skipped            []SkippedAccount   `json:"skipped"`
-	RecoveryEnvelope   *string            `json:"recovery_envelope"`
-	RecoveryOrdinal    *int               `json:"recovery_ordinal"`
-	CreatedAt          time.Time          `json:"created_at"`
+	ID               string           `json:"id"`
+	AttemptID        *string          `json:"attempt_id"`
+	ProjectID        string           `json:"project_id"`
+	RouteID          string           `json:"route_id"`
+	RouteRevisionID  string           `json:"route_revision_id"`
+	APIKeyID         string           `json:"api_key_id"`
+	BindingID        string           `json:"binding_id"`
+	RootID           string           `json:"root_id"`
+	ChosenAccountID  string           `json:"chosen_account_id"`
+	Reason           DecisionReason   `json:"reason"`
+	Skipped          []SkippedAccount `json:"skipped"`
+	RecoveryEnvelope *string          `json:"recovery_envelope"`
+	RecoveryOrdinal  *int             `json:"recovery_ordinal"`
+	CreatedAt        time.Time        `json:"created_at"`
 }
 
 func (d Decision) Validate() error {
@@ -157,20 +134,13 @@ func (d Decision) Validate() error {
 	} else if d.AttemptID == nil || *d.AttemptID == "" {
 		return fmt.Errorf("invalid code decision attempt")
 	}
-	if d.Band != nil && !slices.Contains([]Band{BandHealthy, BandUnknown, BandLow, BandExhausted}, *d.Band) {
-		return fmt.Errorf("invalid code decision band")
-	}
-	if (d.Evidence == nil) != (d.EvidenceObservedAt == nil) ||
-		d.Evidence != nil && !slices.Contains([]AllowanceEvidence{AllowanceEvidencePassive, AllowanceEvidenceActive}, *d.Evidence) {
-		return fmt.Errorf("invalid code decision evidence")
-	}
 	skippedAccounts := slices.SortedFunc(slices.Values(d.Skipped), func(left, right SkippedAccount) int {
 		return cmp.Compare(left.AccountID, right.AccountID)
 	})
 	for index, skipped := range skippedAccounts {
 		if skipped.AccountID == "" || skipped.AccountID == d.ChosenAccountID ||
 			index > 0 && skippedAccounts[index-1].AccountID == skipped.AccountID ||
-			!slices.Contains([]SkipClass{SkipCooldown, SkipBand, SkipWeight, SkipTree, SkipUnavailable, SkipBusy}, skipped.Class) {
+			!slices.Contains([]SkipClass{SkipCooldown, SkipWeight, SkipTree, SkipUnavailable, SkipBusy}, skipped.Class) {
 			return fmt.Errorf("invalid code decision skipped account")
 		}
 	}

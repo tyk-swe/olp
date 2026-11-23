@@ -249,17 +249,17 @@ func (s *Store) admit(ctx context.Context, admission Admission, connection bool)
 		reason = codemode.DecisionPin
 		out.Pin = pins[pinned]
 		tree, _ := codeTree(out.Binding, pins)
-		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree, false)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
 		out.Account = selection.account
 	case connection:
 		// A connection serves on the tree's own account until its model is
 		// pinned; each generation it carries admits its own model.
 		reason = codemode.DecisionConnection
 		out.Pin = codemode.Pin{AccountID: out.Binding.AccountID, Principal: out.Binding.Principal}
-		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil, false)
+		selection, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
 		out.Account = selection.account
 	default:
-		out.Pin, selection, err = codePin(ctx, tx, in, out.Binding, pins, in.Route.AllowanceOrdering && rootSelection != nil)
+		out.Pin, selection, err = codePin(ctx, tx, in, out.Binding, pins)
 		out.Account = selection.account
 	}
 	if err != nil {
