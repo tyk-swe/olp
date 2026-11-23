@@ -1,6 +1,7 @@
-// Package codewire observes code-mode wire messages without rewriting them:
-// bounded body decoding, header forwarding, SSE event splitting, and the
-// Anthropic Messages and Chat Completions observers and client identities.
+// Package codewire reads code-mode wire messages: bounded body decoding,
+// header forwarding, SSE event splitting, the Anthropic Messages and Chat
+// Completions observers and client identities. The only change it makes to a
+// forwarded message is patching the model name in place.
 package codewire
 
 import (
