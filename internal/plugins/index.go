@@ -6,7 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 )
 
 // index lists the reviewed plugins with whether each reviewed digest is

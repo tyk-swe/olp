@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -13,13 +12,14 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 )
 
 type gatewayInputs struct {
 	config        Config
 	pool          *pgxpool.Pool
 	core          runtimeCore
-	inferencePool *admission.Pool
+	inferencePool *concurrency.Pool
 	limiter       *limitadmission.Limiter
 	shared        *sharedLimits
 	outage        *outagePolicy

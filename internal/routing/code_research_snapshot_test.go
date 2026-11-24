@@ -4,10 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/antigravityauth"

@@ -7,7 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
 func scimAttribute(name, typ string, multi, required bool) map[string]any {

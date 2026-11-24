@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/routes/modelcatalog"
 )
 
 type Current struct {

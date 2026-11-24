@@ -77,7 +77,7 @@ retained definitions without revalidating changed dependencies. Revision
 retention, labels, final selection, authority and runtime publication remain in
 one transaction.
 
-Provider configuration identity and connector projection live in `providerconfig`.
+Provider configuration identity and connector projection live in `connectors/providerconfig`.
 Provider mutations accept a prepared configuration whose constructor owns
 normalization, plugin resolution and validation. Stored management and serving
 representations retain their original serialization.

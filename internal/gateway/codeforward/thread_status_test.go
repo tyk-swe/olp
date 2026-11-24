@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -43,7 +43,7 @@ func threadStatusForwarder(t *testing.T, ledger *fakeCodeLedger, now time.Time, 
 		t.Fatal(err)
 	}
 	return &Forwarder{
-		gate:    ingress.NewGate(key, admission.NewPool(4), nil, 0, func() time.Time { return now }),
+		gate:    ingress.NewGate(key, concurrency.NewPool(4), nil, 0, func() time.Time { return now }),
 		ledger:  ledger,
 		runtime: threadStatusRuntime{current: snapshot},
 		now:     func() time.Time { return now },

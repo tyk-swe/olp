@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/internal/identity/scim"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 

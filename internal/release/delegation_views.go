@@ -10,8 +10,8 @@ import (
 	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type DelegationRecord struct {
@@ -128,7 +128,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 		}
 		return delegationPairRecord{
 			Record: data.record(), ProjectID: data.ProjectID,
-			Digest: attribution.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
+			Digest: secrets.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
 		}, nil
 	})
 	if collectErr != nil {

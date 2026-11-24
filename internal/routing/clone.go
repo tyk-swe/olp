@@ -6,8 +6,8 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 )
 
 // Clone owns all published configuration values. Derived contracts are omitted

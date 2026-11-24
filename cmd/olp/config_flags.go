@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 type configFlagValues struct{ databaseFile, databasePasswordFile, databasePasswordFileURL, databaseReadFile, valkeyFile, cacheValkeyFile, level, trustedProxies, managementCIDRs, egressCIDRs, egressHosts, corsOrigins, metricsTenantLabels string }

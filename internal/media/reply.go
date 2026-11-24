@@ -3,7 +3,7 @@ package media
 import (
 	"time"
 
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 type Response interface{ response() }

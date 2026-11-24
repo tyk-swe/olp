@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 )
 
 // ReauthInterval is how often a long-lived session rechecks its key.
@@ -17,17 +17,17 @@ const ReauthInterval = 5 * time.Second
 
 type Gate struct {
 	auth    consumerauth.Authenticator
-	pool    *admission.Pool
+	pool    *concurrency.Pool
 	trusted []netip.Prefix
 	maxBody int64
 	now     func() time.Time
 }
 
-func NewGate(auth consumerauth.Authenticator, pool *admission.Pool, trusted []netip.Prefix, maxBody int64, now func() time.Time) *Gate {
+func NewGate(auth consumerauth.Authenticator, pool *concurrency.Pool, trusted []netip.Prefix, maxBody int64, now func() time.Time) *Gate {
 	return &Gate{auth: auth, pool: pool, trusted: trusted, maxBody: maxBody, now: now}
 }
 
-func (g *Gate) Pool() *admission.Pool { return g.pool }
+func (g *Gate) Pool() *concurrency.Pool { return g.pool }
 
 func SameOrigin(r *http.Request, origin string) bool {
 	u, err := url.Parse(origin)
@@ -43,9 +43,9 @@ func (g *Gate) Admit(ctx context.Context) bool {
 	return g.acquirePermit(ctx) != nil
 }
 
-func (g *Gate) acquirePermit(ctx context.Context) *admission.Permit {
-	if permit := admission.PermitFromContext(ctx); permit != nil {
-		if permit.Await(ctx, admission.Normal, time.Time{}) {
+func (g *Gate) acquirePermit(ctx context.Context) *concurrency.Permit {
+	if permit := concurrency.PermitFromContext(ctx); permit != nil {
+		if permit.Await(ctx, concurrency.Normal, time.Time{}) {
 			return permit
 		}
 		return nil
@@ -57,7 +57,7 @@ func (g *Gate) acquirePermit(ctx context.Context) *admission.Permit {
 // first: a queued permit the middleware only reserved waits for AwaitAdmission.
 // Otherwise the server's own pool bounds the call.
 func (g *Gate) AdmitLater(ctx context.Context) bool {
-	if admission.PermitFromContext(ctx) != nil {
+	if concurrency.PermitFromContext(ctx) != nil {
 		return true
 	}
 	return g.pool.AcquirePermit() != nil
@@ -67,12 +67,12 @@ func (g *Gate) AdmitLater(ctx context.Context) bool {
 // priority class and never past ctx's deadline, then answers the same 503 a
 // full pool does. A request admitted outright returns at once.
 func (g *Gate) AwaitAdmission(ctx context.Context, priority string) *fault.Error {
-	permit := admission.PermitFromContext(ctx)
+	permit := concurrency.PermitFromContext(ctx)
 	if !permit.Queued() {
 		return nil
 	}
 	deadline, _ := ctx.Deadline()
-	if permit.Await(ctx, admission.ClassOf(priority), deadline) {
+	if permit.Await(ctx, concurrency.ClassOf(priority), deadline) {
 		return nil
 	}
 	return fault.Overloaded
@@ -82,7 +82,7 @@ func (g *Gate) AwaitAdmission(ctx context.Context, priority string) *fault.Error
 // the local pool. Release is idempotent on the permit: media handlers hand
 // their slot back once uploads finish staging, before the upstream call.
 func (g *Gate) Release(ctx context.Context) {
-	if permit := admission.PermitFromContext(ctx); permit != nil {
+	if permit := concurrency.PermitFromContext(ctx); permit != nil {
 		permit.Release()
 		return
 	}

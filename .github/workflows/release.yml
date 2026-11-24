@@ -131,8 +131,8 @@ jobs:
             echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/develop/catalog.md#signing-keys" >&2
             exit 1
           fi
-          go run ./cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json
-          go run -tags release ./cmd/olpsign verify internal/catalog/catalog.json internal/pluginindex/index.json
+          go run ./cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/plugins/pluginindex/index.json
+          go run -tags release ./cmd/olpsign verify internal/catalog/catalog.json internal/plugins/pluginindex/index.json
           go test -tags release -run 'TestEmbedded' ./internal/catalog
       - if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -142,8 +142,8 @@ jobs:
             internal/catalog/catalog.json
             internal/catalog/catalog.json.sig
             internal/catalog/schema.json
-            internal/pluginindex/index.json
-            internal/pluginindex/index.json.sig
+            internal/plugins/pluginindex/index.json
+            internal/plugins/pluginindex/index.json.sig
           if-no-files-found: error
           overwrite: true
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -314,8 +314,8 @@ jobs:
           mkdir -p /tmp/catalog
           cp /tmp/signed/catalog/catalog.json /tmp/signed/catalog/catalog.json.sig /tmp/catalog/
           cp /tmp/signed/catalog/schema.json /tmp/catalog/catalog.schema.json
-          cp /tmp/signed/pluginindex/index.json /tmp/catalog/plugin-index.json
-          cp /tmp/signed/pluginindex/index.json.sig /tmp/catalog/plugin-index.json.sig
+          cp /tmp/signed/plugins/pluginindex/index.json /tmp/catalog/plugin-index.json
+          cp /tmp/signed/plugins/pluginindex/index.json.sig /tmp/catalog/plugin-index.json.sig
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod

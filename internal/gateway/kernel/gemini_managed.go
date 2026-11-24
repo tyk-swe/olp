@@ -18,8 +18,8 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/platform/panics"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 var (
