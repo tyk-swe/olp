@@ -4,14 +4,13 @@
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
   import {
-    apiKeyKeys,
-    listApiKeys,
     profileKeys,
     getProfile,
     beginIdentityReauthentication,
     reauthenticateWithPassword
-  } from '#lib/features/access/index.js';
+  } from '#lib/features/identity/index.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { agentKeys } from './agentKeys';

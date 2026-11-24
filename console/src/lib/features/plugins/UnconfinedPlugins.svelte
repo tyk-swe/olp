@@ -16,7 +16,7 @@
     listOidcIdentities,
     ReauthenticateDialog,
     reauthenticateWithPassword
-  } from '#lib/features/access/index.js';
+  } from '#lib/features/identity/index.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import {
     listUnconfinedExecutables,

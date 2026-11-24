@@ -24,8 +24,8 @@
   import ApiKeyRateFields from './ApiKeyRateFields.svelte';
   import ApiKeySpendingFields from './ApiKeySpendingFields.svelte';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
-  import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
-  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
+  import { listBudgetGroups } from '#lib/features/budgets/index.js';
+  import { budgetGroupKeys } from '#lib/features/budgets/index.js';
 
   let {
     editing,

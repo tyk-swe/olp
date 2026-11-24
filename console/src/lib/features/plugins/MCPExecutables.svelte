@@ -13,7 +13,7 @@
     listOidcIdentities,
     ReauthenticateDialog,
     reauthenticateWithPassword
-  } from '#lib/features/access/index.js';
+  } from '#lib/features/identity/index.js';
   import {
     listMCPExecutables,
     reviewMCPExecutable,

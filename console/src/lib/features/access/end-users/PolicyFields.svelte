@@ -1,7 +1,7 @@
 <script lang="ts">
-  import LimitFields from '../budgets/LimitFields.svelte';
+  import { LimitFields } from '#lib/features/budgets/index.js';
   import { type PolicyForm } from './policy';
-  import { limitForm } from '../budgets/limitForm';
+  import { limitForm } from '#lib/features/budgets/index.js';
   let {
     form = $bindable(),
     prefix,

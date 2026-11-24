@@ -1,10 +1,10 @@
 <script lang="ts">
-  import Fields from '../limit-templates/TemplateFields.svelte';
+  import { LimitTemplateFields as Fields } from '#lib/features/budgets/index.js';
   import {
     namedLimitsError,
     namedLimitForm,
     namedLimitsInput
-  } from '../budgets/namedLimits';
+  } from '#lib/features/budgets/index.js';
   import {
     getProjectLimitTemplates,
     putProjectLimitTemplates,
