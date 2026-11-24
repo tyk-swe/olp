@@ -11,10 +11,10 @@
   import { errorMessage } from '#lib/management/http.js';
   import { formatBytes } from '#lib/format.js';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities,
+    ReauthenticateDialog,
     reauthenticateWithPassword
   } from '#lib/features/access/index.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
