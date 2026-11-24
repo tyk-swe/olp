@@ -144,7 +144,7 @@ also drops the saved retry intent. Reads that can fail return the problem as
 a value through `captureResult`/`readResult` in `src/lib/editing/result.ts`
 rather than throwing through the component.
 
-`src/lib/features/sinks/SinkEditor.svelte` is the example to copy for a form
+`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a form
 that creates and updates. Other logic that can fail, such as parsing what the
 user typed, belongs in a `.ts` module that returns the problem as a value, like
 `src/lib/editing/json.ts`.

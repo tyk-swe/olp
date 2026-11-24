@@ -2,7 +2,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { formatUTCDate } from '#lib/format.js';
-  import type { CapturePolicy } from '#lib/features/observability/api.js';
+  import type { CapturePolicy } from '#lib/features/exports/api.js';
 
   let {
     canCreate,

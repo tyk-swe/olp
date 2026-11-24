@@ -21,7 +21,7 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/contracts/` (the strict contract compilers `interaction/`, `unary/`, `duplex/` and `media/`), `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
-| Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
+| Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/exports |
 | Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/platform/database/` |

@@ -6,7 +6,7 @@
   import type {
     CapturePolicy,
     CaptureSinkOption
-  } from '#lib/features/observability/api.js';
+  } from '#lib/features/exports/api.js';
   import type { components } from '#lib/management/schema.js';
 
   type RedactorOption = components['schemas']['GuardrailResponse'];

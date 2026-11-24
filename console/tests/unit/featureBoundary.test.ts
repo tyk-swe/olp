@@ -25,16 +25,16 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
   {
     valid: [
       {
-        filename: inLib('features/sinks/SinkEditor.svelte.ts'),
-        code: "import { a } from '#lib/features/sinks/api.js'; import { b } from './parts/form.js'; import { c } from '#lib/features/routes/index.js'; import { d } from '../routes/index.js'; import { e } from '#lib/components/x.js';"
+        filename: inLib('features/exports/SinkEditor.svelte.ts'),
+        code: "import { a } from '#lib/features/exports/api.js'; import { b } from './parts/form.js'; import { c } from '#lib/features/routes/index.js'; import { d } from '../routes/index.js'; import { e } from '#lib/components/x.js';"
       },
       {
-        filename: inLib('features/sinks/parts/form.ts'),
+        filename: inLib('features/exports/parts/form.ts'),
         code: "import { a } from '../api.js'; export { b } from '../../routes/index.js';"
       },
       {
-        filename: path.resolve('src/routes/sinks/+page.ts'),
-        code: "import { a } from '#lib/features/sinks/api.js';"
+        filename: path.resolve('src/routes/exports/+page.ts'),
+        code: "import { a } from '#lib/features/exports/api.js';"
       },
       {
         filename: inLib('shell/Sidebar.ts'),
@@ -42,7 +42,7 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         code: "import { a } from '#lib/components/Menu.js'; import { b } from '../management/http.js'; import { c } from './navigation.js'; export { d } from '../format.js'; import { e } from 'svelte';"
       },
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         options: ordered,
         code: "import { a } from '#lib/shell/navigation.js'; import { b } from '#lib/management/http.js';"
       },
@@ -69,28 +69,28 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
     ],
     invalid: [
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         code: "import { a } from '#lib/features/routes/routeEditor.js';",
         errors: entry
       },
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         code: "export { a } from '../routes/routeEditor.js'; export * from '../routes/parts/index.js';",
         errors: [...entry, ...entry]
       },
       {
-        filename: inLib('features/sinks/parts/form.ts'),
+        filename: inLib('features/exports/parts/form.ts'),
         code: "const a = () => import('../../routes/routeEditor.js'); export { a };",
         errors: entry
       },
       {
         filename: inLib('components/Picker.ts'),
-        code: "import { a } from '#lib/features/sinks/index.js'; import { b } from '../features/sinks/api.js';",
+        code: "import { a } from '#lib/features/exports/index.js'; import { b } from '../features/exports/api.js';",
         errors: [...shared, ...shared]
       },
       {
         filename: inLib('format.ts'),
-        code: "import type { A } from './features/sinks/index.js'; export type { A };",
+        code: "import type { A } from './features/exports/index.js'; export type { A };",
         errors: shared
       },
       {
