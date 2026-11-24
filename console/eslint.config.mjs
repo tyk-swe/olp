@@ -102,7 +102,7 @@ export default [
         {
           paths: [
             {
-              name: '#lib/management/client.js',
+              name: '#lib/session/client.js',
               message:
                 'Call the management API from the feature api module, not a component.'
             }

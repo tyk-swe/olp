@@ -1,5 +1,5 @@
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { pageResult, unwrap, unwrapPage } from '#lib/management/http.js';
 import {
   GATEWAY_EPOCH_PAGE_SIZE,

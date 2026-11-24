@@ -1,4 +1,4 @@
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { unwrap } from '#lib/management/http.js';
 
 export async function cacheStatistics(route: string, signal?: AbortSignal) {

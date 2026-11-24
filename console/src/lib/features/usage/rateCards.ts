@@ -1,5 +1,5 @@
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { unwrap, unwrapPage, createHeaders } from '#lib/management/http.js';
 import type { CursorPage } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';

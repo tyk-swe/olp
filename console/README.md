@@ -32,11 +32,13 @@ repository-wide commands.
 
 ## API wiring
 
-- `apiClient` is imported only by feature api modules (plus `#lib/management/**` and
-  tests). A slice with one API module uses `api.ts`; a slice with several uses
-  an `api/` folder with one file per domain (`api/<domain>.ts`). Api modules
-  hold the API-call functions and the schema-derived types they return; pure
-  helpers stay in the slice's domain modules.
+- `apiClient` lives in `#lib/session/client.ts`, which gives the management
+  transport its session authentication, and is imported only by feature api
+  modules (plus the session and branding api modules and tests). A slice with
+  one API module uses `api.ts`; a slice with several uses an `api/` folder with
+  one file per domain (`api/<domain>.ts`). Api modules hold the API-call
+  functions and the schema-derived types they return; pure helpers stay in the
+  slice's domain modules.
 - Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
   `ensureOk(fetched)` from `#lib/management/http.js`.
 - Every query key comes from the slice's `*Keys.ts` module.
@@ -49,7 +51,8 @@ repository-wide commands.
 ## Feature ownership
 
 `src/lib/features/` owns product workflows; shared UI lives in
-`src/lib/components/` and pages in `src/routes/`. Keep route components thin.
+`src/lib/components/`, the application frame in `src/lib/shell/` and pages in
+`src/routes/`. Keep route components thin.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
@@ -59,9 +62,10 @@ ESLint enforces five structural rules. `eslint.config.mjs` is their source, and
 `eslint/feature-boundary.mjs` resolves alias and relative imports for the first
 two:
 
-- The shared layers (`src/lib/*.ts`, `components/`, `editing/`, `listing/`,
-  `management/`, `session/` and `shell/`) never import from `src/lib/features/`. When two
-  features need the same thing, move it into a shared layer.
+- The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
+  `listing/`, `components/` and `shell/`) never import from
+  `src/lib/features/`. When two features need the same thing, move it into a
+  shared layer.
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into

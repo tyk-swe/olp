@@ -3,7 +3,7 @@ import { routeKeys } from './routeKeys';
 import { listRouteDraftPage, listRoutePage } from './api';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import TemplatesPage from './TemplatesPage.svelte';

@@ -1,4 +1,4 @@
-import { createManagementClient } from './transport';
+import { createManagementClient } from '#lib/management/transport.js';
 import { createAuthMiddleware } from '#lib/session/authMiddleware.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 

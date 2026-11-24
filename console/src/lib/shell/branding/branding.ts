@@ -1,6 +1,6 @@
 import { createQuery } from '@tanstack/svelte-query';
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { unwrap, ifMatch } from '#lib/management/http.js';
 
 export type Branding = components['schemas']['InstallationBrandingResponse'];
