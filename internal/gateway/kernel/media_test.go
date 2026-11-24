@@ -259,9 +259,8 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		if tc.route != nil {
 			tc.route(&route)
 		}
-		route.Budget = &routing.CostLimits{DailyCostLimit: costText("1000")}
-		ledger.name(route.ID, "route")
 		snapshot.Routes[routeSlug] = route
+		ledger.cap(snapshot)
 		h.rt.inputs = pricedInputs(t, snapshot)
 	})
 	handler, seen := scripted(t, tc.replies, func() string { return h.upstream.URL })

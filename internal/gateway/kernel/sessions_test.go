@@ -33,6 +33,7 @@ type sessionSurface struct {
 	client    string
 	final     string
 	strict    bool
+	budgeted  bool
 	configure func(*routing.Provider, string)
 	mock      string
 	upstream  []sessionStep
@@ -42,7 +43,7 @@ func sessionSurfaces() []sessionSurface {
 	done := `{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}`
 	return []sessionSurface{
 		{
-			name: "openai realtime", path: "/v1/realtime?model=" + routeSlug, final: "response.done", mock: "a",
+			name: "openai realtime", path: "/v1/realtime?model=" + routeSlug, final: "response.done", mock: "a", budgeted: true,
 			configure: func(p *routing.Provider, _ string) {
 				p.Kind = "azure_openai"
 				p.Capabilities = []routing.Capability{{Model: modelA, Operation: "realtime", Surface: "openai", Mode: "realtime"}}
@@ -89,6 +90,7 @@ type sessionRecord struct {
 	Upstream  []any              `json:"upstream"`
 	Dials     int                `json:"dials"`
 	Envelopes []recordedEnvelope `json:"envelopes"`
+	Holds     []recordedHold     `json:"holds,omitempty"`
 }
 
 func (s sessionSurface) publish(t *testing.T, h *surfaceHarness) {
@@ -116,6 +118,7 @@ func runSessionCase(t *testing.T, surface sessionSurface, condition sessionCondi
 	t.Helper()
 	h := newSurfaceHarness(t, condition.limited)
 	surface.publish(t, h)
+	h.price(t, surface.budgeted && !condition.limited)
 	var mu sync.Mutex
 	upstream := []any{}
 	h.mock.set(surface.mock, func(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +188,7 @@ func runSessionCase(t *testing.T, surface sessionSurface, condition sessionCondi
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	record.Upstream, record.Dials, record.Envelopes = upstream, h.mock.count(surface.mock), h.envelopes()
+	record.Upstream, record.Dials, record.Envelopes, record.Holds = upstream, h.mock.count(surface.mock), h.envelopes(), h.ledger.holds()
 	if record.Dials == 0 && refusal != nil {
 		record.Close, record.Reason = int(websocket.CloseStatus(refusal)), closeReason(refusal)
 	}

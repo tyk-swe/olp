@@ -184,6 +184,23 @@ func (h *harness) budget(ledger *moneyLedger) {
 	h.rt.keys[fullKey] = authority
 }
 
+func (l *moneyLedger) cap(snapshot *routing.Snapshot) {
+	route := snapshot.Routes[routeSlug]
+	route.Budget = &routing.CostLimits{DailyCostLimit: costText("1000")}
+	snapshot.Routes[routeSlug] = route
+	l.name(route.ID, "route")
+	for id, provider := range snapshot.Providers {
+		capped := routing.Limits{}
+		if provider.Limits != nil {
+			capped = *provider.Limits
+		}
+		capped.DailyCostLimit = costText("1000")
+		provider.Limits = &capped
+		snapshot.Providers[id] = provider
+		l.name(provider.ID, "provider "+provider.Name)
+	}
+}
+
 func pricedInputs(t *testing.T, snapshot *routing.Snapshot) *routinginputs.Inputs {
 	t.Helper()
 	effective := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
