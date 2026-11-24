@@ -2,8 +2,8 @@
   import { useAction } from '#lib/editing/action.svelte.js';
   import { readResult } from '#lib/editing/result.js';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { listRoutes } from '#lib/features/routes/index.js';
-  import type { RouteDraftEditorState } from '#lib/features/routes/index.js';
+  import { listRoutes } from '../api.js';
+  import type { RouteDraftEditorState } from '../routeDraftEditor.svelte.js';
   import type { components } from '#lib/management/schema.js';
   import { errorMessage } from '#lib/management/http.js';
   import { cacheStatistics, purgeCache } from './api';
