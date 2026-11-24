@@ -242,7 +242,14 @@ SELECT EXISTS(SELECT 1 FROM owner),
 // owner. The caller separately enforces route/provider/credential authority and
 // contract version, and only exposes delivery when StateReady is present.
 func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (*Resource, []byte, error) {
-	if !s.Encrypted() || (kind != KindContinuation && kind != KindStrictResponse) {
+	if kind != KindContinuation && kind != KindStrictResponse {
+		return nil, nil, ErrContract
+	}
+	return s.readSealedContract(ctx, kind, owner, localID, MaxContinuationBytes, nil)
+}
+
+func (s *Store) readSealedContract(ctx context.Context, kind, owner, localID string, maxBytes int, valid func(*Resource) bool) (*Resource, []byte, error) {
+	if !s.Encrypted() {
 		return nil, nil, ErrContract
 	}
 	id, err := parseLocal(localID)
@@ -254,7 +261,7 @@ func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (
 		return nil, nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
+	if err := s.authorizeOwner(ctx, tx, owner); err != nil {
 		return nil, nil, err
 	}
 	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
@@ -264,15 +271,16 @@ func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (
 	if err != nil {
 		return nil, nil, err
 	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
-	if err != nil {
+	if valid != nil && !valid(r) {
 		return nil, nil, ErrContract
 	}
-	if len(payload) == 0 || len(payload) > MaxContinuationBytes {
+	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
+	if err != nil || len(payload) == 0 || len(payload) > maxBytes {
 		return nil, nil, ErrContract
 	}
 	return r, payload, nil
 }
+
 func (s *Store) FindSubmission(ctx context.Context, owner, submission string) (*Resource, []byte, error) {
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `SELECT id FROM olp.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3`, owner, submission, KindContinuation).Scan(&id)
@@ -318,17 +326,22 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 	if len(copy.Metadata) == 0 {
 		copy.Metadata = []byte(`{}`)
 	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.TargetID))
+	out, err := s.insertSealedContract(ctx, tx, &copy, payload)
 	if err != nil {
 		return nil, err
 	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	if err = tx.Commit(ctx); err != nil {
+	return out, nil
+}
+
+func (s *Store) insertSealedContract(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
+	out, err := insertResource(ctx, tx, r)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
 		return nil, err
 	}
 	return out, nil

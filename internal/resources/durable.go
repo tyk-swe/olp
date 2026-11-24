@@ -166,18 +166,7 @@ func (s *Store) putDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource
 	if len(r.Metadata) == 0 {
 		r.Metadata = []byte(`{}`)
 	}
-	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
-		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID, r.RouteRevisionID, r.SlotID,
-		r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.ContractVersion, r.ParentID, r.TargetID))
-	if err != nil {
-		return nil, err
-	}
-	if err = s.keys.Store(ctx, tx, s.installation, out.UUID.String(), secrets.ProviderContinuation, payload, out.ExpiresAt); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return s.insertSealedContract(ctx, tx, r, payload)
 }
 
 func (s *Store) StageDurableContract(ctx context.Context, id uuid.UUID, payload []byte, expiresAt *time.Time) error {
@@ -210,37 +199,12 @@ func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]
 // ReadDurableContract checks the current owner before decrypting. The gateway
 // additionally resolves the historical serving pin and current revocation.
 func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID string) (*Resource, []byte, error) {
-	if !s.Encrypted() || !durableKind(kind) {
+	if !durableKind(kind) {
 		return nil, nil, ErrContract
 	}
-	id, err := parseLocal(localID)
-	if err != nil || LocalID(kind, id) != localID {
-		return nil, nil, ErrNotFound
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
-		return nil, nil, err
-	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
- WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
-		return nil, nil, ErrContract
-	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
-	if err != nil || len(payload) == 0 || len(payload) > MaxContinuationBytes {
-		return nil, nil, ErrContract
-	}
-	return r, payload, nil
+	return s.readSealedContract(ctx, kind, owner, localID, MaxContinuationBytes, func(r *Resource) bool {
+		return r.ContractVersion != nil && *r.ContractVersion == DurableContractVersion
+	})
 }
 
 // UpdateDurableContract commits the latest native result with the status in

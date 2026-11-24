@@ -18,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
@@ -198,20 +197,7 @@ func (s surface) fileContent(w http.ResponseWriter, r *http.Request) {
 		if res.Kind == resources.KindStrictFile {
 			w.Header().Set("X-OLP-Content-SHA256", artifact.Digest)
 		}
-		x.ResponseHeaders(w.Header(), false)
-		w.WriteHeader(http.StatusOK)
-		written, copyErr := kernel.CopyResourceContent(w, opened.File, artifact.ContentLength)
-		if copyErr != nil || written != artifact.ContentLength {
-			x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
-			resp.Exchange.Delivery(kernel.DeliveryState(written))
-			s.kernel.Finish(x, &kernel.Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
-			return nil
-		}
-		if written > 0 {
-			x.Delivered(s.kernel.Now())
-		}
-		resp.Exchange.Delivery(usage.ClientTerminal)
-		s.kernel.Finish(x, &kernel.Outcome{Committed: true}, http.StatusOK)
+		s.kernel.DeliverResourceContent(context.Background(), w, x, resp.Exchange, opened.File, artifact.ContentLength, "The file response ended before all bytes were delivered.")
 		return nil
 	})
 }

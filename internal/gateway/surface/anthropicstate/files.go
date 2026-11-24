@@ -14,7 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const filesBeta = "files-api-2025-04-14"
@@ -247,21 +246,7 @@ func (s surface) fileContent(w http.ResponseWriter, r *http.Request) {
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The results response could not be bounded.")
 		}
-		x.ResponseHeaders(w.Header(), false)
-		w.WriteHeader(http.StatusOK)
-		written, copyErr := kernel.CopyResourceContent(w, opened.File, artifact.ContentLength)
-
-		if copyErr != nil || written != artifact.ContentLength {
-			resp.Exchange.Delivery(kernel.DeliveryState(written))
-			x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The results response ended before all bytes were delivered.")
-			s.kernel.Finish(x, &kernel.Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
-			return nil
-		}
-		if written > 0 {
-			x.Delivered(s.kernel.Now())
-		}
-		resp.Exchange.Delivery(usage.ClientTerminal)
-		s.kernel.Finish(x, &kernel.Outcome{Committed: true}, http.StatusOK)
+		s.kernel.DeliverResourceContent(context.Background(), w, x, resp.Exchange, opened.File, artifact.ContentLength, "The results response ended before all bytes were delivered.")
 		return nil
 	})
 }

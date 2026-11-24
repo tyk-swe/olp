@@ -20,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/staging"
-	"github.com/tyk-swe/olp/internal/usage"
 )
 
 var (
@@ -188,20 +187,7 @@ func (s *Server) GeminiManagedFileContent(ctx context.Context, w http.ResponseWr
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(fault.ResponseWriteTimeout)); err != nil {
 		return fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini file response could not be bounded.")
 	}
-	x.ResponseHeaders(w.Header(), false)
-	w.WriteHeader(http.StatusOK)
-	written, err := CopyResourceContent(w, opened.File, part.Size)
-	if err != nil || written != part.Size {
-		response.Exchange.Delivery(DeliveryState(written))
-		x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Gemini file response ended before all bytes were delivered.")
-		s.finishContext(ctx, x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
-		return nil
-	}
-	if written > 0 {
-		x.Delivered(s.Now())
-	}
-	response.Exchange.Delivery(usage.ClientTerminal)
-	s.finishContext(ctx, x, &Outcome{Committed: true}, http.StatusOK)
+	s.DeliverResourceContent(ctx, w, x, response.Exchange, opened.File, part.Size, "The Gemini file response ended before all bytes were delivered.")
 	return nil
 }
 
