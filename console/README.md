@@ -58,6 +58,39 @@ repository-wide commands.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
+A feature is one route subtree plus the management resource family behind it.
+The folders under `src/lib/features/` and the routes they render are:
+
+| Feature         | Routes                                                                           | Owns                                                                                                                                         |
+| --------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `access`        | `/organizations`, `/projects`, `/keys`, `/audit`                                 | Organizations, projects and their members, API keys, attribution, end users, route groups and the audit log.                                 |
+| `agents`        | `/agents`, `/mcp-servers`, `/activity`, `/investigations`                        | Agent publications, grants and delegations, MCP servers, runs, tasks, tool calls and investigations, plus the exposure tab under `/budgets`. |
+| `budgets`       | `/budgets`                                                                       | The installation budget, budget groups, budget increases, limit templates, attribution budgets and the limit fields other features embed.    |
+| `code-mode`     | `/code-mode`                                                                     | Code mode accounts, pools, routes, bindings, budgets and diagnostics.                                                                        |
+| `exports`       | `/exports`                                                                       | Capture and telemetry export settings at the root and signed export sinks in `signed/`.                                                      |
+| `guardrails`    | `/guardrails`                                                                    | Guardrail definitions, policies, credentials and attachments.                                                                                |
+| `health`        | `/health`                                                                        | Readiness, provider health, gateway epochs and runtime generations.                                                                          |
+| `identity`      | `/login`, `/setup`, `/invitations`, `/members`, `/identity`, `/settings/profile` | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.     |
+| `inference`     | `/playground`                                                                    | The playground and its request templates.                                                                                                    |
+| `media`         | `/media-jobs`                                                                    | Media job metadata.                                                                                                                          |
+| `notifications` | `/notifications`                                                                 | Notification rules, destinations and deliveries.                                                                                             |
+| `overview`      | `/`                                                                              | The landing page and its summaries.                                                                                                          |
+| `plugins`       | `/plugins`                                                                       | The plugin index, installed plugins and the unconfined plugin review.                                                                        |
+| `providers`     | `/providers`, `/models`, `/catalog`                                              | Provider connections, credentials, grants and models, with the published model catalog in `model-catalog/`.                                  |
+| `resources`     | `/provider-resources`                                                            | Retained provider resources and retrieval bindings.                                                                                          |
+| `routes`        | `/routes`                                                                        | Route drafts, activation, routing policy and inspection, with the route cache editor in `cache/`.                                            |
+| `settings`      | `/settings`                                                                      | Installation settings and the branding write, with declarative configuration in `configuration/`.                                            |
+| `usage`         | `/usage`, `/requests`, `/pricing`                                                | Usage reports, request records, pricing, rate cards and reconciliation.                                                                      |
+
+New code goes in the feature whose route subtree shows it. A new resource that
+appears under an existing top-level route gets a subfolder in that feature, and
+a new top-level route gets a new feature folder. A component with one consumer
+lives next to that consumer, even when its name suggests another feature. Code
+that two features need goes into the feature that owns the resource and is
+exported from that feature's `index.ts`, or into a shared layer when it knows
+about no resource at all. An `index.ts` lists only what other features import,
+so a feature nothing imports has none.
+
 ## Boundaries
 
 ESLint enforces eight structural rules. `eslint.config.mjs` is their source,
