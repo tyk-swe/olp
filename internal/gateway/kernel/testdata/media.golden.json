@@ -64,9 +64,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1.500000"
+        },
+        "price": {
+          "cost": "0.07",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.07"
   },
   "bfl image generation": {
     "upstream": [
@@ -126,9 +133,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.05",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.05"
   },
   "bfl refuses image count": {
     "upstream": null,
@@ -169,7 +183,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -224,9 +244,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1.500000"
+        },
+        "price": {
+          "cost": "0.07",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.07"
   },
   "elevenlabs speech": {
     "upstream": [
@@ -256,7 +283,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -312,7 +345,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -382,9 +421,16 @@
           "total_tokens": 13,
           "image_output_tokens": 9,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.13",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.13"
   },
   "gemini speech": {
     "upstream": [
@@ -440,9 +486,16 @@
           "input_tokens": 3,
           "output_tokens": 5,
           "total_tokens": 8
+        },
+        "price": {
+          "cost": "0.056",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.056"
   },
   "gemini transcription": {
     "upstream": [
@@ -495,9 +548,16 @@
           "input_tokens": 30,
           "output_tokens": 3,
           "total_tokens": 33
+        },
+        "price": {
+          "cost": "0.094",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.094"
   },
   "groq transcription": {
     "upstream": [
@@ -546,7 +606,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -589,7 +655,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -680,9 +752,16 @@
           "image_input_tokens": 0,
           "image_output_tokens": 7,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.116",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.116"
   },
   "openai image generation": {
     "upstream": [
@@ -747,9 +826,16 @@
           "image_input_tokens": 0,
           "image_output_tokens": 7,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.116",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.116"
   },
   "openai image generation stream": {
     "upstream": [
@@ -792,6 +878,12 @@
           "total_tokens": 12,
           "image_output_tokens": 7,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.116",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
     ]
@@ -863,9 +955,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "2"
+        },
+        "price": {
+          "cost": "0.09",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.09"
   },
   "openai speech": {
     "upstream": [
@@ -896,7 +995,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -939,6 +1044,12 @@
           "output_tokens": 9,
           "total_tokens": 12,
           "audio_output_tokens": 9
+        },
+        "price": {
+          "cost": "0.088",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
     ]
@@ -990,7 +1101,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1049,7 +1166,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1100,6 +1223,12 @@
           "input_tokens": 4,
           "output_tokens": 2,
           "total_tokens": 6
+        },
+        "price": {
+          "cost": "0.034",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
     ]
@@ -1145,7 +1274,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1223,9 +1358,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1.500000"
+        },
+        "price": {
+          "cost": "0.07",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.07"
   },
   "openai translation": {
     "upstream": [
@@ -1266,7 +1408,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1302,7 +1450,13 @@
         "mode": "unary",
         "status": 429,
         "class": "rate_limit",
-        "committed": false
+        "committed": false,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1365,9 +1519,16 @@
           "image_input_tokens": 0,
           "image_output_tokens": 7,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.116",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.116"
   },
   "profiled transcription chunking default": {
     "upstream": [
@@ -1416,7 +1577,13 @@
         "mode": "unary",
         "status": 200,
         "class": "success",
-        "committed": true
+        "committed": true,
+        "price": {
+          "cost": null,
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
+        }
       }
     ]
   },
@@ -1466,9 +1633,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.05",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.05"
   },
   "stability image edit": {
     "upstream": [
@@ -1528,9 +1702,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.05",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.05"
   },
   "stability image generation": {
     "upstream": [
@@ -1586,9 +1767,16 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.05",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.05"
   },
   "strict image generation": {
     "upstream": [
@@ -1649,9 +1837,16 @@
           "image_input_tokens": 0,
           "image_output_tokens": 7,
           "media_units": "1"
+        },
+        "price": {
+          "cost": "0.116",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.116"
   },
   "xai image generation": {
     "upstream": [
@@ -1702,8 +1897,15 @@
           "output_tokens": 0,
           "total_tokens": 0,
           "media_units": "2"
+        },
+        "price": {
+          "cost": "0.09",
+          "card_revision": 3,
+          "card_markup": "1.5",
+          "card_pinned": true
         }
       }
-    ]
+    ],
+    "cost": "0.09"
   }
 }
