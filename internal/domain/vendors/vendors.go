@@ -67,11 +67,9 @@ type Contract struct {
 	// costs nothing and succeeds only for a valid credential. A media
 	// operation's certification rests on it and the reviewed codec, since
 	// proving a media model by generating with it would be billed.
-	AccountProbe   string
-	BatchWindow    *BatchWindow
-	BatchEndpoints []string
-	// BatchAPI names the adapter of the vendor's OpenAI-style files and
-	// batches API, and BatchOperations are what its batches may hold.
+	AccountProbe       string
+	BatchWindow        *BatchWindow
+	BatchEndpoints     []string
 	BatchAPI           string
 	BatchDocumentation string
 	BatchOperations    []string

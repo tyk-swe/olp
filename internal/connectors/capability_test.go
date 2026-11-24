@@ -1,6 +1,11 @@
 package connectors
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+)
 
 func TestConfigSupportsOnlyTheOperationsItsProfileServes(t *testing.T) {
 	t.Parallel()
@@ -125,5 +130,42 @@ func TestFilesAndBatchesUseTheAdapterOfTheProviderThatServesThem(t *testing.T) {
 				t.Errorf("adapter = %q, %t, want %q, %t", got, served, tc.want, tc.served)
 			}
 		})
+	}
+}
+
+func TestAVendorsBatchesAreServedOnlyThroughTheAPIItsContractNames(t *testing.T) {
+	t.Parallel()
+	profiles := Profiles()
+	for _, contract := range vendors.All() {
+		if contract.Connector != string(KindOpenAICompatible) {
+			continue
+		}
+		var adapters []BatchAdapter
+		for _, p := range profiles {
+			c := Config{Kind: KindOpenAICompatible, ProfileID: p.ID, ProfileRevision: p.Revision, VendorID: contract.ID}
+			adapter, served := c.FilesBatchesAdapter()
+			if served != c.Supports("batch", "openai", "unary") {
+				t.Errorf("%s on %s has a batch adapter = %t and serves batches = %t", contract.ID, p.ID, served, !served)
+			}
+			if !served {
+				continue
+			}
+			adapters = append(adapters, adapter)
+			for _, operation := range contract.BatchOperations {
+				if !c.Supports(operation, "openai", "unary") {
+					t.Errorf("%s on %s serves batches and not %s", contract.ID, p.ID, operation)
+				}
+			}
+		}
+		want := []BatchAdapter{}
+		if contract.BatchAPI != "" {
+			want = []BatchAdapter{BatchAdapter(contract.BatchAPI)}
+		}
+		if !slices.Equal(adapters, want) {
+			t.Errorf("%s batch adapters = %v, want %v from its contract", contract.ID, adapters, want)
+		}
+		if _, refused := vendors.BatchRefusalFor(contract.ID); refused && len(adapters) > 0 {
+			t.Errorf("%s refuses batches and is served them through %v", contract.ID, adapters)
+		}
 	}
 }
