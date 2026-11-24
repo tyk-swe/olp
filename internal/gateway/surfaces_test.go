@@ -43,6 +43,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
+	"github.com/tyk-swe/olp/tests/harness/money"
 )
 
 const (
@@ -215,12 +216,12 @@ type surfaceCondition struct {
 var statefulRouteOperations = []string{"generation", "batch", "realtime"}
 
 type recordedAttempt struct {
-	Mode      string         `json:"mode"`
-	Status    int            `json:"status"`
-	Class     string         `json:"class"`
-	Committed bool           `json:"committed"`
-	Usage     any            `json:"usage,omitempty"`
-	Price     *recordedPrice `json:"price,omitempty"`
+	Mode      string       `json:"mode"`
+	Status    int          `json:"status"`
+	Class     string       `json:"class"`
+	Committed bool         `json:"committed"`
+	Usage     any          `json:"usage,omitempty"`
+	Price     *money.Price `json:"price,omitempty"`
 }
 
 type recordedEnvelope struct {
@@ -248,7 +249,7 @@ type surfaceRecord struct {
 	Upstream    int                `json:"upstream_calls"`
 	Envelopes   []recordedEnvelope `json:"envelopes,omitempty"`
 	Cost        string             `json:"cost,omitempty"`
-	Holds       []recordedHold     `json:"holds,omitempty"`
+	Holds       []money.Hold       `json:"holds,omitempty"`
 }
 
 var surfaceRefusalHeaders = []string{"Allow", "Retry-After", "Www-Authenticate", "X-Should-Retry", "Anthropic-Ratelimit-Requests-Reset"}
@@ -331,7 +332,7 @@ type surfaceHarness struct {
 	server   *httptest.Server
 	upstream *httptest.Server
 	returned chan struct{}
-	ledger   *moneyLedger
+	ledger   *money.Ledger
 }
 
 func (h *surfaceHarness) republish(edit func(s *routing.Snapshot, a, b routing.Provider)) {
@@ -494,7 +495,7 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		})},
 		Staging: spool, Uploads: staging.NewAdmission(spool.CapacityBytes()),
 	}
-	admission, ledger := moneyAdmission(t)
+	admission, ledger := money.Scripted(t)
 	dependencies.Admission = admission
 	if limited {
 		runner, err := scripts.NewRunner(unreachableValkey{}, "test")
@@ -519,10 +520,10 @@ func (h *surfaceHarness) price(budgeted bool) {
 	h.t.Helper()
 	h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
 		if budgeted {
-			h.budget()
-			h.ledger.cap(snapshot)
+			h.rt.keys[fullKey] = h.ledger.Budget(h.rt.keys[fullKey])
+			h.ledger.Cap(snapshot, routeSlug)
 		}
-		inputs := pricedInputs(h.t, snapshot)
+		inputs := money.Inputs(h.t, snapshot, money.Operations...)
 		h.rt.mu.Lock()
 		h.rt.inputs = inputs
 		h.rt.mu.Unlock()
@@ -576,7 +577,7 @@ func (h *surfaceHarness) record(t *testing.T, response *http.Response) surfaceRe
 		record.Headers = headers
 	}
 	record.Envelopes = h.envelopes()
-	record.Cost, record.Holds = response.Header.Get("X-Olp-Cost"), h.ledger.holds()
+	record.Cost, record.Holds = response.Header.Get(money.CostHeader), h.ledger.Drain()
 	return record
 }
 
@@ -604,7 +605,7 @@ func (h *surfaceHarness) envelopes() []recordedEnvelope {
 		attempts := make([]settledAttempt, 0, len(envelope.Attempts))
 		for _, attempt := range envelope.Attempts {
 			settled := settledAttempt{
-				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed, Price: attemptPrice(envelope.Operation, &attempt)},
+				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed, Price: money.AttemptPrice(envelope.Operation, &attempt)},
 				UsageComplete:   attempt.UsageComplete, BillingUncertain: attempt.BillingUncertain,
 			}
 			if attempt.Usage != nil {

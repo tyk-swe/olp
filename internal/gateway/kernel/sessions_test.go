@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
+	"github.com/tyk-swe/olp/tests/harness/money"
 )
 
 const sessionGolden = "testdata/sessions.golden.json"
@@ -90,7 +91,7 @@ type sessionRecord struct {
 	Upstream  []any              `json:"upstream"`
 	Dials     int                `json:"dials"`
 	Envelopes []recordedEnvelope `json:"envelopes"`
-	Holds     []recordedHold     `json:"holds,omitempty"`
+	Holds     []money.Hold       `json:"holds,omitempty"`
 }
 
 func (s sessionSurface) publish(t *testing.T, h *surfaceHarness) {
@@ -188,7 +189,7 @@ func runSessionCase(t *testing.T, surface sessionSurface, condition sessionCondi
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	record.Upstream, record.Dials, record.Envelopes, record.Holds = upstream, h.mock.count(surface.mock), h.envelopes(), h.ledger.holds()
+	record.Upstream, record.Dials, record.Envelopes, record.Holds = upstream, h.mock.count(surface.mock), h.envelopes(), h.ledger.Drain()
 	if record.Dials == 0 && refusal != nil {
 		record.Close, record.Reason = int(websocket.CloseStatus(refusal)), closeReason(refusal)
 	}
