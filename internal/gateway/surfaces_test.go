@@ -148,6 +148,29 @@ func (m *surfaceMock) count(provider string) int {
 	return m.calls[provider]
 }
 
+func (m *surfaceMock) answer(provider string, handler http.HandlerFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.handlers[provider] = handler
+}
+
+func streamedCompletion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	chunk := func(rest string) string {
+		return `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"` + modelA + `",` + rest + "}\n\n"
+	}
+	io.WriteString(w, chunk(`"choices":[{"index":0,"delta":{"role":"assistant","content":"`+answerText+`"},"finish_reason":null}]`))
+	io.WriteString(w, chunk(`"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]`))
+	io.WriteString(w, chunk(`"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}`))
+	io.WriteString(w, "data: [DONE]\n\n")
+}
+
+func failedCompletion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	io.WriteString(w, `{"error":{"message":"upstream is down","type":"server_error"}}`)
+}
+
 func (m *surfaceMock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	provider := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)[0]
 	m.mu.Lock()
@@ -182,6 +205,7 @@ type surfaceCondition struct {
 	key     string
 	route   string
 	body    string
+	only    string
 	limited bool
 	prepare func(*surfaceHarness)
 	entry   bool
@@ -289,6 +313,12 @@ func surfaceConditions() []surfaceCondition {
 		{name: "stateful operations allowed", key: fullKey, route: routeSlug, state: true, prepare: (*surfaceHarness).allowStatefulOperations},
 		{name: "limits unavailable after pin", key: fullKey, route: routeSlug, limited: true, state: true, prepare: (*surfaceHarness).pinNativeBatchProviders},
 		{name: "strict route", key: fullKey, route: routeSlug, state: true, prepare: (*surfaceHarness).enableStrictStateful},
+		{name: "streamed", key: fullKey, route: routeSlug, only: "chat completions", body: `{"model":"` + routeSlug + `","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`, prepare: func(h *surfaceHarness) { h.mock.answer("a", streamedCompletion) }},
+		{name: "first provider fails", key: fullKey, route: routeSlug, only: "chat completions", prepare: func(h *surfaceHarness) { h.mock.answer("a", failedCompletion) }},
+		{name: "every provider fails", key: fullKey, route: routeSlug, only: "chat completions", prepare: func(h *surfaceHarness) {
+			h.mock.answer("a", failedCompletion)
+			h.mock.answer("b", failedCompletion)
+		}},
 	}
 }
 
@@ -614,6 +644,8 @@ func runSurfaceCase(t *testing.T, entry surfaceEntry, condition surfaceCondition
 
 func surfaceCaseApplies(entry surfaceEntry, condition surfaceCondition) bool {
 	switch {
+	case condition.only != "" && entry.name != condition.only:
+		return false
 	case condition.body != "" && entry.body == "":
 		return false
 	case condition.state && entry.headers[kernel.StateRouteHeader] == "":
