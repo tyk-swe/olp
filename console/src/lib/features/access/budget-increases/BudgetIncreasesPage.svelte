@@ -1,8 +1,8 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import type { EntitySource } from '#lib/components/entityOptions.js';
+  import { budgetGroupOptions } from '#lib/features/access/budget-groups/budgetGroupOptions.js';
   import {
-    budgetGroupOptions,
     organizationOptions,
     projectOptions
   } from '#lib/features/access/entityOptions.js';

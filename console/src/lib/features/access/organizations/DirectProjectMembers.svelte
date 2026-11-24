@@ -1,6 +1,6 @@
 <script lang="ts">
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { personOptions } from '#lib/features/access/entityOptions.js';
+  import { personOptions } from '#lib/features/access/users/personOptions.js';
   import { errorMessage } from '#lib/management/http.js';
   import type { projectMembers } from './api';
 

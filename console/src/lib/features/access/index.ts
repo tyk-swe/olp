@@ -1,9 +1,6 @@
-export {
-  budgetGroupOptions,
-  organizationOptions,
-  personOptions,
-  projectOptions
-} from './entityOptions.js';
+export { organizationOptions, projectOptions } from './entityOptions.js';
+export { budgetGroupOptions } from './budget-groups/budgetGroupOptions.js';
+export { personOptions } from './users/personOptions.js';
 export { default as ControlOverview } from './ControlOverview.svelte';
 export { getApiKey, listApiKeys } from './api-keys/api.js';
 export { apiKeyKeys } from './api-keys/apiKeyKeys.js';

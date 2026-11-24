@@ -1,6 +1,6 @@
 <script lang="ts">
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { personOptions } from '#lib/features/access/entityOptions.js';
+  import { personOptions } from '#lib/features/access/users/personOptions.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import {
