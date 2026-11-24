@@ -1,10 +1,10 @@
 <script lang="ts">
   import EmptyState from '#lib/components/EmptyState.svelte';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import type { ProviderHealth } from '#lib/features/runtime/health/api.js';
+  import type { ProviderHealth } from '#lib/features/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
-  import { healthTone } from '#lib/features/runtime/health/presentation.js';
+  import { healthTone } from '#lib/features/health/presentation.js';
 
   let {
     providers,

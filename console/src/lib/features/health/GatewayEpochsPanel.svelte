@@ -9,7 +9,7 @@
     acknowledgeRequestMetadataGatewayEpoch,
     type Readiness,
     type RequestMetadataGatewayEpoch
-  } from '#lib/features/runtime/health/api.js';
+  } from '#lib/features/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     cursorPaginationProps,

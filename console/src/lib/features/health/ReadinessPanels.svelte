@@ -1,18 +1,18 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import type { Readiness } from '#lib/features/runtime/health/api.js';
+  import type { Readiness } from '#lib/features/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
   import type { UsageCompleteness } from '#lib/features/usage/index.js';
   import { formatDate, formatInteger, stateLabel } from '#lib/format.js';
-  import { healthTone } from '#lib/features/runtime/health/presentation.js';
-  import { spoolUsage } from '#lib/features/runtime/health/spool.js';
+  import { healthTone } from '#lib/features/health/presentation.js';
+  import { spoolUsage } from '#lib/features/health/spool.js';
   import {
     CHECKPOINT_STALE_SECONDS,
     ageStatus,
     oldestPendingStatus,
     reportedAgeStatus
-  } from '#lib/features/runtime/health/staleness.js';
+  } from '#lib/features/health/staleness.js';
 
   let {
     readiness,
