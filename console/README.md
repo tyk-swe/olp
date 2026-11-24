@@ -58,14 +58,16 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 
 ## Boundaries
 
-ESLint enforces five structural rules. `eslint.config.mjs` is their source, and
+ESLint enforces six structural rules. `eslint.config.mjs` is their source, and
 `eslint/feature-boundary.mjs` resolves alias and relative imports for the first
-two:
+three:
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
   `listing/`, `components/` and `shell/`) never import from
   `src/lib/features/`. When two features need the same thing, move it into a
   shared layer.
+- A shared layer imports only itself and the layers below it. See "Shared
+  layers" below.
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into
@@ -75,11 +77,37 @@ two:
 - A `.svelte` file has no `try` block. See "Writes" below.
 
 Components that broke the size rule or the `try` rule before those rules
-existed are listed in `eslint-legacy.json`, and the other three rules have no
+existed are listed in `eslint-legacy.json`, and the other four rules have no
 exemptions. The lists only shrink: `scripts/check-exemptions.sh` fails
 `make check-console` when a list has an entry the default branch does not. Fix
 a new violation instead of listing it, and remove a file from its list in the
 change that fixes it.
+
+### Shared layers
+
+The shared layers form one strict order, so no two of them import each other.
+The list runs from the lowest layer to the highest, and a layer imports only
+itself and the layers listed before it:
+
+1. `src/lib/*.ts` holds pure helpers such as formatting and imports no other
+   layer.
+2. `management/` is the management API transport, its generated schema and its
+   query and header helpers. It imports `src/lib/*.ts`.
+3. `session/` is the signed-in principal, its permissions and the authenticated
+   `apiClient`. It imports `management/` and below.
+4. `editing/` is the write and concurrent-edit machinery. It imports `session/`
+   and below.
+5. `listing/` is the list filter and page state. It imports `editing/` and
+   below.
+6. `components/` is the generic UI that knows nothing about the application
+   frame. It imports `listing/` and below.
+7. `shell/` is the application frame, which is the sidebar, navigation and
+   section layout. It imports `components/` and below.
+
+Features and routes sit above all seven and import any of them. The order is
+the `sharedLayers` list in `eslint.config.mjs`. A new folder under `src/lib`
+ranks above `shell/` until it is added to that list, so no listed layer can
+import it. Test files are exempt from the three import rules.
 
 ## Writes
 

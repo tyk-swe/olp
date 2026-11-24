@@ -9,6 +9,15 @@ const tsFiles = ['**/*.{ts,tsx}'];
 const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 const sourceFiles = ['src/**/*.{ts,svelte}'];
 const testFiles = ['src/**/*.test.ts', 'src/**/test/**'];
+const sharedLayers = [
+  '.',
+  'management',
+  'session',
+  'editing',
+  'listing',
+  'components',
+  'shell'
+];
 const apiModules = [
   'src/lib/management/**',
   'src/lib/features/**/api.ts',
@@ -123,7 +132,7 @@ export default [
     files: sourceFiles,
     ignores: testFiles,
     plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
-    rules: { 'console/feature-boundary': 'error' }
+    rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
   },
   {
     files: ['src/**/*.svelte'],

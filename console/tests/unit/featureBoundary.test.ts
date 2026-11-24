@@ -11,6 +11,8 @@ RuleTester.itOnly = it.only;
 const inLib = (file: string) => path.resolve('src/lib', file);
 const entry = [{ messageId: 'entry' }];
 const shared = [{ messageId: 'shared' }];
+const layer = [{ messageId: 'layer' }];
+const ordered = [{ layers: ['.', 'management', 'components', 'shell'] }];
 
 new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
   'feature-boundary',
@@ -28,6 +30,21 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
       {
         filename: path.resolve('src/routes/sinks/+page.ts'),
         code: "import { a } from '#lib/features/sinks/api.js';"
+      },
+      {
+        filename: inLib('shell/Sidebar.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/components/Menu.js'; import { b } from '../management/http.js'; import { c } from './navigation.js'; export { d } from '../format.js'; import { e } from 'svelte';"
+      },
+      {
+        filename: inLib('features/sinks/api.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/shell/navigation.js'; import { b } from '#lib/management/http.js';"
+      },
+      {
+        filename: inLib('unlisted/widget.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/shell/navigation.js';"
       }
     ],
     invalid: [
@@ -55,6 +72,24 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         filename: inLib('format.ts'),
         code: "import type { A } from './features/sinks/index.js'; export type { A };",
         errors: shared
+      },
+      {
+        filename: inLib('components/Tabs.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/shell/navigation.js'; export { b } from '../shell/indicator.js'; export * from '../shell/icons.js'; const c = () => import('#lib/shell/icons.js'); export { a, c };",
+        errors: [...layer, ...layer, ...layer, ...layer]
+      },
+      {
+        filename: inLib('format.ts'),
+        options: ordered,
+        code: "import { a } from './management/http.js'; export { a };",
+        errors: layer
+      },
+      {
+        filename: inLib('shell/Sidebar.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/unlisted/widget.js'; export { a };",
+        errors: layer
       }
     ]
   }
