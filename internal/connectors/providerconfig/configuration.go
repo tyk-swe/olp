@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
@@ -99,13 +100,13 @@ func CloneNetwork(network *egress.ConnectionOptions) *egress.ConnectionOptions {
 		return nil
 	}
 	copied := *network
-	copied.ConnectTimeoutMS = clonePtr(network.ConnectTimeoutMS)
-	copied.TLSHandshakeTimeoutMS = clonePtr(network.TLSHandshakeTimeoutMS)
-	copied.ResponseHeaderTimeoutMS = clonePtr(network.ResponseHeaderTimeoutMS)
-	copied.IdleConnTimeoutMS = clonePtr(network.IdleConnTimeoutMS)
-	copied.MaxIdleConns = clonePtr(network.MaxIdleConns)
-	copied.MaxIdleConnsPerHost = clonePtr(network.MaxIdleConnsPerHost)
-	copied.MaxConnsPerHost = clonePtr(network.MaxConnsPerHost)
+	copied.ConnectTimeoutMS = ptr.Clone(network.ConnectTimeoutMS)
+	copied.TLSHandshakeTimeoutMS = ptr.Clone(network.TLSHandshakeTimeoutMS)
+	copied.ResponseHeaderTimeoutMS = ptr.Clone(network.ResponseHeaderTimeoutMS)
+	copied.IdleConnTimeoutMS = ptr.Clone(network.IdleConnTimeoutMS)
+	copied.MaxIdleConns = ptr.Clone(network.MaxIdleConns)
+	copied.MaxIdleConnsPerHost = ptr.Clone(network.MaxIdleConnsPerHost)
+	copied.MaxConnsPerHost = ptr.Clone(network.MaxConnsPerHost)
 	return &copied
 }
 
@@ -143,14 +144,6 @@ func CloneBindings(values map[string]connectors.Binding) map[string]connectors.B
 		out[name] = binding
 	}
 	return out
-}
-
-func clonePtr[T any](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
 }
 
 func Value[T string | *string](value T) string {

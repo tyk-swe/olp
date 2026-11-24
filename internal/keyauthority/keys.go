@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -286,13 +287,6 @@ func (a Authority) groupBoundary() []CostBoundary {
 		costLimits{a.BudgetGroupDailyCostLimit, a.BudgetGroupWeeklyCostLimit, a.BudgetGroupMonthlyCostLimit})}
 }
 
-func text(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 func (p *BudgetPolicy) costLimits() costLimits {
 	return costLimits{p.DailyCostLimit, p.WeeklyCostLimit, p.MonthlyCostLimit}
 }
@@ -304,8 +298,8 @@ func (a Authority) aggregateBoundaries() ([]CostBoundary, bool) {
 		policy        *BudgetPolicy
 	}{
 		{"installation", a.InstallationID, a.InstallationBudget},
-		{"organization", text(a.OrganizationID), a.OrganizationBudget},
-		{"project", text(a.ProjectID), a.ProjectBudget},
+		{"organization", ptr.Value(a.OrganizationID), a.OrganizationBudget},
+		{"project", ptr.Value(a.ProjectID), a.ProjectBudget},
 	} {
 		if !level.policy.Limited() {
 			continue

@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -72,8 +73,8 @@ func fromRevision(stored revision, draft map[string]int, imported *Billing) (Ent
 				Enabled:       slot.Enabled,
 				Priority:      slot.Priority,
 				Weight:        slot.Weight,
-				AllowedModels: promotion.NonNil(slot.AllowedModels),
-				AllowedRoutes: promotion.NonNil(slot.AllowedRoutes),
+				AllowedModels: ptr.NonNil(slot.AllowedModels),
+				AllowedRoutes: ptr.NonNil(slot.AllowedRoutes),
 				Limits:        connection.LimitsFromServing(slot.Limits),
 				Credential:    storedCredential(configuration.Grant(), slot.CredentialID != nil),
 			}

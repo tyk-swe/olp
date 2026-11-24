@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -47,7 +48,7 @@ func Parse(document contract.ConfigurationDocument) ([]Project, error) {
 }
 
 func Render(projects []Project) ([]contract.ConfigurationProjectEntry, error) {
-	return promotion.Convert[[]contract.ConfigurationProjectEntry](promotion.NonNil(slices.SortedFunc(slices.Values(projects), byName)))
+	return promotion.Convert[[]contract.ConfigurationProjectEntry](ptr.NonNil(slices.SortedFunc(slices.Values(projects), byName)))
 }
 
 func (p Project) normalized() Project {
@@ -144,7 +145,7 @@ func sortedMembers(members []string) []string {
 	if members == nil {
 		return nil
 	}
-	return promotion.NonNil(slices.Sorted(slices.Values(members)))
+	return ptr.NonNil(slices.Sorted(slices.Values(members)))
 }
 
 func byName(a, b Project) int {

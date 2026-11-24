@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -162,7 +163,7 @@ func (p *requestPreparation) evidence(key preparationKey) preparationEvidence {
 		planClass = receipt.Class
 	}
 	return preparationEvidence{
-		guardrails: slices.Clone(record.guardrailDecisions), planClass: planClass, output: copiedOutput(output),
+		guardrails: slices.Clone(record.guardrailDecisions), planClass: planClass, output: ptr.Clone(output),
 		document: record.provider.invocation.Prepared.Document(),
 	}
 }
@@ -199,13 +200,6 @@ func retainedParameters(parameters routing.Names, planning bool) routing.Names {
 		return nil
 	}
 	return routing.Listed(parameters())
-}
-
-func copiedOutput(output *int64) *int64 {
-	if output == nil {
-		return nil
-	}
-	return new(*output)
 }
 
 func (p *requestPreparation) remember(key preparationKey, record targetPreparation) {

@@ -282,21 +282,6 @@ func unchangedSince(ctx context.Context, read *record, during string) func(pgx.T
 	}
 }
 
-func valueOr[T any](v *T, fallback T) T {
-	if v == nil {
-		return fallback
-	}
-	return *v
-}
-
-func deref[T comparable](v *T) T {
-	var zero T
-	if v == nil {
-		return zero
-	}
-	return *v
-}
-
 func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
 	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.providers")
 	if err != nil {

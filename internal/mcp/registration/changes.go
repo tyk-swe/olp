@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -85,8 +86,8 @@ func (s *Server) loadForWrite(ctx context.Context, tx pgx.Tx, principal authz.Pr
 
 func inputLimits(in Input) routing.ToolLimits {
 	return routing.EffectiveToolLimits(
-		routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute), routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
-		routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute), routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+		ptr.Or(in.CallsPerMinute, routing.DefaultToolCallsPerMinute), ptr.Or(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		ptr.Or(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute), ptr.Or(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 }
 
 func (s *Server) saveCredential(ctx context.Context, tx pgx.Tx, in Input, current *Definition, material []byte) (*string, error) {
@@ -115,7 +116,7 @@ func definitionFromInput(in Input, current *Definition, catalog *upstream.Catalo
 		ProjectID: project, Name: in.Name, Endpoint: in.Endpoint, Enabled: *in.Enabled,
 		Transport: string(definitionTransport(in, current)), Stdio: definitionStdio(in, current), Catalog: catalog,
 		CredentialID: credentialID, DelegationKeyID: signingID, EntraClientSecretID: entraID,
-		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
+		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), UnitPrice: ptr.Clone(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute: limits.CallsPerMinute, MaxConcurrency: limits.MaxConcurrency, PerKeyCallsPerMinute: limits.PerKeyCallsPerMinute, PerKeyMaxConcurrency: limits.PerKeyMaxConcurrency,
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -40,7 +41,7 @@ func exported(ctx context.Context, q database.Queryer, directory promotion.Direc
 		if err != nil {
 			return "", err
 		}
-		if !found || key.Revoked || key.Expired || promotion.ValueOf(key.ProjectID) != binding.ProjectID {
+		if !found || key.Revoked || key.Expired || ptr.Value(key.ProjectID) != binding.ProjectID {
 			return "", httpkit.Invalid("retrieval_bindings.key_grants", "Remove inactive API-key grants before exporting retrieval bindings.")
 		}
 		return key.Name, nil

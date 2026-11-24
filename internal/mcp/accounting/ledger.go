@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -77,7 +78,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
 		ToolAlias: in.ToolAlias, InputDigest: in.InputDigest, CallDigest: in.CallDigest,
 		AgentPrincipalID: in.Authority.DelegationAgentID, MemberPrincipalID: in.Authority.DelegationMemberID, DelegationPairDigest: in.Authority.DelegationPairDigest,
-		UnitPrice: cloneUnitPrice(in.UnitPrice), Currency: currency,
+		UnitPrice: ptr.Clone(in.UnitPrice), Currency: currency,
 	}
 	if in.RunID != "" {
 		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {

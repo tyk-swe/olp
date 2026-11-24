@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 func (config Config) Clone() Config {
 	out := config
-	out.Plugin = copyPointer(config.Plugin)
+	out.Plugin = ptr.Clone(config.Plugin)
 	out.TuningDatasetURIPrefixes = slices.Clone(config.TuningDatasetURIPrefixes)
 	out.DocumentURIPrefixes = slices.Clone(config.DocumentURIPrefixes)
 	if config.BatchStorage != nil {
@@ -31,13 +33,13 @@ func (config Config) Clone() Config {
 	}
 	if config.Network != nil {
 		network := *config.Network
-		network.ConnectTimeoutMS = copyPointer(network.ConnectTimeoutMS)
-		network.TLSHandshakeTimeoutMS = copyPointer(network.TLSHandshakeTimeoutMS)
-		network.ResponseHeaderTimeoutMS = copyPointer(network.ResponseHeaderTimeoutMS)
-		network.IdleConnTimeoutMS = copyPointer(network.IdleConnTimeoutMS)
-		network.MaxIdleConns = copyPointer(network.MaxIdleConns)
-		network.MaxIdleConnsPerHost = copyPointer(network.MaxIdleConnsPerHost)
-		network.MaxConnsPerHost = copyPointer(network.MaxConnsPerHost)
+		network.ConnectTimeoutMS = ptr.Clone(network.ConnectTimeoutMS)
+		network.TLSHandshakeTimeoutMS = ptr.Clone(network.TLSHandshakeTimeoutMS)
+		network.ResponseHeaderTimeoutMS = ptr.Clone(network.ResponseHeaderTimeoutMS)
+		network.IdleConnTimeoutMS = ptr.Clone(network.IdleConnTimeoutMS)
+		network.MaxIdleConns = ptr.Clone(network.MaxIdleConns)
+		network.MaxIdleConnsPerHost = ptr.Clone(network.MaxIdleConnsPerHost)
+		network.MaxConnsPerHost = ptr.Clone(network.MaxConnsPerHost)
 		out.Network = &network
 	}
 	return out
@@ -65,12 +67,4 @@ func copyDefaults(values map[string]DefaultSet) map[string]DefaultSet {
 		out[name] = value
 	}
 	return out
-}
-
-func copyPointer[T any](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	out := *value
-	return &out
 }

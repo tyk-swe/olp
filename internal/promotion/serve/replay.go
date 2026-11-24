@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -56,8 +57,8 @@ func credentialMaterial(credential promotion.Credential) ([]byte, error) {
 }
 
 func declaredCode(bindings *contract.ConfigurationCodeBindings) *contract.ConfigurationCodeBindings {
-	declared := promotion.ValueOf(bindings)
-	if len(promotion.ValueOf(declared.Credentials))+len(promotion.ValueOf(declared.Users))+len(promotion.ValueOf(declared.ApiKeys)) == 0 {
+	declared := ptr.Value(bindings)
+	if len(ptr.Value(declared.Credentials))+len(ptr.Value(declared.Users))+len(ptr.Value(declared.ApiKeys)) == 0 {
 		return nil
 	}
 	return bindings

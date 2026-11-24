@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -105,8 +106,8 @@ func (s slotScope) parse(j int, slot contract.ConfigurationSlotEntry) (Slot, err
 		Enabled:       slot.Enabled,
 		Priority:      int(slot.Priority),
 		Weight:        int64(slot.Weight),
-		AllowedModels: promotion.NonNil(slot.Restrictions.AllowedModels),
-		AllowedRoutes: promotion.NonNil(slot.Restrictions.AllowedRoutes),
+		AllowedModels: ptr.NonNil(slot.Restrictions.AllowedModels),
+		AllowedRoutes: ptr.NonNil(slot.Restrictions.AllowedRoutes),
 		Limits:        limits,
 		Credential:    credential,
 	}, nil
@@ -204,8 +205,8 @@ func renderSlots(entry Entry) ([]contract.ConfigurationSlotEntry, error) {
 			Priority:      int32(slot.Priority),
 			Restrictions: contract.ConfigurationSlotRestrictions{
 				AllowedApiKeys: []string{},
-				AllowedModels:  promotion.NonNil(slices.Sorted(slices.Values(slot.AllowedModels))),
-				AllowedRoutes:  promotion.NonNil(slices.Sorted(slices.Values(slot.AllowedRoutes))),
+				AllowedModels:  ptr.NonNil(slices.Sorted(slices.Values(slot.AllowedModels))),
+				AllowedRoutes:  ptr.NonNil(slices.Sorted(slices.Values(slot.AllowedRoutes))),
 			},
 			Weight: int32(slot.Weight),
 		}, nil

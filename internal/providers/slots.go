@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -144,18 +145,11 @@ func (row slotRow) reply() slotReply {
 	return slotReply{
 		ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight,
 		CredentialVersionID: row.CredentialID,
-		AllowedAPIKeys:      orEmpty(row.Restrictions.AllowedAPIKeys), AllowedModels: orEmpty(row.Restrictions.AllowedModels), AllowedRoutes: orEmpty(row.Restrictions.AllowedRoutes),
+		AllowedAPIKeys:      ptr.NonNil(row.Restrictions.AllowedAPIKeys), AllowedModels: ptr.NonNil(row.Restrictions.AllowedModels), AllowedRoutes: ptr.NonNil(row.Restrictions.AllowedRoutes),
 		MaxConcurrency: row.Limits.MaxConcurrency, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute,
 		InputTokensPerMinute: row.Limits.InputTokensPerMinute, OutputTokensPerMinute: row.Limits.OutputTokensPerMinute,
 		DailyCostLimit: row.Limits.DailyCostLimit, MonthlyCostLimit: row.Limits.MonthlyCostLimit, PriorityShares: row.Limits.PriorityShares, SaturationPercent: row.Limits.SaturationPercent,
 	}
-}
-
-func orEmpty(list []string) []string {
-	if list == nil {
-		return []string{}
-	}
-	return list
 }
 
 func (s *Server) slotList(ctx context.Context, q database.Queryer, current *record) (httpkit.Reply, error) {

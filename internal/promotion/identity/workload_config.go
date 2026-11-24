@@ -6,6 +6,7 @@ import (
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -18,7 +19,7 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 			return workload.Mapping{}, err
 		}
 		return workload.Mapping{
-			AgentPrincipal:     promotion.ValueOf(m.AgentPrincipal),
+			AgentPrincipal:     ptr.Value(m.AgentPrincipal),
 			Name:               m.Name,
 			Match:              m.Match,
 			ProjectID:          id,
@@ -28,7 +29,7 @@ func configOf(issuer contract.ConfigurationWorkloadIssuer, projectID func(string
 			AllowedAgents:      identifiers(m.AllowedAgents),
 			Scopes:             promotion.Map(m.Scopes, func(s contract.ConfigurationWorkloadMappingScopes) string { return string(s) }),
 			EndUserClaim:       promotion.Pointer(m.EndUserClaim),
-			AllowProviderState: promotion.ValueOf(m.AllowProviderState),
+			AllowProviderState: ptr.Value(m.AllowProviderState),
 		}, nil
 	})
 	if err != nil {
@@ -109,10 +110,10 @@ func canonicalConfig(c workload.Config) workload.Config {
 		Issuer:             c.Issuer,
 		JWKSURL:            c.JWKSURL,
 		Enabled:            c.Enabled,
-		Audiences:          promotion.NonNil(c.Audiences),
-		Algorithms:         promotion.NonNil(c.Algorithms),
+		Audiences:          ptr.NonNil(c.Audiences),
+		Algorithms:         ptr.NonNil(c.Algorithms),
 		MaxLifetimeSeconds: c.MaxLifetimeSeconds,
-		DisabledKeyIDs:     promotion.NonNil(c.DisabledKeyIDs),
+		DisabledKeyIDs:     ptr.NonNil(c.DisabledKeyIDs),
 		Mappings:           promotion.Map(c.Mappings, canonicalMapping),
 	}
 }
@@ -124,10 +125,10 @@ func canonicalMapping(m workload.Mapping) workload.Mapping {
 		Match:              maps.Collect(maps.All(m.Match)),
 		ProjectID:          m.ProjectID,
 		LimitTemplate:      m.LimitTemplate,
-		RouteGroups:        promotion.NonNil(m.RouteGroups),
-		AllowedToolsets:    promotion.NonNil(m.AllowedToolsets),
-		AllowedAgents:      promotion.NonNil(m.AllowedAgents),
-		Scopes:             promotion.NonNil(m.Scopes),
+		RouteGroups:        ptr.NonNil(m.RouteGroups),
+		AllowedToolsets:    ptr.NonNil(m.AllowedToolsets),
+		AllowedAgents:      ptr.NonNil(m.AllowedAgents),
+		Scopes:             ptr.NonNil(m.Scopes),
 		EndUserClaim:       m.EndUserClaim,
 		AllowProviderState: m.AllowProviderState,
 	}

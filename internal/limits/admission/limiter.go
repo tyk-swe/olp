@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
@@ -59,21 +60,14 @@ func (l *Limiter) holdCost(ctx context.Context, budget *limits.CostBudget, ttl t
 	return &costHold{budget: *budget, reservation: reservation}, nil
 }
 
-func limit(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
 func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error) {
 	id := uuid.Must(uuid.NewV7()).String()
 	reservation := scripts.RateReservation{
 		Lookup: r.Lookup, LeaseID: id, TTL: r.LeaseTTL,
 		Tokens: r.Rate.Tokens, InputTokens: r.Rate.InputTokens, OutputTokens: r.Rate.OutputTokens,
-		RequestsPerMinute: limit(r.Rate.RequestsPerMinute), TokensPerMinute: limit(r.Rate.TokensPerMinute),
-		InputTokensPerMinute: limit(r.Rate.InputTokensPerMinute), OutputTokensPerMinute: limit(r.Rate.OutputTokensPerMinute),
-		MaxConcurrency: limit(r.Rate.MaxConcurrency), TrackConcurrency: r.Rate.TrackConcurrency,
+		RequestsPerMinute: ptr.Value(r.Rate.RequestsPerMinute), TokensPerMinute: ptr.Value(r.Rate.TokensPerMinute),
+		InputTokensPerMinute: ptr.Value(r.Rate.InputTokensPerMinute), OutputTokensPerMinute: ptr.Value(r.Rate.OutputTokensPerMinute),
+		MaxConcurrency: ptr.Value(r.Rate.MaxConcurrency), TrackConcurrency: r.Rate.TrackConcurrency,
 		Stated: r.Rate.reports(),
 	}
 	if r.Rate.Share.divides() {

@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -202,9 +203,9 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		name := strings.TrimSpace(valueOr(input.Name, current.Name))
-		destination := valueOr(input.Destination, current.Destination)
-		enabled := valueOr(input.Enabled, current.Enabled)
+		name := strings.TrimSpace(ptr.Or(input.Name, current.Name))
+		destination := ptr.Or(input.Destination, current.Destination)
+		enabled := ptr.Or(input.Enabled, current.Enabled)
 		spec, err := a.updatedSpec(ctx, tx, k, input.Settings, previous, current)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -497,11 +498,4 @@ func (a *API) storeCredential(ctx context.Context, tx pgx.Tx, raw json.RawMessag
 
 func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
-}
-
-func valueOr[T any](value *T, fallback T) T {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }

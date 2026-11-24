@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -25,8 +26,8 @@ func (a *Admission) ReserveAggregateBudgets(ctx context.Context, authority *keya
 		policy         *keyauthority.BudgetPolicy
 	}{
 		{"installation", authority.InstallationID, authority.InstallationBudget},
-		{"organization", projectBudgetSubject(authority.OrganizationID), authority.OrganizationBudget},
-		{"project", projectBudgetSubject(authority.ProjectID), authority.ProjectBudget},
+		{"organization", ptr.Value(authority.OrganizationID), authority.OrganizationBudget},
+		{"project", ptr.Value(authority.ProjectID), authority.ProjectBudget},
 	} {
 		if !boundary.policy.Limited() {
 			continue
@@ -110,13 +111,6 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 		return nil, failure
 	}
 	return nil, a.Outage(keyID, true, err)
-}
-
-func projectBudgetSubject(project *string) string {
-	if project == nil {
-		return ""
-	}
-	return *project
 }
 
 func budgetBoundaryError(e *fault.Error, name, param string) *fault.Error {

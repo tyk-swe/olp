@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 
 	"github.com/jackc/pgx/v5"
@@ -61,7 +62,7 @@ func parsePolicies(declared []contract.ConfigurationGuardrailPolicyEntry, defini
 
 func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 	return Policy{Project: p.Project, Name: p.Name, Entries: promotion.Map(p.Entries, func(e rule) Entry {
-		return Entry{Guardrail: e.Guardrail, Phase: guardrailpolicy.Phase(e.Phase), Action: guardrailpolicy.Action(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
+		return Entry{Guardrail: e.Guardrail, Phase: guardrailpolicy.Phase(e.Phase), Action: guardrailpolicy.Action(e.Action), Monitor: ptr.Value(e.Monitor), Mandatory: ptr.Value(e.Mandatory)}
 	})}
 }
 

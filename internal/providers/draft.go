@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -233,7 +234,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 	case !configuration.CredentialRequired() && credential != nil:
 		return createdProvider{}, httpkit.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
-	displayName := cmp.Or(deref(input.DisplayName), deref(input.Model))
+	displayName := cmp.Or(ptr.Value(input.DisplayName), ptr.Value(input.Model))
 	if input.Model != nil {
 		if err = connection.ValidModelName("model", *input.Model); err != nil {
 			return createdProvider{}, err
@@ -477,9 +478,9 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 		return err
 	}
 	for _, slot := range slots {
-		slot.Restrictions.AllowedAPIKeys = orEmpty(slot.Restrictions.AllowedAPIKeys)
-		slot.Restrictions.AllowedModels = orEmpty(slot.Restrictions.AllowedModels)
-		slot.Restrictions.AllowedRoutes = orEmpty(slot.Restrictions.AllowedRoutes)
+		slot.Restrictions.AllowedAPIKeys = ptr.NonNil(slot.Restrictions.AllowedAPIKeys)
+		slot.Restrictions.AllowedModels = ptr.NonNil(slot.Restrictions.AllowedModels)
+		slot.Restrictions.AllowedRoutes = ptr.NonNil(slot.Restrictions.AllowedRoutes)
 		restrictions, err := json.Marshal(slot.Restrictions)
 		if err != nil {
 			return err

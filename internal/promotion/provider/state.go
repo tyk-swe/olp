@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -125,7 +126,7 @@ func draftEntry(row providers.ProviderSnapshot, configuration connection.Configu
 		if err := json.Unmarshal(model.Capabilities, &capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}
-		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: model.Enabled, Capabilities: promotion.NonNil(capabilities)}, nil
+		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: model.DisplayName, Enabled: model.Enabled, Capabilities: ptr.NonNil(capabilities)}, nil
 	})
 	if err != nil {
 		return Entry{}, err
@@ -163,11 +164,11 @@ func parseSlotRow(row providers.SlotSnapshot, grant bool) (storedPair, error) {
 		Enabled:       row.Enabled,
 		Priority:      row.Priority,
 		Weight:        row.Weight,
-		AllowedModels: promotion.NonNil(restrictions.AllowedModels),
-		AllowedRoutes: promotion.NonNil(restrictions.AllowedRoutes),
+		AllowedModels: ptr.NonNil(restrictions.AllowedModels),
+		AllowedRoutes: ptr.NonNil(restrictions.AllowedRoutes),
 		Limits:        limits,
 		Credential:    storedCredential(grant, row.CredentialID != nil),
-	}, state: storedSlot{id: row.ID, credentialID: row.Usable, pluginDigest: row.PluginDigest, profileID: row.ProfileID, allowedAPIKeys: promotion.NonNil(restrictions.AllowedAPIKeys)}}, nil
+	}, state: storedSlot{id: row.ID, credentialID: row.Usable, pluginDigest: row.PluginDigest, profileID: row.ProfileID, allowedAPIKeys: ptr.NonNil(restrictions.AllowedAPIKeys)}}, nil
 }
 
 func storedSlots(pairs []storedPair) map[string]storedSlot {

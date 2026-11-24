@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -35,7 +36,7 @@ func fromDefinition(definition registration.Definition, projectName string) Serv
 			transport: routing.MCPTransport(definition.Transport), endpoint: definition.Endpoint, stdio: definition.Stdio,
 			oauth: definition.OAuth, delegation: definition.Delegation, bearer: bearerOf(definition.HasCredential, ref),
 		}),
-		UnitPrice: definition.UnitPrice, ToolPrices: nonNil(definition.ToolPrices),
+		UnitPrice: definition.UnitPrice, ToolPrices: ptr.NonNilMap(definition.ToolPrices),
 		Limits: routing.ToolLimits{
 			CallsPerMinute: definition.CallsPerMinute, MaxConcurrency: definition.MaxConcurrency,
 			PerKeyCallsPerMinute: definition.PerKeyCallsPerMinute, PerKeyMaxConcurrency: definition.PerKeyMaxConcurrency,

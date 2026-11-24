@@ -25,7 +25,7 @@ func reasonOf(plan Plan, targetID string) string {
 func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 	s, slug, ids := planningFixture()
 	capped := s.Providers[ids[0]]
-	capped.Limits = &Limits{Supply: Supply{DailyCostLimit: ptr("10")}}
+	capped.Limits = &Limits{Supply: Supply{DailyCostLimit: new("10")}}
 	s.Providers[capped.ID] = capped
 	route := s.Routes[slug]
 
@@ -49,7 +49,7 @@ func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 		t.Fatalf("unknown spend: %+v", plan.Decisions)
 	}
 
-	route.Budget = &CostLimits{MonthlyCostLimit: ptr("100")}
+	route.Budget = &CostLimits{MonthlyCostLimit: new("100")}
 	route.ID = uuid.NewString()
 	s.Routes[slug] = route
 	state = &SupplyState{Spend: map[string]Spend{route.ID: SpendExhausted, capped.ID: SpendAvailable}}
@@ -73,7 +73,7 @@ func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 func TestSpendCapWithoutSlotCheckLeavesAttemptSlotsUnset(t *testing.T) {
 	s, slug, ids := planningFixture()
 	capped := s.Providers[ids[0]]
-	capped.Limits = &Limits{Supply: Supply{DailyCostLimit: ptr("10")}}
+	capped.Limits = &Limits{Supply: Supply{DailyCostLimit: new("10")}}
 	s.Providers[capped.ID] = capped
 	options := Options{CheckSlots: false, Supply: supplyFunc(func(SupplyQuery) *SupplyState {
 		return &SupplyState{Spend: map[string]Spend{capped.ID: SpendAvailable}}
@@ -112,7 +112,7 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	route.MaxAttempts = 6
 	s.Routes[slug] = route
 	var queried SupplyQuery
-	options := Options{CheckSlots: true, Preferences: &Preferences{Strategy: ptr("capacity")}, Supply: supplyFunc(func(q SupplyQuery) *SupplyState {
+	options := Options{CheckSlots: true, Preferences: &Preferences{Strategy: new("capacity")}, Supply: supplyFunc(func(q SupplyQuery) *SupplyState {
 		queried = q
 		state := &SupplyState{Headroom: map[SlotModel]float64{}}
 		for _, entry := range q.Slots {

@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 // ConnectionOptions configures one provider connection. CredentialID identifies
@@ -243,12 +245,6 @@ func milliseconds(value *int64, fallback time.Duration) time.Duration {
 	}
 	return time.Duration(*value) * time.Millisecond
 }
-func connectionCount(value *int, fallback int) int {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
 
 // ConnectionClient builds one reusable client. Use ConnectionClientCache at
 // request-serving call sites rather than constructing a transport per request.
@@ -318,7 +314,7 @@ func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defa
 	transport := &http.Transport{
 		Proxy: nil, DialContext: dial.DialContext, DialTLSContext: dial.DialTLSContext, TLSClientConfig: tlsConfig, TLSHandshakeTimeout: tlsTimeout,
 		ResponseHeaderTimeout: milliseconds(options.ResponseHeaderTimeoutMS, defaultResponseHeaderTimeout), ExpectContinueTimeout: time.Second, MaxResponseHeaderBytes: 32 << 10,
-		IdleConnTimeout: milliseconds(options.IdleConnTimeoutMS, 90*time.Second), MaxIdleConns: connectionCount(options.MaxIdleConns, 128), MaxIdleConnsPerHost: connectionCount(options.MaxIdleConnsPerHost, 16), MaxConnsPerHost: connectionCount(options.MaxConnsPerHost, 64), ForceAttemptHTTP2: true,
+		IdleConnTimeout: milliseconds(options.IdleConnTimeoutMS, 90*time.Second), MaxIdleConns: ptr.Or(options.MaxIdleConns, 128), MaxIdleConnsPerHost: ptr.Or(options.MaxIdleConnsPerHost, 16), MaxConnsPerHost: ptr.Or(options.MaxConnsPerHost, 64), ForceAttemptHTTP2: true,
 	}
 	redirect := func(*http.Request, []*http.Request) error { return ErrRedirect }
 	if raw {

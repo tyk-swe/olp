@@ -162,12 +162,6 @@ func parseEvidenceDigest(digest string) ([]byte, bool) {
 	return decoded, true
 }
 
-func cloneUnitPrice(price *string) *string {
-	if price == nil {
-		return nil
-	}
-	return new(*price)
-}
 func canonicalUUID(raw string) bool {
 	id, err := uuid.Parse(raw)
 	return err == nil && id != uuid.Nil && id.String() == raw

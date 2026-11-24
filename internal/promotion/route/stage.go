@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -67,7 +68,7 @@ func lifecycle(r Route, state State) []promotion.Item {
 	switch {
 	case !ok:
 		return nil
-	case !strings.EqualFold(promotion.ValueOf(existing.Project), promotion.ValueOf(r.Project)):
+	case !strings.EqualFold(ptr.Value(existing.Project), ptr.Value(r.Project)):
 		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_project_mismatch")}
 	case r.Retired && !existing.Retired:
 		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_lifecycle_requires_retirement")}

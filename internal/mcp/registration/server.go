@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -103,14 +104,6 @@ func (in *Input) UnmarshalJSON(data []byte) error {
 func (in Input) Present(field string) bool {
 	_, present := in.present[field]
 	return present
-}
-
-func clonePrice(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	out := *value
-	return &out
 }
 
 func cloneToolPrices(values map[string]string) map[string]string {
@@ -293,7 +286,7 @@ func mergeAbsentPricingAndLimits(in Input, previous *Definition) Input {
 	return Input{
 		Delegation:           inheritedInputField(in, "delegation", in.Delegation, previous.Delegation).Clone(),
 		OAuth:                inheritedInputField(in, "oauth", in.OAuth, previous.OAuth).Clone(),
-		UnitPrice:            clonePrice(inheritedInputField(in, "unit_price", in.UnitPrice, previous.UnitPrice)),
+		UnitPrice:            ptr.Clone(inheritedInputField(in, "unit_price", in.UnitPrice, previous.UnitPrice)),
 		ToolPrices:           cloneToolPrices(inheritedInputField(in, "tool_prices", in.ToolPrices, previous.ToolPrices)),
 		CallsPerMinute:       limit("calls_per_minute", in.CallsPerMinute, previous.CallsPerMinute, routing.DefaultToolCallsPerMinute),
 		MaxConcurrency:       limit("max_concurrency", in.MaxConcurrency, previous.MaxConcurrency, routing.DefaultToolMaxConcurrency),
@@ -338,10 +331,10 @@ func limitsOnlyUpdate(in Input, previous *Definition) bool {
 		}
 	}
 	effective := routing.EffectiveToolLimits(
-		routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
-		routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
-		routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
-		routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+		ptr.Or(in.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+		ptr.Or(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		ptr.Or(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+		ptr.Or(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 	return effective != routing.EffectiveToolLimits(previous.CallsPerMinute, previous.MaxConcurrency, previous.PerKeyCallsPerMinute, previous.PerKeyMaxConcurrency)
 }
 

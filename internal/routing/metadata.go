@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 type decodedMetadata struct {
@@ -89,9 +91,9 @@ func (m ModelMetadata) clone() ModelMetadata {
 		return new(slices.Clone(*m.SupportedParameters))
 	}()
 	return ModelMetadata{
-		CanonicalModel: copyPointer(m.CanonicalModel), InputModalities: slices.Clone(m.InputModalities), OutputModalities: slices.Clone(m.OutputModalities),
-		ContextLength: copyPointer(m.ContextLength), MaxOutputTokens: copyPointer(m.MaxOutputTokens), SupportedParameters: parameters,
-		Quantization: copyPointer(m.Quantization), Region: copyPointer(m.Region), DataCollection: copyPointer(m.DataCollection),
-		ZeroDataRetention: copyPointer(m.ZeroDataRetention), Deployment: copyPointer(m.Deployment), Source: copyPointer(m.Source), ObservedAt: copyPointer(m.ObservedAt),
+		CanonicalModel: ptr.Clone(m.CanonicalModel), InputModalities: slices.Clone(m.InputModalities), OutputModalities: slices.Clone(m.OutputModalities),
+		ContextLength: ptr.Clone(m.ContextLength), MaxOutputTokens: ptr.Clone(m.MaxOutputTokens), SupportedParameters: parameters,
+		Quantization: ptr.Clone(m.Quantization), Region: ptr.Clone(m.Region), DataCollection: ptr.Clone(m.DataCollection),
+		ZeroDataRetention: ptr.Clone(m.ZeroDataRetention), Deployment: ptr.Clone(m.Deployment), Source: ptr.Clone(m.Source), ObservedAt: ptr.Clone(m.ObservedAt),
 	}
 }

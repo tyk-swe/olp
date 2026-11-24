@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -87,7 +88,7 @@ func prepareRevision(current *Definition, candidate Definition) (Definition, err
 		Catalog: candidate.Catalog, CertifiedAt: candidate.CertifiedAt, RetiredAt: candidate.RetiredAt,
 		Stdio: candidate.Stdio.Clone(), OAuth: candidate.OAuth.Clone(), Delegation: candidate.Delegation.Clone(),
 		EntraClientSecretID: candidate.EntraClientSecretID, DelegationKeyID: candidate.DelegationKeyID,
-		UnitPrice: clonePrice(candidate.UnitPrice), ToolPrices: cloneToolPrices(candidate.ToolPrices),
+		UnitPrice: ptr.Clone(candidate.UnitPrice), ToolPrices: cloneToolPrices(candidate.ToolPrices),
 		CallsPerMinute: effective.CallsPerMinute, MaxConcurrency: effective.MaxConcurrency,
 		PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute, PerKeyMaxConcurrency: effective.PerKeyMaxConcurrency,
 	}, nil

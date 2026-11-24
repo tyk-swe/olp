@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/retrieval"
@@ -36,7 +37,7 @@ type Desired struct {
 }
 
 func Parse(document contract.ConfigurationDocument, names promotion.Names) (Desired, error) {
-	entries := promotion.ValueOf(document.RetrievalBindings)
+	entries := ptr.Value(document.RetrievalBindings)
 	if len(entries) > maxBindings {
 		return Desired{}, httpkit.Invalid("retrieval_bindings", "Declare at most 512 retrieval bindings.")
 	}
@@ -114,12 +115,12 @@ func renderBinding(binding Binding) contract.ConfigurationRetrievalBinding {
 
 func fieldsOf(fields contract.RetrievalBindingFields) retrieval.Fields {
 	return retrieval.Fields{
-		Text:     promotion.ValueOf(fields.Text),
-		ID:       promotion.ValueOf(fields.Id),
-		Title:    promotion.ValueOf(fields.Title),
-		URL:      promotion.ValueOf(fields.Url),
-		Search:   promotion.ValueOf(fields.Search),
-		Metadata: promotion.ValueOf(fields.Metadata),
+		Text:     ptr.Value(fields.Text),
+		ID:       ptr.Value(fields.Id),
+		Title:    ptr.Value(fields.Title),
+		URL:      ptr.Value(fields.Url),
+		Search:   ptr.Value(fields.Search),
+		Metadata: ptr.Value(fields.Metadata),
 	}
 }
 

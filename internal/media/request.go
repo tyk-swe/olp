@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
@@ -255,27 +256,15 @@ func imageCount(count *int64) int64 {
 	return *count
 }
 
-func valueOr[T any](value *T, fallback T) T {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
-
-func valueOf[T any](value *T) T {
-	var zero T
-	return valueOr(value, zero)
-}
-
 func (r *Request) TranscriptFormat() string {
 	if r == nil {
 		return "json"
 	}
 	switch p := r.params.(type) {
 	case Transcription:
-		return valueOr(p.Format, "json")
+		return ptr.Or(p.Format, "json")
 	case Translation:
-		return valueOr(p.Format, "json")
+		return ptr.Or(p.Format, "json")
 	}
 	return "json"
 }

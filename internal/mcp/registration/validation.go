@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -74,7 +75,7 @@ func Prepare(in Input, policy *egress.Policy) (Input, error) {
 		Name: name, Endpoint: endpoint, Transport: in.Transport, ProjectID: in.ProjectID, Enabled: in.Enabled,
 		Stdio: in.Stdio.Clone(), OAuth: in.OAuth.Clone(), Delegation: in.Delegation.Clone(),
 		Credential: bytes.Clone(in.Credential), EntraClientSecret: in.EntraClientSecret, DelegationPrivateKey: in.DelegationPrivateKey,
-		UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
+		UnitPrice: ptr.Clone(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute: in.CallsPerMinute, MaxConcurrency: in.MaxConcurrency,
 		PerKeyCallsPerMinute: in.PerKeyCallsPerMinute, PerKeyMaxConcurrency: in.PerKeyMaxConcurrency, present: maps.Clone(in.present),
 	}, nil

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -38,18 +39,11 @@ type delegationRow struct {
 	ProjectRole          *string `db:"project_role"`
 }
 
-func projectRole(role *string) string {
-	if role == nil {
-		return ""
-	}
-	return *role
-}
-
 func (r delegationRow) memberAuthorized() bool {
 	if r.MemberActive == nil || !*r.MemberActive || r.MemberOIDCAuthorized == nil || !*r.MemberOIDCAuthorized || r.MemberRole == nil || r.MemberScope == nil {
 		return false
 	}
-	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
+	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: ptr.Value(r.ProjectRole)}}
 	return principal.Authorize(authz.Keys) == nil && principal.Project(&r.ProjectID, authz.Change) == nil
 }
 

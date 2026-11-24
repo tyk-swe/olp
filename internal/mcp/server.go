@@ -36,14 +36,6 @@ type RateLimiter interface {
 	Reserve(ctx context.Context, request admission.Request) (*admission.Lease, error)
 }
 
-func cloneUnitPrice(price *string) *string {
-	if price == nil {
-		return nil
-	}
-	out := *price
-	return &out
-}
-
 type Runtime interface {
 	consumerauth.TaskCapabilityAuthenticator
 	ReauthenticateDelegation(context.Context, string, string) (*keyauthority.Authority, error)
