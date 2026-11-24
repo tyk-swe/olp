@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -57,7 +58,7 @@ type GuardrailEvaluation struct {
 	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
-	Phase     guardrails.Phase
+	Phase     guardrailpolicy.Phase
 	Segments  []guardrails.Segment
 	Masks     *guardrails.Masking
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -35,26 +36,26 @@ func (f fixture) api(t *testing.T, visible bool, hidden int) api {
 		Definitions: map[string]guardrails.Revision{}, Policies: map[string]guardrails.PolicyRevision{},
 		ProjectOrganizations: map[string]string{f.project: f.organization, f.sibling: f.organization},
 	}
-	attach := func(id, project string, scope guardrails.Scope, scopeID string, phase guardrails.Phase, order int, monitor bool) {
+	attach := func(id, project string, scope guardrailpolicy.Scope, scopeID string, phase guardrailpolicy.Phase, order int, monitor bool) {
 		definition := guardrails.Revision{ID: id + "-check-r1", GuardrailID: id + "-check", ProjectID: project,
-			Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+			Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrailpolicy.FailClosed}
 		registry.Definitions[definition.ID] = definition
 		policy := guardrails.PolicyRevision{ID: id + "-policy-r1", PolicyID: id, ProjectID: project,
-			Entries: []guardrails.Entry{{GuardrailID: definition.GuardrailID, RevisionID: definition.ID, Phase: phase, Action: guardrails.Block, Monitor: monitor}}}
+			Entries: []guardrails.Entry{{GuardrailID: definition.GuardrailID, RevisionID: definition.ID, Phase: phase, Action: guardrailpolicy.Block, Monitor: monitor}}}
 		registry.Policies[policy.ID] = policy
 		registry.Attachments = append(registry.Attachments, guardrails.Attachment{ID: id, Scope: scope, ScopeID: scopeID, PolicyRevisionID: policy.ID, Order: order})
 	}
 	if visible {
-		attach("key-check", f.project, guardrails.KeyScope, f.key, guardrails.Input, 6, true)
-		attach("route-check", f.project, guardrails.RouteScope, f.route, guardrails.Output, 11, false)
-		attach("project-check", f.project, guardrails.ProjectScope, f.project, guardrails.Input, 5, false)
+		attach("key-check", f.project, guardrailpolicy.KeyScope, f.key, guardrailpolicy.Input, 6, true)
+		attach("route-check", f.project, guardrailpolicy.RouteScope, f.route, guardrailpolicy.Output, 11, false)
+		attach("project-check", f.project, guardrailpolicy.ProjectScope, f.project, guardrailpolicy.Input, 5, false)
 	}
 	if hidden > 0 {
-		attach("hidden-installation", f.project, guardrails.InstallationScope, guardrails.InstallationProject, guardrails.Output, 2, false)
+		attach("hidden-installation", f.project, guardrailpolicy.InstallationScope, guardrails.InstallationProject, guardrailpolicy.Output, 2, false)
 	}
 	if hidden > 1 {
-		attach("hidden-organization", f.sibling, guardrails.OrganizationScope, f.organization, guardrails.Output, 0, false)
-		attach("hidden-sibling", f.sibling, guardrails.InstallationScope, guardrails.InstallationProject, guardrails.Input, 0, true)
+		attach("hidden-organization", f.sibling, guardrailpolicy.OrganizationScope, f.organization, guardrailpolicy.Output, 0, false)
+		attach("hidden-sibling", f.sibling, guardrailpolicy.InstallationScope, guardrails.InstallationProject, guardrailpolicy.Input, 0, true)
 	}
 	model := "wire-model"
 	snapshot := &routing.Snapshot{
@@ -216,10 +217,10 @@ func assertPreviewOrder(t *testing.T, result response, want ...string) {
 
 func TestPreviewExplainsStaticSurfaceLimits(t *testing.T) {
 	d := guardrails.Revision{ID: "revision", GuardrailID: "check", ProjectID: "project", Type: "builtin.keywords",
-		Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+		Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrailpolicy.FailClosed}
 	engine, err := guardrails.Compile([]guardrails.Entry{
-		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Block},
-		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.OutputStream, Action: guardrails.Redact},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.OutputStream, Action: guardrailpolicy.Redact},
 	}, map[string]guardrails.Revision{d.ID: d})
 	if err != nil {
 		t.Fatal(err)
@@ -263,11 +264,11 @@ func TestPreviewExplainsStaticSurfaceLimits(t *testing.T) {
 
 func TestNativeTypeSafePreviewKeepsStreamingConflicts(t *testing.T) {
 	d := guardrails.Revision{ID: "revision", GuardrailID: "check", Type: "typesafe",
-		Configuration: json.RawMessage(`{"route":"decision-route"}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+		Configuration: json.RawMessage(`{"route":"decision-route"}`), TimeoutMS: 100, OnError: guardrailpolicy.FailClosed}
 	engine, err := guardrails.Compile([]guardrails.Entry{
-		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Block},
-		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Output, Action: guardrails.Block},
-		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.OutputStream, Action: guardrails.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.Output, Action: guardrailpolicy.Block},
+		{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.OutputStream, Action: guardrailpolicy.Block},
 	}, map[string]guardrails.Revision{d.ID: d})
 	if err != nil {
 		t.Fatal(err)

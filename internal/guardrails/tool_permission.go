@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 )
 
 // ToolPermissionConfig evaluates ordered rules against captured function tool
@@ -54,7 +56,7 @@ func compileToolPermission(raw json.RawMessage) (detector, error) {
 	compiled := &toolPermissionDetector{defaultAllow: action == "allow"}
 	ids := map[string]bool{}
 	for _, rule := range config.Rules {
-		if !identifier.MatchString(rule.ID) || ids[rule.ID] || len(rule.AllowedParamPatterns) > 64 {
+		if !guardrailpolicy.ValidIdentifier(rule.ID) || ids[rule.ID] || len(rule.AllowedParamPatterns) > 64 {
 			return nil, errors.New("invalid tool permission rule")
 		}
 		ids[rule.ID] = true

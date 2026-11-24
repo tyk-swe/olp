@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -94,7 +94,7 @@ func Validate(e *Event) (*Validated, error) {
 	if err := attribution.Validate(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
 	}
-	if err := guardrails.ValidateEvidence(e.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(e.GuardrailDecisions); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	if err := validateUsageDimensions(e.tokenQuantities()); err != nil {
@@ -150,7 +150,7 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
-	if err := guardrails.ValidateEvidence(attempt.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(attempt.GuardrailDecisions); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if attempt.Routing != nil {

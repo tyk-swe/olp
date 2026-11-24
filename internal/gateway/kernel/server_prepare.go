@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/priority"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -220,7 +221,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
 	options.Demand = func(_ routing.Provider, t routing.Target) *routing.TokenDemand {
-		if x.guard.engine.HasAction(guardrails.Input, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+		if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Redact) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 			return nil
 		}
 		return x.sourceDemand(t.ProviderModel)

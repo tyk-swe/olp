@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -66,7 +66,7 @@ func TestGeminiDecisionRoute(t *testing.T) {
 				snapshot.Routes[routeSlug] = route
 			})
 			if tc.blockSecret {
-				installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
+				installTestGuardrail(t, h, guardrailpolicy.Input, guardrailpolicy.Block, "builtin.regex", `{"rules":[{"id":"secret","pattern":"secret"}]}`)
 			}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost || r.URL.RequestURI() != "/a/v1beta/decisions" || r.Header.Get("X-Goog-Api-Key") != secretA || r.Header.Get("Authorization") != "" {

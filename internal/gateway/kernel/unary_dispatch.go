@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -13,7 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -136,7 +136,7 @@ func (run unaryRun) inspect(sent unarySent, result unary.Result) *attemptEnd {
 	if guardErr := sent.parallel.join(x, true); guardErr != nil {
 		return ended(classPolicy, &AttemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
 	}
-	if !x.guard.engine.HasPhase(guardrails.Output) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.Output) {
 		return nil
 	}
 	if guardErr := run.inspectOutput(sent.plan, result); guardErr != nil {
@@ -149,7 +149,7 @@ func (run unaryRun) inspectOutput(plan *unary.Plan, result unary.Result) error {
 	x := run.x
 	texts, err := plan.GuardrailOutput(result)
 	if err != nil {
-		unavailable, unavailableErr := x.guard.engine.Unavailable(guardrails.Output)
+		unavailable, unavailableErr := x.guard.engine.Unavailable(guardrailpolicy.Output)
 		x.guard.record(unavailable.Decisions)
 		return unavailableErr
 	}

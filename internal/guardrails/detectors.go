@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 )
 
 const (
@@ -137,7 +139,7 @@ func compileTools(raw json.RawMessage) (*toolsDetector, error) {
 	}
 	schemas := make(map[string]*jsonschema.Schema, len(config.Schemas))
 	for name, raw := range config.Schemas {
-		if !identifier.MatchString(name) {
+		if !guardrailpolicy.ValidIdentifier(name) {
 			return nil, errors.New("invalid tool name")
 		}
 		schema, err := compileSchema(raw)

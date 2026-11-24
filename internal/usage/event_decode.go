@@ -6,8 +6,8 @@ import (
 	"math"
 
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
@@ -117,7 +117,7 @@ func (w wireAttempt) decode() (*Attempt, error) {
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, err
 	}
-	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(w.GuardrailDecisions); err != nil {
 		return nil, err
 	}
 	var err error
@@ -351,7 +351,7 @@ func (w wireEvent) decodeAuthority(event *Event) error {
 			return fmt.Errorf("request metadata field attribution is invalid: %w", err)
 		}
 	}
-	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(w.GuardrailDecisions); err != nil {
 		return err
 	}
 	event.GuardrailDecisions = w.GuardrailDecisions

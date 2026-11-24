@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -81,7 +82,7 @@ func requirePolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, t target) 
 		return err
 	}
 	ownedBy := func(id *string) bool { return project != nil && id != nil && *project == *id }
-	if t.Scope == guardrails.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
+	if t.Scope == guardrailpolicy.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
 		return httpkit.Invalid("scope_id", "The policy must belong to this project.")
 	}
 	return nil

@@ -9,24 +9,25 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Definition struct {
-	Configuration    json.RawMessage    `json:"configuration"`
-	TimeoutMS        int64              `json:"timeout_ms"`
-	OnError          guardrails.OnError `json:"on_error"`
-	ActiveRevisionID *string            `json:"active_revision_id"`
-	ID               string             `json:"id"`
-	ProjectID        string             `json:"project_id"`
-	Name             string             `json:"name"`
-	Type             guardrails.Kind    `json:"type"`
-	ETag             string             `json:"etag"`
-	RevisionID       string             `json:"revision_id"`
-	Revision         int64              `json:"revision"`
-	RetiredAt        *time.Time         `json:"retired_at"`
+	Configuration    json.RawMessage         `json:"configuration"`
+	TimeoutMS        int64                   `json:"timeout_ms"`
+	OnError          guardrailpolicy.OnError `json:"on_error"`
+	ActiveRevisionID *string                 `json:"active_revision_id"`
+	ID               string                  `json:"id"`
+	ProjectID        string                  `json:"project_id"`
+	Name             string                  `json:"name"`
+	Type             guardrails.Kind         `json:"type"`
+	ETag             string                  `json:"etag"`
+	RevisionID       string                  `json:"revision_id"`
+	Revision         int64                   `json:"revision"`
+	RetiredAt        *time.Time              `json:"retired_at"`
 }
 
 type Saved struct{ ID, RevisionID string }

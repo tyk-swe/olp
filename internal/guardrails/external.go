@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails/vendor"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
@@ -251,13 +252,13 @@ func vendorVerdict(ctx context.Context, spec vendor.Spec, client *http.Client, c
 	return Verdict{flagged: true, categories: findingCategories(findings), redactions: completeRepairs(findings)}, nil
 }
 
-func vendorRequest(phase Phase, s Segment) vendor.Request {
-	return vendor.Request{Output: OutputPhase(phase), Document: s.Kind == ToolResult, Role: vendorRole(phase, s.Role), Text: s.Text}
+func vendorRequest(phase guardrailpolicy.Phase, s Segment) vendor.Request {
+	return vendor.Request{Output: guardrailpolicy.OutputPhase(phase), Document: s.Kind == ToolResult, Role: vendorRole(phase, s.Role), Text: s.Text}
 }
 
-func vendorRole(phase Phase, role Role) vendor.Role {
+func vendorRole(phase guardrailpolicy.Phase, role Role) vendor.Role {
 	switch {
-	case OutputPhase(phase) || role == Assistant:
+	case guardrailpolicy.OutputPhase(phase) || role == Assistant:
 		return vendor.Assistant
 	case role == System || role == Developer:
 		return vendor.System

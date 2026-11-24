@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -342,10 +343,10 @@ func TestSnapshotRefusesMalformedToolPricesAndLimits(t *testing.T) {
 func TestSnapshotCompilesToolGuardrailEnginesPerToolsetAndKey(t *testing.T) {
 	snapshot := mcpSnapshot(t, strings.Repeat("a", 64))
 	definition := func(id string) guardrails.Revision {
-		return guardrails.Revision{ID: id, GuardrailID: id, ProjectID: mcpProject, Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrails.FailClosed}
+		return guardrails.Revision{ID: id, GuardrailID: id, ProjectID: mcpProject, Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 100, OnError: guardrailpolicy.FailClosed}
 	}
-	policy := func(id, definitionID string, phase guardrails.Phase) guardrails.PolicyRevision {
-		return guardrails.PolicyRevision{ID: id, PolicyID: id, ProjectID: mcpProject, Entries: []guardrails.Entry{{GuardrailID: definitionID, RevisionID: definitionID, Phase: phase, Action: guardrails.Block, Mandatory: true}}}
+	policy := func(id, definitionID string, phase guardrailpolicy.Phase) guardrails.PolicyRevision {
+		return guardrails.PolicyRevision{ID: id, PolicyID: id, ProjectID: mcpProject, Entries: []guardrails.Entry{{GuardrailID: definitionID, RevisionID: definitionID, Phase: phase, Action: guardrailpolicy.Block, Mandatory: true}}}
 	}
 	const (
 		toolDef    = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50621"
@@ -359,9 +360,9 @@ func TestSnapshotCompilesToolGuardrailEnginesPerToolsetAndKey(t *testing.T) {
 	snapshot.Guardrails = &guardrails.Registry{
 		Definitions: map[string]guardrails.Revision{toolDef: definition(toolDef), projectDef: definition(projectDef), keyDef: definition(keyDef)},
 		Policies: map[string]guardrails.PolicyRevision{
-			toolPol:    policy(toolPol, toolDef, guardrails.Input),
-			projectPol: policy(projectPol, projectDef, guardrails.Output),
-			keyPol:     policy(keyPol, keyDef, guardrails.OutputStream),
+			toolPol:    policy(toolPol, toolDef, guardrailpolicy.Input),
+			projectPol: policy(projectPol, projectDef, guardrailpolicy.Output),
+			keyPol:     policy(keyPol, keyDef, guardrailpolicy.OutputStream),
 		},
 		Attachments: []guardrails.Attachment{
 			{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50628", Scope: "toolset", ScopeID: mcpToolset, PolicyRevisionID: toolPol},
@@ -374,14 +375,14 @@ func TestSnapshotCompilesToolGuardrailEnginesPerToolsetAndKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := snapshot.ToolGuardrailEngine(mcpToolset, "")
-	if engine == nil || !engine.HasPhase(guardrails.Input) || !engine.HasPhase(guardrails.Output) {
+	if engine == nil || !engine.HasPhase(guardrailpolicy.Input) || !engine.HasPhase(guardrailpolicy.Output) {
 		t.Fatalf("tool engine lost its toolset or project policies: %v", engine)
 	}
-	if engine.HasPhase(guardrails.OutputStream) {
+	if engine.HasPhase(guardrailpolicy.OutputStream) {
 		t.Fatal("a key policy reached calls from other keys")
 	}
 	keyEngine := snapshot.ToolGuardrailEngine(mcpToolset, keyID)
-	if keyEngine == nil || !keyEngine.HasPhase(guardrails.Input) || !keyEngine.HasPhase(guardrails.OutputStream) {
+	if keyEngine == nil || !keyEngine.HasPhase(guardrailpolicy.Input) || !keyEngine.HasPhase(guardrailpolicy.OutputStream) {
 		t.Fatalf("key tool engine lost its inherited policies: %v", keyEngine)
 	}
 	if snapshot.ToolGuardrailEngine("0192cf87-d4ab-7f2e-a8b1-c2d3e4f50699", "") != nil {

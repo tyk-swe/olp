@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"slices"
 )
 
@@ -26,7 +27,7 @@ func compileTypeSafe(raw json.RawMessage) (detector, error) {
 	if err := decodeConfig(raw, &config); err != nil {
 		return nil, err
 	}
-	if !identifier.MatchString(config.Route) {
+	if !guardrailpolicy.ValidIdentifier(config.Route) {
 		return nil, errors.New("typesafe requires a decision route")
 	}
 	return typeSafeDetector{config: config}, nil
@@ -45,7 +46,7 @@ func (e *Engine) TypeSafePolicies() []TypeSafePolicy {
 	return slices.Collect(func(yield func(TypeSafePolicy) bool) {
 		for _, entry := range e.entries {
 			detector, ok := entry.detector.(typeSafeDetector)
-			if !ok || entry.entry.Phase != Input || entry.entry.Monitor {
+			if !ok || entry.entry.Phase != guardrailpolicy.Input || entry.entry.Monitor {
 				continue
 			}
 			if !yield(TypeSafePolicy{Entry: entry.entry, Revision: entry.definition, Config: detector.config}) {

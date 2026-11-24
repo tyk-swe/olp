@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/platform/database"
 
@@ -129,9 +130,9 @@ func policyName(registry *guardrails.Registry, r guardrails.NamedPolicyRevision)
 		Type      guardrails.Kind
 		Config    json.RawMessage
 		Timeout   int64
-		OnError   guardrails.OnError
-		Phase     guardrails.Phase
-		Action    guardrails.Action
+		OnError   guardrailpolicy.OnError
+		Phase     guardrailpolicy.Phase
+		Action    guardrailpolicy.Action
 		Monitor   bool
 		Mandatory bool
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -103,7 +104,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 		x.noteCacheLookupReason(usage.CacheLookupUnavailable)
 		return nil
 	}
-	if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		return nil
 	}
 	doc := x.requestDocument()

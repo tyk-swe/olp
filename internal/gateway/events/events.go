@@ -4,10 +4,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -43,7 +43,7 @@ type Envelope struct {
 	Attribution map[string]string
 
 	EvaluatorGuardrailID string
-	GuardrailDecisions   []guardrails.Evidence
+	GuardrailDecisions   []guardrailpolicy.Evidence
 	UserID               string
 	Route                string
 	RouteRevisionID      string
@@ -82,7 +82,7 @@ type AttemptFact struct {
 	Commitment         *routing.Commitment
 	CommitmentPinned   bool
 	Cache              *usage.CacheEvidence
-	GuardrailDecisions []guardrails.Evidence
+	GuardrailDecisions []guardrailpolicy.Evidence
 	BudgetExempt       bool
 	CredentialSource   string
 	Execution          *usage.ExecutionReference

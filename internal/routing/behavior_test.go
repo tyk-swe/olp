@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -59,7 +60,7 @@ func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, guardrailErr := guardrails.ParseRevision(guardrails.Revision{Type: "plugin", Configuration: configuration, TimeoutMS: 1000, OnError: guardrails.FailClosed})
+			_, guardrailErr := guardrails.ParseRevision(guardrails.Revision{Type: "plugin", Configuration: configuration, TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed})
 			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
 			routeErr := behavior.Validate("route", nil)
 			indexErr := index.Validate()

@@ -8,14 +8,15 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-func keywordEngine(t *testing.T, action guardrails.Action) *guardrails.Engine {
+func keywordEngine(t *testing.T, action guardrailpolicy.Action) *guardrails.Engine {
 	t.Helper()
-	revision := guardrails.Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["forbidden"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}
-	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: revision.GuardrailID, RevisionID: revision.ID, Phase: guardrails.OutputStream, Action: action}}, map[string]guardrails.Revision{revision.ID: revision})
+	revision := guardrails.Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["forbidden"]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
+	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: revision.GuardrailID, RevisionID: revision.ID, Phase: guardrailpolicy.OutputStream, Action: action}}, map[string]guardrails.Revision{revision.ID: revision})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func toolExchanges(t *testing.T) []exchange {
 
 type run struct {
 	emitted  [][][]byte
-	recorded []guardrails.Evidence
+	recorded []guardrailpolicy.Evidence
 	err      error
 }
 
@@ -115,12 +116,12 @@ func (r run) all() []byte {
 	return bytes.Join(slices.Concat(r.emitted...), nil)
 }
 
-func play(t *testing.T, action guardrails.Action, strict bool, e exchange) run {
+func play(t *testing.T, action guardrailpolicy.Action, strict bool, e exchange) run {
 	t.Helper()
 	result := run{}
 	stream, err := New(Config{
 		Engine: keywordEngine(t, action), Family: e.family, Window: 1 << 16, Strict: strict, ToolContext: t.Context(),
-		Record: func(decisions []guardrails.Evidence) { result.recorded = append(result.recorded, decisions...) },
+		Record: func(decisions []guardrailpolicy.Evidence) { result.recorded = append(result.recorded, decisions...) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func play(t *testing.T, action guardrails.Action, strict bool, e exchange) run {
 
 func checkRedacted(t *testing.T, e exchange, redacted string) {
 	t.Helper()
-	got := play(t, guardrails.Redact, false, e)
+	got := play(t, guardrailpolicy.Redact, false, e)
 	if got.err != nil {
 		t.Fatal(got.err)
 	}
@@ -181,7 +182,7 @@ func TestToolArgumentsAreHeldUntilCompleteThenRedactedInEveryFamily(t *testing.T
 
 func checkBlocked(t *testing.T, e exchange) run {
 	t.Helper()
-	got := play(t, guardrails.Block, false, e)
+	got := play(t, guardrailpolicy.Block, false, e)
 	if got.err == nil {
 		t.Fatalf("blocked content passed: %q", got.all())
 	}
@@ -210,7 +211,7 @@ func TestBlockedToolCallNeverReachesTheClientAndIsRecorded(t *testing.T) {
 func TestStrictRoutesRefuseARewriteInsteadOfChangingOrLeakingFrames(t *testing.T) {
 	for _, e := range slices.Concat(textExchanges(), toolExchanges(t)) {
 		t.Run(string(e.family), func(t *testing.T) {
-			got := play(t, guardrails.Redact, true, e)
+			got := play(t, guardrailpolicy.Redact, true, e)
 			if !errors.Is(got.err, guardrails.ErrSurface) {
 				t.Fatalf("error = %v, output %q", got.err, got.all())
 			}
@@ -222,7 +223,7 @@ func TestStrictRoutesRefuseARewriteInsteadOfChangingOrLeakingFrames(t *testing.T
 }
 
 func TestBedrockTextThatMustChangeIsRefused(t *testing.T) {
-	got := play(t, guardrails.Redact, false, exchange{family: wire.Bedrock, frames: [][]byte{
+	got := play(t, guardrailpolicy.Redact, false, exchange{family: wire.Bedrock, frames: [][]byte{
 		bedrock(t, "contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"it is for"}}`),
 		bedrock(t, "contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"bidden here"}}`),
 		bedrock(t, "contentBlockStop", `{"contentBlockIndex":0}`),
@@ -237,7 +238,7 @@ func TestLogprobsAreRefusedBecauseTheyRepeatUninspectedText(t *testing.T) {
 		wire.Chat:        `{"choices":[{"index":0,"delta":{"content":"fine"},"logprobs":{"content":[{"token":"fine"}]}}]}`,
 		wire.Completions: `{"choices":[{"index":0,"text":"fine","logprobs":{"tokens":["fine"]}}]}`,
 	} {
-		got := play(t, guardrails.Redact, false, exchange{family: family, frames: [][]byte{sse(frame)}})
+		got := play(t, guardrailpolicy.Redact, false, exchange{family: family, frames: [][]byte{sse(frame)}})
 		if !errors.Is(got.err, guardrails.ErrSurface) || len(got.all()) != 0 {
 			t.Fatalf("%s: error = %v, output %q", family, got.err, got.all())
 		}

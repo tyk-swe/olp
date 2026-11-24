@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
@@ -292,10 +292,10 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 		{"malformed model family", func(e *Event) { e.Attempts[1].ModelFamily = "OpenAI o200k" }},
 		{"oversized model family", func(e *Event) { e.Attempts[1].ModelFamily = "f" + strings.Repeat("a", 64) }},
 		{"malformed request guardrail evidence", func(e *Event) {
-			e.GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+			e.GuardrailDecisions = []guardrailpolicy.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Outcome: "maybe"}}
 		}},
 		{"malformed attempt guardrail evidence", func(e *Event) {
-			e.Attempts[1].GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+			e.Attempts[1].GuardrailDecisions = []guardrailpolicy.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Outcome: "maybe"}}
 		}},
 	}
 	for _, tc := range cases {

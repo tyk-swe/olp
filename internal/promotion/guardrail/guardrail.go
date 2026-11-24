@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -33,7 +34,7 @@ type Guardrail struct {
 	Type          guardrails.Kind
 	Configuration json.RawMessage
 	TimeoutMS     int64
-	OnError       guardrails.OnError
+	OnError       guardrailpolicy.OnError
 	spec          guardrails.Spec
 	credentials   []reference
 }
@@ -70,7 +71,7 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 		Type:          guardrails.Kind(entry.Type),
 		Configuration: configuration,
 		TimeoutMS:     cmp.Or(promotion.ValueOf(entry.TimeoutMs), 1000),
-		OnError:       cmp.Or(guardrails.OnError(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
+		OnError:       cmp.Or(guardrailpolicy.OnError(promotion.ValueOf(entry.OnError)), guardrailpolicy.FailClosed),
 	}
 	spec, err := guardrails.ParseRevision(revision)
 	if err != nil {
