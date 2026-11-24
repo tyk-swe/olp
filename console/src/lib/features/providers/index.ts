@@ -18,6 +18,7 @@ export {
   type LifecycleNotice,
   lifecycleNotice
 } from './provider-models/lifecycle.js';
+export { default as PublicationPanel } from './model-catalog/PublicationPanel.svelte';
 export { parseManualModelNames, requiresGrant } from './providerEditor.js';
 export { providerKeys } from './providerKeys.js';
 export {
