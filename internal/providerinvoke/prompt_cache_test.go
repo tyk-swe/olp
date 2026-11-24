@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
@@ -97,7 +97,7 @@ func TestApplyPromptCacheAnthropicBreakpoints(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inv, config := preparedPromptCache(t, wire.Anthropic, "anthropic", tc.body)
-			out, err := ApplyPromptCache(inv, config, &cache.PromptPolicy{}, "")
+			out, err := ApplyPromptCache(inv, config, &cachepolicy.PromptPolicy{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +117,7 @@ func TestApplyPromptCacheLeavesCallerPolicyInCharge(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			inv, config := preparedPromptCache(t, wire.Anthropic, "anthropic", body)
-			out, err := ApplyPromptCache(inv, config, &cache.PromptPolicy{}, "")
+			out, err := ApplyPromptCache(inv, config, &cachepolicy.PromptPolicy{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func TestApplyPromptCacheLeavesCallerPolicyInCharge(t *testing.T) {
 	}
 	t.Run("missing nested ttl matches the default", func(t *testing.T) {
 		inv, config := preparedPromptCache(t, wire.Anthropic, "anthropic", `{"max_tokens":16,"system":"s","messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}`)
-		out, err := ApplyPromptCache(inv, config, &cache.PromptPolicy{}, "")
+		out, err := ApplyPromptCache(inv, config, &cachepolicy.PromptPolicy{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestApplyPromptCacheOpenAIKey(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			inv, config := preparedPromptCache(t, wire.Chat, "openai", tc.body)
-			out, err := ApplyPromptCache(inv, config, &cache.PromptPolicy{}, "olp-key")
+			out, err := ApplyPromptCache(inv, config, &cachepolicy.PromptPolicy{}, "olp-key")
 			if err != nil {
 				t.Fatal(err)
 			}

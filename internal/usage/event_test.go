@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -339,7 +339,7 @@ func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
 			}
 			_, requestErr := openai.Parse(wire.Chat, request)
 			accessErr := (keyauthority.RouteGroups{"group": []string{tc.slug}}).Validate()
-			cacheErr := (&cache.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
+			cacheErr := (&cachepolicy.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
 			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
 				t.Fatalf("accounting error = %v, request error = %v, access error = %v, cache error = %v", accountingErr, requestErr, accessErr, cacheErr)
 			}

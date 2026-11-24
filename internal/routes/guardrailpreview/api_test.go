@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/release"
@@ -243,7 +243,7 @@ func TestPreviewExplainsStaticSurfaceLimits(t *testing.T) {
 		t.Run(tt.operation+"/"+tt.surface+"/"+tt.mode, func(t *testing.T) {
 			route := routing.Route{
 				Operations: []string{tt.operation}, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed},
-				Behavior: routing.Behavior{Cache: &cache.Policy{}, ToolExecution: "gateway"},
+				Behavior: routing.Behavior{Cache: &cachepolicy.Policy{}, ToolExecution: "gateway"},
 			}
 			profile, err := compatibility(route, selection{operation: tt.operation, surface: tt.surface, mode: tt.mode}, 1024)
 			if err != nil {

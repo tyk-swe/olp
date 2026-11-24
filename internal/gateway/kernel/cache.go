@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
@@ -25,8 +26,8 @@ import (
 )
 
 type responseCacheCall struct {
-	policy                   cache.Policy
-	controls                 cache.Controls
+	policy                   cachepolicy.Policy
+	controls                 cachepolicy.Controls
 	ticket                   cache.Ticket
 	entry                    *cache.Entry
 	admitted                 bool // Set only after the replay passes admission.
@@ -83,7 +84,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 	if x.Route.Cache == nil && x.request.cacheDirectives == "" {
 		return nil
 	}
-	c, err := cache.ParseControls(x.request.cacheDirectives)
+	c, err := cachepolicy.ParseControls(x.request.cacheDirectives)
 	if err != nil {
 		return fault.InvalidRequest("invalid_cache_control", err.Error(), nil)
 	}
