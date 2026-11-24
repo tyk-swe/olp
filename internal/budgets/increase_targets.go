@@ -41,7 +41,7 @@ func (t *BudgetTarget) validate() error {
 		return httpkit.Invalid("target.route", "Supply a route only for a key-route budget.")
 	}
 	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"
-	if (identified && !keyauthority.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
+	if (identified && !attribution.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
 		return httpkit.Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
 	}
 	if t.Kind == "attribution" {

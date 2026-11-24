@@ -10,7 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 )
 
 type Resource struct{ table, audit string }
@@ -107,7 +107,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 	if digest := r.URL.Query().Get("end_user_digest"); endUsers && digest != "" {
 		if digest == "unidentified" {
 			digest = ""
-		} else if !keyauthority.ValidEndUserDigest(digest) {
+		} else if !attribution.ValidEndUserDigest(digest) {
 			return httpkit.Reply{}, httpkit.Invalid("end_user_digest", "Use an end-user digest or unidentified.")
 		}
 		args = append(args, digest)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
@@ -154,8 +155,8 @@ func TestEndUserDigestsAgreeWithAccessPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		decoded, decodeErr := Decode(payload)
-		if keyauthority.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
-			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, keyauthority.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
+		if attribution.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
+			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, attribution.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
 		}
 		if decodeErr == nil && decoded.EndUserDigest != tc.digest {
 			t.Errorf("digest %q decoded as %q", tc.digest, decoded.EndUserDigest)

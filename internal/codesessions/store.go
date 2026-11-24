@@ -125,7 +125,7 @@ func validateCodeAdmission(in Admission) error {
 	if err := attribution.Validate(in.Attribution); err != nil {
 		return codemode.Refuse(400, "code_invalid_attribution")
 	}
-	if in.EndUserDigest != "" && !keyauthority.ValidEndUserDigest(in.EndUserDigest) {
+	if in.EndUserDigest != "" && !attribution.ValidEndUserDigest(in.EndUserDigest) {
 		return codemode.Refuse(400, "code_end_user_invalid")
 	}
 	if err := in.Operation.Identity.Validate(); err != nil {
@@ -336,7 +336,7 @@ func (s *Store) ObserveReference(ctx context.Context, attemptID, externalID stri
 }
 
 func (s *Store) RecordRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) error {
-	if digest != "" && !keyauthority.ValidEndUserDigest(digest) {
+	if digest != "" && !attribution.ValidEndUserDigest(digest) {
 		return codemode.Refuse(400, "code_end_user_invalid")
 	}
 	if !codeRefusalReason.MatchString(code) {
