@@ -213,7 +213,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority key
 	for _, owner := range capped {
 		cap := quota.CapRequest(owner, time.Hour).Cost
 		owners = append(owners, cap.Owner)
-		admissions = append(admissions, debits.Boundary{Owner: cap.Owner, Budget: cap})
+		admissions = append(admissions, limits.Boundary{Owner: cap.Owner, Budget: cap})
 	}
 	var state debits.State
 	if x.workflow != nil {

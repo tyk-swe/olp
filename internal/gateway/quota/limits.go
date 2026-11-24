@@ -204,7 +204,7 @@ func groupRequest(authority *keyauthority.Authority, estimate int64, ttl time.Du
 			RequestsPerMinute: authority.BudgetGroupRPM, TokensPerMinute: authority.BudgetGroupTPM, MaxConcurrency: authority.BudgetGroupConcurrency,
 			Tokens: estimate,
 		},
-		Cost: admission.Budget(owner, authority.BudgetGroupDailyCostLimit, authority.BudgetGroupWeeklyCostLimit, authority.BudgetGroupMonthlyCostLimit, authority.BudgetIncreases[owner.ID]),
+		Cost: limits.Budget(owner, authority.BudgetGroupDailyCostLimit, authority.BudgetGroupWeeklyCostLimit, authority.BudgetGroupMonthlyCostLimit, authority.BudgetIncreases[owner.ID]),
 	}
 	if !request.HasHardLimits() {
 		return nil

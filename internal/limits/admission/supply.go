@@ -42,10 +42,10 @@ func (l *Limiter) Supply(ctx context.Context, quotas []QuotaProbe, caps []CapPro
 		query.Lookups[index] = quota.Lookup
 	}
 	for index, probe := range caps {
-		query.Caps[index] = CostBudget{
+		query.Caps[index] = scripts.BudgetCaps(limits.CostBudget{
 			Owner: limits.Owner{ID: probe.OwnerID, Kind: limits.OwnerSupply, Basis: limits.BasisCost},
 			Daily: probe.Daily, Monthly: probe.Monthly,
-		}.Caps()
+		})
 	}
 	answer := l.scripts.Supply(ctx, query)
 	headroom := make([]Headroom, len(quotas))

@@ -56,7 +56,7 @@ type rateAnswer struct {
 }
 
 type costHold struct {
-	budget      CostBudget
+	budget      limits.CostBudget
 	reservation *costReservation
 	actual      string
 }
@@ -97,7 +97,7 @@ func (le *Lease) GrowCost(ctx context.Context, cost, charge, requestID string, t
 		return nil
 	}
 	grown := le.cost.budget
-	grown.Estimate = &Estimate{Amount: grown.Owner.Basis.Pick(cost, charge), RequestID: requestID}
+	grown.Estimate = &limits.Estimate{Amount: grown.Owner.Basis.Pick(cost, charge), RequestID: requestID}
 	if err := grown.Validate(); err != nil {
 		return err
 	}

@@ -68,7 +68,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *keyauthority
 		request := hold.On(admission.Request{
 			Lookup: limits.EndUserLookup(owner), LeaseTTL: ttl,
 			Rate: admission.RateLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency, Tokens: estimate},
-			Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerEndUser, Basis: limits.Basis(policy.CostBasis)},
+			Cost: limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerEndUser, Basis: limits.Basis(policy.CostBasis)},
 				policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
 		})
 		if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {

@@ -21,7 +21,7 @@ func (a *Admission) ReserveRouteLimits(ctx context.Context, authority *keyauthor
 	request := hold.On(admission.Request{
 		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
 		Rate: admission.RateLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency, Tokens: estimate},
-		Cost: admission.Budget(basis, policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
+		Cost: limits.Budget(basis, policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, authority.BudgetIncreases[owner]),
 	})
 	if policy.TokensPerMinute != nil {
 		if e := a.checkPendingTokenAccounting(ctx, owner); e != nil {
