@@ -87,10 +87,10 @@ func (c Config) forbidProfileDefaults(providerMessage, modelMessage string) erro
 }
 
 func (c Config) validateProfileVendor(p Profile) error {
-	if required, pinned := p.reviewedVendor(); pinned && c.VendorID != required.id {
-		return errors.New(required.family + " profile requires its reviewed vendor")
+	if required, pinned := p.reviewedVendor(); pinned && c.VendorID != required {
+		return errors.New(p.vendorFamily() + " profile requires its reviewed vendor")
 	}
-	if _, generation := generationFamily(p.Dialect); p.Dialect != "openai-completions" && generation && !vendors.Speaks(c.VendorID, p.Dialect) {
+	if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
 		return errors.New("the vendor's reviewed contract does not include the profile's dialect")
 	}
 	return nil

@@ -12,8 +12,9 @@ import (
 var generationParameters = []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "logit_bias", "n", "user", "reasoning", "reasoning_effort"}
 
 var (
-	openAIDialects = []string{"openai-chat", "openai-responses"}
-	chatDialect    = []string{"openai-chat"}
+	openAIDialects      = []string{"openai-chat", "openai-responses"}
+	chatDialect         = []string{"openai-chat"}
+	completionsDialects = []string{"openai-completions"}
 
 	mediaOperations  = []string{"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_list", "video_get", "video_content", "video_delete"}
 	openAIOperations = slices.Concat([]string{"generation", "token_count", "embeddings", "moderation", "batch", "realtime"}, mediaOperations)
@@ -68,7 +69,7 @@ func selfHostedPreset(id, name, description, endpoint string, docs Link, c Contr
 // each connector kind's presets in onboarding order.
 var contracts = []Contract{
 	compatiblePreset("typesafe-jev", "TypeSafe Jev", "TypeSafe", "Text-only System One decisions.", "https://api.typesafe.ai/v1", Link{"System One API", "https://api.typesafe.ai/redoc"}, Contract{Operations: []string{"decision"}, ProbeOperation: "decision", Dialects: []string{"systemone"}, Parameters: []string{}}, &ProfileRef{ID: "systemone", Revision: "1"}),
-	{ID: "openai", Name: "OpenAI", Maintainer: "OpenAI", Connector: "openai", KindDefault: true, Endpoint: "https://api.openai.com/v1", Documentation: Link{"OpenAI API reference", "https://platform.openai.com/docs/api-reference"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: generationParameters},
+	{ID: "openai", Name: "OpenAI", Maintainer: "OpenAI", Connector: "openai", KindDefault: true, Endpoint: "https://api.openai.com/v1", Documentation: Link{"OpenAI API reference", "https://platform.openai.com/docs/api-reference"}, Discovery: true, Operations: openAIOperations, Dialects: slices.Concat(openAIDialects, completionsDialects, []string{"openai-decisions"}), Parameters: generationParameters},
 	{ID: "openai_compatible", Name: "OpenAI-compatible", Connector: "openai_compatible", KindDefault: true, Documentation: Link{"OpenAI Chat Completions", "https://platform.openai.com/docs/api-reference/chat"}, Discovery: true, Operations: compatibleOperations, Dialects: openAIDialects, Parameters: generationParameters},
 	{ID: "anthropic", Name: "Anthropic", Maintainer: "Anthropic", Connector: "anthropic", KindDefault: true, Endpoint: "https://api.anthropic.com/v1", Documentation: Link{"Anthropic API", "https://docs.anthropic.com"}, Discovery: true, Operations: []string{"generation", "token_count", "batch"}, Dialects: []string{"anthropic-messages"}, Parameters: generationParameters},
 	{ID: "google", Name: "Google Gemini", Maintainer: "Google", Connector: "gemini", KindDefault: true, Endpoint: "https://generativelanguage.googleapis.com/v1beta", Documentation: Link{"Gemini API", "https://ai.google.dev"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "image_generation", "speech", "transcription", "batch", "decision"}, Dialects: []string{"gemini-generate-content", "gemini-decisions"}, Parameters: generationParameters,
@@ -85,17 +86,21 @@ var contracts = []Contract{
 	{ID: "azure", Name: "Azure OpenAI", Maintainer: "Microsoft", Connector: "azure_openai", KindDefault: true, Documentation: Link{"Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: generationParameters},
 	{ID: "azure-ai-search", Name: "Azure AI Search", Maintainer: "Microsoft", Connector: "azure_ai_search", KindDefault: true, Documentation: Link{"Azure AI Search", "https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01"}, Operations: []string{"retrieval"}, Dialects: []string{"azure-ai-search"}, ProbeOperation: "retrieval", Parameters: []string{"query", "max_num_results", "filters"}},
 
-	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, BatchWindow: &BatchWindow{MinHours: 24, MaxHours: 168}, BatchEndpoints: []string{"/v1/chat/completions"}, Operations: []string{"generation", "transcription", "translation", "batch"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"},
+	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, BatchAPI: "openai", BatchDocumentation: "https://console.groq.com/docs/api-reference", BatchOperations: []string{"generation"},
+		BatchWindow: &BatchWindow{MinHours: 24, MaxHours: 168}, BatchEndpoints: []string{"/v1/chat/completions"}, Operations: []string{"generation", "transcription", "translation", "batch"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"},
 		MediaWires: map[string]string{"transcription": "groq-audio", "translation": "groq-audio"}, AccountProbe: "models"}, exactChat),
-	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, BatchWindow: &BatchWindow{MinHours: 1, MaxHours: 168}, Operations: []string{"generation", "embeddings", "ocr", "batch"}, Dialects: []string{"openai-chat", "mistral-fim", "mistral-ocr"},
+	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, BatchAPI: "mistral", BatchDocumentation: "https://docs.mistral.ai/api/endpoint/batch", BatchOperations: []string{"generation", "embeddings"},
+		BatchWindow: &BatchWindow{MinHours: 1, MaxHours: 168}, Operations: []string{"generation", "embeddings", "ocr", "batch"}, Dialects: []string{"openai-chat", "mistral-fim", "mistral-ocr"},
 		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens, {From: "seed", To: "random_seed"}}}}}, nil),
 	compatiblePreset("openrouter", "OpenRouter", "OpenRouter", "OpenRouter unified API.", "https://openrouter.ai/api/v1", Link{"OpenRouter API reference", "https://openrouter.ai/docs/api/reference/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
-	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings", "rerank", "batch"}, Dialects: chatDialect, Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"},
+	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings", "rerank", "batch"}, Dialects: slices.Concat(chatDialect, completionsDialects), Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"},
+		BatchAPI: "together", BatchDocumentation: "https://docs.together.ai/reference/batch-create", BatchOperations: []string{"generation"},
 		Requests: map[string]RequestShape{"generation": chatTokenLimit["generation"], "rerank": {Unsupported: []string{"truncation"}}}}, nil),
-	selfHostedPreset("tgi", "Text Generation Inference", "Self-hosted Hugging Face TGI server.", "https://tgi.example.internal/v1", Link{"TGI API", "https://huggingface.co/docs/text-generation-inference/reference/api_reference"}, Contract{Operations: []string{"generation"}, Dialects: []string{"openai-chat", "openai-completions"}}),
-	selfHostedPreset("vllm", "vLLM", "Self-hosted vLLM OpenAI server.", "https://vllm.example.internal/v1", Link{"vLLM OpenAI-compatible server", "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Unsupported: []string{"user"}}),
+	selfHostedPreset("tgi", "Text Generation Inference", "Self-hosted Hugging Face TGI server.", "https://tgi.example.internal/v1", Link{"TGI API", "https://huggingface.co/docs/text-generation-inference/reference/api_reference"}, Contract{Operations: []string{"generation"}, Dialects: slices.Concat(chatDialect, completionsDialects)}),
+	selfHostedPreset("vllm", "vLLM", "Self-hosted vLLM OpenAI server.", "https://vllm.example.internal/v1", Link{"vLLM OpenAI-compatible server", "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: slices.Concat(openAIDialects, completionsDialects), Unsupported: []string{"user"}}),
 	compatiblePreset("deepseek", "DeepSeek", "DeepSeek", "DeepSeek compatible API.", "https://api.deepseek.com", Link{"DeepSeek chat completion API", "https://api-docs.deepseek.com/api/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"frequency_penalty", "presence_penalty"}, Requests: chatTokenLimit}, nil),
-	compatiblePreset("fireworks", "Fireworks", "Fireworks", "Fireworks compatible API.", "https://api.fireworks.ai/inference/v1", Link{"Fireworks OpenAI compatibility", "https://docs.fireworks.ai/tools-sdks/openai-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect}, exactChat),
+	compatiblePreset("fireworks", "Fireworks", "Fireworks", "Fireworks compatible API.", "https://api.fireworks.ai/inference/v1", Link{"Fireworks OpenAI compatibility", "https://docs.fireworks.ai/tools-sdks/openai-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: slices.Concat(chatDialect, completionsDialects),
+		BatchRefusal: "Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids."}, exactChat),
 	compatiblePreset("deepinfra", "DeepInfra", "DeepInfra", "DeepInfra compatible API.", "https://api.deepinfra.com/v1/openai", Link{"DeepInfra chat API", "https://docs.deepinfra.com/chat/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
 	compatiblePreset("huggingface", "Hugging Face", "Hugging Face", "Hugging Face Inference Providers.", "https://router.huggingface.co/v1", Link{"Hugging Face chat completion", "https://huggingface.co/docs/inference-providers/tasks/chat-completion"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
 	compatiblePreset("cohere", "Cohere", "Cohere", "Cohere compatible API.", "https://api.cohere.ai/compatibility/v1", Link{"Cohere Compatibility API", "https://docs.cohere.com/docs/compatibility-api"}, Contract{
@@ -212,8 +217,9 @@ var contracts = []Contract{
 // index maps vendor identifiers to their position in contracts, and shapes
 // holds each contract's request shapes as Contract.Request returns them.
 var (
-	index  = map[string]int{}
-	shapes = make([]map[string]RequestShape, len(contracts))
+	index    = map[string]int{}
+	shapes   = make([]map[string]RequestShape, len(contracts))
+	speakers = map[string][]string{}
 )
 
 func init() {
@@ -225,6 +231,9 @@ func init() {
 			panic(fmt.Sprintf("vendor contract %q is declared twice", c.ID))
 		}
 		index[c.ID] = i
+		for _, dialect := range c.Dialects {
+			speakers[dialect] = append(speakers[dialect], c.ID)
+		}
 		shapes[i] = make(map[string]RequestShape, len(c.Requests))
 		for operation := range c.Requests {
 			shapes[i][operation] = c.Request(operation)
@@ -276,6 +285,9 @@ func (c Contract) validate() error {
 	if c.AccountProbe != "" && (strings.HasPrefix(c.AccountProbe, "/") || strings.Contains(c.AccountProbe, "..") || strings.ContainsAny(c.AccountProbe, "#\\")) {
 		return fmt.Errorf("the account probe must be a relative path")
 	}
+	if err := c.validateBatch(); err != nil {
+		return err
+	}
 	if c.Preset == nil {
 		return nil
 	}
@@ -290,6 +302,25 @@ func (c Contract) validate() error {
 	}
 	if profile := c.Preset.Profile; profile != nil && (profile.ID == "" || profile.Revision == "") {
 		return fmt.Errorf("a preset profile needs an identity and revision")
+	}
+	return nil
+}
+
+func (c Contract) validateBatch() error {
+	if c.BatchRefusal != "" && (c.BatchAPI != "" || c.Serves("batch")) {
+		return fmt.Errorf("a vendor that refuses batches serves none")
+	}
+	if c.BatchAPI == "" {
+		if c.BatchDocumentation != "" || len(c.BatchOperations) > 0 {
+			return fmt.Errorf("batch documentation and operations need a batch API")
+		}
+		return nil
+	}
+	if u, err := url.Parse(c.BatchDocumentation); err != nil || u.Scheme != "https" {
+		return fmt.Errorf("a batch API needs an HTTPS documentation URL")
+	}
+	if !c.Serves("batch") || len(c.BatchOperations) == 0 || slices.ContainsFunc(c.BatchOperations, func(operation string) bool { return !c.Serves(operation) }) {
+		return fmt.Errorf("a batch API serves batches of operations the vendor serves")
 	}
 	return nil
 }

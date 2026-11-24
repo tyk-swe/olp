@@ -70,6 +70,12 @@ type Contract struct {
 	AccountProbe   string
 	BatchWindow    *BatchWindow
 	BatchEndpoints []string
+	// BatchAPI names the adapter of the vendor's OpenAI-style files and
+	// batches API, and BatchOperations are what its batches may hold.
+	BatchAPI           string
+	BatchDocumentation string
+	BatchOperations    []string
+	BatchRefusal       string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
 }
@@ -90,6 +96,22 @@ func BatchEndpointsFor(vendor string) []string {
 		return nil
 	}
 	return slices.Clone(contracts[i].BatchEndpoints)
+}
+
+func BatchAPIFor(vendor string) (string, bool) {
+	i, ok := index[vendor]
+	if !ok || contracts[i].BatchAPI == "" {
+		return "", false
+	}
+	return contracts[i].BatchAPI, true
+}
+
+func BatchRefusalFor(vendor string) (string, bool) {
+	i, ok := index[vendor]
+	if !ok || contracts[i].BatchRefusal == "" {
+		return "", false
+	}
+	return contracts[i].BatchRefusal, true
 }
 
 // ErrorClass classifies the failures with Status and error Type as Class: a
@@ -241,6 +263,13 @@ func Speaks(vendor, dialect string) bool {
 	return !ok || contracts[i].Speaks(dialect)
 }
 
+func ForDialect(dialect string) (string, bool) {
+	if only := speakers[dialect]; len(only) == 1 {
+		return only[0], true
+	}
+	return "", false
+}
+
 // DefaultFor is the vendor a provider of kind gets when it names none: the
 // kind's default vendor, or the kind itself.
 func DefaultFor(kind string) string {
@@ -268,6 +297,7 @@ func (c Contract) clone() Contract {
 	c.Unsupported = slices.Clone(c.Unsupported)
 	c.OperationEndpoints = maps.Clone(c.OperationEndpoints)
 	c.BatchEndpoints = slices.Clone(c.BatchEndpoints)
+	c.BatchOperations = slices.Clone(c.BatchOperations)
 	if c.Requests != nil {
 		requests := make(map[string]RequestShape, len(c.Requests))
 		for operation, shape := range c.Requests {

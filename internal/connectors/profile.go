@@ -25,7 +25,7 @@ type Profile struct {
 	ModelDiscovery    bool                       `json:"model_discovery,omitempty"`
 	OptionsSchema     json.RawMessage            `json:"options_schema,omitempty"`
 	Strict            bool                       `json:"strict"`
-	vendor            reviewedVendor
+	vendor            string
 }
 
 func (c Config) profile() (Profile, error) {
@@ -55,7 +55,7 @@ func (c Config) Hosting() string {
 
 func (p Profile) Vendor() string {
 	required, _ := p.reviewedVendor()
-	return required.id
+	return required
 }
 
 func (p Profile) OperationDialect(operation string) string {

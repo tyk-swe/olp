@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 const (
@@ -236,33 +237,30 @@ var (
 	cohereDialects = []string{"cohere-embed-v2", "cohere-rerank-v2"}
 )
 
-type reviewedVendor struct {
-	id, family string
-}
+const completionsDialect = "openai-completions"
 
-var dialectVendors = map[string]reviewedVendor{
-	"xai-realtime":                    {id: "xai", family: "native duplex"},
-	"vertex-realtime":                 {id: "google-vertex", family: "native duplex"},
-	"bedrock-realtime":                {id: "amazon-bedrock", family: "native duplex"},
-	"openai-decisions":                {id: "openai", family: "decision"},
-	"gemini-decisions":                {id: "google", family: "decision"},
-	"systemone":                       {id: "typesafe-jev", family: "decision"},
-	"mistral-ocr":                     {id: "mistral", family: "operation"},
-	"azure-document-intelligence-ocr": {id: "azure-document-intelligence", family: "operation"},
-	"vertex-document-processing-ocr":  {id: "google-vertex", family: "operation"},
-	"perplexity-search":               {id: "perplexity", family: "operation"},
-	"tavily-search":                   {id: "tavily", family: "operation"},
-	"exa-search":                      {id: "exa", family: "operation"},
-	"parallel-search":                 {id: "parallel", family: "operation"},
-	"brave-search":                    {id: "brave", family: "operation"},
-}
+var vendorOwnedOperations = []string{"realtime", "decision", "ocr", "search"}
 
-func (p Profile) reviewedVendor() (reviewedVendor, bool) {
-	if p.vendor.id != "" {
+func (p Profile) reviewedVendor() (string, bool) {
+	if p.vendor != "" {
 		return p.vendor, true
 	}
-	required, pinned := dialectVendors[p.Dialect]
-	return required, pinned
+	if len(p.Operations) != 1 || !slices.Contains(vendorOwnedOperations, p.Operations[0]) {
+		return "", false
+	}
+	return vendors.ForDialect(p.Dialect)
+}
+
+func (p Profile) vendorFamily() string {
+	switch {
+	case p.Dialect == completionsDialect:
+		return "completions"
+	case slices.Contains(p.Operations, "realtime"):
+		return "native duplex"
+	case slices.Contains(p.Operations, "decision"):
+		return "decision"
+	}
+	return "operation"
 }
 
 func operationProfile(d operations.Dialect) Profile {
@@ -304,62 +302,51 @@ var cohereV2 = Profile{
 	Documentation:     "https://docs.cohere.com/reference/embed", Strict: true,
 }
 
-func completionProfile(vendor string, kind Kind, hosting string) Profile {
+func directHosting(kind Kind) string {
+	if kind == KindOpenAI {
+		return "direct-openai"
+	}
+	return "direct-compatible"
+}
+
+func completionProfile(v vendors.Contract) Profile {
 	return Profile{
-		ID: vendor + "-completions", Label: vendor + " text completions", Kind: kind,
-		Dialect: "openai-completions", DialectRevision: "m9-baseline-1", Hosting: hosting,
+		ID: v.ID + "-completions", Label: v.ID + " text completions", Kind: Kind(v.Connector),
+		Dialect: completionsDialect, DialectRevision: "m9-baseline-1", Hosting: directHosting(Kind(v.Connector)),
 		Authentication: keyHeadersOrNone, Operations: []string{"generation"},
-		OperationDialects: map[string]string{"generation": "openai-completions"},
+		OperationDialects: map[string]string{"generation": completionsDialect},
 		Documentation:     "https://platform.openai.com/docs/api-reference/completions", Strict: true,
-		vendor: reviewedVendor{id: vendor, family: "completions"},
+		vendor: v.ID,
 	}
 }
 
-var completionProfiles = []Profile{
-	completionProfile("openai", KindOpenAI, "direct-openai"),
-	completionProfile("vllm", KindOpenAICompatible, "direct-compatible"),
-	completionProfile("tgi", KindOpenAICompatible, "direct-compatible"),
-	completionProfile("fireworks", KindOpenAICompatible, "direct-compatible"),
-	completionProfile("together", KindOpenAICompatible, "direct-compatible"),
+func filesBatchesProfileID(vendor string) string {
+	return vendor + "-files-batches"
 }
 
-type filesBatchesService struct {
-	vendor, documentation string
-	adapter               BatchAdapter
-	operations            []string
-}
-
-var filesBatchesServices = []filesBatchesService{
-	{vendor: "groq", documentation: "https://console.groq.com/docs/api-reference", adapter: BatchOpenAI, operations: []string{"generation", "batch"}},
-	{vendor: "together", documentation: "https://docs.together.ai/reference/batch-create", adapter: BatchTogether, operations: []string{"generation", "batch"}},
-	{vendor: "mistral", documentation: "https://docs.mistral.ai/api/endpoint/batch", adapter: BatchMistral, operations: []string{"generation", "embeddings", "batch"}},
-}
-
-func (s filesBatchesService) profile() string {
-	return s.vendor + "-files-batches"
-}
-
-func filesBatchesVendors() []string {
-	out := make([]string, len(filesBatchesServices))
-	for i, service := range filesBatchesServices {
-		out[i] = service.vendor
+func filesBatchesProfile(v vendors.Contract) Profile {
+	return Profile{
+		ID: filesBatchesProfileID(v.ID), Label: v.ID + " OpenAI-compatible files and batches", Kind: KindOpenAICompatible,
+		Dialect: "openai-chat", Hosting: "direct-compatible", Authentication: keyOnly, Operations: slices.Concat(v.BatchOperations, []string{"batch"}),
+		Documentation: v.BatchDocumentation, vendor: v.ID,
 	}
-	return out
 }
 
-func filesBatchesProfiles() []Profile {
-	out := make([]Profile, len(filesBatchesServices))
-	for i, service := range filesBatchesServices {
-		out[i] = Profile{
-			ID: service.profile(), Label: service.vendor + " OpenAI-compatible files and batches", Kind: KindOpenAICompatible,
-			Dialect: "openai-chat", Hosting: "direct-compatible", Authentication: keyOnly, Operations: service.operations,
-			Documentation: service.documentation, vendor: reviewedVendor{id: service.vendor, family: "operation"},
+func vendorProfiles(offered func(vendors.Contract) bool, profile func(vendors.Contract) Profile) []Profile {
+	var out []Profile
+	for _, v := range vendors.All() {
+		if offered(v) {
+			out = append(out, profile(v))
 		}
 	}
 	return out
 }
 
-var builtIns = builtIn(slices.Concat(hostedProfiles, operationProfiles(), []Profile{cohereV2}, completionProfiles, filesBatchesProfiles()))
+var builtIns = builtIn(slices.Concat(
+	hostedProfiles, operationProfiles(), []Profile{cohereV2},
+	vendorProfiles(func(v vendors.Contract) bool { return v.Speaks(completionsDialect) }, completionProfile),
+	vendorProfiles(func(v vendors.Contract) bool { return v.BatchAPI != "" }, filesBatchesProfile),
+))
 
 func builtIn(declared []Profile) []Profile {
 	out := make([]Profile, len(declared))
