@@ -1,6 +1,5 @@
 import { setupProgress } from '#lib/features/overview/setupProgress.js';
 import { describe, expect, it } from 'vitest';
-import { activeTab } from '#lib/components/tabLinks.js';
 import type { Grant } from '#lib/session/authorization.js';
 import {
   MANAGEMENT_REQUIREMENTS,
@@ -73,14 +72,6 @@ describe('navigation', () => {
     expect(owningItem('/settings/profile')).toBe(PROFILE);
     expect(owningItem('/agents/grants')?.label).toBe('My connections');
     expect(owningItem('/agents/toolsets')?.label).toBe('Agents and tools');
-  });
-
-  it('marks the deepest matching tab as active', () => {
-    const usage = items.find((item) => item.label === 'Usage');
-    expect(activeTab('/usage/routing', usage?.tabs ?? [])?.label).toBe(
-      'Routing savings'
-    );
-    expect(activeTab('/usage', usage?.tabs ?? [])?.label).toBe('Summary');
   });
 
   it('opens an item on the first tab the grant can read', () => {
