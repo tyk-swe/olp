@@ -1,12 +1,12 @@
 import { setupProgress } from '#lib/features/overview/setupProgress.js';
 import { describe, expect, it } from 'vitest';
+import { activeTab } from '#lib/components/tabLinks.js';
 import type { Grant } from '#lib/session/authorization.js';
 import {
   MANAGEMENT_REQUIREMENTS,
   type ManagementOperation
 } from '#lib/management/requirements.js';
 import {
-  activeTab,
   breadcrumbs,
   NAVIGATION_SECTIONS,
   owningItem,
