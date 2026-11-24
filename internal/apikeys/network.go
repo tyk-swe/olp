@@ -3,12 +3,12 @@ package apikeys
 import (
 	"net/netip"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func validateKeyCIDRs(cidrs []string) error {
-	if len(cidrs) > authority.MaxKeyCIDRs {
+	if len(cidrs) > keyauthority.MaxKeyCIDRs {
 		return httpkit.Invalid("allowed_cidrs", "Use at most 64 CIDR ranges.")
 	}
 	seen := make(map[netip.Prefix]bool, len(cidrs))

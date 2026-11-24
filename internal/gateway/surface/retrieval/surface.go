@@ -3,9 +3,9 @@ package retrieval
 import (
 	"net/http"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 type surface struct{ kernel *kernel.Server }

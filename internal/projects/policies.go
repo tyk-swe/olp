@@ -8,20 +8,20 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
 type Policies struct {
-	EndUser            *authority.EndUserPolicy
+	EndUser            *keyauthority.EndUserPolicy
 	Attribution        *attribution.Policy
-	RouteGroups        authority.RouteGroups
-	Budget             *authority.BudgetPolicy
-	Templates          authority.LimitTemplates
-	AttributionBudgets authority.AttributionBudgets
+	RouteGroups        keyauthority.RouteGroups
+	Budget             *keyauthority.BudgetPolicy
+	Templates          keyauthority.LimitTemplates
+	AttributionBudgets keyauthority.AttributionBudgets
 }
 
 const policyColumns = "end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets"
@@ -65,13 +65,13 @@ func WritePolicies(ctx context.Context, tx pgx.Tx, id string, desired Policies) 
 
 type PolicyImport struct {
 	ProjectID          string
-	EndUserDefaults    *authority.AdmissionLimits
+	EndUserDefaults    *keyauthority.AdmissionLimits
 	EndUserTemplate    *string
 	Attribution        *attribution.Policy
-	RouteGroups        authority.RouteGroups
-	Budget             *authority.BudgetPolicy
-	Templates          *authority.LimitTemplates
-	AttributionBudgets authority.AttributionBudgets
+	RouteGroups        keyauthority.RouteGroups
+	Budget             *keyauthority.BudgetPolicy
+	Templates          *keyauthority.LimitTemplates
+	AttributionBudgets keyauthority.AttributionBudgets
 }
 
 func (desired PolicyImport) policies(current Policies) Policies {
@@ -82,18 +82,18 @@ func (desired PolicyImport) policies(current Policies) Policies {
 	return Policies{EndUser: ImportedEndUserPolicy(current.EndUser, desired.EndUserDefaults, desired.EndUserTemplate), Attribution: desired.Attribution, RouteGroups: desired.RouteGroups, Budget: desired.Budget, Templates: templates, AttributionBudgets: desired.AttributionBudgets}
 }
 
-func ImportedEndUserPolicy(existing *authority.EndUserPolicy, defaults *authority.AdmissionLimits, template *string) *authority.EndUserPolicy {
+func ImportedEndUserPolicy(existing *keyauthority.EndUserPolicy, defaults *keyauthority.AdmissionLimits, template *string) *keyauthority.EndUserPolicy {
 	if defaults == nil && template == nil && (existing == nil || len(existing.Overrides)+len(existing.Blocked) == 0) {
 		return nil
 	}
-	values := authority.AdmissionLimits{}
+	values := keyauthority.AdmissionLimits{}
 	if defaults != nil {
 		values = *defaults
 	}
 	if existing == nil {
-		return &authority.EndUserPolicy{LimitTemplate: template, Defaults: values}
+		return &keyauthority.EndUserPolicy{LimitTemplate: template, Defaults: values}
 	}
-	return &authority.EndUserPolicy{LimitTemplate: template, Defaults: values, Overrides: existing.Overrides, Blocked: existing.Blocked}
+	return &keyauthority.EndUserPolicy{LimitTemplate: template, Defaults: values, Overrides: existing.Overrides, Blocked: existing.Blocked}
 }
 
 func (desired PolicyImport) Changes(current Policies) bool {

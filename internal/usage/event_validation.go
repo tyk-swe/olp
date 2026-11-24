@@ -8,12 +8,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -85,7 +85,7 @@ func Validate(e *Event) (*Validated, error) {
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
 	}
-	if e.EndUserDigest != "" && (!authority.ValidEndUserDigest(e.EndUserDigest) || e.Origin.Keyless()) {
+	if e.EndUserDigest != "" && (!keyauthority.ValidEndUserDigest(e.EndUserDigest) || e.Origin.Keyless()) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
 	if err := validateDelegation(e); err != nil {

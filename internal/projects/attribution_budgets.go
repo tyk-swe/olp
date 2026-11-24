@@ -7,13 +7,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
-func EnsureAttributionBudgetAccounts(ctx context.Context, tx pgx.Tx, project string, b authority.AttributionBudgets) error {
+func EnsureAttributionBudgetAccounts(ctx context.Context, tx pgx.Tx, project string, b keyauthority.AttributionBudgets) error {
 	for key, values := range b {
 		for value := range values {
 			if err := ledger.EnsureAttributionBudget(ctx, tx, project, key, value); err != nil {
@@ -52,7 +52,7 @@ func (s *Server) putProjectAttributionBudgets(r *http.Request, _ authz.Principal
 		return httpkit.Reply{}, err
 	}
 	var input struct {
-		Budgets authority.AttributionBudgets `json:"budgets"`
+		Budgets keyauthority.AttributionBudgets `json:"budgets"`
 	}
 	if err = httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err

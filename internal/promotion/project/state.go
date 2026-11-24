@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -66,21 +66,21 @@ func (c Current) exported() Project {
 	}
 }
 
-func defaults(policy *authority.EndUserPolicy) *authority.AdmissionLimits {
+func defaults(policy *keyauthority.EndUserPolicy) *keyauthority.AdmissionLimits {
 	if policy == nil {
 		return nil
 	}
 	return &policy.Defaults
 }
 
-func template(policy *authority.EndUserPolicy) *string {
+func template(policy *keyauthority.EndUserPolicy) *string {
 	if policy == nil {
 		return nil
 	}
 	return policy.LimitTemplate
 }
 
-func templates(current authority.LimitTemplates) *authority.LimitTemplates {
+func templates(current keyauthority.LimitTemplates) *keyauthority.LimitTemplates {
 	if len(current) == 0 {
 		return nil
 	}

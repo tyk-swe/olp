@@ -5,18 +5,18 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type OrganizationBudget struct {
 	Name   string
-	Budget *authority.BudgetPolicy
+	Budget *keyauthority.BudgetPolicy
 }
 
 type LockedOrganization struct {
 	ID     string
-	Budget *authority.BudgetPolicy
+	Budget *keyauthority.BudgetPolicy
 }
 
 func ReadOrganizationBudgets(ctx context.Context, q database.Queryer) ([]OrganizationBudget, error) {

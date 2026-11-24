@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 var knownSurfaces = map[string]struct{}{
@@ -341,7 +341,7 @@ func (w wireEvent) decodeAuthority(event *Event) error {
 	}
 	if w.EndUserDigest != nil {
 		event.EndUserDigest = *w.EndUserDigest
-		if event.EndUserDigest != "" && (!authority.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
+		if event.EndUserDigest != "" && (!keyauthority.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
 			return errors.New("request metadata field end_user_digest is invalid")
 		}
 	}

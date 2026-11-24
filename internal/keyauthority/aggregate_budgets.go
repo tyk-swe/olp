@@ -1,4 +1,4 @@
-package authority
+package keyauthority
 
 import (
 	"github.com/tyk-swe/olp/internal/limits"
