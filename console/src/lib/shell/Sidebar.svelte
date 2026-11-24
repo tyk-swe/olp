@@ -6,7 +6,7 @@
   import Menu from '#lib/components/Menu.svelte';
   import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
   import { productName, useBranding } from '#lib/shell/branding/branding.js';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import {
     OVERVIEW,
     PLAYGROUND,

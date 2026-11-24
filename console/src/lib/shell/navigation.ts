@@ -6,7 +6,7 @@ import {
 } from '#lib/components/tabLinks.js';
 import { allows, type Grant } from '#lib/session/authorization.js';
 import type { ManagementRoute } from '#lib/management/requirements.js';
-import type { IconName } from '#lib/shell/icons.js';
+import type { IconName } from '#lib/components/icons.js';
 
 export type NavigationLeaf = TabLink & {
   readonly route?: ManagementRoute;

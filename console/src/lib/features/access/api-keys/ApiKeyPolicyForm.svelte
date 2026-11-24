@@ -11,7 +11,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
   import ApiKeyOverlaps from './ApiKeyOverlaps.svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
 

@@ -37,7 +37,7 @@
   } from '#lib/features/access/api-keys/api.js';
   import SecretDialog from '#lib/components/SecretDialog.svelte';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import type { ApiKeyListState } from '#lib/features/access/api-keys/apiKeyListState.js';
 

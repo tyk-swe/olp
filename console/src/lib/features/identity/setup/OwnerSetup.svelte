@@ -4,7 +4,7 @@
   import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
   import { createOwner } from '#lib/features/identity/setup/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import {
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH

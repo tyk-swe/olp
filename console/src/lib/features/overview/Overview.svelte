@@ -5,7 +5,7 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { onMount } from 'svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import { setupProgress } from './setupProgress';
   import SetupChecklist from '#lib/features/overview/SetupChecklist.svelte';
   import OverviewStatusGrid from '#lib/features/overview/OverviewStatusGrid.svelte';
