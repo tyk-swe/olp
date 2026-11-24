@@ -53,15 +53,15 @@ type verdict struct {
 	Result any      `json:"result,omitempty"`
 }
 
-func labelled(format wire.Format, output []byte, render func(wire.Format) ([]byte, error)) verdict {
-	if same := sameAs(format, format, output, render); same != "" {
+func labelled(format wire.Format, output []byte, rendered render) verdict {
+	if same := sameAs(format, format, output, rendered); same != "" {
 		return verdict{Result: "same as " + same}
 	}
 	return verdict{Result: digest(output)}
 }
 
-func described(format wire.Format, output []byte, render func(wire.Format) ([]byte, error)) verdict {
-	if same := sameAs(format, format, output, render); same != "" {
+func described(format wire.Format, output []byte, rendered render) verdict {
+	if same := sameAs(format, format, output, rendered); same != "" {
 		return verdict{Result: "same as " + same}
 	}
 	return verdict{Result: document(output)}
@@ -101,12 +101,20 @@ func collapsed(label string, entries map[string]any) any {
 	return entries
 }
 
-func perProbe(run func(probe) any) any {
-	out := map[string]any{}
+type column func(wire.Format) any
+
+func perProbe(build func(probe) column) column {
+	shaped := map[string]column{}
 	for _, probe := range probes() {
-		out[string(probe.shape)+" shaped"] = run(probe)
+		shaped[string(probe.shape)+" shaped"] = build(probe)
 	}
-	return collapsed("every shape", out)
+	return func(format wire.Format) any {
+		out := map[string]any{}
+		for name, run := range shaped {
+			out[name] = run(format)
+		}
+		return collapsed("every shape", out)
+	}
 }
 
 func formatFacts(format wire.Format) any {
@@ -138,51 +146,60 @@ func nativeFamily(format wire.Format) string {
 	return string(family)
 }
 
-func parseVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		request, err := protocols.Parse(format, probe.request, routeModel)
-		if err != nil {
-			return verdict{Error: coarse(err)}
+func parseVerdicts() column {
+	return perProbe(func(probe probe) column {
+		return func(format wire.Format) any {
+			request, err := protocols.Parse(format, probe.request, routeModel)
+			if err != nil {
+				return verdict{Error: coarse(err)}
+			}
+			return verdict{Result: "accepted as " + string(request.Family)}
 		}
-		return verdict{Result: "accepted as " + string(request.Family)}
 	})
 }
 
-func parseSourceVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		if _, err := protocols.ParseSource(format, probe.request); err != nil {
-			return verdict{Error: classify(err)}
+func parseSourceVerdicts() column {
+	return perProbe(func(probe probe) column {
+		return func(format wire.Format) any {
+			if _, err := protocols.ParseSource(format, probe.request); err != nil {
+				return verdict{Error: classify(err)}
+			}
+			return verdict{Result: "accepted"}
 		}
-		return verdict{Result: "accepted"}
 	})
 }
 
-func encodeSourceVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		out := map[string]any{}
+func encodeSourceVerdicts() column {
+	return perProbe(func(probe probe) column {
+		encoders := map[string]render{}
 		for _, target := range []wire.Format{wire.Chat, wire.Anthropic} {
-			encode := func(source wire.Format) ([]byte, error) {
+			encoders["to "+string(target)] = memoized(func(source wire.Format) ([]byte, error) {
 				request, err := requestOf(source, probe.request)
 				if err != nil {
 					return nil, err
 				}
 				body, _, err := protocols.EncodeTarget(request, target, "", "", upstreamModel, nil)
 				return body, err
-			}
-			body, err := encode(format)
-			if err != nil {
-				out["to "+string(target)] = verdict{Error: coarse(err)}
-				continue
-			}
-			out["to "+string(target)] = labelled(format, body, encode)
+			})
 		}
-		return collapsed("to chat or anthropic", out)
+		return func(format wire.Format) any {
+			out := map[string]any{}
+			for name, encode := range encoders {
+				body, err := encode(format)
+				if err != nil {
+					out[name] = verdict{Error: coarse(err)}
+					continue
+				}
+				out[name] = labelled(format, body, encode)
+			}
+			return collapsed("to chat or anthropic", out)
+		}
 	})
 }
 
-func requestReaders(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		read := func(source wire.Format) ([]byte, error) {
+func requestReaders() column {
+	return perProbe(func(probe probe) column {
+		read := memoized(func(source wire.Format) ([]byte, error) {
 			request, err := requestOf(source, probe.request)
 			if err != nil {
 				return nil, err
@@ -196,94 +213,99 @@ func requestReaders(format wire.Format) any {
 				"pruning_task":      protocols.WorkflowPruningTask(request, 1024),
 				"pruning_plan":      classify(pruningErr),
 			})
+		})
+		return func(format wire.Format) any {
+			output, err := read(format)
+			if err != nil {
+				return verdict{Error: classify(err)}
+			}
+			return described(format, output, read)
 		}
-		output, err := read(format)
-		if err != nil {
-			return verdict{Error: classify(err)}
-		}
-		return described(format, output, read)
 	})
 }
 
-func decodeSourceVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		out := map[string]any{}
-		for _, native := range []bool{false, true} {
-			name, decode := "to chat", func(source wire.Format) ([]byte, error) {
-				completion, err := protocols.Decode(source, wire.Chat, probe.response, routeModel, "")
+func decodeSourceVerdicts() column {
+	return perProbe(func(probe probe) column {
+		decoded := func(target func(wire.Format) wire.Format) render {
+			return memoized(func(source wire.Format) ([]byte, error) {
+				completion, err := protocols.Decode(source, target(source), probe.response, routeModel, "")
 				if err != nil {
 					return nil, err
 				}
 				return json.Marshal(unaryOutcome(completion, nil))
-			}
-			if native {
-				name, decode = "to itself", func(source wire.Format) ([]byte, error) {
-					completion, err := protocols.Decode(source, source, probe.response, routeModel, "")
-					if err != nil {
-						return nil, err
-					}
-					return json.Marshal(unaryOutcome(completion, nil))
-				}
-			}
-			output, err := decode(format)
-			if err != nil {
-				out[name] = verdict{Error: classify(err)}
-				continue
-			}
-			out[name] = labelled(format, output, decode)
+			})
 		}
-		return collapsed("to chat or itself", out)
+		decoders := map[string]render{
+			"to chat":   decoded(func(wire.Format) wire.Format { return wire.Chat }),
+			"to itself": decoded(func(source wire.Format) wire.Format { return source }),
+		}
+		return func(format wire.Format) any {
+			out := map[string]any{}
+			for name, decode := range decoders {
+				output, err := decode(format)
+				if err != nil {
+					out[name] = verdict{Error: classify(err)}
+					continue
+				}
+				out[name] = labelled(format, output, decode)
+			}
+			return collapsed("to chat or itself", out)
+		}
 	})
 }
 
-func streamVerdict(format wire.Format, run func(wire.Format) (streamOutcome, []byte)) verdict {
-	render := func(candidate wire.Format) ([]byte, error) {
+func streamVerdicts(run func(wire.Format) (streamOutcome, []byte)) column {
+	rendered := memoized(func(candidate wire.Format) ([]byte, error) {
 		outcome, _ := run(candidate)
 		return json.Marshal(outcome)
-	}
-	outcome, raw := run(format)
-	if outcome.Error != nil {
-		if len(raw) == 0 {
-			return verdict{Error: outcome.Error}
+	})
+	return func(format wire.Format) any {
+		outcome, raw := run(format)
+		if outcome.Error != nil {
+			if len(raw) == 0 {
+				return verdict{Error: outcome.Error}
+			}
+			return verdict{Error: outcome.Error, Result: "after emitting " + digest(raw)}
 		}
-		return verdict{Error: outcome.Error, Result: "after emitting " + digest(raw)}
+		whole, err := json.Marshal(outcome)
+		if err != nil {
+			return verdict{Error: classify(err)}
+		}
+		return labelled(format, whole, rendered)
 	}
-	whole, err := render(format)
-	if err != nil {
-		return verdict{Error: classify(err)}
-	}
-	return labelled(format, whole, render)
 }
 
-func streamSourceVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		return streamVerdict(format, func(source wire.Format) (streamOutcome, []byte) {
+func streamSourceVerdicts() column {
+	return perProbe(func(probe probe) column {
+		return streamVerdicts(func(source wire.Format) (streamOutcome, []byte) {
 			return runStream(source, wire.Chat, probe.stream, true)
 		})
 	})
 }
 
-func streamTargetVerdicts(format wire.Format) any {
-	return perProbe(func(probe probe) any {
-		return streamVerdict(format, func(target wire.Format) (streamOutcome, []byte) {
+func streamTargetVerdicts() column {
+	return perProbe(func(probe probe) column {
+		return streamVerdicts(func(target wire.Format) (streamOutcome, []byte) {
 			return runStream(probe.shape, target, probe.stream, true)
 		})
 	})
 }
 
-func aggregateVerdict(format wire.Format) any {
-	aggregate := func(target wire.Format) ([]byte, error) {
+func aggregateVerdicts() column {
+	aggregate := memoized(func(target wire.Format) ([]byte, error) {
 		completion, err := protocols.AggregateTranslatedResponses(target, bytes.NewReader(responsesToolStream), eventLimit, routeModel, nil)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(unaryOutcome(completion, nil))
+	})
+	return func(format wire.Format) any {
+		output, err := aggregate(format)
+		if err != nil {
+			return verdict{Error: classify(err)}
+		}
+		return labelled(format, output, aggregate)
 	}
-	output, err := aggregate(format)
-	if err != nil {
-		return verdict{Error: classify(err)}
-	}
-	return labelled(format, output, aggregate)
 }
 
 type captureVerdicts struct {
@@ -435,22 +457,25 @@ func embeddingDefaultVerdicts(t *testing.T, format wire.Format) any {
 
 func TestFormatDispatch(t *testing.T) {
 	t.Parallel()
+	pure := func(run column) func(*testing.T, wire.Format) any {
+		return func(_ *testing.T, format wire.Format) any { return run(format) }
+	}
 	columns := []struct {
 		name string
 		run  func(*testing.T, wire.Format) any
 	}{
-		{"facts", func(_ *testing.T, format wire.Format) any { return formatFacts(format) }},
-		{"parse", func(_ *testing.T, format wire.Format) any { return parseVerdicts(format) }},
-		{"parse source", func(_ *testing.T, format wire.Format) any { return parseSourceVerdicts(format) }},
-		{"request readers", func(_ *testing.T, format wire.Format) any { return requestReaders(format) }},
-		{"encode as source", func(_ *testing.T, format wire.Format) any { return encodeSourceVerdicts(format) }},
-		{"decode as source", func(_ *testing.T, format wire.Format) any { return decodeSourceVerdicts(format) }},
-		{"stream as source", func(_ *testing.T, format wire.Format) any { return streamSourceVerdicts(format) }},
-		{"stream as target", func(_ *testing.T, format wire.Format) any { return streamTargetVerdicts(format) }},
-		{"aggregate as target", func(_ *testing.T, format wire.Format) any { return aggregateVerdict(format) }},
-		{"capture", func(_ *testing.T, format wire.Format) any { return captureDispatch(format) }},
-		{"meaningful frames", func(_ *testing.T, format wire.Format) any { return meaningfulVerdicts(format) }},
-		{"workflow", func(_ *testing.T, format wire.Format) any { return workflowVerdicts(format) }},
+		{"facts", pure(formatFacts)},
+		{"parse", pure(parseVerdicts())},
+		{"parse source", pure(parseSourceVerdicts())},
+		{"request readers", pure(requestReaders())},
+		{"encode as source", pure(encodeSourceVerdicts())},
+		{"decode as source", pure(decodeSourceVerdicts())},
+		{"stream as source", pure(streamSourceVerdicts())},
+		{"stream as target", pure(streamTargetVerdicts())},
+		{"aggregate as target", pure(aggregateVerdicts())},
+		{"capture", pure(captureDispatch)},
+		{"meaningful frames", pure(meaningfulVerdicts)},
+		{"workflow", pure(workflowVerdicts)},
 		{"inline media", inlineMediaDispatch},
 		{"embedding defaults", embeddingDefaultVerdicts},
 	}

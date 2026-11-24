@@ -2,7 +2,9 @@ package protocols_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -83,28 +85,54 @@ type encoded struct {
 
 var referenceFormats = []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock}
 
-func sameAs(source, target wire.Format, output []byte, render func(wire.Format) ([]byte, error)) string {
+type render func(wire.Format) ([]byte, error)
+
+func memoized(run render, extra ...wire.Format) render {
+	cached := map[wire.Format]func() ([]byte, error){}
+	for _, format := range append(extra, referenceFormats...) {
+		cached[format] = sync.OnceValues(func() ([]byte, error) { return run(format) })
+	}
+	return func(format wire.Format) ([]byte, error) {
+		if once, ok := cached[format]; ok {
+			return once()
+		}
+		return run(format)
+	}
+}
+
+func sameAs(source, target wire.Format, output []byte, rendered render) string {
 	for _, reference := range append([]wire.Format{source}, referenceFormats...) {
 		if reference == target {
 			continue
 		}
-		if expected, err := render(reference); err == nil && string(expected) == string(output) {
+		if expected, err := rendered(reference); err == nil && string(expected) == string(output) {
 			return string(reference)
 		}
 	}
 	return ""
 }
 
-func encodeOutcome(request *wire.Request, target wire.Format, upstream string) encoded {
-	encode := func(target wire.Format) ([]byte, error) {
-		body, _, err := protocols.EncodeTarget(request, target, "", "", upstream, nil)
-		return body, err
+func (f requestFixture) encode(target wire.Format) ([]byte, wire.Format, error) {
+	request, err := parseFixture(f.format, f.body)
+	if err != nil {
+		return nil, target, fmt.Errorf("the %s fixture no longer parses: %w", f.format, err)
 	}
-	body, format, err := protocols.EncodeTarget(request, target, "", "", upstream, nil)
+	return protocols.EncodeTarget(request, target, "", "", f.upstream, nil)
+}
+
+func (f requestFixture) rendered() render {
+	return memoized(func(target wire.Format) ([]byte, error) {
+		body, _, err := f.encode(target)
+		return body, err
+	}, f.format)
+}
+
+func encodeOutcome(fixture requestFixture, target wire.Format, rendered render) encoded {
+	body, format, err := fixture.encode(target)
 	if err != nil {
 		return encoded{Error: classify(err)}
 	}
-	if same := sameAs(request.Family, target, body, encode); same != "" {
+	if same := sameAs(fixture.format, target, body, rendered); same != "" {
 		return encoded{Wire: format, SameAs: same}
 	}
 	return encoded{Wire: format, Body: document(body)}
@@ -125,13 +153,10 @@ func TestRequestCodecMatrix(t *testing.T) {
 		if targets == nil {
 			targets = formats(t)
 		}
+		rendered := fixture.rendered()
 		for _, target := range targets {
-			cases = append(cases, goldenCase{name: fixture.name() + " to " + string(target), run: func(t *testing.T) any {
-				request, err := parseFixture(fixture.format, fixture.body)
-				if err != nil {
-					t.Fatalf("the %s fixture no longer parses: %v", fixture.format, err)
-				}
-				return encodeOutcome(request, target, fixture.upstream)
+			cases = append(cases, goldenCase{name: fixture.name() + " to " + string(target), run: func(*testing.T) any {
+				return encodeOutcome(fixture, target, rendered)
 			}})
 		}
 	}
@@ -184,33 +209,38 @@ var responseFixtures = []responseFixture{
 	{wire.Moderation, "flagged", `{"id":"modr-fixture","model":"fixture-upstream","results":[{"flagged":true,"categories":{"hate":false,"violence":true},"category_scores":{"hate":0.125,"violence":0.75}}]}`, moderationCaller},
 }
 
-func decodeOutcome(fixture responseFixture, target wire.Format) decoded {
-	var caller *wire.Request
-	encoding := ""
-	if fixture.request != nil {
-		request, err := parseFixture(fixture.request.format, fixture.request.body)
-		if err != nil {
-			return decoded{Error: &failure{Type: "fixture", Detail: err.Error()}}
-		}
-		caller, encoding = request, protocols.EmbeddingEncoding(request, nil)
+func (f responseFixture) decode(target wire.Format) (*wire.Completion, error) {
+	if f.request == nil {
+		return protocols.DecodeRequest(f.format, target, []byte(f.body), routeModel, "", nil)
 	}
-	decode := func(target wire.Format) ([]byte, error) {
-		completion, err := protocols.DecodeRequest(fixture.format, target, []byte(fixture.body), routeModel, encoding, caller)
+	caller, err := parseFixture(f.request.format, f.request.body)
+	if err != nil {
+		return nil, fmt.Errorf("the %s caller fixture no longer parses: %w", f.request.format, err)
+	}
+	return protocols.DecodeRequest(f.format, target, []byte(f.body), routeModel, protocols.EmbeddingEncoding(caller, nil), caller)
+}
+
+func (f responseFixture) rendered() render {
+	return memoized(func(target wire.Format) ([]byte, error) {
+		completion, err := f.decode(target)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(unaryOutcome(completion, nil))
-	}
-	completion, err := protocols.DecodeRequest(fixture.format, target, []byte(fixture.body), routeModel, encoding, caller)
+	}, f.format)
+}
+
+func decodeOutcome(fixture responseFixture, target wire.Format, rendered render) decoded {
+	completion, err := fixture.decode(target)
 	outcome := unaryOutcome(completion, err)
 	if err != nil {
 		return outcome
 	}
 	whole, err := json.Marshal(outcome)
 	if err != nil {
-		return decoded{Error: &failure{Type: "fixture", Detail: err.Error()}}
+		return decoded{Error: classify(err)}
 	}
-	if same := sameAs(fixture.format, target, whole, decode); same != "" {
+	if same := sameAs(fixture.format, target, whole, rendered); same != "" {
 		return decoded{SameAs: same}
 	}
 	return outcome
@@ -220,9 +250,10 @@ func TestResponseCodecMatrix(t *testing.T) {
 	t.Parallel()
 	var cases []goldenCase
 	for _, fixture := range responseFixtures {
+		rendered := fixture.rendered()
 		for _, target := range formats(t) {
 			cases = append(cases, goldenCase{name: string(fixture.format) + " to " + string(target) + ", " + fixture.scenario, run: func(*testing.T) any {
-				return decodeOutcome(fixture, target)
+				return decodeOutcome(fixture, target, rendered)
 			}})
 		}
 	}
