@@ -52,14 +52,14 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         code: "import { a } from '#lib/shell/navigation.js';"
       },
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         options: ordered,
         code: "export type A = import('#lib/management/http.js').CursorPage<string>; export type B = import('./form.js').Form; export type C = import('#lib/features/routes/index.js').Route;"
       },
       {
-        filename: path.resolve('src/routes/sinks/+page.ts'),
+        filename: path.resolve('src/routes/exports/+page.ts'),
         options: guarded,
-        code: "import { a } from './form.js'; import { b } from '#lib/features/sinks/latest.js';"
+        code: "import { a } from './form.js'; import { b } from '#lib/features/exports/latest.js';"
       },
       {
         filename: inLib('session/api.ts'),
@@ -118,23 +118,23 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         errors: [...layer, ...layer]
       },
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         code: "export type A = import('#lib/features/routes/routeEditor.js').Route;",
         errors: entry
       },
       {
         filename: inLib('format.ts'),
-        code: "export type A = import('#lib/features/sinks/index.js').Sink;",
+        code: "export type A = import('#lib/features/exports/index.js').Sink;",
         errors: shared
       },
       {
-        filename: inLib('features/sinks/api.ts'),
+        filename: inLib('features/exports/api.ts'),
         options: ordered,
         code: "import { a } from '#lib/session/test/transport.js'; import { b } from './test/fixture.js'; import { c } from './api.test.js'; import { d } from '../../../../tests/unit/support/eventually.js'; export { a, b, c, d };",
         errors: [...test, ...test, ...test, ...test]
       },
       {
-        filename: path.resolve('src/routes/sinks/+page.ts'),
+        filename: path.resolve('src/routes/exports/+page.ts'),
         options: ordered,
         code: "import { a } from '#lib/session/test/transport.js'; export { a };",
         errors: test
@@ -142,7 +142,7 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
       {
         filename: inLib('shell/Sidebar.ts'),
         options: ordered,
-        code: "import { a } from '../../routes/sinks/+page.js'; export { a };",
+        code: "import { a } from '../../routes/exports/+page.js'; export { a };",
         errors: routes
       },
       {
@@ -158,7 +158,7 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         errors: apiClient
       },
       {
-        filename: path.resolve('src/routes/sinks/+page.ts'),
+        filename: path.resolve('src/routes/exports/+page.ts'),
         options: guarded,
         code: "import { apiClient } from '#lib/session/client.js'; export { apiClient };",
         errors: apiClient
