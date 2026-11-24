@@ -46,7 +46,9 @@ repository-wide commands.
   `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
 - Writes build their `Idempotency-Key` and `If-Match` headers with `ifMatch`,
   `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
-- ESLint enforces the `apiClient`, `fetch` and header restrictions.
+- ESLint enforces the `apiClient`, `fetch` and header restrictions. The
+  `apiClient` one is part of `eslint/feature-boundary.mjs`, so it holds for any
+  spelling of the path.
 
 ## Feature ownership
 
@@ -58,9 +60,10 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 
 ## Boundaries
 
-ESLint enforces six structural rules. `eslint.config.mjs` is their source, and
-`eslint/feature-boundary.mjs` resolves alias and relative imports for the first
-three:
+ESLint enforces eight structural rules. `eslint.config.mjs` is their source,
+and `eslint/feature-boundary.mjs` resolves alias and relative imports for the
+first five, in `import` and `export` statements, dynamic imports and inline
+`import('...')` types:
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
   `listing/`, `components/` and `shell/`) never import from
@@ -70,6 +73,10 @@ three:
   layers" below.
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.
+- Nothing under `src/lib` imports from `src/routes`.
+- Only a test file imports a `*.test.ts` file, a `test/` folder or
+  `console/tests/`. Test files are exempt from these rules, so code that
+  production needs moves out of them.
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into
   parts beside it.
 - The `Idempotency-Key` and `If-Match` header names appear only in
@@ -77,7 +84,7 @@ three:
 - A `.svelte` file has no `try` block. See "Writes" below.
 
 Components that broke the size rule or the `try` rule before those rules
-existed are listed in `eslint-legacy.json`, and the other four rules have no
+existed are listed in `eslint-legacy.json`, and the other six rules have no
 exemptions. The lists only shrink: `scripts/check-exemptions.sh` fails
 `make check-console` when a list has an entry the default branch does not. Fix
 a new violation instead of listing it, and remove a file from its list in the
@@ -107,7 +114,7 @@ itself and the layers listed before it:
 Features and routes sit above all seven and import any of them. The order is
 the `sharedLayers` list in `eslint.config.mjs`. A new folder under `src/lib`
 ranks above `shell/` until it is added to that list, so no listed layer can
-import it. Test files are exempt from the three import rules.
+import it.
 
 ## Writes
 

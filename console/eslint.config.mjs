@@ -101,22 +101,20 @@ export default [
     }
   },
   {
+    files: sourceFiles,
+    ignores: testFiles,
+    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
+    rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
+  },
+  {
     // Feature api modules (and shared transport) own every apiClient call;
     // browser code reaches the inference gateway only through gatewayFetch.
     files: sourceFiles,
     ignores: [...apiModules, ...testFiles],
     rules: {
-      'no-restricted-imports': [
+      'console/feature-boundary': [
         'error',
-        {
-          paths: [
-            {
-              name: '#lib/session/client.js',
-              message:
-                'Call the management API from the feature api module, not a component.'
-            }
-          ]
-        }
+        { layers: sharedLayers, apiClient: 'session/client' }
       ],
       'no-restricted-globals': [
         'error',
@@ -127,12 +125,6 @@ export default [
         }
       ]
     }
-  },
-  {
-    files: sourceFiles,
-    ignores: testFiles,
-    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
-    rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
   },
   {
     files: ['src/**/*.svelte'],

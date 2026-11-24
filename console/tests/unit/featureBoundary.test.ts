@@ -12,7 +12,12 @@ const inLib = (file: string) => path.resolve('src/lib', file);
 const entry = [{ messageId: 'entry' }];
 const shared = [{ messageId: 'shared' }];
 const layer = [{ messageId: 'layer' }];
-const ordered = [{ layers: ['.', 'management', 'components', 'shell'] }];
+const test = [{ messageId: 'test' }];
+const routes = [{ messageId: 'routes' }];
+const apiClient = [{ messageId: 'apiClient' }];
+const order = ['.', 'management', 'session', 'components', 'shell'];
+const ordered = [{ layers: order }];
+const guarded = [{ layers: order, apiClient: 'session/client' }];
 
 new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
   'feature-boundary',
@@ -45,6 +50,21 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         filename: inLib('unlisted/widget.ts'),
         options: ordered,
         code: "import { a } from '#lib/shell/navigation.js';"
+      },
+      {
+        filename: inLib('features/sinks/api.ts'),
+        options: ordered,
+        code: "export type A = import('#lib/management/http.js').CursorPage<string>; export type B = import('./form.js').Form; export type C = import('#lib/features/routes/index.js').Route;"
+      },
+      {
+        filename: path.resolve('src/routes/sinks/+page.ts'),
+        options: guarded,
+        code: "import { a } from './form.js'; import { b } from '#lib/features/sinks/latest.js';"
+      },
+      {
+        filename: inLib('session/api.ts'),
+        options: ordered,
+        code: "import { apiClient } from './client.js'; export { apiClient };"
       }
     ],
     invalid: [
@@ -90,6 +110,58 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
         options: ordered,
         code: "import { a } from '#lib/unlisted/widget.js'; export { a };",
         errors: layer
+      },
+      {
+        filename: inLib('components/Tabs.ts'),
+        options: ordered,
+        code: "export type A = import('#lib/shell/navigation.js').NavigationLeaf; export type B = import('$lib/shell/navigation.js').NavigationLeaf;",
+        errors: [...layer, ...layer]
+      },
+      {
+        filename: inLib('features/sinks/api.ts'),
+        code: "export type A = import('#lib/features/routes/routeEditor.js').Route;",
+        errors: entry
+      },
+      {
+        filename: inLib('format.ts'),
+        code: "export type A = import('#lib/features/sinks/index.js').Sink;",
+        errors: shared
+      },
+      {
+        filename: inLib('features/sinks/api.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/session/test/transport.js'; import { b } from './test/fixture.js'; import { c } from './api.test.js'; import { d } from '../../../../tests/unit/support/eventually.js'; export { a, b, c, d };",
+        errors: [...test, ...test, ...test, ...test]
+      },
+      {
+        filename: path.resolve('src/routes/sinks/+page.ts'),
+        options: ordered,
+        code: "import { a } from '#lib/session/test/transport.js'; export { a };",
+        errors: test
+      },
+      {
+        filename: inLib('shell/Sidebar.ts'),
+        options: ordered,
+        code: "import { a } from '../../routes/sinks/+page.js'; export { a };",
+        errors: routes
+      },
+      {
+        filename: inLib('components/Picker.ts'),
+        options: guarded,
+        code: "import { a } from '#lib/session/client.js'; import { b } from '../session/client.js'; import { c } from '../session/client'; export { a, b, c };",
+        errors: [...apiClient, ...apiClient, ...apiClient]
+      },
+      {
+        filename: inLib('session/lifecycle.ts'),
+        options: guarded,
+        code: "import { apiClient } from './client.js'; export { apiClient };",
+        errors: apiClient
+      },
+      {
+        filename: path.resolve('src/routes/sinks/+page.ts'),
+        options: guarded,
+        code: "import { apiClient } from '#lib/session/client.js'; export { apiClient };",
+        errors: apiClient
       }
     ]
   }
