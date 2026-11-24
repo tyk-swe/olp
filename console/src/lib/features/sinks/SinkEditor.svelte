@@ -3,7 +3,7 @@
   import { useQueryClient } from '@tanstack/svelte-query';
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';

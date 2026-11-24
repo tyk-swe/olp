@@ -9,8 +9,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { listProviderPage } from '#lib/features/providers/providers.js';
   import {
     cursorPaginationProps,

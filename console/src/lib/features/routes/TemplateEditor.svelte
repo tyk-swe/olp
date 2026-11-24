@@ -3,7 +3,7 @@
   import { useQueryClient } from '@tanstack/svelte-query';
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { parseJsonObject } from '#lib/editing/json.js';
   import type { RoutingPolicy } from './api';
   import { fidelityOptions, type FidelityMode } from './routeFidelity';

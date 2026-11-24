@@ -1,5 +1,5 @@
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { unwrapPage } from '#lib/management/http.js';
 import { RUNTIME_GENERATION_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import type { CursorPage } from '#lib/management/http.js';

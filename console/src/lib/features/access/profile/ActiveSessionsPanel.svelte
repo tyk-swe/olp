@@ -17,7 +17,7 @@
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import { formatDate } from '#lib/format.js';
 
   const pagination = $state(emptyCursorHistory());

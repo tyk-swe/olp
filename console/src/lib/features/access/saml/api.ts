@@ -1,4 +1,4 @@
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { ensureOk, unwrap, ifMatch } from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];

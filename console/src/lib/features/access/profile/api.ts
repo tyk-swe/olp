@@ -1,6 +1,6 @@
 import { parseMFAChallenge } from '#lib/session/mfaChallenge.js';
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import {
   ensureOk,
   unwrap,

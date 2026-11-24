@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/svelte-query';
 import { providerKeys } from './providerKeys';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import type { ProviderKindCapability } from './models';
 import type { Provider, ProviderProbe } from './providers';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';

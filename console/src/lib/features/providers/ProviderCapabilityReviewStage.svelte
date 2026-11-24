@@ -10,7 +10,7 @@
     cursorPaginationProps,
     type CursorHistory
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import { formatDate } from '#lib/format.js';
   import CapabilityReview from '#lib/features/providers/CapabilityReview.svelte';
 

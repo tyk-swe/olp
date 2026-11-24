@@ -19,8 +19,8 @@
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import RouteFixtureChecks from './RouteFixtureChecks.svelte';
   import { errorMessage } from '#lib/management/http.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '#lib/format.js';
   import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   import { ProjectScopeField } from '#lib/features/access/index.js';

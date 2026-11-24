@@ -6,7 +6,6 @@ import {
   type ManagementOperation
 } from '#lib/management/requirements.js';
 import {
-  activeTab,
   breadcrumbs,
   NAVIGATION_SECTIONS,
   owningItem,
@@ -73,14 +72,6 @@ describe('navigation', () => {
     expect(owningItem('/settings/profile')).toBe(PROFILE);
     expect(owningItem('/agents/grants')?.label).toBe('My connections');
     expect(owningItem('/agents/toolsets')?.label).toBe('Agents and tools');
-  });
-
-  it('marks the deepest matching tab as active', () => {
-    const usage = items.find((item) => item.label === 'Usage');
-    expect(activeTab('/usage/routing', usage?.tabs ?? [])?.label).toBe(
-      'Routing savings'
-    );
-    expect(activeTab('/usage', usage?.tabs ?? [])?.label).toBe('Summary');
   });
 
   it('opens an item on the first tab the grant can read', () => {

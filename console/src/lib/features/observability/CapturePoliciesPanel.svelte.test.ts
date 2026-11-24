@@ -1,6 +1,6 @@
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
 import type { CapturePolicy } from './api';

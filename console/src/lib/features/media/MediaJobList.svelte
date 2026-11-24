@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { formatDate, stateLabel } from '#lib/format.js';
   import { timeInputType } from '#lib/listing/filters.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import { cursorPaginationProps } from '#lib/listing/pagination.js';
   import { mediaJobStates, mediaJobLifecycles } from './mediaJobListState.js';
   import type { MediaJob } from './api.js';

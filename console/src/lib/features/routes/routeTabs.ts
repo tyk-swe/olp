@@ -1,7 +1,7 @@
 import { resolve } from '$app/paths';
-import type { NavigationLeaf } from '#lib/shell/navigation.js';
+import type { TabLink } from '#lib/components/tabLinks.js';
 
-export const routeTabs = (routeId: string): readonly NavigationLeaf[] => [
+export const routeTabs = (routeId: string): readonly TabLink[] => [
   { label: 'Draft', href: resolve(`routes/${routeId}`) },
   { label: 'Revision history', href: resolve(`routes/${routeId}/revisions`) }
 ];

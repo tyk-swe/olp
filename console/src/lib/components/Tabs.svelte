@@ -1,13 +1,13 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { slidingIndicator } from '#lib/shell/indicator.js';
-  import { activeTab, type NavigationLeaf } from '#lib/shell/navigation.js';
+  import { slidingIndicator } from '#lib/components/indicator.js';
+  import { activeTab, type TabLink } from '#lib/components/tabLinks.js';
   let {
     tabs,
     label,
     active
   }: {
-    tabs: readonly NavigationLeaf[];
+    tabs: readonly TabLink[];
     label: string;
     active?: string;
   } = $props();

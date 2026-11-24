@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
 
   let {
     emailMappings = $bindable(''),

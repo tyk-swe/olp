@@ -16,8 +16,8 @@
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import ReauthenticateDialog from '#lib/features/access/profile/ReauthenticateDialog.svelte';
   import {
     acceptRemote,
     beginReload,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { GrantEnrollment, GrantEnrollmentCompletion } from './grants';

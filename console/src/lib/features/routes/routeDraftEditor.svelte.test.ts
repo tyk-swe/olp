@@ -3,7 +3,7 @@ import type { OperationDialect } from './inspectionDialects';
 import RoutePublishPanel from './RoutePublishPanel.svelte';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';

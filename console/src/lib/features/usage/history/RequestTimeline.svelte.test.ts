@@ -1,7 +1,7 @@
 import { createQuery } from '@tanstack/svelte-query';
 import { getAllContexts, mount, unmount } from 'svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import { getRequest } from './api.js';
 import RequestTimeline from './RequestTimeline.svelte';

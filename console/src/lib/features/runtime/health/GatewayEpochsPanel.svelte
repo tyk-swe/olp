@@ -4,7 +4,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     acknowledgeRequestMetadataGatewayEpoch,
     type Readiness,

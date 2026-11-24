@@ -18,9 +18,9 @@
   import { reauthenticateWithPassword } from '#lib/features/access/profile/reauthentication.js';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
+  import ReauthenticateDialog from '#lib/features/access/profile/ReauthenticateDialog.svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
   import QueryView from '#lib/components/QueryView.svelte';
   import OidcRoleMappings from './OidcRoleMappings.svelte';

@@ -1,6 +1,6 @@
 import type { paths } from '#lib/management/schema.js';
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { apiProblem, unwrap } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 

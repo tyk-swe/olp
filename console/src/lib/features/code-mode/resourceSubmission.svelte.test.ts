@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { ApiProblem } from '#lib/management/http.js';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
