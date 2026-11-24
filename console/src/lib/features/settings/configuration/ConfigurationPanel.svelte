@@ -19,7 +19,7 @@
     type ConfigurationDocument,
     type ConfigurationPlan,
     type ConfigurationPlanItem
-  } from '#lib/features/configuration/api.js';
+  } from '#lib/features/settings/configuration/api.js';
 
   let exportBusy = $state(false);
   let exportDigest = $state('');

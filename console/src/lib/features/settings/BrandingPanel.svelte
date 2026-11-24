@@ -6,11 +6,11 @@
   import { errorMessage } from '#lib/management/http.js';
   import {
     brandingKey,
-    updateBranding,
     useBranding,
     type Branding
   } from '#lib/shell/branding/branding.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
+  import { updateBranding } from './api.js';
 
   const defaultAccent = '#2f64ee';
   const access = useRole();
