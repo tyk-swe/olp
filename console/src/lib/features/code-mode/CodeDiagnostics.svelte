@@ -26,7 +26,7 @@
     cursorPaginationProps,
     resetCursor
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
   import CodeAttemptList from './CodeAttemptList.svelte';
   import CodeBindingList from './CodeBindingList.svelte';

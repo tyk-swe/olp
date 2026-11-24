@@ -1,6 +1,6 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory

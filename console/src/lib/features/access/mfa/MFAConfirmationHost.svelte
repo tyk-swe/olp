@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import SecretDialog from '#lib/components/SecretDialog.svelte';
   import MFAFlow from './MFAFlow.svelte';
   import { mfaPrompt } from '#lib/session/mfaPrompt.svelte.js';
   function cancel() {

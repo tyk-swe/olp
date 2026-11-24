@@ -8,7 +8,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { formatBytes } from '#lib/format.js';
   import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities,

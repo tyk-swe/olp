@@ -1,6 +1,6 @@
 <script lang="ts">
   import { RoutingPreferencesForm } from '#lib/features/routes/index.js';
-  import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
+  import SegmentedRadioGroup from '#lib/components/SegmentedRadioGroup.svelte';
   import PlaygroundDryRun from './PlaygroundDryRun.svelte';
   import { publicNativeOperations } from './nativeOperation.js';
   import { playgroundTemplates } from './templates';

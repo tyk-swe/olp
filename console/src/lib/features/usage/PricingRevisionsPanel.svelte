@@ -5,7 +5,7 @@
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { captureResult } from '#lib/editing/result.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import PricingRevisionForm from './PricingRevisionForm.svelte';
   import {
     emptyPriceFields,
@@ -14,7 +14,7 @@
     type PricingRevisionFormValues,
     extraComponents
   } from './priceEntry';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,

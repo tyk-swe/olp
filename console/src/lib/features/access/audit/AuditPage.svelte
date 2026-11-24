@@ -18,7 +18,7 @@
     applyListSearch,
     syncListWithUrl
   } from '#lib/listing/urlSync.svelte.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import { formatDate } from '#lib/format.js';
   import {
     auditFilters,

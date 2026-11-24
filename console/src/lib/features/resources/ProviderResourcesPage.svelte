@@ -3,7 +3,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     listProviderResources,
     type ProviderResourceFilters

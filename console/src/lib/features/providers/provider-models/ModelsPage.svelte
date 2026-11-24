@@ -9,8 +9,8 @@
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,

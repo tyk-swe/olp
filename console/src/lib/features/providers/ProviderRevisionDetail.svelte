@@ -6,8 +6,8 @@
     emptyCursorHistory,
     resetCursor
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import SecretDialog from '#lib/components/SecretDialog.svelte';
   import { providerKeys } from './providerKeys.js';
   import {
     getProviderRevision,

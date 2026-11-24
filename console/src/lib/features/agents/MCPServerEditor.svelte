@@ -4,7 +4,7 @@
   import type { components } from '#lib/management/schema.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { createServer, saveServer, type MCPServer } from './api';
   import { agentKeys } from './agentKeys';

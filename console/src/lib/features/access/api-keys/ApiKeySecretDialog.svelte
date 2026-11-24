@@ -11,7 +11,7 @@
   import type { ApiKeySecret } from '#lib/features/access/api-keys/api.js';
   import { copyText } from '#lib/clipboard.js';
   import NavIcon from '#lib/shell/NavIcon.svelte';
-  import SecretDialog from '#lib/shell/SecretDialog.svelte';
+  import SecretDialog from '#lib/components/SecretDialog.svelte';
   import { slidingIndicator } from '#lib/shell/indicator.js';
   import {
     SDK_OPTIONS,

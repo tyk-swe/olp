@@ -17,8 +17,8 @@
   } from '#lib/listing/pagination.js';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import Menu from '#lib/components/Menu.svelte';

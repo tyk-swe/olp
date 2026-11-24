@@ -12,7 +12,7 @@
   } from '#lib/listing/pagination.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     listAllProjectMembers,
     listProjectMemberPage,

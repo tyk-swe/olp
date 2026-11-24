@@ -5,7 +5,7 @@
   import { healthKeys } from '#lib/features/runtime/health/healthKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
