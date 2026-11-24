@@ -151,4 +151,44 @@ describe('native JSON documents', () => {
     );
     expect(() => stringifyNativeJSON(undefined)).toThrow('JSON value');
   });
+
+  it('parses and serializes losslessly without ES2025 JSON.rawJSON', () => {
+    const jsonGlobal = JSON as typeof JSON & { rawJSON?: unknown };
+    const descriptor = Object.getOwnPropertyDescriptor(jsonGlobal, 'rawJSON');
+    Object.defineProperty(jsonGlobal, 'rawJSON', {
+      value: undefined,
+      configurable: true,
+      writable: true
+    });
+    try {
+      const source =
+        '{"status":200,"configuration":{"limit":9007199254740993,"rate":1.2500e+2}}';
+      const parsed = parseNativeJSON(source);
+      expect(stringifyNativeJSON(parsed)).toBe(source);
+
+      const managed = parseManagementJSON(source, [['configuration']]) as {
+        status: number;
+        configuration: unknown;
+      };
+      expect(managed.status).toBe(200);
+      expect(stringifyNativeJSON(managed.configuration)).toBe(
+        '{"limit":9007199254740993,"rate":1.2500e+2}'
+      );
+      expect(() => JSON.stringify(new NativeNumber('42'))).toThrow(
+        'stringifyNativeJSON'
+      );
+    } finally {
+      if (descriptor) Object.defineProperty(jsonGlobal, 'rawJSON', descriptor);
+      else delete jsonGlobal.rawJSON;
+    }
+  });
+
+  it('parses large literal arrays in linear time', () => {
+    const count = 50_000;
+    const source = `[${Array.from({ length: count }, (_, index) => String(index)).join(',')}]`;
+    const parsed = parseNativeJSON(source);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect((parsed as unknown[]).length).toBe(count);
+    expect(String((parsed as unknown[])[count - 1])).toBe(String(count - 1));
+  });
 });

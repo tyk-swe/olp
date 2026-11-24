@@ -108,52 +108,64 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 	return nil
 }
 
-func (a *codeAttempt) observeUnary(body []byte) {
+func (a *codeAttempt) ledgerContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+}
+
+func (a *codeAttempt) warnLedger(msg string, err error) {
+	if err == nil || a.forwarder == nil || a.forwarder.log == nil {
+		return
+	}
+	a.forwarder.log.Warn(msg, "attempt_id", a.permit.Attempt.ID, "error", err.Error())
+}
+
+func (a *codeAttempt) observeUnary(ctx context.Context, body []byte) {
 	observation := a.observer.Unary(body)
 	if a.status >= 400 && len(observation.RejectionBody) == 0 {
-		a.observe(codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
+		a.observe(ctx, codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
 	}
-	a.observe(observation)
+	a.observe(ctx, observation)
 	if a.status >= 400 {
 		a.terminal = true
 	}
 }
 
-func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
+func (a *codeAttempt) observeEncodedUnary(ctx context.Context, body []byte, encoding string) {
 	decoded, err := codewire.Decode(body, encoding, codewire.MaxBody)
 	if err == nil {
-		a.observeUnary(decoded)
+		a.observeUnary(ctx, decoded)
 	}
 }
 
-func (a *codeAttempt) observe(o codemode.Observation) {
+func (a *codeAttempt) observe(ctx context.Context, o codemode.Observation) {
 	if o.ResponseID != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = a.forwarder.ledger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
+		refCtx, cancel := a.ledgerContext(ctx)
+		err := a.forwarder.ledger.ObserveReference(refCtx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
+		a.warnLedger("code reference unavailable", err)
 	}
-	classification, classified := a.observeCooldownClass(o)
+	classification, classified := a.observeCooldownClass(ctx, o)
 	switch {
 	case classified && classification.Scope == codeadapter.ScopeModel:
 		a.pendingHealth = nil
 	case len(o.RejectionBody) > 0:
-		a.flushPendingHealth(context.Background())
+		a.flushPendingHealth(ctx)
 	}
 	if o.Status != 0 && !classified {
-		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
-		a.flushPendingHealth(context.Background())
+		a.response(ctx, o.Status, http.Header{"Retry-After": o.RetryAfter})
+		a.flushPendingHealth(ctx)
 	}
 	if o.Allowance != nil {
-		a.observeAllowance(context.Background(), *o.Allowance)
+		a.observeAllowance(ctx, *o.Allowance)
 	}
 	if o.AllowanceCharge != nil {
-		a.observeAllowanceCharge(context.Background(), o.AllowanceCharge)
+		a.observeAllowanceCharge(ctx, o.AllowanceCharge)
 	}
 	if o.Outcome != nil {
-		a.outcome(context.Background(), *o.Outcome)
+		a.outcome(ctx, *o.Outcome)
 	}
 	if o.Successful && !a.prewarm {
-		a.health(context.Background(), "healthy")
+		a.health(ctx, "healthy")
 	}
 	if !o.Terminal {
 		return
@@ -262,18 +274,18 @@ func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.Ra
 	if a.paid != nil || a.adapter != codemode.AdapterOpenCodeGo || a.permit.Attempt.ID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
+	a.warnLedger("code allowance charge unavailable", a.forwarder.ledger.ObserveAllowanceCharge(writeCtx, a.permit.Attempt.ID, charge))
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
 	if a.paid != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
+	a.warnLedger("code allowance unavailable", a.forwarder.ledger.ObserveAllowance(writeCtx, a.permit.Account.ID, allowance))
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
@@ -284,9 +296,9 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	if a.paid != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveHealth(ctx, a.permit.Account.ID, observation)
+	a.warnLedger("code health unavailable", a.forwarder.ledger.ObserveHealth(writeCtx, a.permit.Account.ID, observation))
 }
 
 func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
@@ -298,7 +310,7 @@ func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
 	a.observeHealth(ctx, pending)
 }
 
-func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
+func (a *codeAttempt) observeCooldownClass(ctx context.Context, o codemode.Observation) (codeadapter.Classification, bool) {
 	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
 		return codeadapter.Classification{}, false
 	}
@@ -324,9 +336,10 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 		return classification, true
 	}
 	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	err := a.forwarder.ledger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	err := a.forwarder.ledger.ObserveCooldownClass(writeCtx, a.permit.Account.ID, a.model, classification, now)
+	a.warnLedger("code cooldown classification unavailable", err)
 	return classification, err == nil
 }
 

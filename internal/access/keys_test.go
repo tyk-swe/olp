@@ -41,7 +41,14 @@ func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	}
 	owner := keyauthority.Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
 	capability := &keyauthority.TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
-	callback := policy.TaskAuthority(owner, "snapshot", "workload-revision", &expires, "end-user", capability)
+	callback := policy.TaskAuthority(keyauthority.TaskDerivation{
+		Identity:         owner,
+		SnapshotID:       "snapshot",
+		WorkloadRevision: "workload-revision",
+		ExpiresAt:        &expires,
+		EndUserDigest:    "end-user",
+		Capability:       capability,
+	})
 	if !callback.Allows("inference", "allowed", &project, time.Now()) || callback.Allows("inference", "other", &project, time.Now()) {
 		t.Fatal("task authority did not retain the binding's route policy")
 	}
@@ -64,8 +71,19 @@ func TestDerivedAuthoritiesFollowTheSourceKeyPause(t *testing.T) {
 	for _, pausedAt := range []*time.Time{nil, &now} {
 		key := keyauthority.Authority{ID: "key", ProjectID: &project, PausedAt: pausedAt, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
 		derived := map[string]keyauthority.Authority{
-			"task":       key.TaskAuthority(key, "snapshot", "", &expires, "", nil),
-			"delegation": *key.Delegated([]string{"inference"}, nil, nil, nil, keyauthority.Authority{ID: "agent"}, "member", "pair", "token", expires),
+			"task": key.TaskAuthority(keyauthority.TaskDerivation{
+				Identity:   key,
+				SnapshotID: "snapshot",
+				ExpiresAt:  &expires,
+			}),
+			"delegation": *key.Delegated(keyauthority.DelegationDerivation{
+				Scopes:      []string{"inference"},
+				Agent:       keyauthority.Authority{ID: "agent"},
+				MemberID:    "member",
+				PairDigest:  "pair",
+				TokenDigest: "token",
+				ExpiresAt:   expires,
+			}),
 		}
 		for name, authority := range derived {
 			if got, want := authority.Allows("inference", "route", &project, now), pausedAt == nil; got != want {
@@ -249,5 +267,49 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 	uncapped := keyauthority.Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &keyauthority.DelegationAgentLimits{ID: agentID}}
 	if uncapped.CostBoundaries("").CostBudgeted() {
 		t.Fatal("tracking an uncapped delegated pair must not create a cost limit")
+	}
+}
+
+func TestDelegatedAuthorityPreservesRestrictionsAndDropsGroupRoutes(t *testing.T) {
+	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
+	expires := time.Now().Add(time.Hour)
+	parent := keyauthority.Authority{
+		ID:            "key-parent",
+		ProjectID:     &project,
+		SecretOverlap: &keyauthority.SecretOverlap{LookupID: "old", ExpiresAt: expires},
+		Policy: keyauthority.KeyPolicy{
+			Scopes:                  []string{"inference"},
+			AllowedRoutes:           []string{"allowed"},
+			AllowedRouteGroups:      []string{"group-a"},
+			AllowedCIDRs:            []string{"10.0.0.0/8"},
+			RequiredAttributionKeys: []string{"team"},
+			ForbidResponseCache:     false,
+		},
+	}
+	if err := parent.BindRouteGroups(keyauthority.RouteGroups{"group-a": {"group-only"}}); err != nil {
+		t.Fatal(err)
+	}
+	agent := keyauthority.Authority{
+		ID:     "agent-1",
+		Policy: keyauthority.KeyPolicy{ForbidResponseCache: true},
+	}
+	delegated := parent.Delegated(keyauthority.DelegationDerivation{
+		Scopes:      []string{"inference"},
+		Routes:      []string{"allowed"},
+		Agent:       agent,
+		PairDigest:  "pair",
+		TokenDigest: "token",
+		ExpiresAt:   expires,
+	})
+	if delegated.SecretOverlap != nil {
+		t.Fatal("delegated authority retained parent SecretOverlap")
+	}
+	if delegated.Allows("inference", "group-only", &project, time.Now()) {
+		t.Fatal("delegated authority widened past explicit routes via parent route groups")
+	}
+	if !slices.Equal(delegated.Policy.AllowedCIDRs, []string{"10.0.0.0/8"}) ||
+		!slices.Equal(delegated.Policy.RequiredAttributionKeys, []string{"team"}) ||
+		!delegated.Policy.ForbidResponseCache {
+		t.Fatalf("delegated authority lost parent or agent restrictions: %+v", delegated.Policy)
 	}
 }

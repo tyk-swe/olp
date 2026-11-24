@@ -91,31 +91,53 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 	}
 	generates := operation == "generation" && slices.Contains(generating, mode)
 	if surface == "native" {
-		cloud, hosted := nativeCloudVendors[kind]
-		switch operation {
-		case "batch":
-			return mode == "unary" && hosted && cloud == vendor
-		case "realtime":
-			return mode == "realtime" && (kind == KindOpenAICompatible && vendor == "xai" || hosted && cloud == vendor) && vendors.Serves(vendor, operation)
-		case "generation":
-			return generates && (kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2")))
+		if matched, supported := supportsNativeSurface(kind, vendor, operation, mode, generates); matched {
+			return supported
 		}
 	}
 	if !slices.Contains(modes, mode) {
 		return false
 	}
+	if matched, supported := supportsSpecialKind(kind, vendor, operation, surface, generates); matched {
+		return supported
+	}
+	return supportsReviewedOffer(kind, vendor, operation, surface, mode)
+}
+
+func supportsNativeSurface(kind Kind, vendor, operation, mode string, generates bool) (matched, supported bool) {
+	cloud, hosted := nativeCloudVendors[kind]
+	switch operation {
+	case "batch":
+		return true, mode == "unary" && hosted && cloud == vendor
+	case "realtime":
+		nativeHost := kind == KindOpenAICompatible && vendor == "xai" || hosted && cloud == vendor
+		return true, mode == "realtime" && nativeHost && vendors.Serves(vendor, operation)
+	case "generation":
+		nativeGen := kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2"))
+		return true, generates && nativeGen
+	default:
+		return false, false
+	}
+}
+
+func supportsSpecialKind(kind Kind, vendor, operation, surface string, generates bool) (matched, supported bool) {
 	switch kind {
 	case KindPlugin:
-		return generates && surface != "bedrock"
+		return true, generates && surface != "bedrock"
 	case KindSageMaker:
-		return generates && surface == "openai" && vendors.Serves(vendor, operation)
+		return true, generates && surface == "openai" && vendors.Serves(vendor, operation)
 	case KindWatsonx:
-		return generates && surface != "bedrock" && vendors.Serves(vendor, operation)
+		return true, generates && surface != "bedrock" && vendors.Serves(vendor, operation)
+	default:
+		return false, false
 	}
+}
+
+func supportsReviewedOffer(kind Kind, vendor, operation, surface, mode string) bool {
 	if !slices.Contains(reviewed, kind) {
 		return false
 	}
-	if kind == KindOpenAICompatible && (surface != "openai" || operation == "generation" && !vendors.Speaks(vendor, "openai-chat") && !vendors.Speaks(vendor, "openai-responses")) {
+	if kind == KindOpenAICompatible && !supportsOpenAICompatible(vendor, operation, surface) {
 		return false
 	}
 	if surface == "bedrock" && kind != KindBedrock {
@@ -133,6 +155,16 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 		return Kind(connector) == kind && surface == "openai" && (mode == "unary" || creates)
 	}
 	return slices.ContainsFunc(offers[operation], func(o offer) bool { return o.serves(kind, vendor, surface, mode) })
+}
+
+func supportsOpenAICompatible(vendor, operation, surface string) bool {
+	if surface != "openai" {
+		return false
+	}
+	if operation != "generation" {
+		return true
+	}
+	return vendors.Speaks(vendor, "openai-chat") || vendors.Speaks(vendor, "openai-responses")
 }
 
 var (

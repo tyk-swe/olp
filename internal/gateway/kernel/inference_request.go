@@ -76,7 +76,7 @@ func (s *Server) newInferenceRequest(w http.ResponseWriter, r *http.Request, fam
 }
 
 func (q inferenceRequest) finish() {
-	q.server.Finish(q.x, q.end.out, q.end.status)
+	q.server.finishContext(q.r.Context(), q.x, q.end.out, q.end.status)
 	// The budgets this request reserved are settled even when the
 	// client is gone: a concurrency slot nobody releases is a slot
 	// every replica keeps counting.
@@ -252,7 +252,6 @@ func (q inferenceRequest) plan(caller inferenceCaller, parsed *wire.Request) *fa
 		return e
 	}
 	if s.Deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.OperationName() == "generation" {
-		x.captureContext = ctx
 		x.capture = s.Deps.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 	}
 	return nil

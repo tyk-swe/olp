@@ -654,7 +654,7 @@ func TestCodeAttemptUnaryCapacity429WritesOnlyModelCooldown(t *testing.T) {
 	if len(ledger.health) != 0 || len(ledger.cooldowns) != 0 {
 		t.Fatalf("headers wrote health %v cooldowns %v before body classification", ledger.health, ledger.cooldowns)
 	}
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.health) != 0 {
 		t.Fatalf("capacity 429 wrote credential health %v, want none", ledger.health)
@@ -796,7 +796,7 @@ func TestCodeAttemptUnaryUnclassified429KeepsCredentialFallback(t *testing.T) {
 	ledger := &fakeCodeLedger{}
 	attempt := codexAttempt(t, ledger, now)
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 0 {
 		t.Fatalf("unclassified 429 wrote cooldowns %+v", ledger.cooldowns)
@@ -811,7 +811,7 @@ func TestCodeAttemptFailedCooldownWriteKeepsCredentialFallback(t *testing.T) {
 	ledger := &fakeCodeLedger{cooldownErr: errors.New("store unavailable")}
 	attempt := codexAttempt(t, ledger, now)
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"type":"rate_limit_error","code":"model_at_capacity"}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.health) != 1 || ledger.health[0].Status != "quota_limited" {
 		t.Fatalf("health = %+v, want credential fallback after failed model cooldown write", ledger.health)
@@ -858,7 +858,7 @@ func TestCodeAttemptGLMMessagesQuota429WritesCredentialCooldownWithVendorReset(t
 	ledger := &fakeCodeLedger{}
 	attempt := glmAttempt(t, ledger, now, "v1/messages")
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"1316","message":"Usage limit reached for the past 5 hours. Insufficient balance for extra usage. Resets at ` + reset.Format(time.RFC3339) + `."}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"code":"1316","message":"Usage limit reached for the past 5 hours. Insufficient balance for extra usage. Resets at `+reset.Format(time.RFC3339)+`."}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 {
 		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
@@ -875,7 +875,7 @@ func TestCodeAttemptGLMExpiry429WritesNoHealthOrCooldown(t *testing.T) {
 	ledger := &fakeCodeLedger{}
 	attempt := glmAttempt(t, ledger, now, "v1/chat/completions")
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"1309","message":"Your GLM Coding Plan package has expired"}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"code":"1309","message":"Your GLM Coding Plan package has expired"}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.health) != 0 {
 		t.Fatalf("expiry 429 wrote health %+v, want none", ledger.health)
@@ -933,7 +933,7 @@ func TestCodeAttemptQwenQuotaCooldownUsesCycleAnchorReset(t *testing.T) {
 	ledger := &fakeCodeLedger{}
 	attempt := qwenAttempt(t, ledger, now, &anchor)
 	attempt.response(t.Context(), 429, http.Header{})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 {
 		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
@@ -953,7 +953,7 @@ func TestCodeAttemptQwenQuotaCooldownShortVendorRetryAfterDoesNotShortenAnchorRe
 	ledger := &fakeCodeLedger{}
 	attempt := qwenAttempt(t, ledger, now, &anchor)
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"3600"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(want) {
 		t.Fatalf("cooldowns = %+v, want anchor reset %s over one hour retry-after", ledger.cooldowns, want)
@@ -961,7 +961,7 @@ func TestCodeAttemptQwenQuotaCooldownShortVendorRetryAfterDoesNotShortenAnchorRe
 	longLedger := &fakeCodeLedger{}
 	longAttempt := qwenAttempt(t, longLedger, now, &anchor)
 	longAttempt.response(t.Context(), 429, http.Header{"Retry-After": {"2592000"}})
-	longAttempt.observe(longAttempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	longAttempt.observe(t.Context(), longAttempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
 	longAttempt.finish(t.Context())
 	if len(longLedger.cooldowns) != 1 || !longLedger.cooldowns[0].classification.RetryAt.Equal(now.Add(30*24*time.Hour)) {
 		t.Fatalf("cooldowns = %+v, want later vendor retry-after over anchor reset", longLedger.cooldowns)
@@ -974,7 +974,7 @@ func TestCodeAttemptQwenQuotaCooldownWithoutAnchorKeepsFallback(t *testing.T) {
 	ledger := &fakeCodeLedger{}
 	attempt := qwenAttempt(t, ledger, now, nil)
 	attempt.response(t.Context(), 429, http.Header{})
-	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"error":{"code":"insufficient_quota","message":"Your token-plan quota has been exhausted."}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 || !ledger.cooldowns[0].classification.RetryAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("cooldowns = %+v, want one minute fallback without anchor", ledger.cooldowns)
@@ -1009,7 +1009,7 @@ func TestCodeAttemptMiniMaxMessagesUsage429WritesCredentialQuotaCooldown(t *test
 	ledger := &fakeCodeLedger{}
 	attempt := minimaxAttempt(t, ledger, now, "v1/messages")
 	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
-	attempt.observe(attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 {
 		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
@@ -1026,7 +1026,7 @@ func TestCodeAttemptMiniMaxChatAmbiguous2062WritesShortRateCooldownOnly(t *testi
 	ledger := &fakeCodeLedger{}
 	attempt := minimaxAttempt(t, ledger, now, "v1/chat/completions")
 	attempt.response(t.Context(), 429, http.Header{})
-	attempt.observe(attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 {
 		t.Fatalf("cooldowns = %+v, want one rate cooldown", ledger.cooldowns)
@@ -1043,7 +1043,7 @@ func TestCodeAttemptMiniMaxDeclaredFoldingWritesModelEntitlementCooldown(t *test
 	ledger := &fakeCodeLedger{}
 	attempt := minimaxAttempt(t, ledger, now, "v1/chat/completions")
 	attempt.response(t.Context(), 429, http.Header{})
-	attempt.observe(attempt.observer.Unary([]byte(`{"base_resp":{"status_code":2061,"status_msg":"your current token plan not support model"},"error":{"message":"usage limit exceeded","type":"rate_limit_error","code":2056,"http_code":"429"}}`)))
+	attempt.observe(t.Context(), attempt.observer.Unary([]byte(`{"base_resp":{"status_code":2061,"status_msg":"your current token plan not support model"},"error":{"message":"usage limit exceeded","type":"rate_limit_error","code":2056,"http_code":"429"}}`)))
 	attempt.finish(t.Context())
 	if len(ledger.cooldowns) != 1 {
 		t.Fatalf("cooldowns = %+v, want one model cooldown", ledger.cooldowns)
@@ -1216,7 +1216,7 @@ func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
 			if tc.paid {
 				attempt.paid = &paidCodeAttempt{}
 			}
-			attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: reported})
+			attempt.observe(t.Context(), codemode.Observation{Terminal: true, AllowanceCharge: reported})
 			if tc.want && (ledger.attempt != "attempt-1" || string(ledger.charge) != string(reported)) {
 				t.Fatalf("ledger = %s %s, want the reported charge on attempt-1", ledger.attempt, ledger.charge)
 			}
@@ -1230,12 +1230,60 @@ func TestCodeAttemptStoresAllowanceChargeOnlyForOpenCodeGo(t *testing.T) {
 func TestCodeAttemptLastTerminalChargeWins(t *testing.T) {
 	ledger := &chargeLedger{}
 	attempt := &codeAttempt{forwarder: &Forwarder{ledger: ledger}, adapter: codemode.AdapterOpenCodeGo, permit: codesessions.Permit{Attempt: codemode.Attempt{ID: "attempt-1"}}}
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
+	attempt.observe(t.Context(), codemode.Observation{Terminal: true, AllowanceCharge: json.RawMessage(`{"billing_source":"go","allowance":0.001}`)})
 	terminal := json.RawMessage(`{"billing_source":"go","allowance":0.0021}`)
-	attempt.observe(codemode.Observation{Terminal: true, AllowanceCharge: terminal})
+	attempt.observe(t.Context(), codemode.Observation{Terminal: true, AllowanceCharge: terminal})
 	if string(ledger.charge) != string(terminal) {
 		t.Fatalf("charge = %s, want the last terminal charge %s", ledger.charge, terminal)
 	}
+}
+
+func TestCodeAttemptObserveLogsLedgerFailuresAndPropagatesContextValues(t *testing.T) {
+	type traceKey struct{}
+	var logs bytes.Buffer
+	var seenValue any
+	ledger := &contextCapturingLedger{
+		err: errors.New("ledger down"),
+		onCall: func(ctx context.Context) {
+			seenValue = ctx.Value(traceKey{})
+		},
+	}
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	attempt := &codeAttempt{
+		forwarder: &Forwarder{
+			now:    func() time.Time { return now },
+			log:    slog.New(slog.NewTextHandler(&logs, nil)),
+			ledger: ledger,
+		},
+		permit: codesessions.Permit{
+			Account: codemode.Account{ID: "acct-1"},
+			Attempt: codemode.Attempt{ID: "att-1"},
+		},
+	}
+	ctx := context.WithValue(t.Context(), traceKey{}, "req-42")
+	attempt.observe(ctx, codemode.Observation{ResponseID: "resp-1", Successful: true})
+	if seenValue != "req-42" {
+		t.Fatalf("ledger ctx value = %v, want req-42", seenValue)
+	}
+	if !strings.Contains(logs.String(), "code reference unavailable") || !strings.Contains(logs.String(), "code health unavailable") {
+		t.Fatalf("expected ledger warnings in logs, got %q", logs.String())
+	}
+}
+
+type contextCapturingLedger struct {
+	Ledger
+	err    error
+	onCall func(context.Context)
+}
+
+func (l *contextCapturingLedger) ObserveReference(ctx context.Context, _ string, _ string) error {
+	l.onCall(ctx)
+	return l.err
+}
+
+func (l *contextCapturingLedger) ObserveHealth(ctx context.Context, _ string, _ codemode.HealthObservation) error {
+	l.onCall(ctx)
+	return l.err
 }
 
 func TestCodeProviderDemandHoldsTheReplyBoundAsOutput(t *testing.T) {

@@ -130,14 +130,9 @@ func (r *RoutingCardRevision) Charge(u usage.AttemptUsage, startedAt time.Time, 
 		return Cost{}, false
 	}
 	if cost.units == nil {
-		// A zero cost (a committed attempt) charges zero under any markup.
 		return Cost{units: new(big.Int)}, true
 	}
-	// Round the already-rounded cost by the markup in one half-up rounding.
-	total := new(big.Int).Mul(cost.units, r.markupUnits)
-	total.Add(total, new(big.Int).Quo(costUnit, big.NewInt(2)))
-	total.Quo(total, costUnit)
-	return clampCost(total), true
+	return clampCost(applyMarkupUnits(*cost, r.markupUnits)), true
 }
 
 // ChargeBound is the reservation-equivalent of Charge: the explicit rate's

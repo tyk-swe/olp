@@ -234,7 +234,17 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	return key.Delegated(scopes, routes, toolsets, agents, *agent, member, pairDigest, hex.EncodeToString(m.auth.Digest(secrets.DelegationTokenDigest, token)), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	return key.Delegated(keyauthority.DelegationDerivation{
+		Scopes:      scopes,
+		Routes:      routes,
+		Toolsets:    toolsets,
+		Agents:      agents,
+		Agent:       *agent,
+		MemberID:    member,
+		PairDigest:  pairDigest,
+		TokenDigest: hex.EncodeToString(m.auth.Digest(secrets.DelegationTokenDigest, token)),
+		ExpiresAt:   boundDelegationExpiry(expires, agent.ExpiresAt),
+	}), nil
 }
 
 func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string) (*keyauthority.Authority, error) {
@@ -274,7 +284,12 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 	key, keyExists := m.authority.agentPrincipals[keyID]
 	owner, ownerExists := m.authority.agentPrincipals[expectedKey]
 	policy, principal, currentSnapshot, _, agentExists := m.authority.taskCapabilityPrincipal(agentID, revision, &expires)
-	agent := policy.TaskAuthority(principal, currentSnapshot, revision, &expires, "", nil)
+	agent := policy.TaskAuthority(keyauthority.TaskDerivation{
+		Identity:         principal,
+		SnapshotID:       currentSnapshot,
+		WorkloadRevision: revision,
+		ExpiresAt:        &expires,
+	})
 	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, time.Now())
 	m.mu.RUnlock()
 	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, time.Now()) || !delegationResourcesAllowed(agent, owner, routes, toolsets, agents, time.Now()) {
@@ -283,7 +298,17 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	return owner.Delegated(scopes, routes, toolsets, agents, agent, member, pair, hex.EncodeToString(digest), expires), nil
+	return owner.Delegated(keyauthority.DelegationDerivation{
+		Scopes:      scopes,
+		Routes:      routes,
+		Toolsets:    toolsets,
+		Agents:      agents,
+		Agent:       agent,
+		MemberID:    member,
+		PairDigest:  pair,
+		TokenDigest: hex.EncodeToString(digest),
+		ExpiresAt:   expires,
+	}), nil
 }
 
 func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID, project, publication string) error {

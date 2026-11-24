@@ -26,20 +26,54 @@ func (s *Server) SessionStillAuthorized(ctx context.Context, x *Call, token, key
 	return ok
 }
 
-func (s *Server) SessionAuthority(ctx context.Context, x *Call, token, keyID string, p *Pin) *fault.Error {
+type SessionAuthStatus int
+
+const (
+	SessionAuthorized SessionAuthStatus = iota
+	SessionAuthorityRevoked
+	SessionCredentialIneligible
+	SessionBudgetChanged
+)
+
+type SessionAuthCheck struct {
+	Status      SessionAuthStatus
+	Eligibility routing.Eligibility
+}
+
+func (s *Server) CheckSessionAuthority(ctx context.Context, x *Call, token, keyID string, p *Pin) SessionAuthCheck {
 	authority, ok := s.sessionAuthorityValue(ctx, x, token, keyID)
 	if !ok {
-		return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
+		return SessionAuthCheck{Status: SessionAuthorityRevoked}
 	}
 	if eligibility := s.PinEligibility(p); eligibility != routing.Eligible {
-		return fault.PermissionError("provider_credential_"+string(eligibility), "The realtime provider credential is no longer eligible.")
+		return SessionAuthCheck{Status: SessionCredentialIneligible, Eligibility: eligibility}
 	}
 	current := *authority
 	current.EndUserDigest = x.endUserDigest
 	if e := s.UnboundedPinLimits(x.AdmissionAuthority(current), p, x.Route); e != nil {
-		return e
+		return SessionAuthCheck{Status: SessionBudgetChanged}
 	}
-	return nil
+	return SessionAuthCheck{Status: SessionAuthorized}
+}
+
+func (s *Server) SessionAuthority(ctx context.Context, x *Call, token, keyID string, p *Pin) *fault.Error {
+	check := s.CheckSessionAuthority(ctx, x, token, keyID, p)
+	switch check.Status {
+	case SessionAuthorized:
+		return nil
+	case SessionAuthorityRevoked:
+		return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
+	case SessionCredentialIneligible:
+		return fault.PermissionError("provider_credential_"+string(check.Eligibility), "The realtime provider credential is no longer eligible.")
+	default:
+		authority, _ := s.sessionAuthorityValue(ctx, x, token, keyID)
+		if authority == nil {
+			return fault.PermissionError("key_revoked", "The realtime session no longer has route authority.")
+		}
+		current := *authority
+		current.EndUserDigest = x.endUserDigest
+		return s.UnboundedPinLimits(x.AdmissionAuthority(current), p, x.Route)
+	}
 }
 
 func (s *Server) ReauthenticateSession(ctx context.Context, x *Call, token string) (*keyauthority.Authority, error) {

@@ -244,7 +244,7 @@ One usage row per (UTC day, consumer project, provider, upstream model,
 operation, route, API key, attribution set, committed flag, price-line
 component/tier/unit/list and contracted unit price). Facts store `cost_lines`
 and `charge_lines` from the exact decomposition produced by
-`olp.price_usage_lines`. Each line has a `quantity` in its unit (`1000000 Tokens`, `Requests`, `Calls` or `Units`),
+the Go pricing engine (`internal/usage/rates`). Each line has a `quantity` in its unit (`1000000 Tokens`, `Requests`, `Calls` or `Units`),
 a `list_unit_price` that already includes the window and batch multipliers,
 and a `contracted_unit_price` that also includes the discount. A fact can have no
 stored lines when the line-total guard did not match the fact totals. It then falls back to a single `attempt`

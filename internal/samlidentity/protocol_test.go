@@ -22,6 +22,7 @@ import (
 
 	"github.com/beevik/etree"
 	"github.com/crewjam/saml"
+	"github.com/crewjam/saml/xmlenc"
 	dsig "github.com/russellhaering/goxmldsig"
 )
 
@@ -116,6 +117,7 @@ type issue struct {
 	assertionID, destination, audience, recipient, inResponseTo, nameIDFormat, algorithm string
 	age, lifetime                                                                        time.Duration
 	reshape                                                                              func(assertion *etree.Element)
+	omitResponseCertificate                                                              bool
 }
 
 func without(name string) func(*etree.Element) {
@@ -168,7 +170,7 @@ func respond(t *testing.T, assertionSigner, responseSigner *signer, i issue) []b
 	assertion := shaped(assertionSigner.sign(t, shaped(nil), i.algorithm))
 	response := func(signature *etree.Element) *etree.Element {
 		element := (&saml.Response{
-			ID: "id-response-1", InResponseTo: cmp.Or(i.inResponseTo, requestID), Version: "2.0", IssueInstant: issued,
+			ID: "id-response-1", InResponseTo: cmp.Or(i.inResponseTo, requestID), Version: "2.0", IssueInstant: instant,
 			Destination: cmp.Or(i.destination, serviceConsume), Issuer: &saml.Issuer{Value: providerEntity},
 			Status:    saml.Status{StatusCode: saml.StatusCode{Value: saml.StatusSuccess}},
 			Signature: signature,
@@ -177,7 +179,11 @@ func respond(t *testing.T, assertionSigner, responseSigner *signer, i issue) []b
 		return element
 	}
 	document := etree.NewDocument()
-	document.SetRoot(response(responseSigner.sign(t, response(nil), i.algorithm)))
+	signature := responseSigner.sign(t, response(nil), i.algorithm)
+	if i.omitResponseCertificate {
+		signature.RemoveChild(signature.SelectElement("KeyInfo"))
+	}
+	document.SetRoot(response(signature))
 	raw, err := document.WriteToBytes()
 	if err != nil {
 		t.Fatal(err)
@@ -239,31 +245,87 @@ func TestVerifyAcceptsOnlyTheSolicitedSignedAssertion(t *testing.T) {
 
 	forged := assertionIn(t, respond(t, nil, nil, issue{assertionID: "id-assertion-2"}))
 	for name, raw := range map[string][]byte{
-		"an unsigned assertion":                        respond(t, nil, nil, issue{}),
-		"a signature on the response only":             respond(t, nil, provider, issue{}),
-		"a signature from an unregistered key":         respond(t, stranger, nil, issue{}),
-		"a signature from a retired certificate":       respond(t, retired, nil, issue{}),
-		"a SHA-1 signature":                            respond(t, provider, nil, issue{algorithm: dsig.ECDSASHA1SignatureMethod}),
-		"a subject changed after signing":              bytes.Replace(solicited, []byte(subject), []byte("eve@example.com"), 1),
-		"a forged assertion beside the signed one":     bytes.Replace(solicited, []byte("<saml:Assertion"), slices.Concat(forged, []byte("<saml:Assertion")), 1),
-		"a response addressed to another service":      respond(t, provider, nil, issue{destination: "https://other.example/acs"}),
-		"an assertion for another audience":            respond(t, provider, nil, issue{audience: "https://other.example/metadata"}),
-		"an assertion for another recipient":           respond(t, provider, nil, issue{recipient: "https://other.example/acs"}),
-		"an answer to another request":                 respond(t, provider, nil, issue{inResponseTo: "id-request-2"}),
-		"a transient subject":                          respond(t, provider, nil, issue{nameIDFormat: string(saml.TransientNameIDFormat)}),
-		"an expired assertion":                         respond(t, provider, nil, issue{age: 10 * time.Minute}),
-		"an assertion from the future":                 respond(t, provider, nil, issue{age: -10 * time.Minute}),
-		"an assertion valid for more than ten minutes": respond(t, provider, nil, issue{lifetime: 11 * time.Minute}),
-		"a signed assertion without a subject":         respond(t, provider, nil, issue{reshape: without("Subject")}),
-		"a signed assertion without conditions":        respond(t, provider, nil, issue{reshape: without("Conditions")}),
-		"a name identifier in a foreign namespace":     respond(t, provider, nil, issue{reshape: foreignNameID}),
+		"an unsigned assertion":                         respond(t, nil, nil, issue{}),
+		"a signature on the response only":              respond(t, nil, provider, issue{}),
+		"a signature from an unregistered key":          respond(t, stranger, nil, issue{}),
+		"a signature from a retired certificate":        respond(t, retired, nil, issue{}),
+		"a SHA-1 signature":                             respond(t, provider, nil, issue{algorithm: dsig.ECDSASHA1SignatureMethod}),
+		"a subject changed after signing":               bytes.Replace(solicited, []byte(subject), []byte("eve@example.com"), 1),
+		"a forged assertion beside the signed one":      bytes.Replace(solicited, []byte("<saml:Assertion"), slices.Concat(forged, []byte("<saml:Assertion")), 1),
+		"a response addressed to another service":       respond(t, provider, nil, issue{destination: "https://other.example/acs"}),
+		"an assertion for another audience":             respond(t, provider, nil, issue{audience: "https://other.example/metadata"}),
+		"an assertion for another recipient":            respond(t, provider, nil, issue{recipient: "https://other.example/acs"}),
+		"an answer to another request":                  respond(t, provider, nil, issue{inResponseTo: "id-request-2"}),
+		"a transient subject":                           respond(t, provider, nil, issue{nameIDFormat: string(saml.TransientNameIDFormat)}),
+		"an expired assertion":                          respond(t, provider, nil, issue{age: 10 * time.Minute}),
+		"an old assertion with an open validity window": respond(t, provider, nil, issue{age: Skew + time.Second}),
+		"an assertion from the future":                  respond(t, provider, nil, issue{age: -10 * time.Minute}),
+		"an assertion valid for more than ten minutes":  respond(t, provider, nil, issue{lifetime: 11 * time.Minute}),
+		"a signed assertion without a subject":          respond(t, provider, nil, issue{reshape: without("Subject")}),
+		"a signed assertion without conditions":         respond(t, provider, nil, issue{reshape: without("Conditions")}),
+		"a name identifier in a foreign namespace":      respond(t, provider, nil, issue{reshape: foreignNameID}),
 		"a second subject name outside the SAML namespace": resigned(t, provider, solicited, func(subject *etree.Element) {
 			subject.AddChild(outsideSAML(subject.SelectElement("NameID").Copy()))
 		}),
+		"a response signed by a stranger": respond(t, provider, stranger, issue{}),
+		"a non-success response status":   bytes.Replace(solicited, []byte(saml.StatusSuccess), []byte(saml.StatusAuthnFailed), 1),
 	} {
-		if _, err := Verify(service, metadata, raw, requestID, instant); !errors.Is(err, ErrDocument) {
-			t.Errorf("%s: got %v, want %v", name, err, ErrDocument)
+		if _, err := Verify(service, metadata, raw, requestID, instant); !errors.Is(err, ErrDocument) || err == ErrDocument {
+			t.Errorf("%s: got %v, want wrapped %v", name, err, ErrDocument)
 		}
+	}
+}
+
+func TestVerifyResponseWithoutCertificateDuringRollover(t *testing.T) {
+	t.Parallel()
+	provider := newSigner(t, instant.Add(-time.Hour), instant.Add(time.Hour))
+	rollover := newSigner(t, instant.Add(-time.Hour), instant.Add(time.Hour))
+	stranger := newSigner(t, instant.Add(-time.Hour), instant.Add(time.Hour))
+	service, metadata := trust(t, keyDescriptor("signing", provider.certificate)+keyDescriptor("signing", rollover.certificate))
+
+	response := respond(t, provider, rollover, issue{omitResponseCertificate: true})
+	if _, err := Verify(service, metadata, response, requestID, instant); err != nil {
+		t.Fatalf("response signed by the rollover certificate was refused: %v", err)
+	}
+	untrusted := respond(t, provider, stranger, issue{omitResponseCertificate: true})
+	if _, err := Verify(service, metadata, untrusted, requestID, instant); !errors.Is(err, ErrDocument) {
+		t.Fatalf("response signed by an untrusted certificate: got %v, want %v", err, ErrDocument)
+	}
+}
+
+func TestVerifyPreservesEncryptedAttributes(t *testing.T) {
+	t.Parallel()
+	provider := newSigner(t, instant.Add(-time.Hour), instant.Add(time.Hour))
+	service, metadata := trust(t, keyDescriptor("signing", provider.certificate))
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.Key = key
+	service.Certificate = certify(t, key.Public(), key, instant.Add(-time.Hour), instant.Add(time.Hour))
+	attribute := []byte(`<saml:Attribute xmlns:saml="` + assertionNS + `" Name="email"><saml:AttributeValue>` + subject + `</saml:AttributeValue></saml:Attribute>`)
+	legacy := xmlenc.OAEP()
+	legacy.DigestMethod = xmlenc.SHA1
+	for _, encryption := range []xmlenc.RSA{legacy, xmlenc.OAEP_SHA256()} {
+		t.Run(encryption.Algorithm(), func(t *testing.T) {
+			encrypted, err := encryption.Encrypt(service.Certificate, attribute, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := respond(t, provider, nil, issue{reshape: func(assertion *etree.Element) {
+				statement := assertion.CreateElement("saml:AttributeStatement")
+				statement.CreateElement("saml:EncryptedAttribute").AddChild(encrypted.Copy())
+			}})
+
+			assertion, err := Verify(service, metadata, raw, requestID, instant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attributes, err := Attributes(assertion)
+			if err != nil || !slices.Equal(attributes["email"], []string{subject}) {
+				t.Fatalf("encrypted email claim = %v, error = %v", attributes["email"], err)
+			}
+		})
 	}
 }
 

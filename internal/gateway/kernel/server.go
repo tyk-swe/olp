@@ -211,16 +211,6 @@ func New(deps Dependencies, cfg Config) *Server {
 	}
 }
 
-func (s *Server) WithWorkflow(runs WorkflowRunStore, tools WorkflowToolRunner) *Server {
-	if s == nil {
-		return nil
-	}
-	next := *s
-	next.Deps.WorkflowRuns = runs
-	next.Deps.WorkflowTools = tools
-	return &next
-}
-
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
 func (s *Server) AdmissionPool() *admission.Pool { return s.Gate.Pool() }

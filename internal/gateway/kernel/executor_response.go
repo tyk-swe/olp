@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"time"
@@ -17,13 +18,17 @@ var ErrResponseTooLarge = providerinvoke.ErrResponseTooLarge
 
 // Finish emits the terminal envelope exactly once.
 func (s *Server) Finish(x *Call, out *Outcome, status int) {
+	s.finishContext(context.Background(), x, out, status)
+}
+
+func (s *Server) finishContext(ctx context.Context, x *Call, out *Outcome, status int) {
 	x.once.Do(func() {
 		s.storeCache(x, out, status)
 		completedAt := s.Now()
 		x.finalizePinned()
 		env := x.envelope(out, status, completedAt)
 		x.traceTerminal(env)
-		env.PayloadCaptured = x.captureTerminal(out, env, completedAt)
+		env.PayloadCaptured = x.captureTerminal(ctx, out, env, completedAt)
 		s.finalizeGenerationHTTP(x, env)
 		s.recordBusiness(env, x)
 		s.Deps.Sink.Terminal(env)
@@ -144,7 +149,7 @@ func (x *Call) traceTerminal(env events.Envelope) {
 	x.request.trace.RecordTerminal(env.Status, env.ErrorClass, len(x.facts), firstByte, total)
 }
 
-func (x *Call) captureTerminal(out *Outcome, env events.Envelope, completedAt time.Time) bool {
+func (x *Call) captureTerminal(ctx context.Context, out *Outcome, env events.Envelope, completedAt time.Time) bool {
 	if x.capture == nil {
 		return false
 	}
@@ -154,10 +159,10 @@ func (x *Call) captureTerminal(out *Outcome, env events.Envelope, completedAt ti
 		x.capture.CaptureResponse(x.family, completionBody(out))
 	}
 	var traceID, spanID string
-	if context := x.request.trace.SpanContext(); context.IsValid() {
-		traceID, spanID = context.TraceID().String(), context.SpanID().String()
+	if spanCtx := x.request.trace.SpanContext(); spanCtx.IsValid() {
+		traceID, spanID = spanCtx.TraceID().String(), spanCtx.SpanID().String()
 	}
-	return x.capture.Finish(x.captureContext, capture.Identity{
+	return x.capture.Finish(ctx, capture.Identity{
 		Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
 		TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: capture.ModeOf(streaming),
 	}, completedAt)

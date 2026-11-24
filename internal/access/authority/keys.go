@@ -128,51 +128,32 @@ type TaskCapability struct {
 	ToolsetRevisions []string
 }
 
-func (a Authority) TaskAuthority(identity Authority, snapshot, workloadRevision string, expiry *time.Time, EndUser string, capability *TaskCapability) Authority {
-	return Authority{
-		TaskCapability:              capability,
-		DelegationAgentLimits:       a.DelegationAgentLimits,
-		SnapshotID:                  snapshot,
-		AgentPrincipal:              a.AgentPrincipal,
-		DelegationAgentID:           a.DelegationAgentID,
-		DelegationMemberID:          a.DelegationMemberID,
-		DelegationPairDigest:        a.DelegationPairDigest,
-		DelegationTokenDigest:       a.DelegationTokenDigest,
-		WorkloadIssuerID:            identity.WorkloadIssuerID,
-		WorkloadDigest:              identity.WorkloadDigest,
-		WorkloadRevision:            workloadRevision,
-		WorkloadMapping:             identity.WorkloadMapping,
-		BudgetIncreases:             a.BudgetIncreases,
-		OrganizationID:              a.OrganizationID,
-		OrganizationBudget:          a.OrganizationBudget,
-		InstallationID:              a.InstallationID,
-		InstallationBudget:          a.InstallationBudget,
-		ProjectBudget:               a.ProjectBudget,
-		ProjectAttributionBudgets:   a.ProjectAttributionBudgets,
-		Attribution:                 a.Attribution,
-		allowedGroupRoutes:          a.allowedGroupRoutes,
-		ProjectAttributionPolicy:    a.ProjectAttributionPolicy,
-		EndUserDigest:               EndUser,
-		ProjectEndUserPolicy:        a.ProjectEndUserPolicy,
-		ID:                          identity.ID,
-		Issuer:                      a.Issuer,
-		LookupID:                    identity.LookupID,
-		LimitLookupID:               identity.LimitLookupID,
-		ProjectID:                   a.ProjectID,
-		BudgetGroupTemplate:         a.BudgetGroupTemplate,
-		BudgetGroupRPM:              a.BudgetGroupRPM,
-		BudgetGroupTPM:              a.BudgetGroupTPM,
-		BudgetGroupConcurrency:      a.BudgetGroupConcurrency,
-		BudgetGroupID:               a.BudgetGroupID,
-		BudgetGroupCostBasis:        a.BudgetGroupCostBasis,
-		BudgetGroupDailyCostLimit:   a.BudgetGroupDailyCostLimit,
-		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
-		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
-		Policy:                      a.Policy,
-		ExpiresAt:                   expiry,
-		RevokedAt:                   identity.RevokedAt,
-		PausedAt:                    identity.PausedAt,
-	}
+type TaskDerivation struct {
+	Identity         Authority
+	SnapshotID       string
+	WorkloadRevision string
+	ExpiresAt        *time.Time
+	EndUserDigest    string
+	Capability       *TaskCapability
+}
+
+func (a Authority) TaskAuthority(spec TaskDerivation) Authority {
+	next := a
+	next.SecretOverlap = nil
+	next.TaskCapability = spec.Capability
+	next.SnapshotID = spec.SnapshotID
+	next.WorkloadIssuerID = spec.Identity.WorkloadIssuerID
+	next.WorkloadDigest = spec.Identity.WorkloadDigest
+	next.WorkloadRevision = spec.WorkloadRevision
+	next.WorkloadMapping = spec.Identity.WorkloadMapping
+	next.EndUserDigest = spec.EndUserDigest
+	next.ID = spec.Identity.ID
+	next.LookupID = spec.Identity.LookupID
+	next.LimitLookupID = spec.Identity.LimitLookupID
+	next.ExpiresAt = spec.ExpiresAt
+	next.RevokedAt = spec.Identity.RevokedAt
+	next.PausedAt = spec.Identity.PausedAt
+	return next
 }
 
 func (a Authority) BudgetAttribution() map[string]string {
@@ -189,77 +170,54 @@ func (a Authority) BudgetAttribution() map[string]string {
 	})
 }
 
-func (a Authority) Delegated(scopes, routes, toolsets, agents []string, agent Authority, memberID, pairDigest, tokenDigest string, expiresAt time.Time) *Authority {
-	return &Authority{
-		SnapshotID:            a.SnapshotID,
-		AgentPrincipal:        a.AgentPrincipal,
-		DelegationAgentID:     agent.ID,
-		DelegationMemberID:    memberID,
-		DelegationPairDigest:  pairDigest,
-		DelegationTokenDigest: tokenDigest,
-		DelegationAgentLimits: &DelegationAgentLimits{ID: agent.ID, LookupID: agent.LimitsLookup(), WorkloadIssuerID: agent.WorkloadIssuerID, WorkloadDigest: agent.WorkloadDigest, WorkloadRevision: agent.WorkloadRevision, WorkloadMapping: agent.WorkloadMapping, Limits: AdmissionLimits{
-			RequestsPerMinute: agent.Policy.RequestsPerMinute,
-			TokensPerMinute:   agent.Policy.TokensPerMinute,
-			MaxConcurrency:    agent.Policy.MaxConcurrency,
-			DailyCostLimit:    agent.Policy.DailyCostLimit,
-			WeeklyCostLimit:   agent.Policy.WeeklyCostLimit,
-			MonthlyCostLimit:  agent.Policy.MonthlyCostLimit,
-			CostBasis:         agent.Policy.CostBasis,
-		}},
-		WorkloadIssuerID:          a.WorkloadIssuerID,
-		WorkloadDigest:            a.WorkloadDigest,
-		WorkloadRevision:          a.WorkloadRevision,
-		WorkloadMapping:           a.WorkloadMapping,
-		BudgetIncreases:           a.BudgetIncreases,
-		OrganizationID:            a.OrganizationID,
-		OrganizationBudget:        a.OrganizationBudget,
-		InstallationID:            a.InstallationID,
-		InstallationBudget:        a.InstallationBudget,
-		ProjectBudget:             a.ProjectBudget,
-		ProjectAttributionBudgets: a.ProjectAttributionBudgets,
-		Attribution:               a.Attribution,
-		ProjectAttributionPolicy:  a.ProjectAttributionPolicy,
-		EndUserDigest:             a.EndUserDigest,
-		ProjectEndUserPolicy:      a.ProjectEndUserPolicy,
-		ID:                        a.ID, Issuer: a.Issuer, LookupID: a.LookupID, LimitLookupID: a.LimitLookupID,
-		ProjectID:                   a.ProjectID,
-		BudgetGroupTemplate:         a.BudgetGroupTemplate,
-		BudgetGroupRPM:              a.BudgetGroupRPM,
-		BudgetGroupTPM:              a.BudgetGroupTPM,
-		BudgetGroupConcurrency:      a.BudgetGroupConcurrency,
-		BudgetGroupID:               a.BudgetGroupID,
-		BudgetGroupCostBasis:        a.BudgetGroupCostBasis,
-		BudgetGroupDailyCostLimit:   a.BudgetGroupDailyCostLimit,
-		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
-		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
-		Policy: KeyPolicy{
-			RunLimits: a.Policy.RunLimits,
-			Scopes:    slices.Clone(scopes), AllowedRoutes: slices.Clone(routes), AllowedToolsets: slices.Clone(toolsets), AllowedAgents: slices.Clone(agents),
-			ForbidResponseCache:     a.Policy.ForbidResponseCache || agent.Policy.ForbidResponseCache,
-			LimitTemplate:           a.Policy.LimitTemplate,
-			RouteLimits:             a.Policy.RouteLimits,
-			RegionalLimits:          a.Policy.RegionalLimits,
-			RotationIntervalDays:    a.Policy.RotationIntervalDays,
-			RequiredAttributionKeys: a.Policy.RequiredAttributionKeys,
-			AttributionDefaults:     a.Policy.AttributionDefaults,
-			AllowedCIDRs:            a.Policy.AllowedCIDRs,
-			AllowedAttributionKeys:  a.Policy.AllowedAttributionKeys,
-			RequestsPerMinute:       a.Policy.RequestsPerMinute,
-			TokensPerMinute:         a.Policy.TokensPerMinute,
-			MaxConcurrency:          a.Policy.MaxConcurrency,
-			DailyCostLimit:          a.Policy.DailyCostLimit,
-			MonthlyCostLimit:        a.Policy.MonthlyCostLimit,
-			WeeklyCostLimit:         a.Policy.WeeklyCostLimit,
-			ExpiresAt:               a.Policy.ExpiresAt,
-			CostBasis:               a.Policy.CostBasis,
-			AllowProviderState:      a.Policy.AllowProviderState && agent.Policy.AllowProviderState,
-			ResponseMetadata:        a.Policy.ResponseMetadata,
-			EndUserSource:           a.Policy.EndUserSource,
-			EndUserPolicy:           a.Policy.EndUserPolicy,
-			Priority:                a.Policy.Priority, MaxPriority: a.Policy.MaxPriority,
+type DelegationDerivation struct {
+	Scopes      []string
+	Routes      []string
+	Toolsets    []string
+	Agents      []string
+	Agent       Authority
+	MemberID    string
+	PairDigest  string
+	TokenDigest string
+	ExpiresAt   time.Time
+}
+
+func (a Authority) Delegated(spec DelegationDerivation) *Authority {
+	next := a
+	next.SecretOverlap = nil
+	next.TaskCapability = nil
+	next.allowedGroupRoutes = nil
+	next.DelegationAgentID = spec.Agent.ID
+	next.DelegationMemberID = spec.MemberID
+	next.DelegationPairDigest = spec.PairDigest
+	next.DelegationTokenDigest = spec.TokenDigest
+	next.DelegationAgentLimits = &DelegationAgentLimits{
+		ID:               spec.Agent.ID,
+		LookupID:         spec.Agent.LimitsLookup(),
+		WorkloadIssuerID: spec.Agent.WorkloadIssuerID,
+		WorkloadDigest:   spec.Agent.WorkloadDigest,
+		WorkloadRevision: spec.Agent.WorkloadRevision,
+		WorkloadMapping:  spec.Agent.WorkloadMapping,
+		Limits: AdmissionLimits{
+			RequestsPerMinute: spec.Agent.Policy.RequestsPerMinute,
+			TokensPerMinute:   spec.Agent.Policy.TokensPerMinute,
+			MaxConcurrency:    spec.Agent.Policy.MaxConcurrency,
+			DailyCostLimit:    spec.Agent.Policy.DailyCostLimit,
+			WeeklyCostLimit:   spec.Agent.Policy.WeeklyCostLimit,
+			MonthlyCostLimit:  spec.Agent.Policy.MonthlyCostLimit,
+			CostBasis:         spec.Agent.Policy.CostBasis,
 		},
-		ExpiresAt: &expiresAt, RevokedAt: a.RevokedAt, PausedAt: a.PausedAt,
 	}
+	next.Policy.Scopes = slices.Clone(spec.Scopes)
+	next.Policy.AllowedRoutes = slices.Clone(spec.Routes)
+	next.Policy.AllowedRouteGroups = nil
+	next.Policy.AllowedToolsets = slices.Clone(spec.Toolsets)
+	next.Policy.AllowedAgents = slices.Clone(spec.Agents)
+	next.Policy.ForbidResponseCache = a.Policy.ForbidResponseCache || spec.Agent.Policy.ForbidResponseCache
+	next.Policy.AllowProviderState = a.Policy.AllowProviderState && spec.Agent.Policy.AllowProviderState
+	expiresAt := spec.ExpiresAt
+	next.ExpiresAt = &expiresAt
+	return &next
 }
 
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {

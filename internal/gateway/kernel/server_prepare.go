@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/priority"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/anthropicbeta"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -209,7 +210,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 			return e
 		}
 	}
-	if e := x.checkAnthropicBeta(); e != nil {
+	if e := checkAnthropicBeta(x); e != nil {
 		return e
 	}
 	session := s.planning(x, canonicalPlanning, x.Route, x.family.Operation(), x.family.Surface(), x.mode)
@@ -256,6 +257,19 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	options.Preferences = x.legPreferences()
 	_, _, failure := session.selectPlan(ctx, options)
 	return failure
+}
+
+func checkAnthropicBeta(x *Call) *fault.Error {
+	if x.Strict() || len(x.semanticHeaders.Values("Anthropic-Beta")) == 0 {
+		return nil
+	}
+	snapshot := x.Snapshot()
+	targets := make([]connectors.Config, 0, len(x.Route.Targets))
+	for _, target := range x.Route.Targets {
+		provider := snapshot.Provider(target.ProviderID)
+		targets = append(targets, provider.Connector())
+	}
+	return anthropicbeta.Check(false, x.generation.parsed.Family, x.semanticHeaders, targets)
 }
 
 // WriteAdmissionOverload renders the surface's 503 rejection. The public

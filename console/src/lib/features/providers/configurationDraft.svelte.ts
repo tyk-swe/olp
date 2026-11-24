@@ -5,10 +5,11 @@ import {
   nativeAt,
   nativeIssue,
   nativeObject,
+  normalizeNativeJSON,
   parseNativeJSON,
   renderNativeDraft,
   replaceNative,
-  stringifyNativeJSON,
+  snapshotNativeJSON,
   type NativePath,
   type NativeValue
 } from '#lib/nativeJson.js';
@@ -28,6 +29,8 @@ export const profileScopedSettings = [
   'bindings'
 ] as const;
 
+export type ConfigurationPatch = readonly [NativePath, NativeValue | undefined];
+
 /** One immutable JSON tree is authoritative for both forms and advanced JSON.
  * Partially typed JSON stays in that tree and blocks every save/activation. */
 export class ConfigurationDraft {
@@ -45,9 +48,7 @@ export class ConfigurationDraft {
     configuration: Configuration,
     private readonly lockedKind?: string
   ) {
-    this.root = freezeNative(
-      parseNativeJSON(stringifyNativeJSON(configuration))
-    );
+    this.root = normalizeNativeJSON(configuration);
   }
   get source(): string {
     return this.draft.source;
@@ -131,9 +132,16 @@ export class ConfigurationDraft {
     return value === undefined ? '' : renderNativeDraft(value);
   }
   set(path: NativePath, value: NativeValue | undefined): void {
+    this.patch([[path, value]]);
+  }
+  patch(updates: readonly ConfigurationPatch[]): void {
     if (!nativeObject(this.root))
       throw new Error('Correct configuration JSON before editing fields.');
-    this.root = freezeNative(replaceNative(this.root, path, value));
+    const next = updates.reduce<NativeValue>(
+      (tree, [path, value]) => replaceNative(tree, path, value),
+      this.root
+    );
+    if (next !== this.root) this.root = freezeNative(next);
   }
   setJSON(path: NativePath, source: string): void {
     try {
@@ -157,8 +165,6 @@ export class ConfigurationDraft {
       throw new Error(
         'Configuration requires a connector kind and authentication mode.'
       );
-    // Generated types describe the wire contract. Native number wrappers only
-    // live inside this JSON document and serialize as exact JSON number tokens.
-    return parseNativeJSON(stringifyNativeJSON(this.root)) as Configuration;
+    return snapshotNativeJSON(this.root) as Configuration;
   }
 }

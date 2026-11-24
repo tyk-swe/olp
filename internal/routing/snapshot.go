@@ -429,6 +429,30 @@ func validUUID(value string) bool {
 	return err == nil && len(value) == 36
 }
 
+func (p *Provider) providerOptions() providerconfig.Options {
+	return providerconfig.Options{
+		Network: p.Network, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings,
+		OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, PluginOptions: p.PluginOptions,
+		TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes,
+		VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models, ParameterDefaults: p.ParameterDefaults,
+	}
+}
+
+func (p *Provider) applyProviderOptions(opts providerconfig.Options) {
+	p.Network = opts.Network
+	p.SemanticHeaders = opts.SemanticHeaders
+	p.QuerySettings = opts.QuerySettings
+	p.OperationDefaults = opts.OperationDefaults
+	p.Bindings = opts.Bindings
+	p.PluginOptions = opts.PluginOptions
+	p.TuningDatasetURIPrefixes = opts.TuningDatasetURIPrefixes
+	p.DocumentURIPrefixes = opts.DocumentURIPrefixes
+	p.VendorID = opts.VendorID
+	p.CredentialHeaders = opts.CredentialHeaders
+	p.Models = opts.Models
+	p.ParameterDefaults = opts.ParameterDefaults
+}
+
 func (p *Provider) Connector() connectors.Config {
 	mode := p.AuthMode
 	if mode == "" {
@@ -439,13 +463,7 @@ func (p *Provider) Connector() connectors.Config {
 		Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion,
 		CloudProject: p.CloudProject, BatchStorage: p.BatchStorage, Deployment: p.Deployment, APIVersion: p.APIVersion,
 	}
-	options := providerconfig.Options{
-		Network: p.Network, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings,
-		OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, PluginOptions: p.PluginOptions,
-		TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes,
-		VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models, ParameterDefaults: p.ParameterDefaults,
-	}
-	return identity.Connector(options, p.Plugin, p.CredentialSource, p.ObservedPrincipal)
+	return identity.Connector(p.providerOptions(), p.Plugin, p.CredentialSource, p.ObservedPrincipal)
 }
 
 // HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.

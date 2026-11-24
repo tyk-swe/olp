@@ -52,7 +52,14 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	}
 	boundedExpiry := boundDelegationExpiry(record.Expires, principalExpires)
 	capability := &keyauthority.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(record.Definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(record.Definition.Agent.ToolsetRevisions)}
-	callback := currentPolicy.TaskAuthority(principal, snapshot, record.WorkloadRevision, &boundedExpiry, record.EndUser, capability)
+	callback := currentPolicy.TaskAuthority(keyauthority.TaskDerivation{
+		Identity:         principal,
+		SnapshotID:       snapshot,
+		WorkloadRevision: record.WorkloadRevision,
+		ExpiresAt:        &boundedExpiry,
+		EndUserDigest:    record.EndUser,
+		Capability:       capability,
+	})
 	return &callback, nil
 }
 

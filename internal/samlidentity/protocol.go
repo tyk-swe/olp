@@ -10,8 +10,8 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"time"
 
@@ -166,8 +166,9 @@ func child(e *etree.Element, ns, name string) []*etree.Element {
 }
 
 func strongSignatures(e *etree.Element) bool {
+	inSignature := e.NamespaceURI() == signatureNS
 	for _, n := range e.ChildElements() {
-		if n.NamespaceURI() == signatureNS {
+		if inSignature && n.NamespaceURI() == signatureNS {
 			switch n.Tag {
 			case "SignatureMethod":
 				switch n.SelectAttrValue("Algorithm", "") {
@@ -189,105 +190,205 @@ func strongSignatures(e *etree.Element) bool {
 	return true
 }
 
-// currentCertificates keeps the signing certificates valid at now. Rollover
-// metadata may also list a retired or future one, which never vouches alone.
-func currentCertificates(certificates []*x509.Certificate, now time.Time) []*x509.Certificate {
-	var current []*x509.Certificate
-	for _, c := range certificates {
-		if !now.Before(c.NotBefore) && !now.After(c.NotAfter) {
-			current = append(current, c)
+func docError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrDocument, reason)
+}
+
+func unmarshalElement(el *etree.Element, target any) error {
+	doc := etree.NewDocument()
+	doc.SetRoot(el.Copy())
+	raw, err := doc.WriteToBytes()
+	if err != nil {
+		return err
+	}
+	return xml.Unmarshal(raw, target)
+}
+
+func validateResponseEnvelope(root *etree.Element, acsURL string) (*etree.Element, error) {
+	if root == nil || root.Tag != "Response" || root.NamespaceURI() != protocolNS {
+		return nil, docError("root element must be a SAML 2.0 Response")
+	}
+	if root.SelectAttrValue("Version", "") != "2.0" {
+		return nil, docError("unsupported response version")
+	}
+	if root.SelectAttrValue("Destination", "") != acsURL {
+		return nil, docError("response destination mismatch")
+	}
+	if !strongSignatures(root) {
+		return nil, docError("weak signature or digest algorithm")
+	}
+	if len(child(root, signatureNS, "Signature")) > 1 {
+		return nil, docError("multiple response signatures")
+	}
+	if len(child(root, assertionNS, "EncryptedAssertion")) != 0 {
+		return nil, docError("encrypted assertions are not supported")
+	}
+	assertions := child(root, assertionNS, "Assertion")
+	if len(assertions) != 1 {
+		return nil, docError("response must carry exactly one assertion")
+	}
+	return assertions[0], nil
+}
+
+func validateAssertionShape(assertion *etree.Element) error {
+	if len(child(assertion, signatureNS, "Signature")) != 1 {
+		return docError("assertion must carry exactly one signature")
+	}
+	for _, name := range []string{"Issuer", "Subject", "Conditions", "AuthnStatement"} {
+		if len(child(assertion, assertionNS, name)) != 1 {
+			return docError("assertion missing singleton " + name)
 		}
 	}
-	return current
+	subjectEl := child(assertion, assertionNS, "Subject")[0]
+	var nameIDs []*etree.Element
+	for _, elem := range subjectEl.ChildElements() {
+		if elem.Tag == "NameID" {
+			nameIDs = append(nameIDs, elem)
+		}
+	}
+	if len(nameIDs) != 1 || nameIDs[0].NamespaceURI() != assertionNS {
+		return docError("subject must carry one SAML NameID")
+	}
+	return nil
+}
+
+func validateResponseHeader(root *etree.Element, sp *saml.ServiceProvider, metadata Metadata, requestID string, now time.Time) error {
+	var resp saml.Response
+	if err := unmarshalElement(root, &resp); err != nil {
+		return docError("malformed response XML")
+	}
+	if resp.Version != "2.0" || resp.Destination != sp.AcsURL.String() {
+		return docError("response version or destination mismatch")
+	}
+	if resp.InResponseTo != requestID {
+		return docError("response InResponseTo mismatch")
+	}
+	if resp.IssueInstant.IsZero() || resp.IssueInstant.After(now.Add(Skew)) || now.After(resp.IssueInstant.Add(Skew)) {
+		return docError("response IssueInstant outside allowed skew")
+	}
+	if resp.Issuer != nil && resp.Issuer.Value != metadata.Entity.EntityID {
+		return docError("response issuer mismatch")
+	}
+	if resp.Status.StatusCode.Value != saml.StatusSuccess {
+		return docError("response status is not success")
+	}
+	return nil
+}
+
+func validateAssertionCore(a *saml.Assertion, metadata Metadata, now time.Time) error {
+	if a.ID == "" || len(a.ID) > 256 || a.Version != "2.0" {
+		return docError("invalid assertion ID or version")
+	}
+	if a.Issuer.Value != metadata.Entity.EntityID {
+		return docError("assertion issuer mismatch")
+	}
+	if a.IssueInstant.IsZero() || a.IssueInstant.After(now.Add(Skew)) {
+		return docError("invalid assertion IssueInstant")
+	}
+	if len(a.AuthnStatements) != 1 {
+		return docError("assertion must carry one AuthnStatement")
+	}
+	stmt := a.AuthnStatements[0]
+	if stmt.AuthnInstant.IsZero() || stmt.AuthnInstant.After(now.Add(Skew)) {
+		return docError("invalid AuthnInstant")
+	}
+	if stmt.SessionNotOnOrAfter != nil && !now.Before(stmt.SessionNotOnOrAfter.Add(Skew)) {
+		return docError("session expired")
+	}
+	return nil
+}
+
+func validateSubject(a *saml.Assertion, sp *saml.ServiceProvider, metadata Metadata, requestID string, now time.Time) error {
+	if a.Subject == nil || a.Subject.NameID == nil {
+		return docError("missing subject or NameID")
+	}
+	n := a.Subject.NameID
+	if n.Value == "" || len(n.Value) > 1024 || strings.ContainsAny(n.Value, "\x00\r\n") || n.Format == string(saml.TransientNameIDFormat) {
+		return docError("invalid NameID")
+	}
+	if n.NameQualifier != "" && n.NameQualifier != metadata.Entity.EntityID {
+		return docError("NameQualifier mismatch")
+	}
+	if n.SPNameQualifier != "" && n.SPNameQualifier != sp.EntityID {
+		return docError("SPNameQualifier mismatch")
+	}
+	if len(a.Subject.SubjectConfirmations) != 1 {
+		return docError("subject must carry one SubjectConfirmation")
+	}
+	confirmation := a.Subject.SubjectConfirmations[0]
+	data := confirmation.SubjectConfirmationData
+	if confirmation.Method != "urn:oasis:names:tc:SAML:2.0:cm:bearer" || data == nil {
+		return docError("missing bearer SubjectConfirmationData")
+	}
+	if data.InResponseTo != requestID || data.Recipient != sp.AcsURL.String() {
+		return docError("SubjectConfirmationData InResponseTo or Recipient mismatch")
+	}
+	if data.NotOnOrAfter.IsZero() || !now.Before(data.NotOnOrAfter.Add(Skew)) {
+		return docError("SubjectConfirmationData expired")
+	}
+	if !data.NotBefore.IsZero() && now.Before(data.NotBefore.Add(-Skew)) {
+		return docError("SubjectConfirmationData not yet valid")
+	}
+	return nil
+}
+
+func validateConditions(a *saml.Assertion, sp *saml.ServiceProvider, now time.Time) error {
+	c := a.Conditions
+	if c == nil || c.NotBefore.IsZero() || c.NotOnOrAfter.IsZero() || !c.NotOnOrAfter.After(c.NotBefore) {
+		return docError("invalid assertion conditions interval")
+	}
+	if c.NotOnOrAfter.Sub(a.IssueInstant) > 10*time.Minute {
+		return docError("assertion lifetime exceeds 10 minutes")
+	}
+	if now.Before(c.NotBefore.Add(-Skew)) || !now.Before(c.NotOnOrAfter.Add(Skew)) {
+		return docError("assertion outside validity window")
+	}
+	if len(c.AudienceRestrictions) == 0 {
+		return docError("missing audience restriction")
+	}
+	for _, restriction := range c.AudienceRestrictions {
+		if restriction.Audience.Value != sp.EntityID {
+			return docError("audience mismatch")
+		}
+	}
+	return nil
 }
 
 // Verify requires exactly one separately signed, unencrypted assertion. Outer
 // response signatures are verified too; they never substitute for this proof.
 func Verify(sp *saml.ServiceProvider, metadata Metadata, raw []byte, requestID string, now time.Time) (*saml.Assertion, error) {
 	if BoundedXML(raw) != nil {
-		return nil, ErrDocument
+		return nil, docError("XML bounds check failed")
 	}
 	doc := etree.NewDocument()
 	if doc.ReadFromBytes(raw) != nil {
-		return nil, ErrDocument
+		return nil, docError("XML parse failed")
 	}
-	root := doc.Root()
-	if root.Tag != "Response" || root.NamespaceURI() != protocolNS || root.SelectAttrValue("Version", "") != "2.0" || root.SelectAttrValue("Destination", "") != sp.AcsURL.String() || !strongSignatures(root) {
-		return nil, ErrDocument
-	}
-	assertions := child(root, assertionNS, "Assertion")
-	if len(assertions) != 1 || len(child(root, assertionNS, "EncryptedAssertion")) != 0 {
-		return nil, ErrDocument
-	}
-	assertion := assertions[0]
-	for _, name := range []string{"Issuer", "Subject", "Conditions", "AuthnStatement", "Signature"} {
-		ns := assertionNS
-		if name == "Signature" {
-			ns = signatureNS
-		}
-		if len(child(assertion, ns, name)) != 1 {
-			return nil, ErrDocument
-		}
-	}
-	nameIDs := slices.DeleteFunc(child(assertion, assertionNS, "Subject")[0].ChildElements(), func(e *etree.Element) bool { return e.Tag != "NameID" })
-	if len(nameIDs) != 1 || nameIDs[0].NamespaceURI() != assertionNS {
-		return nil, ErrDocument
-	}
-	roots := currentCertificates(metadata.Certificates, now)
-	if len(roots) == 0 {
-		return nil, ErrDocument
-	}
-	ctx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: roots})
-	ctx.Clock = dsig.NewFakeClockAt(now)
-	ctx.IdAttribute = "ID"
-	if _, err := ctx.Validate(assertion); err != nil {
-		return nil, ErrDocument
-	}
-	var preview saml.Response
-	if xml.Unmarshal(raw, &preview) != nil || preview.Assertion == nil || preview.Assertion.Subject == nil || preview.Assertion.Conditions == nil || preview.IssueInstant.After(now.Add(Skew)) {
-		return nil, ErrDocument
-	}
-	for _, confirmation := range preview.Assertion.Subject.SubjectConfirmations {
-		if confirmation.SubjectConfirmationData == nil {
-			return nil, ErrDocument
-		}
-	}
-	a, err := sp.ParseXMLResponse(raw, []string{requestID}, sp.AcsURL)
+	assertionEl, err := validateResponseEnvelope(doc.Root(), sp.AcsURL.String())
 	if err != nil {
-		return nil, ErrDocument
+		return nil, err
 	}
-	if a.ID == "" || len(a.ID) > 256 || a.Version != "2.0" || a.Subject == nil || a.Subject.NameID == nil || a.Conditions == nil || a.IssueInstant.IsZero() || a.IssueInstant.After(now.Add(Skew)) {
-		return nil, ErrDocument
+	if err := validateAssertionShape(assertionEl); err != nil {
+		return nil, err
 	}
-	if len(a.AuthnStatements) != 1 || a.AuthnStatements[0].AuthnInstant.IsZero() || a.AuthnStatements[0].AuthnInstant.After(now.Add(Skew)) {
-		return nil, ErrDocument
+	if err := validateResponseHeader(doc.Root(), sp, metadata, requestID, now); err != nil {
+		return nil, err
 	}
-	if end := a.AuthnStatements[0].SessionNotOnOrAfter; end != nil && !now.Before(end.Add(Skew)) {
-		return nil, ErrDocument
+	verifier := *sp
+	verifier.Clock = dsig.NewFakeClockAt(now)
+	verifier.IDPMetadata = metadata.Entity
+	a, err := verifier.ParseXMLResponse(raw, []string{requestID}, verifier.AcsURL)
+	if err != nil {
+		return nil, docError("response or assertion rejected by SAML verifier")
 	}
-	n := a.Subject.NameID
-	if n.NameQualifier != "" && n.NameQualifier != metadata.Entity.EntityID || n.SPNameQualifier != "" && n.SPNameQualifier != sp.EntityID {
-		return nil, ErrDocument
+	if err := validateAssertionCore(a, metadata, now); err != nil {
+		return nil, err
 	}
-	if n.Value == "" || len(n.Value) > 1024 || strings.ContainsAny(n.Value, "\x00\r\n") || n.Format == string(saml.TransientNameIDFormat) || n.NameQualifier != "" && n.NameQualifier != metadata.Entity.EntityID || n.SPNameQualifier != "" && n.SPNameQualifier != sp.EntityID {
-		return nil, ErrDocument
+	if err := validateSubject(a, sp, metadata, requestID, now); err != nil {
+		return nil, err
 	}
-	c := a.Conditions
-	if c.NotBefore.IsZero() || c.NotOnOrAfter.IsZero() || !c.NotOnOrAfter.After(c.NotBefore) || c.NotOnOrAfter.Sub(a.IssueInstant) > 10*time.Minute || now.Before(c.NotBefore.Add(-Skew)) || !now.Before(c.NotOnOrAfter.Add(Skew)) || len(c.AudienceRestrictions) == 0 {
-		return nil, ErrDocument
-	}
-	for _, restriction := range c.AudienceRestrictions {
-		if restriction.Audience.Value != sp.EntityID {
-			return nil, ErrDocument
-		}
-	}
-	if len(a.Subject.SubjectConfirmations) != 1 {
-		return nil, ErrDocument
-	}
-	confirmation := a.Subject.SubjectConfirmations[0]
-	data := confirmation.SubjectConfirmationData
-	if confirmation.Method != "urn:oasis:names:tc:SAML:2.0:cm:bearer" || data == nil || data.InResponseTo != requestID || data.Recipient != sp.AcsURL.String() || data.NotOnOrAfter.IsZero() || !data.NotBefore.IsZero() && now.Before(data.NotBefore.Add(-Skew)) || !now.Before(data.NotOnOrAfter.Add(Skew)) {
-		return nil, ErrDocument
+	if err := validateConditions(a, sp, now); err != nil {
+		return nil, err
 	}
 	return a, nil
 }

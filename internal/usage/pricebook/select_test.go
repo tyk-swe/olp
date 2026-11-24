@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
 func TestAttemptRoutingReadsThePricingPin(t *testing.T) {
@@ -72,6 +74,46 @@ func TestAttemptRoutingReadsThePricingPin(t *testing.T) {
 			}
 			if pin.providerRevisionID == nil || *pin.providerRevisionID != revision {
 				t.Fatalf("provider revision = %v, want %s", pin.providerRevisionID, revision)
+			}
+		})
+	}
+}
+
+func TestMediaQuoteAndSettlementUseTheirOwnAmountLimits(t *testing.T) {
+	t.Parallel()
+	in := pricingInputs{
+		priceDoc:    []byte(`{"unit_price":2}`),
+		explicitDoc: []byte(`{"unit_price":3}`),
+	}
+	u := usage.AttemptUsage{
+		Evidence:        usage.EvidenceObservedComplete,
+		UsageQuantities: usage.UsageQuantities{MediaUnits: new("1000000000000")},
+	}
+	maximum := rates.MaxCost().String()
+	for _, tc := range []struct {
+		name               string
+		forStorage         bool
+		wantCost, wantBill string
+		wantLines          bool
+	}{
+		{"quote", false, "2000000000000", "3000000000000", true},
+		{"settlement", true, maximum, maximum, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := evaluatePricingInputs(in, u, time.Time{}, true, tc.forStorage)
+			if err != nil || !p.Complete {
+				t.Fatalf("complete = %v, error = %v", p.Complete, err)
+			}
+			for field, amount := range map[string]*string{"list cost": p.ListCost, "cost": p.EstimatedCost, "contracted cost": p.ContractedCost} {
+				if amount == nil || *amount != tc.wantCost {
+					t.Errorf("%s = %v, want %s", field, amount, tc.wantCost)
+				}
+			}
+			if p.Charge == nil || *p.Charge != tc.wantBill {
+				t.Errorf("charge = %v, want %s", p.Charge, tc.wantBill)
+			}
+			if (len(p.CostLines) > 0) != tc.wantLines || (len(p.ChargeLines) > 0) != tc.wantLines {
+				t.Errorf("cost lines = %s, charge lines = %s, want lines = %v", p.CostLines, p.ChargeLines, tc.wantLines)
 			}
 		})
 	}

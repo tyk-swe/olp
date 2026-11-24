@@ -13,6 +13,13 @@ type Cost struct{ units *big.Int }
 // MaxCost is the largest amount a cost column holds.
 func MaxCost() Cost { return Cost{new(big.Int).Set(maxCostUnits)} }
 
+func (c Cost) ForStorage() Cost {
+	if c.units == nil {
+		return c
+	}
+	return clampCost(c.units)
+}
+
 func ParseCost(text string) (Cost, bool) {
 	units, ok := scaledDecimal(text, costDigits)
 	if !ok || units.Cmp(maxCostUnits) > 0 {

@@ -284,8 +284,10 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		media:              video,
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
-		cardPinned:         true,
-		cardRev:            loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+		callPricing: callPricing{
+			cardPinned: true,
+			cardRev:    loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+		},
 	}
 	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.Amount != "1" || hold.Charge != "1.5" {
 		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
@@ -372,10 +374,12 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 		retained:           retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage},
 		request:            request{startedAt: now},
 		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
-		routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
-		}},
+		callPricing: callPricing{
+			routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
+				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
+				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
+			}},
+		},
 	}
 	s := &Server{Now: func() time.Time { return now }, Deps: Dependencies{Admission: &quota.Admission{
 		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },

@@ -252,7 +252,7 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 		authority: current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
 		userID: parent.userID, origin: usage.OriginClassifier, parent: parent.request.accountingID(),
 		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
-		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
+		deadline: parent.deadline, callBudget: callBudget{spent: parent.spent}, facts: slices.Clone(parent.facts),
 		routeLeg: routeLeg{Route: route}, workflow: parent.workflow,
 		generation: generationCall{runLimits: parent.generation.runLimits},
 		unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},

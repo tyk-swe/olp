@@ -2,13 +2,12 @@ package routing
 
 import (
 	"bytes"
-	"encoding/json"
 	"maps"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/providerconfig"
 )
 
 // Clone owns all published configuration values. Derived contracts are omitted
@@ -80,13 +79,6 @@ func copyPointer[T any](v *T) *T {
 	out := *v
 	return &out
 }
-func cloneValues(m map[string]json.RawMessage) map[string]json.RawMessage {
-	out := maps.Clone(m)
-	for k, v := range out {
-		out[k] = bytes.Clone(v)
-	}
-	return out
-}
 
 func (p *Policy) Clone() *Policy {
 	if p == nil {
@@ -149,36 +141,16 @@ func cloneSlot(s Slot) Slot {
 }
 func cloneProvider(provider Provider) Provider {
 	p := provider
-	// Config.Clone owns nested defaults, bindings, model documents and networking.
-	c := p.Connector().Clone()
-	p.Network = c.Network
-	p.BatchStorage = c.BatchStorage
-	p.TuningDatasetURIPrefixes = c.TuningDatasetURIPrefixes
-	p.DocumentURIPrefixes = c.DocumentURIPrefixes
-	p.SemanticHeaders = c.SemanticHeaders
-	p.QuerySettings = c.QuerySettings
-	p.OperationDefaults = c.OperationDefaults
-	p.Bindings = c.Bindings
-	p.PluginOptions = c.PluginOptions
-	p.Plugin = c.Plugin
-	p.CredentialHeaders = c.CredentialHeaders
-	p.Models = c.Models
+	p.applyProviderOptions(p.providerOptions().Clone())
+	p.BatchStorage = providerconfig.CloneBatchStorage(p.BatchStorage)
+	p.Plugin = copyPointer(p.Plugin)
 	p.metadata = nil
 	p.ActiveCredential = copyPointer(p.ActiveCredential)
 	p.Capabilities = slices.Clone(p.Capabilities)
-	p.ParameterDefaults = cloneValues(p.ParameterDefaults)
 	p.ProjectID = copyPointer(p.ProjectID)
 	p.Limits = cloneLimits(p.Limits)
-	p.Commitment = copyPointer(p.Commitment)
-	if p.Commitment != nil {
-		p.Commitment.EffectiveAt = copyPointer(p.Commitment.EffectiveAt)
-		p.Commitment.EndsAt = copyPointer(p.Commitment.EndsAt)
-	}
-	p.PendingCommitment = copyPointer(p.PendingCommitment)
-	if p.PendingCommitment != nil {
-		p.PendingCommitment.EffectiveAt = copyPointer(p.PendingCommitment.EffectiveAt)
-		p.PendingCommitment.EndsAt = copyPointer(p.PendingCommitment.EndsAt)
-	}
+	p.Commitment = cloneCommitment(p.Commitment)
+	p.PendingCommitment = cloneCommitment(p.PendingCommitment)
 	p.HealthProbe = copyPointer(p.HealthProbe)
 	p.SharedTokenQuotas = slices.Clone(p.SharedTokenQuotas)
 	p.Slots = slices.Clone(p.Slots)
@@ -186,6 +158,16 @@ func cloneProvider(provider Provider) Provider {
 		p.Slots[i] = cloneSlot(p.Slots[i])
 	}
 	return p
+}
+
+func cloneCommitment(c *Commitment) *Commitment {
+	if c == nil {
+		return nil
+	}
+	copied := *c
+	copied.EffectiveAt = copyPointer(c.EffectiveAt)
+	copied.EndsAt = copyPointer(c.EndsAt)
+	return &copied
 }
 func cloneRoute(r Route) Route {
 	r.Operations = slices.Clone(r.Operations)
@@ -277,24 +259,16 @@ func cloneCodeRoute(route codemode.Route) codemode.Route {
 	}
 }
 func cloneConfiguration(c Configuration) Configuration {
-	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()
-	c.BatchStorage = cfg.BatchStorage
-	c.Options.TuningDatasetURIPrefixes = cfg.TuningDatasetURIPrefixes
-	c.Options.DocumentURIPrefixes = cfg.DocumentURIPrefixes
-	c.Options.Network = cfg.Network
-	c.Options.SemanticHeaders = cfg.SemanticHeaders
-	c.Options.QuerySettings = cfg.QuerySettings
-	c.Options.OperationDefaults = cfg.OperationDefaults
-	c.Options.Bindings = cfg.Bindings
-	c.Options.Models = cfg.Models
-	c.Options.CredentialHeaders = cfg.CredentialHeaders
-	c.Options.PluginOptions = cfg.PluginOptions
-	c.Options.ParameterDefaults = cloneValues(c.Options.ParameterDefaults)
-	c.Options.Limits = cloneLimits(c.Options.Limits)
-	c.Options.Commitment = copyPointer(c.Options.Commitment)
-	c.Options.HealthProbe = copyPointer(c.Options.HealthProbe)
-	c.Options.SharedTokenQuotas = slices.Clone(c.Options.SharedTokenQuotas)
-	return c
+	out := c
+	out.BatchStorage = providerconfig.CloneBatchStorage(c.BatchStorage)
+	out.Options = ConfigurationOptionsFrom(
+		c.Options.ProviderOptions().Clone(),
+		cloneLimits(c.Options.Limits),
+		cloneCommitment(c.Options.Commitment),
+		copyPointer(c.Options.HealthProbe),
+		slices.Clone(c.Options.SharedTokenQuotas),
+	)
+	return out
 }
 
 func (c Configuration) Clone() Configuration { return cloneConfiguration(c) }
