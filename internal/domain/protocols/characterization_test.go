@@ -132,7 +132,10 @@ func classify(err error) *failure {
 	if errors.As(err, &incompatible) {
 		return &failure{Type: "incompatibility", Code: incompatible.Code, Param: incompatible.Field}
 	}
-	return &failure{Type: fmt.Sprintf("%T", err), Detail: err.Error()}
+	if kind := fmt.Sprintf("%T", err); kind != "*errors.errorString" {
+		return &failure{Type: kind}
+	}
+	return &failure{Type: "plain", Detail: err.Error()}
 }
 
 type observed struct {
