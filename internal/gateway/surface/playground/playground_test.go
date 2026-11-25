@@ -11,7 +11,7 @@ import (
 func TestPlaygroundStructuredOutputPreservesLargeInteger(t *testing.T) {
 	t.Parallel()
 	const exact = `{"count":9007199254740993}`
-	in := request{ResponseFormat: &format{Type: "json_object"}}
+	in := Request{ResponseFormat: &format{Type: "json_object"}}
 	for _, test := range []struct{ text, structured string }{
 		{exact, exact},
 		{`{"count":0,"count":9007199254740993}`, exact},

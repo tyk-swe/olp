@@ -664,16 +664,18 @@ func TestPlaygroundRunsARouteForItsProjectMembersStreamsItAndAccountsItToTheInst
 	answered("stream summary", events[len(events)-1].data)
 
 	for what, refused := range map[string]struct {
-		path string
-		body map[string]any
+		path  string
+		body  map[string]any
+		field string
 	}{
-		"a stream on the whole reply endpoint":  {"/api/v1/playground", streamed},
-		"a whole reply on the stream endpoint":  {"/api/v1/playground/stream", typed},
-		"embeddings without a request document": {"/api/v1/playground", map[string]any{"model": slug, "operation": "embeddings", "input": "hello"}},
-		"a request document beside typed input": {"/api/v1/playground", map[string]any{"model": slug, "input": "hello", "request": document["request"]}},
+		"a stream on the whole reply endpoint":  {"/api/v1/playground", streamed, "stream"},
+		"a whole reply on the stream endpoint":  {"/api/v1/playground/stream", typed, "stream"},
+		"embeddings without a request document": {"/api/v1/playground", map[string]any{"model": slug, "operation": "embeddings", "input": "hello"}, "operation"},
+		"a request document beside typed input": {"/api/v1/playground", map[string]any{"model": slug, "input": "hello", "request": document["request"]}, "request"},
 	} {
-		if status, raw := s.Do(owner, "POST", refused.path, refused.body, nil); status != http.StatusUnprocessableEntity {
-			t.Errorf("%s: %s, want 422", what, describe(status, raw))
+		problem := s.Want(owner, "POST", refused.path, refused.body, nil, http.StatusUnprocessableEntity)
+		if blamed, _ := problem["errors"].(map[string]any); blamed[refused.field] == nil {
+			t.Errorf("%s blamed %v, want %s", what, problem["errors"], refused.field)
 		}
 	}
 

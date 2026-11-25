@@ -26,7 +26,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/gateway/surface/playground"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -213,10 +212,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	apikeys.NewAPI(m.Access, m.KeyOverlaps).Register(mux)
 	auditlog.NewAPI(m.Access).Register(mux)
 	routeServer.Register(mux)
-	playgroundAPI := playground.NewAPI(m.Gateway)
-	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
-	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
-	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
+	registerPlayground(m.Access, mux, m.Gateway)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)

@@ -37,7 +37,7 @@ func routingEvidence(trail kernel.MemberTrail) []map[string]any {
 	return evidenceRows
 }
 
-func response(trail kernel.MemberTrail, c *wire.Completion, in request) map[string]any {
+func response(trail kernel.MemberTrail, c *wire.Completion, in Request) map[string]any {
 	routing := routingEvidence(trail)
 	if in.operation() != "generation" {
 		res := map[string]any{

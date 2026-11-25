@@ -6,21 +6,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 )
 
-func (p *API) Stream(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
-	var in request
-	if err := httpkit.Decode(r, &in); err != nil {
-		return err
-	}
+func (p *API) Stream(w http.ResponseWriter, r *http.Request, userID string, admit Admit, in Request) error {
 	if err := in.validate(true); err != nil {
 		return err
 	}
-	run := p.member(r, principal, in)
+	run := p.member(r, userID, admit, in)
 	parsed, err := in.parse("generation", "streaming", run)
 	if err != nil {
 		return err
@@ -31,7 +25,7 @@ func (p *API) Stream(w http.ResponseWriter, r *http.Request, principal authz.Pri
 		return nil
 	}
 	if out.Err != nil && !sw.committed {
-		return httpkit.Fail(out.Err.Status, out.Err.Code, out.Err.Message)
+		return fail(out.Err.Status, out.Err.Code, out.Err.Message)
 	}
 	sw.finish(run.Trail(), out)
 	return nil
