@@ -25,7 +25,7 @@ problems=$(jq -r --slurpfile legacy "$legacy" '
   | ($found | map(select(.entry as $entry
         | $entry == null or (($legacy[0][$entry.list] // []) | index($entry.name) | not))
       | "\(.issue.Pos.Filename):\(.issue.Pos.Line): \(.issue.Text) (\(.issue.FromLinter))"))
-  + ($legacy[0] | to_entries | map(.key as $list | .value[] as $name
+  + ($legacy[0] | del(.providerStringComparison) | to_entries | map(.key as $list | .value[] as $name
       | select($found | any(.entry == {list: $list, name: $name}) | not)
       | "\($list): \($name) no longer violates, remove it from '"$legacy"'"))
   | unique | .[]' "$report")
@@ -103,5 +103,20 @@ fi
 if branches=$(git grep -nE '(VendorID|(Provider|provider|cfg|config)\.Kind) *(==|!=) *"|connectors\.Kind[A-Z]' -- 'internal/gateway/kernel/*.go' ':!*_test.go'); then
   echo "$branches" >&2
   echo "check-lint: the kernel must not branch on a provider kind or vendor. Declare the fact on connectors.Config or domain/vendors, or move the branch into its surface" >&2
+  exit 1
+fi
+
+kinds=$(sed -nE 's/^\tKind[A-Za-z]+ +Kind = "([a-z_]+)"$/\1/p' internal/connectors/config.go | paste -sd '|')
+compared=$(git grep -nE '([Vv]endor(ID)?\)?|[Hh]osting(\(\))?) *(==|!=) *"[^"]|[Kk]ind\)? *(==|!=) *"('"${kinds:?no provider kinds found in internal/connectors/config.go}"')"' -- 'internal/*.go' ':!internal/connectors' ':!internal/domain/vendors' ':!*_test.go' || true)
+compared=$(jq -rn --arg found "$compared" --slurpfile legacy "$legacy" '
+  ($found | split("\n") | map(select(. != ""))) as $lines
+  | ($legacy[0].providerStringComparison // []) as $listed
+  | ($lines | map(select(split(":")[0] as $file | $listed | index($file) | not)))
+  + ($listed | map(select(. as $file | $lines | any(startswith($file + ":")) | not)
+      | "providerStringComparison: \(.) no longer violates, remove it from '"$legacy"'"))
+  | .[]')
+if [[ -n $compared ]]; then
+  echo "$compared" >&2
+  echo "check-lint: only internal/connectors and internal/domain/vendors compare a provider kind, vendor or hosting to a string. State what the branch needs to know once, a vendor fact on its record in internal/domain/vendors, a hosting rule in the hostings table in internal/connectors/hosting.go, anything else as a method on connectors.Config or connectors.Profile, and ask for it here" >&2
   exit 1
 fi

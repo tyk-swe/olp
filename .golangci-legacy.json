@@ -1,4 +1,5 @@
 {
   "fileOverMaxLines": [],
-  "functionOverMaxLines": []
+  "functionOverMaxLines": [],
+  "providerStringComparison": ["internal/domain/protocols/request.go"]
 }

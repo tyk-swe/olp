@@ -287,6 +287,11 @@ package instead.
 - `internal/access` is the management kit and holds no feature. It
   authenticates callers, registers routes, runs write transactions and records
   audit rows. A new resource gets its own package that imports the kit.
+- Only `internal/connectors` and `internal/domain/vendors` compare a provider
+  kind, vendor or hosting with a string. Everything else asks for the fact, as
+  `Profile.HostsRealtime` and `vendors.BatchRefusalFor` answer. State a new
+  fact once, on the vendor record, in the `hostings` table or as a method on
+  `connectors.Config` or `connectors.Profile`.
 - A function holds at most 100 lines and a file at most 500 lines of code.
   Tests and generated files are exempt. Split by behavior, not by line count.
 - A management write returns `access.Mutate`, `access.Remove` or
