@@ -95,6 +95,7 @@ func runPassthroughCase(t *testing.T, c passthroughCase) passthroughRecord {
 	t.Helper()
 	h := newSurfaceHarness(t, c.limited)
 	strictRelease(t, h.harness, configurePassthrough)
+	h.price(t, !c.limited)
 	allowPassthrough(h.harness)
 	var mu sync.Mutex
 	forwarded := []recordedRequest{}

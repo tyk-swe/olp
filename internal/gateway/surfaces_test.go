@@ -43,6 +43,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
+	"github.com/tyk-swe/olp/tests/harness/money"
 )
 
 const (
@@ -63,6 +64,7 @@ var updateSurfaces = flag.Bool("update", false, "rewrite testdata/surfaces.golde
 type surfaceRuntime struct {
 	mu      sync.Mutex
 	release *release.Release
+	inputs  *routinginputs.Inputs
 	keys    map[string]keyauthority.Authority
 	stale   bool
 }
@@ -73,7 +75,11 @@ func (f *surfaceRuntime) Release() *release.Release {
 	return f.release
 }
 
-func (*surfaceRuntime) RoutingInputs() *routinginputs.Inputs { return nil }
+func (f *surfaceRuntime) RoutingInputs() *routinginputs.Inputs {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inputs
+}
 
 func (f *surfaceRuntime) Authenticate(secret string) (*keyauthority.Authority, error) {
 	f.mu.Lock()
@@ -143,6 +149,29 @@ func (m *surfaceMock) count(provider string) int {
 	return m.calls[provider]
 }
 
+func (m *surfaceMock) answer(provider string, handler http.HandlerFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.handlers[provider] = handler
+}
+
+func streamedCompletion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	chunk := func(rest string) string {
+		return `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"` + modelA + `",` + rest + "}\n\n"
+	}
+	io.WriteString(w, chunk(`"choices":[{"index":0,"delta":{"role":"assistant","content":"`+answerText+`"},"finish_reason":null}]`))
+	io.WriteString(w, chunk(`"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]`))
+	io.WriteString(w, chunk(`"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}`))
+	io.WriteString(w, "data: [DONE]\n\n")
+}
+
+func failedCompletion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	io.WriteString(w, `{"error":{"message":"upstream is down","type":"server_error"}}`)
+}
+
 func (m *surfaceMock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	provider := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)[0]
 	m.mu.Lock()
@@ -177,6 +206,7 @@ type surfaceCondition struct {
 	key     string
 	route   string
 	body    string
+	only    string
 	limited bool
 	prepare func(*surfaceHarness)
 	entry   bool
@@ -186,11 +216,12 @@ type surfaceCondition struct {
 var statefulRouteOperations = []string{"generation", "batch", "realtime"}
 
 type recordedAttempt struct {
-	Mode      string `json:"mode"`
-	Status    int    `json:"status"`
-	Class     string `json:"class"`
-	Committed bool   `json:"committed"`
-	Usage     any    `json:"usage,omitempty"`
+	Mode      string       `json:"mode"`
+	Status    int          `json:"status"`
+	Class     string       `json:"class"`
+	Committed bool         `json:"committed"`
+	Usage     any          `json:"usage,omitempty"`
+	Price     *money.Price `json:"price,omitempty"`
 }
 
 type recordedEnvelope struct {
@@ -217,6 +248,8 @@ type surfaceRecord struct {
 	Body        any                `json:"body"`
 	Upstream    int                `json:"upstream_calls"`
 	Envelopes   []recordedEnvelope `json:"envelopes,omitempty"`
+	Cost        string             `json:"cost,omitempty"`
+	Holds       []money.Hold       `json:"holds,omitempty"`
 }
 
 var surfaceRefusalHeaders = []string{"Allow", "Retry-After", "Www-Authenticate", "X-Should-Retry", "Anthropic-Ratelimit-Requests-Reset"}
@@ -281,6 +314,12 @@ func surfaceConditions() []surfaceCondition {
 		{name: "stateful operations allowed", key: fullKey, route: routeSlug, state: true, prepare: (*surfaceHarness).allowStatefulOperations},
 		{name: "limits unavailable after pin", key: fullKey, route: routeSlug, limited: true, state: true, prepare: (*surfaceHarness).pinNativeBatchProviders},
 		{name: "strict route", key: fullKey, route: routeSlug, state: true, prepare: (*surfaceHarness).enableStrictStateful},
+		{name: "streamed", key: fullKey, route: routeSlug, only: "chat completions", body: `{"model":"` + routeSlug + `","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hi"}]}`, prepare: func(h *surfaceHarness) { h.mock.answer("a", streamedCompletion) }},
+		{name: "first provider fails", key: fullKey, route: routeSlug, only: "chat completions", prepare: func(h *surfaceHarness) { h.mock.answer("a", failedCompletion) }},
+		{name: "every provider fails", key: fullKey, route: routeSlug, only: "chat completions", prepare: func(h *surfaceHarness) {
+			h.mock.answer("a", failedCompletion)
+			h.mock.answer("b", failedCompletion)
+		}},
 	}
 }
 
@@ -293,6 +332,7 @@ type surfaceHarness struct {
 	server   *httptest.Server
 	upstream *httptest.Server
 	returned chan struct{}
+	ledger   *money.Ledger
 }
 
 func (h *surfaceHarness) republish(edit func(s *routing.Snapshot, a, b routing.Provider)) {
@@ -455,6 +495,8 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		})},
 		Staging: spool, Uploads: staging.NewAdmission(spool.CapacityBytes()),
 	}
+	admission, ledger := money.Scripted(t)
+	dependencies.Admission = admission
 	if limited {
 		runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 		if err != nil {
@@ -471,7 +513,21 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return &surfaceHarness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, upstream: upstream, returned: returned}
+	return &surfaceHarness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, upstream: upstream, returned: returned, ledger: ledger}
+}
+
+func (h *surfaceHarness) price(budgeted bool) {
+	h.t.Helper()
+	h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+		if budgeted {
+			h.rt.keys[fullKey] = h.ledger.Budget(h.rt.keys[fullKey])
+			h.ledger.Cap(snapshot, routeSlug)
+		}
+		inputs := money.Inputs(h.t, snapshot, money.Operations...)
+		h.rt.mu.Lock()
+		h.rt.inputs = inputs
+		h.rt.mu.Unlock()
+	})
 }
 
 func (h *surfaceHarness) do(ctx context.Context, method, path, key string, body []byte, headers map[string]string) *http.Response {
@@ -521,6 +577,7 @@ func (h *surfaceHarness) record(t *testing.T, response *http.Response) surfaceRe
 		record.Headers = headers
 	}
 	record.Envelopes = h.envelopes()
+	record.Cost, record.Holds = response.Header.Get(money.CostHeader), h.ledger.Drain()
 	return record
 }
 
@@ -548,7 +605,7 @@ func (h *surfaceHarness) envelopes() []recordedEnvelope {
 		attempts := make([]settledAttempt, 0, len(envelope.Attempts))
 		for _, attempt := range envelope.Attempts {
 			settled := settledAttempt{
-				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed},
+				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed, Price: money.AttemptPrice(envelope.Operation, &attempt)},
 				UsageComplete:   attempt.UsageComplete, BillingUncertain: attempt.BillingUncertain,
 			}
 			if attempt.Usage != nil {
@@ -570,6 +627,7 @@ func runSurfaceCase(t *testing.T, entry surfaceEntry, condition surfaceCondition
 	if condition.prepare != nil {
 		condition.prepare(h)
 	}
+	h.price(!condition.limited)
 	headers := map[string]string{}
 	for name, value := range entry.headers {
 		headers[name] = strings.ReplaceAll(value, "{route}", condition.route)
@@ -587,6 +645,8 @@ func runSurfaceCase(t *testing.T, entry surfaceEntry, condition surfaceCondition
 
 func surfaceCaseApplies(entry surfaceEntry, condition surfaceCondition) bool {
 	switch {
+	case condition.only != "" && entry.name != condition.only:
+		return false
 	case condition.body != "" && entry.body == "":
 		return false
 	case condition.state && entry.headers[kernel.StateRouteHeader] == "":

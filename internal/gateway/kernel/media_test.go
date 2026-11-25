@@ -34,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/tests/harness/money"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/media.golden.json from the current behavior")
@@ -93,11 +94,12 @@ type recordedRequest struct {
 }
 
 type recordedAttempt struct {
-	Mode      string `json:"mode"`
-	Status    int    `json:"status"`
-	Class     string `json:"class"`
-	Committed bool   `json:"committed"`
-	Usage     any    `json:"usage,omitempty"`
+	Mode      string       `json:"mode"`
+	Status    int          `json:"status"`
+	Class     string       `json:"class"`
+	Committed bool         `json:"committed"`
+	Usage     any          `json:"usage,omitempty"`
+	Price     *money.Price `json:"price,omitempty"`
 }
 
 type mediaRecord struct {
@@ -108,6 +110,8 @@ type mediaRecord struct {
 	Operation   string            `json:"operation"`
 	Usage       any               `json:"usage,omitempty"`
 	Attempts    []recordedAttempt `json:"attempts"`
+	Cost        string            `json:"cost,omitempty"`
+	Holds       []money.Hold      `json:"holds,omitempty"`
 }
 
 func digest(b []byte) string {
@@ -210,7 +214,9 @@ func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.
 
 func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	t.Helper()
-	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
+	admission, ledger := money.Scripted(t)
+	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20}, Dependencies{Admission: admission})
+	h.rt.keys[fullKey] = ledger.Budget(h.rt.keys[fullKey])
 	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +261,8 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 			tc.route(&route)
 		}
 		snapshot.Routes[routeSlug] = route
+		ledger.Cap(snapshot, routeSlug)
+		h.rt.inputs = money.Inputs(t, snapshot, money.Operations...)
 	})
 	handler, seen := scripted(t, tc.replies, func() string { return h.upstream.URL })
 	h.mock.set("a", handler)
@@ -318,7 +326,7 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := mediaRecord{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type")}
+	record := mediaRecord{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Cost: resp.Header.Get(headerCost)}
 	switch mediaType, _, _ := mime.ParseMediaType(record.ContentType); {
 	case mediaType == "application/json":
 		var body map[string]any
@@ -345,12 +353,13 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		record.Usage = envelope.Usage
 	}
 	for _, attempt := range envelope.Attempts {
-		recorded := recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed}
+		recorded := recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed, Price: money.AttemptPrice(envelope.Operation, &attempt)}
 		if attempt.Usage != nil {
 			recorded.Usage = attempt.Usage
 		}
 		record.Attempts = append(record.Attempts, recorded)
 	}
+	record.Holds = ledger.Drain()
 	return record
 }
 

@@ -46,6 +46,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -367,6 +368,16 @@ type storedPlan struct {
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
+	valkey      scripts.Commander
+	sessions    bool
+	front       func(http.Handler) http.Handler
+}
+
+func (p storedPlan) served(mux http.Handler) http.Handler {
+	if p.front == nil {
+		return mux
+	}
+	return p.front(mux)
 }
 
 type storedGateway struct {
@@ -476,12 +487,15 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	runner := newRunner(t)
+	runner := runnerOver(t, cmp.Or(plan.valkey, scripts.Commander(harness.Valkey(t))))
 	debitStore := debits.NewStore(pool)
 	syncer := debits.NewSyncer(debitStore, runner)
 	limiter := admission.NewDurable(runner, syncer)
 	g.limiter = limiter
 	workflow := kernel.Dependencies{}
+	if plan.sessions {
+		workflow = kernel.Dependencies{Debits: &kernel.SessionDebits{Session: debits.NewSession(debitStore, syncer)}}
+	}
 	if plan.tools != nil {
 		workflow = kernel.Dependencies{
 			WorkflowTools: plan.tools,
@@ -531,7 +545,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	g.kernel = server
 	g.mux = http.NewServeMux()
 	gateway.Register(server, g.mux)
-	g.server = httptest.NewServer(g.mux)
+	g.server = httptest.NewServer(plan.served(g.mux))
 	t.Cleanup(g.server.Close)
 	return g
 }
@@ -569,6 +583,9 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 func operationModes(operation string, modes []string) []string {
 	if operation == "video_create" {
 		return []string{"async"}
+	}
+	if operation == "realtime" {
+		return []string{"realtime"}
 	}
 	return modes
 }
