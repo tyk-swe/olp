@@ -38,7 +38,7 @@
     <div class="form-field">
       <label for="playground-simulate-key">Evaluate as API key</label><select
         id="playground-simulate-key"
-        bind:value={playground.simulateKeyId}
+        bind:value={playground.inspection.keyId}
         aria-describedby="simulate-key-help"
       >
         <option value="">No API key authority</option>
@@ -52,7 +52,7 @@
     <div class="form-field">
       <label for="playground-simulate-seed">Seed</label><input
         id="playground-simulate-seed"
-        bind:value={playground.simulateSeed}
+        bind:value={playground.inspection.seed}
         autocomplete="off"
         maxlength="256"
         placeholder="Any stable value"
@@ -61,22 +61,25 @@
           // Enter would implicitly submit the composer and start a real run.
           if (event.key !== 'Enter' || event.isComposing) return;
           event.preventDefault();
-          if (!playground.simulation.isPending) void playground.explain();
+          if (!playground.inspection.action.busy)
+            void playground.inspection.explain();
         }}
       /><small id="simulate-seed-help"
         >Fixes weighted tie-breaks so the order is reproducible.</small
       >
     </div>
   </div>
-  {#if playground.simulationError}<p class="field-error" role="alert">
-      {playground.simulationError}
+  {#if playground.inspection.action.error}<p class="field-error" role="alert">
+      {playground.inspection.action.error}
     </p>{/if}
   <button
     class="button button-secondary"
     type="button"
-    disabled={playground.simulation.isPending}
-    onclick={playground.explain}
-    >{playground.simulation.isPending ? 'Inspecting…' : 'Inspect plan'}</button
+    disabled={playground.inspection.action.busy}
+    onclick={playground.inspection.explain}
+    >{playground.inspection.action.busy
+      ? 'Inspecting…'
+      : 'Inspect plan'}</button
   >
 </details>
 

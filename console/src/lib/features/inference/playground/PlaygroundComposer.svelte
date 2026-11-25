@@ -49,7 +49,7 @@
   <RoutingPreferencesForm
     bind:value={playground.routing}
     id="playground-routing"
-    disabled={playground.mutation.isPending || playground.streaming}
+    disabled={playground.execution.busy || playground.streaming}
   />
   <SegmentedRadioGroup
     label="Composer"
@@ -280,10 +280,10 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={playground.mutation.isPending ||
+      disabled={playground.execution.busy ||
         playground.streaming ||
         Boolean(playground.plan.submissionError)}
-      >{playground.mutation.isPending || playground.streaming
+      >{playground.execution.busy || playground.streaming
         ? 'Running…'
         : 'Run test'}</button
     >
@@ -292,7 +292,7 @@
         type="button"
         onclick={playground.cancelStream}>Cancel</button
       >{/if}
-    {#if playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem || playground.mutation.data}<button
+    {#if playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem || playground.response}<button
         class="button button-secondary"
         type="button"
         onclick={playground.clearResult}>Clear</button

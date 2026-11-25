@@ -1,6 +1,5 @@
 <script lang="ts">
   import OperationResult from './OperationResult.svelte';
-  import { errorMessage } from '#lib/management/http.js';
   import { formatInteger } from '#lib/format.js';
   import type { PlaygroundState } from './playgroundState.svelte';
 
@@ -13,8 +12,8 @@
       <p class="eyebrow">Ephemeral response</p>
       <h2 id="result-title">Result</h2>
     </div>
-    {#if playground.mutation.data && !playground.mutation.isPending}<span
-        class="badge success">{playground.mutation.data.latency_ms} ms</span
+    {#if playground.response && !playground.execution.busy}<span
+        class="badge success">{playground.response.latency_ms} ms</span
       >{/if}
   </div>
   {#if playground.streaming || playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem}
@@ -52,27 +51,18 @@
           <dd>{formatInteger(playground.streamDone.usage?.total_tokens)}</dd>
         </div>
       </dl>{/if}
-  {:else if playground.mutation.isPending}<div
-      class="loading-state"
-      role="status"
-    >
+  {:else if playground.execution.busy}<div class="loading-state" role="status">
       Waiting for the route…
     </div>
-  {:else if playground.mutation.isError}<div
-      class="inline-problem"
-      role="alert"
-    >
-      {errorMessage(
-        playground.mutation.error,
-        'The playground request failed.'
-      )}
+  {:else if playground.execution.error}<div class="inline-problem" role="alert">
+      {playground.execution.error}
     </div>
-  {:else if playground.mutation.data}
-    {#if playground.mutation.data.refusal}<div class="refusal" role="alert">
+  {:else if playground.response}
+    {#if playground.response.refusal}<div class="refusal" role="alert">
         <strong>The model refused this request</strong>
-        <p>{playground.mutation.data.refusal}</p>
+        <p>{playground.response.refusal}</p>
       </div>{/if}
-    {#if !playground.mutation.data.refusal && !playground.mutation.data.output_text && !playground.mutation.data.tool_calls?.length && playground.mutation.data.response === undefined && (playground.mutation.data.structured_output === undefined || playground.mutation.data.structured_output === null)}<div
+    {#if !playground.response.refusal && !playground.response.output_text && !playground.response.tool_calls?.length && playground.response.response === undefined && (playground.response.structured_output === undefined || playground.response.structured_output === null)}<div
         class="empty-state"
       >
         <div>
@@ -83,32 +73,28 @@
           </p>
         </div>
       </div>{/if}
-    {#if playground.mutation.data.response !== undefined}<div class="output">
+    {#if playground.response.response !== undefined}<div class="output">
         <OperationResult
           operation={playground.completedRequest?.operation ?? 'generation'}
-          response={playground.mutation.data.response}
-          responseRaw={playground.mutation.data.response_raw}
+          response={playground.response.response}
+          responseRaw={playground.response.response_raw}
           request={playground.completedRequest?.request}
         />
       </div>{/if}
-    {#if playground.mutation.data.output_text}<div class="output">
+    {#if playground.response.output_text}<div class="output">
         <h3>Text</h3>
-        <pre>{playground.mutation.data.output_text}</pre>
+        <pre>{playground.response.output_text}</pre>
       </div>{/if}
-    {#if playground.mutation.data.tool_calls?.length}<div class="output">
+    {#if playground.response.tool_calls?.length}<div class="output">
         <h3>Tool calls</h3>
-        <pre>{JSON.stringify(
-            playground.mutation.data.tool_calls,
-            null,
-            2
-          )}</pre>
+        <pre>{JSON.stringify(playground.response.tool_calls, null, 2)}</pre>
       </div>{/if}
-    {#if playground.mutation.data.structured_output !== undefined && playground.mutation.data.structured_output !== null}<div
+    {#if playground.response.structured_output !== undefined && playground.response.structured_output !== null}<div
         class="output"
       >
         <h3>Structured output</h3>
         <pre>{JSON.stringify(
-            playground.mutation.data.structured_output,
+            playground.response.structured_output,
             null,
             2
           )}</pre>
@@ -116,45 +102,45 @@
     <dl>
       <div>
         <dt>Response ID</dt>
-        <dd class="mono">{playground.mutation.data.id}</dd>
+        <dd class="mono">{playground.response.id}</dd>
       </div>
       <div>
         <dt>Route</dt>
-        <dd>{playground.mutation.data.model}</dd>
+        <dd>{playground.response.model}</dd>
       </div>
       <div>
         <dt>Provider model</dt>
-        <dd>{playground.mutation.data.provider_model ?? 'Not reported'}</dd>
+        <dd>{playground.response.provider_model ?? 'Not reported'}</dd>
       </div>
       <div>
         <dt>Finish reason</dt>
-        <dd>{playground.mutation.data.finish_reason ?? 'Not reported'}</dd>
+        <dd>{playground.response.finish_reason ?? 'Not reported'}</dd>
       </div>
       <div>
         <dt>Input tokens</dt>
-        <dd>{formatInteger(playground.mutation.data.usage?.input_tokens)}</dd>
+        <dd>{formatInteger(playground.response.usage?.input_tokens)}</dd>
       </div>
       <div>
         <dt>Cached input tokens</dt>
         <dd>
-          {formatInteger(playground.mutation.data.usage?.cached_input_tokens)}
+          {formatInteger(playground.response.usage?.cached_input_tokens)}
         </dd>
       </div>
       <div>
         <dt>Output tokens</dt>
         <dd>
-          {formatInteger(playground.mutation.data.usage?.output_tokens)}
+          {formatInteger(playground.response.usage?.output_tokens)}
         </dd>
       </div>
       <div>
         <dt>Reasoning tokens</dt>
         <dd>
-          {formatInteger(playground.mutation.data.usage?.reasoning_tokens)}
+          {formatInteger(playground.response.usage?.reasoning_tokens)}
         </dd>
       </div>
       <div>
         <dt>Total tokens</dt>
-        <dd>{formatInteger(playground.mutation.data.usage?.total_tokens)}</dd>
+        <dd>{formatInteger(playground.response.usage?.total_tokens)}</dd>
       </div>
     </dl>
   {:else}<div class="empty-state">

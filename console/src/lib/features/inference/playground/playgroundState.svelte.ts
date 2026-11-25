@@ -1,35 +1,26 @@
-import { createMutation, createQuery } from '@tanstack/svelte-query';
+import { createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import {
   routeKeys,
   listRoutes,
   selectActiveRoutes,
-  simulateRouting,
-  inspectionDialects
+  simulateRouting
 } from '#lib/features/routes/index.js';
 import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
-import {
-  nativeObject,
-  parseNativeJSON,
-  replaceNative,
-  type NativeObject
-} from '#lib/nativeJson.js';
+import { useAction } from '#lib/editing/action.svelte.js';
+import { captureResult } from '#lib/editing/result.js';
+import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
 import { abortError, errorMessage } from '#lib/management/http.js';
 import {
-  inspectRouting,
   runPlayground,
   streamPlayground,
-  type InspectRoutingInput,
   type PlaygroundOperation,
   type PlaygroundRequest,
+  type PlaygroundResponse,
   type PlaygroundStreamDone
 } from './api';
-import {
-  nativeDialects,
-  nativeOperationRequest,
-  publicNativeOperations,
-  type NativeOperation
-} from './nativeOperation';
+import { PlaygroundInspection } from './playgroundInspection.svelte';
+import { resolvePlaygroundPlan, type Composer } from './playgroundPlan';
 import { playgroundTemplates, templateFor } from './templates';
 import {
   parseMaxOutputTokens,
@@ -39,126 +30,6 @@ import {
 } from './validation';
 
 type Mode = 'text' | 'tools' | 'structured';
-type Composer = 'basic' | 'advanced';
-
-type PlaygroundPlanInput = {
-  composer: Composer;
-  operation: PlaygroundOperation;
-  surface: 'openai' | 'anthropic' | 'gemini';
-  strict: boolean;
-  template: string;
-  nativeDialect: string;
-  inspectDialect: string;
-  stream: boolean;
-  operationKnown: boolean;
-};
-type PlaygroundClient =
-  | { kind: 'composer'; advanced: boolean }
-  | { kind: 'native'; operation: NativeOperation; dialect: string }
-  | { kind: 'strict' }
-  | { kind: 'audio' }
-  | { kind: 'realtime' }
-  | { kind: 'unavailable' };
-export type PlaygroundPlan = PlaygroundClient & {
-  activeOperation: PlaygroundOperation;
-  submissionError: string | null;
-  inspection: {
-    surface: InspectRoutingInput['surface'];
-    mode: InspectRoutingInput['mode'];
-    dialect: InspectRoutingInput['dialect'] | undefined;
-    registeredNative: boolean;
-    clientContract: string | undefined;
-    dialects: readonly string[];
-  };
-};
-
-export function resolvePlaygroundPlan(
-  input: PlaygroundPlanInput
-): PlaygroundPlan {
-  const advanced = input.composer === 'advanced';
-  const operation = advanced ? input.operation : 'generation';
-  const options = nativeDialects(operation);
-  const nativeDialect = options.includes(input.nativeDialect)
-    ? input.nativeDialect
-    : (options[0] ?? '');
-  const registeredNative =
-    advanced &&
-    (input.strict || publicNativeOperations.has(operation)) &&
-    options.length > 0;
-  const inspectOptions = inspectionDialects(operation, input.surface);
-  const dialect = registeredNative
-    ? nativeDialect
-    : advanced &&
-        (inspectOptions as readonly string[]).includes(input.inspectDialect)
-      ? input.inspectDialect
-      : undefined;
-  const inspectionSurface = !registeredNative
-    ? input.surface
-    : publicNativeOperations.has(operation)
-      ? ((['openai', 'gemini'] as const).find((surface) =>
-          inspectionDialects(operation, surface).includes(nativeDialect)
-        ) ?? 'native')
-      : 'native';
-  const client: PlaygroundClient =
-    operation === 'realtime'
-      ? { kind: 'realtime' }
-      : operation === 'translation'
-        ? { kind: 'audio' }
-        : input.strict || publicNativeOperations.has(operation)
-          ? advanced && operation === 'generation' && input.surface === 'openai'
-            ? input.template === 'legacy-completions'
-              ? {
-                  kind: 'native',
-                  operation: 'completions',
-                  dialect: 'openai-completions'
-                }
-              : { kind: 'strict' }
-            : advanced && options.length > 0
-              ? {
-                  kind: 'native',
-                  operation: operation as NativeOperation,
-                  dialect: nativeDialect
-                }
-              : { kind: 'unavailable' }
-          : { kind: 'composer', advanced };
-  const submissionError =
-    advanced && !input.operationKnown
-      ? `The route does not offer the ${operation} operation.`
-      : input.strict && operation !== 'realtime'
-        ? 'Use the qualified public client below for this strict route.'
-        : client.kind === 'audio'
-          ? 'Use the audio upload form below.'
-          : client.kind === 'realtime'
-            ? 'Use the local realtime event viewer below; it does not open a provider session.'
-            : client.kind !== 'composer' ||
-                operation === 'classification' ||
-                operation === 'scoring'
-              ? 'Use the public native client below with a route certified for this operation.'
-              : null;
-  return {
-    ...client,
-    activeOperation: operation,
-    submissionError,
-    inspection: {
-      surface: inspectionSurface,
-      mode:
-        operation === 'realtime'
-          ? 'realtime'
-          : registeredNative
-            ? 'unary'
-            : input.stream
-              ? 'streaming'
-              : 'unary',
-      dialect: dialect as InspectRoutingInput['dialect'] | undefined,
-      registeredNative,
-      clientContract:
-        registeredNative && operation === 'embeddings'
-          ? 'raw-vector-storage/1'
-          : undefined,
-      dialects: registeredNative ? options : inspectOptions
-    }
-  };
-}
 
 export class PlaygroundState {
   private routingPreferences = $state('{}');
@@ -211,7 +82,8 @@ export class PlaygroundState {
     queryKey: apiKeyKeys.list(),
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
-  mutation = createMutation(() => ({ mutationFn: runPlayground }));
+  readonly execution = useAction();
+  response = $state<PlaygroundResponse | null>(null);
   selectedRoute = $derived(
     (this.routes.data ?? []).find((route) => route.slug === this.model.trim())
   );
@@ -243,23 +115,15 @@ export class PlaygroundState {
     })
   );
   streamSelectable = $derived(this.activeOperation === 'generation');
-  simulation = createMutation(() => ({
-    // Wrapped so the mutation context is not passed as the abort signal.
-    mutationFn: (input: InspectRoutingInput) => inspectRouting(input)
-  }));
-  simulateKeyId = $state('');
-  simulateSeed = $state('');
-  private inspectedInputs = $state('');
-  simulationError = $state('');
+  readonly inspection = new PlaygroundInspection(this);
   // A dry run is the most recent action when its inputs still match; a run resets it.
   explanation = $derived(
-    this.simulation.data?.length &&
-      this.inspectedInputs === this.inspectionInputs()
-      ? { dryRun: true, decisions: this.simulation.data }
+    this.inspection.current
+      ? { dryRun: true, decisions: this.inspection.current }
       : this.streamDone?.routing?.length
         ? { dryRun: false, decisions: this.streamDone.routing }
-        : this.mutation.data?.routing?.length
-          ? { dryRun: false, decisions: this.mutation.data.routing }
+        : this.response?.routing?.length
+          ? { dryRun: false, decisions: this.response.routing }
           : null
   );
 
@@ -326,44 +190,12 @@ export class PlaygroundState {
     this.streamFrames = [];
     this.streamDone = null;
     this.streamProblem = null;
-    this.mutation.reset();
+    this.execution.retire();
+    this.response = null;
     this.completedRequest = null;
   };
 
-  private inspectionInputs() {
-    return JSON.stringify([
-      this.model,
-      this.surface,
-      this.operation,
-      this.composer,
-      this.rawJson,
-      this.streamEnabled,
-      this.routing,
-      this.simulateKeyId,
-      this.simulateSeed,
-      this.inspectDialect,
-      this.nativeDialect
-    ]);
-  }
-
-  // The inspector dialect only applies while it belongs to the current
-  // operation and surface; a stale choice is dropped rather than sent.
-  currentInspectDialect = (): string | undefined =>
-    this.composer === 'advanced' &&
-    (inspectionDialects(this.operation, this.surface) as string[]).includes(
-      this.inspectDialect
-    )
-      ? this.inspectDialect
-      : undefined;
-
-  currentNativeDialect = (): string => {
-    const options = nativeDialects(this.operation);
-    return options.includes(this.nativeDialect)
-      ? this.nativeDialect
-      : (options[0] ?? '');
-  };
-
-  private advancedRequest(): Record<string, unknown> {
+  advancedRequest(): Record<string, unknown> {
     if (this.operation === 'translation') return { model: this.model.trim() };
     const raw = parseNativeJSON(this.rawJson);
     if (!nativeObject(raw))
@@ -383,60 +215,11 @@ export class PlaygroundState {
     };
   }
 
-  private inspectionNativeRequest(dialect: string): NativeObject {
-    const request = nativeOperationRequest(
-      this.rawJson,
-      this.model.trim(),
-      dialect
-    );
-    return dialect === 'openai-completions'
-      ? (replaceNative(request, ['stream'], this.streamEnabled) as NativeObject)
-      : request;
-  }
-
-  explain = async () => {
-    this.simulationError = '';
-    if (!this.model.trim()) {
-      this.simulationError = 'Enter an active route slug.';
-      return;
-    }
-    try {
-      const version = this.inspectionInputs();
-      const plan = this.plan;
-      const input: InspectRoutingInput = {
-        route: this.model.trim(),
-        operation: this.activeOperation,
-        surface: plan.inspection.surface,
-        mode: plan.inspection.mode,
-        preferences: JSON.parse(this.routing),
-        apiKeyId: this.simulateKeyId || null,
-        seed: this.simulateSeed,
-        clientContract: plan.inspection.clientContract,
-        ...(this.composer === 'advanced' && plan.kind !== 'realtime'
-          ? {
-              request:
-                plan.inspection.registeredNative ||
-                plan.inspection.dialect === 'openai-completions'
-                  ? this.inspectionNativeRequest(plan.inspection.dialect ?? '')
-                  : this.advancedRequest(),
-              dialect: plan.inspection.dialect
-            }
-          : {})
-      };
-      await this.simulation.mutateAsync(input);
-      this.inspectedInputs = version;
-    } catch (error) {
-      this.simulationError = errorMessage(
-        error,
-        'The routing explanation could not be produced.'
-      );
-    }
-  };
-
   private async runStream(request: PlaygroundRequest) {
     const abort = new AbortController();
     this.streamAbort = abort;
-    this.mutation.reset();
+    this.execution.retire();
+    this.response = null;
     this.streaming = true;
     this.streamFrames = [];
     this.streamDone = null;
@@ -477,13 +260,32 @@ export class PlaygroundState {
     }
   }
 
+  private composedRequest(advanced: boolean): PlaygroundRequest {
+    return advanced
+      ? {
+          routing: JSON.parse(this.routing),
+          model: this.model.trim(),
+          surface: this.surface,
+          operation: this.activeOperation as PlaygroundRequest['operation'],
+          request: this.advancedRequest(),
+          stream: this.streamEnabled ? true : undefined
+        }
+      : {
+          routing: JSON.parse(this.routing),
+          model: this.model.trim(),
+          input: this.input,
+          surface: this.surface,
+          stream: this.streamEnabled ? true : undefined,
+          ...this.requestControls()
+        };
+  }
+
   submit = async (event: SubmitEvent) => {
     event.preventDefault();
     this.validationError = '';
     // The run that follows produces its own explanation, so the dry run stops
     // competing for the panel.
-    this.simulation.reset();
-    this.simulationError = '';
+    this.inspection.reset();
     if (!this.model.trim()) {
       this.validationError = 'Enter an active route slug.';
       return;
@@ -498,51 +300,37 @@ export class PlaygroundState {
         'Streaming has not been verified as available for this route.';
       return;
     }
-    let request: PlaygroundRequest;
-    try {
-      if (plan.kind === 'composer' && plan.advanced) {
-        request = {
-          routing: JSON.parse(this.routing),
-          model: this.model.trim(),
-          surface: this.surface,
-          operation: this.activeOperation as PlaygroundRequest['operation'],
-          request: this.advancedRequest(),
-          stream: this.streamEnabled ? true : undefined
-        };
-      } else {
-        if (!this.input.trim()) {
-          this.validationError = 'Enter a prompt.';
-          return;
-        }
-        request = {
-          routing: JSON.parse(this.routing),
-          model: this.model.trim(),
-          input: this.input,
-          surface: this.surface,
-          stream: this.streamEnabled ? true : undefined,
-          ...this.requestControls()
-        };
-      }
-    } catch (error) {
-      this.validationError = errorMessage(error, 'Check the request fields.');
+    const advanced = plan.kind === 'composer' && plan.advanced;
+    if (!advanced && !this.input.trim()) {
+      this.validationError = 'Enter a prompt.';
       return;
     }
+    const built = captureResult(() => this.composedRequest(advanced));
+    if (!built.ok) {
+      this.validationError = errorMessage(
+        built.error,
+        'Check the request fields.'
+      );
+      return;
+    }
+    const request = built.value;
     this.streamFrames = [];
     this.streamDone = null;
     this.streamProblem = null;
-    this.mutation.reset();
+    this.execution.retire();
+    this.response = null;
     this.completedRequest = request;
     if (this.streamEnabled) {
       await this.runStream(request);
       return;
     }
-    // A transport or route failure is rendered by the result panel; rethrowing
-    // here would leave an unhandled rejection with nothing to catch it.
-    try {
-      await this.mutation.mutateAsync(request);
-    } catch {
-      this.validationError = '';
-    }
+    await this.execution.run(
+      () => runPlayground(request),
+      (response) => {
+        this.response = response;
+      },
+      { fallback: 'The playground request failed.' }
+    );
   };
 
   constructor() {
