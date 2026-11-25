@@ -39,22 +39,17 @@
 <PageTitle title="Reconciliation" />
 
 <form class="toolbar range" aria-label="Time range" onsubmit={apply}>
-  <label class="filter-control"
-    >From <input
+  <label class="filter-control">
+    From <input
       name="start"
       value={shown.start}
       type="datetime-local"
       required
-    /></label
-  >
-  <label class="filter-control"
-    >To <input
-      name="end"
-      value={shown.end}
-      type="datetime-local"
-      required
-    /></label
-  >
+    />
+  </label>
+  <label class="filter-control">
+    To <input name="end" value={shown.end} type="datetime-local" required />
+  </label>
   <button class="button button-secondary" type="submit">Apply</button>
 </form>
 

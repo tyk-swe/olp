@@ -93,31 +93,32 @@
     required
   >
     <option value="" disabled>Choose a plugin profile</option>
-    {#if pinned && !selected}<option value={pinned}
-        >{values.profileId} · digest {shortDigest(
-          values.profileRevision ?? ''
-        )}</option
-      >{/if}
+    {#if pinned && !selected}<option value={pinned}>
+        {values.profileId} · digest {shortDigest(values.profileRevision ?? '')}
+      </option>{/if}
     {#each groups as group (group.plugin.digest)}<optgroup
         label={build(group.plugin)}
       >
         {#each group.profiles as profile (profile.id)}<option
             value={`${profile.id}@${profile.revision}`}
-            >{`${profile.label} · ${build(group.plugin)}`}</option
-          >{/each}
+          >
+            {`${profile.label} · ${build(group.plugin)}`}
+          </option>{/each}
       </optgroup>{/each}
   </select>
-  <small id={`${idPrefix}-plugin-profile-help`}
-    >The provider pins the plugin build by its digest. Moving to another build
-    of the plugin is a new revision.</small
-  >
+  <small id={`${idPrefix}-plugin-profile-help`}>
+    The provider pins the plugin build by its digest. Moving to another build of
+    the plugin is a new revision.
+  </small>
 </div>
 {#if profiles.isError}<div class="inline-problem full" role="alert">
     The plugin profiles could not be loaded. <button
       class="button button-secondary"
       type="button"
-      onclick={() => profiles.refetch()}>Retry</button
+      onclick={() => profiles.refetch()}
     >
+      Retry
+    </button>
   </div>
 {:else if profiles.isSuccess && !groups.length}
   <p class="plugin-note full">

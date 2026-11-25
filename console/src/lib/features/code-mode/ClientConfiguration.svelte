@@ -121,8 +121,10 @@
           onchange={(event) => select({ model: event.currentTarget.value })}
         >
           {#each pickerConfig.native_models as model (model)}<option
-              value={model}>{model}</option
-            >{/each}
+              value={model}
+            >
+              {model}
+            </option>{/each}
         </select>
       </div>
       {#if pickerConfig.plan_model != null}
@@ -136,14 +138,16 @@
               select({ plan_model: event.currentTarget.value })}
           >
             {#each pickerConfig.native_models as model (model)}<option
-                value={model}>{model}</option
-              >{/each}
+                value={model}
+              >
+                {model}
+              </option>{/each}
           </select>
-          <small id="{ids.planModel}-help"
-            >{pickerConfig.client === 'claude-code'
+          <small id="{ids.planModel}-help">
+            {pickerConfig.client === 'claude-code'
               ? 'Plan mode, through opusplan; other requests use the selected model.'
-              : 'The plan agent; the build agent uses the selected model.'}</small
-          >
+              : 'The plan agent; the build agent uses the selected model.'}
+          </small>
         </div>
       {/if}
       {#if pickerConfig.small_model != null}
@@ -157,14 +161,16 @@
               select({ small_model: event.currentTarget.value })}
           >
             {#each pickerConfig.native_models as model (model)}<option
-                value={model}>{model}</option
-              >{/each}
+                value={model}
+              >
+                {model}
+              </option>{/each}
           </select>
-          <small id="{ids.smallModel}-help"
-            >{pickerConfig.client === 'claude-code'
+          <small id="{ids.smallModel}-help">
+            {pickerConfig.client === 'claude-code'
               ? 'Haiku-class and other background requests.'
-              : 'Session titles and other small tasks.'}</small
-          >
+              : 'Session titles and other small tasks.'}
+          </small>
         </div>
       {/if}
     </div>
@@ -176,8 +182,10 @@
       {#if Object.keys(selection).length}<button
           type="button"
           class="text-button"
-          onclick={() => (chosen = undefined)}>Use defaults</button
-        >{/if}
+          onclick={() => (chosen = undefined)}
+        >
+          Use defaults
+        </button>{/if}
     </LoadError>
   {:else if !config}<p role="status">Loading supported configuration…</p>
   {:else}
@@ -212,20 +220,20 @@
         {#each config.qualification_gaps as gap (gap)}<li>{gap}</li>{/each}
       </ul>{/if}
     <div class="form-field">
-      <label for={ids.configuration}
-        >Generated configuration · {config.format.toUpperCase()}</label
-      >
+      <label for={ids.configuration}>
+        Generated configuration · {config.format.toUpperCase()}
+      </label>
       <textarea
         id={ids.configuration}
         aria-describedby="{ids.configuration}-help"
         readonly
         value={config.configuration}
         rows="12"></textarea>
-      <small id="{ids.configuration}-help"
-        >{config.file
+      <small id="{ids.configuration}-help">
+        {config.file
           ? `Destination: ${config.file}. Follow the merge instructions above.`
-          : 'Source this file in your shell before starting the client.'}</small
-      >
+          : 'Source this file in your shell before starting the client.'}
+      </small>
     </div>
     <button
       class="button button-secondary"
@@ -234,8 +242,9 @@
         (copied = (await copyText(config.configuration))
           ? 'Configuration copied.'
           : 'Clipboard unavailable; select and copy the configuration.')}
-      >Copy configuration</button
     >
+      Copy configuration
+    </button>
     {#each config.additional_files ?? [] as file, index (file.file)}
       <div class="form-field">
         <label for="{ids.configuration}-additional-{index}">
@@ -246,10 +255,10 @@
           readonly
           value={file.configuration}
           rows="10"></textarea>
-        <small
-          >Merge these entries into {file.file}. Keep OLP_API_KEY in your
-          environment.</small
-        >
+        <small>
+          Merge these entries into {file.file}. Keep OLP_API_KEY in your
+          environment.
+        </small>
       </div>
       <button
         class="button button-secondary"
@@ -258,8 +267,9 @@
           (copied = (await copyText(file.configuration))
             ? `${file.file} copied.`
             : 'Clipboard unavailable; select and copy the configuration.')}
-        >Copy {file.file}</button
       >
+        Copy {file.file}
+      </button>
     {/each}
     <p role="status">{copied}</p>
   {/if}

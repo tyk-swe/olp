@@ -45,27 +45,29 @@
       {#if editable}<button
           class="button button-secondary"
           disabled={busy}
-          onclick={() => onRemove(m)}>Remove {m.email}</button
-        >{/if}
+          onclick={() => onRemove(m)}
+        >
+          Remove {m.email}
+        </button>{/if}
     </p>{/each}
   {#if editable}<form onsubmit={add}>
-      <label class="form-field"
-        >Person<EntityPicker
+      <label class="form-field">
+        Person<EntityPicker
           id="organization-member"
           source={personOptions}
           required
           bind:value={userId}
           emptyLabel="Choose someone"
           disabled={busy}
-        /></label
-      ><label class="form-field"
-        >Role<select bind:value={role} disabled={busy}
-          ><option value="viewer">Viewer</option><option value="manager"
-            >Manager</option
-          ></select
-        ></label
-      ><button class="button button-primary" disabled={busy}
-        >Add to organization</button
-      >
+        />
+      </label><label class="form-field">
+        Role<select bind:value={role} disabled={busy}>
+          <option value="viewer">Viewer</option><option value="manager">
+            Manager
+          </option>
+        </select>
+      </label><button class="button button-primary" disabled={busy}>
+        Add to organization
+      </button>
     </form>{/if}
 </section>

@@ -220,8 +220,10 @@
   {#if pool.isError}<p class="inline-problem" role="alert">
       Credentials could not be loaded. <button
         type="button"
-        onclick={() => pool.refetch()}>Retry</button
+        onclick={() => pool.refetch()}
       >
+        Retry
+      </button>
     </p>{/if}
   {#if pool.isPending}<p class="inline-status" role="status">
       Loading credentials…
@@ -232,8 +234,7 @@
         .tokens_this_minute} tokens · {pool.data.connection_usage
         .concurrent_requests} concurrent requests.
     </p>{/if}
-  {#each Object.entries(pool.data?.shared_group_usage ?? {}) as [group, usage] (group)}<p
-    >
+  {#each Object.entries(pool.data?.shared_group_usage ?? {}) as [group, usage] (group)}<p>
       Shared token quota {group} this minute: {usage.tokens_this_minute} / {usage.tokens_per_minute}
       tokens across every member connection.
     </p>{/each}
@@ -242,13 +243,13 @@
       {@const lapsed = Boolean(pool.data?.health?.[slot.id]?.lapsed)}
       <li>
         <div>
-          <strong>{slot.name}</strong><span
-            >{slot.enabled ? 'Enabled' : 'Disabled'} · Priority {slot.priority} ·
-            Weight {slot.weight}</span
-          >{#if pool.data?.health?.[slot.id]}{@const health =
-              pool.data.health[slot.id]}<small
-              ><span class:revoked={health.revoked || lapsed}
-                >{health.revoked
+          <strong>{slot.name}</strong><span>
+            {slot.enabled ? 'Enabled' : 'Disabled'} · Priority {slot.priority} · Weight
+            {slot.weight}
+          </span>{#if pool.data?.health?.[slot.id]}{@const health =
+              pool.data.health[slot.id]}<small>
+              <span class:revoked={health.revoked || lapsed}>
+                {health.revoked
                   ? grant
                     ? 'Revoked — re-enroll its grant'
                     : 'Revoked — stage a replacement secret'
@@ -260,17 +261,17 @@
                       ? 'Active'
                       : health.active_credential_version_id
                         ? 'Change staged'
-                        : 'Draft'}</span
-              >
+                        : 'Draft'}
+              </span>
               · {health.cooling_down
                 ? 'Cooling down'
                 : health.cooling_down === false
                   ? 'Available'
                   : 'Live health unknown'} · {health.validated_at
                 ? 'Access validated'
-                : 'Access validation required'}</small
-            >{#if health.usage}<small
-                >{health.usage.requests_this_minute} / {slot.requests_per_minute ??
+                : 'Access validation required'}
+            </small>{#if health.usage}<small>
+                {health.usage.requests_this_minute} / {slot.requests_per_minute ??
                   'unlimited'} requests this minute · {health.usage
                   .tokens_this_minute} / {slot.tokens_per_minute ?? 'unlimited'} tokens{#if slot.input_tokens_per_minute != null}
                   · {health.usage.input_tokens_this_minute} / {slot.input_tokens_per_minute}
@@ -278,37 +279,40 @@
                   · {health.usage.output_tokens_this_minute} / {slot.output_tokens_per_minute}
                   output tokens{/if}
                 · {health.usage.concurrent_requests} / {slot.max_concurrency ??
-                  'unlimited'} concurrent</small
-              >{/if}{/if}<small
-            >{slot.allowed_models?.length || 'All'} models · {slot
-              .allowed_routes?.length || 'All'} routes</small
-          >
+                  'unlimited'} concurrent
+              </small>{/if}{/if}<small>
+            {slot.allowed_models?.length || 'All'} models · {slot.allowed_routes
+              ?.length || 'All'} routes
+          </small>
         </div>
         {#if canManage}<button
             class="button button-secondary"
             type="button"
             disabled={Boolean(busy)}
             onclick={() => edit(slot)}
-            >{grant ? 'Edit' : 'Edit / rotate'}</button
-          >{#if grant}<button
+          >
+            {grant ? 'Edit' : 'Edit / rotate'}
+          </button>{#if grant}<button
               class="button"
               class:button-primary={lapsed}
               class:button-secondary={!lapsed}
               type="button"
               disabled={Boolean(busy) || Boolean(enrollment)}
               onclick={() => enroll(slot)}
-              >{busy === `enroll-${slot.id}`
+            >
+              {busy === `enroll-${slot.id}`
                 ? 'Starting sign-in…'
                 : slot.credential_version_id
                   ? 'Re-enroll grant'
-                  : 'Enroll grant'}</button
-            >{/if}<button
+                  : 'Enroll grant'}
+            </button>{/if}<button
             class="button button-secondary"
             type="button"
             disabled={Boolean(busy) || !slot.credential_version_id}
             onclick={() => validate(slot)}
-            >{busy === slot.id ? 'Validating…' : 'Validate access'}</button
-          >{/if}
+          >
+            {busy === slot.id ? 'Validating…' : 'Validate access'}
+          </button>{/if}
         {#if slot.id && pool.data && access.allows('DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}')}<ConfirmAction
             danger
             label="Delete slot"
@@ -343,8 +347,10 @@
       class="button button-secondary"
       type="button"
       disabled={!pool.data || pool.isFetching || Boolean(busy)}
-      onclick={() => edit()}>Add credential</button
-    >{/if}
+      onclick={() => edit()}
+    >
+      Add credential
+    </button>{/if}
   {#if editing}
     <CredentialSlotForm
       {canManage}

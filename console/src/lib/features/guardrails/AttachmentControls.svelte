@@ -45,8 +45,10 @@
           (result) => {
             inspected = result;
           }
-        )}>Inspect pinned revision</button
+        )}
     >
+      Inspect pinned revision
+    </button>
   {/if}
   {#if access.allows('DELETE /api/v1/guardrail-attachments/{attachment_id}')}
     <ConfirmAction
@@ -66,15 +68,17 @@
     )}</pre>{/if}
 {#if access.allows('PUT /api/v1/guardrail-attachments/{attachment_id}')}
   <div class="filter-bar">
-    <label class="form-field"
-      >Replacement active revision<select bind:value={revision}
-        ><option value="">Choose policy</option
-        >{#each policies.filter((item) => item.active_revision_id && !item.retired_at) as item (item.policy_id)}<option
+    <label class="form-field">
+      Replacement active revision<select bind:value={revision}>
+        <option value="">
+          Choose policy
+        </option>{#each policies.filter((item) => item.active_revision_id && !item.retired_at) as item (item.policy_id)}<option
             value={item.active_revision_id}
-            >{item.name} · {item.active_revision_id}</option
-          >{/each}</select
-      ></label
-    >
+          >
+            {item.name} · {item.active_revision_id}
+          </option>{/each}
+      </select>
+    </label>
     <ConfirmAction
       label="Replace attachment"
       description="Switch this attachment to the selected revision while retaining its scope and position."

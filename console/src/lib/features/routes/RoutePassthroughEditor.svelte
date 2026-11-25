@@ -65,10 +65,10 @@
         disabled={!editor.canManage}
         oninput={(event) => patch({ dialect: event.currentTarget.value })}
       />
-      <small
-        >Callers use /native/&#123;dialect&#125;/routes/&#123;route&#125;/… and
-        keys must name this route.</small
-      >
+      <small>
+        Callers use /native/&#123;dialect&#125;/routes/&#123;route&#125;/… and
+        keys must name this route.
+      </small>
     </div>
     <fieldset class="form-field">
       <legend>Methods</legend>
@@ -118,10 +118,10 @@
         onchange={(event) =>
           patch({ headers: parsePassthroughLines(event.currentTarget.value) })}
       ></textarea>
-      <small
-        >Hop-by-hop and caller credential headers are always stripped. Only the
-        bound credential is injected.</small
-      >
+      <small>
+        Hop-by-hop and caller credential headers are always stripped. Only the
+        bound credential is injected.
+      </small>
     </div>
     <label class="toggle">
       <input

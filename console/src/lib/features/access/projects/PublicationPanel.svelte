@@ -75,13 +75,13 @@
         !etag ||
         !access.allows('PUT /api/v1/projects/{project_id}/catalog')}
     >
-      <label
-        ><input type="checkbox" bind:checked={enabled} /> Publish project catalog</label
-      >
-      <label
-        ><input type="checkbox" bind:checked={pricesPublic} /> Include current declared
-        prices in the public catalog</label
-      >
+      <label>
+        <input type="checkbox" bind:checked={enabled} /> Publish project catalog
+      </label>
+      <label>
+        <input type="checkbox" bind:checked={pricesPublic} /> Include current declared
+        prices in the public catalog
+      </label>
     </fieldset>
     <div class="actions">
       <button
@@ -89,19 +89,22 @@
         disabled={action.busy ||
           !etag ||
           !access.allows('PUT /api/v1/projects/{project_id}/catalog')}
-        >Save publication</button
-      ><button
+      >
+        Save publication
+      </button><button
         class="button button-secondary"
         type="button"
         disabled={action.busy || publication.isFetching}
-        onclick={reload}>Reload publication</button
+        onclick={reload}
       >
+        Reload publication
+      </button>
     </div>
   </form>
   {#if publication.data?.enabled}<p>
-      <a href={`/catalog/public/${projectId}`} target="_blank" rel="noreferrer"
-        >Open public model catalog</a
-      >
+      <a href={`/catalog/public/${projectId}`} target="_blank" rel="noreferrer">
+        Open public model catalog
+      </a>
     </p>{/if}
 </section>
 

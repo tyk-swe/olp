@@ -297,8 +297,10 @@
       <button
         class="text-button"
         type="button"
-        onclick={() => sources.refetch()}>Try again</button
+        onclick={() => sources.refetch()}
       >
+        Try again
+      </button>
     </div>
   {:else if !(sources.data ?? []).length}<div class="card empty-state">
       No pricing sources. Revisions can still be created manually below.
@@ -324,11 +326,11 @@
                 <strong>{source.name}</strong>
                 <small>{sourceFormatLabel(source)}</small>
                 <small class="mono">{sourceAddress(source)}</small>
-                <small
-                  >{source.enabled ? 'Enabled' : 'Disabled'} · updated {formatDate(
+                <small>
+                  {source.enabled ? 'Enabled' : 'Disabled'} · updated {formatDate(
                     source.updated_at
-                  )}</small
-                >
+                  )}
+                </small>
               </div>
               {#if canEdit}
                 <div class="row-actions">
@@ -337,19 +339,23 @@
                     type="button"
                     disabled={Boolean(busy)}
                     onclick={() => refresh(source)}
-                    >{busy === source.id ? 'Fetching…' : 'Refresh'}</button
-                  ><button
+                  >
+                    {busy === source.id ? 'Fetching…' : 'Refresh'}
+                  </button><button
                     class="text-button"
                     type="button"
                     disabled={Boolean(busy)}
-                    onclick={() => startEdit(source)}>Edit</button
-                  ><button
+                    onclick={() => startEdit(source)}
+                  >
+                    Edit
+                  </button><button
                     class="text-button"
                     type="button"
                     disabled={Boolean(busy)}
                     onclick={() => toggle(source)}
-                    >{source.enabled ? 'Disable' : 'Enable'}</button
                   >
+                    {source.enabled ? 'Disable' : 'Enable'}
+                  </button>
                 </div>
               {/if}
             </div>

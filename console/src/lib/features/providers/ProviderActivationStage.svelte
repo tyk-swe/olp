@@ -45,20 +45,24 @@
       runtime generation.
     </p>
     <div class="form-actions">
-      <a class="button button-primary" href={resolve('routes/new')}
-        >Build default route <NavIcon name="arrow" /></a
-      >
+      <a class="button button-primary" href={resolve('routes/new')}>
+        Build default route <NavIcon name="arrow" />
+      </a>
 
       {#if onAddAnother}
         <button
           class="button button-secondary"
           type="button"
-          onclick={onAddAnother}>Add another connection</button
-        >{/if}
+          onclick={onAddAnother}
+        >
+          Add another connection
+        </button>{/if}
       <a
         class="button button-secondary"
-        href={resolve(`providers/${provider?.id}`)}>View provider</a
+        href={resolve(`providers/${provider?.id}`)}
       >
+        View provider
+      </a>
     </div>
   </section>
 {:else}
@@ -85,8 +89,10 @@
           class="button button-secondary"
           type="button"
           onclick={onBack}
-          {disabled}>Back</button
+          {disabled}
         >
+          Back
+        </button>
       {/if}
 
       <button
@@ -94,17 +100,19 @@
         type="button"
         onclick={onTest}
         disabled={disabled || !certified}
-        >{busy === 'final-probe'
-          ? 'Testing completed draft…'
-          : 'Test completed draft'}</button
       >
+        {busy === 'final-probe'
+          ? 'Testing completed draft…'
+          : 'Test completed draft'}
+      </button>
       <button
         class="button button-primary"
         type="button"
         onclick={onActivate}
         disabled={disabled || !ready}
-        >{busy === 'activate' ? 'Activating…' : 'Activate provider'}</button
       >
+        {busy === 'activate' ? 'Activating…' : 'Activate provider'}
+      </button>
     </div>
     {#if !ready}
       <p class="audit-note">

@@ -43,10 +43,10 @@
         {#each FIXED_ROLES as option (option)}
           <label class="option">
             <input type="radio" name="role" value={option} bind:group={role} />
-            <span
-              ><strong>{ROLE_DETAILS[option].label}</strong>
-              <small>{ROLE_DETAILS[option].summary}</small></span
-            >
+            <span>
+              <strong>{ROLE_DETAILS[option].label}</strong>
+              <small>{ROLE_DETAILS[option].summary}</small>
+            </span>
           </label>
         {/each}
       </fieldset>
@@ -60,23 +60,24 @@
               value={option}
               bind:group={scope}
             />
-            <span
-              ><strong>{SCOPE_DETAILS[option].label}</strong>
-              <small>{SCOPE_DETAILS[option].summary}</small></span
-            >
+            <span>
+              <strong>{SCOPE_DETAILS[option].label}</strong>
+              <small>{SCOPE_DETAILS[option].summary}</small>
+            </span>
           </label>
         {/each}
       </fieldset>
       <div class="page-actions">
-        <button class="button button-secondary" type="button" onclick={close}
-          >Cancel</button
-        >
+        <button class="button button-secondary" type="button" onclick={close}>
+          Cancel
+        </button>
         <button
           class="button button-primary"
           type="submit"
           disabled={!dirty || busy}
-          >{busy ? 'Saving…' : 'Save and sign them out'}</button
         >
+          {busy ? 'Saving…' : 'Save and sign them out'}
+        </button>
       </div>
     </form>
   {/snippet}

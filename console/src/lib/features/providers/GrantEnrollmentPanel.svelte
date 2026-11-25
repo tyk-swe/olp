@@ -79,8 +79,10 @@
     class="button button-secondary"
     type="button"
     onclick={() => copy(value, what)}
-    aria-label={`Copy ${what}`}>{copied === what ? 'Copied' : 'Copy'}</button
+    aria-label={`Copy ${what}`}
   >
+    {copied === what ? 'Copied' : 'Copy'}
+  </button>
 {/snippet}
 
 <section class="card grant" aria-labelledby="grant-enrollment-heading">
@@ -101,8 +103,10 @@
             class="button button-secondary"
             href={device.verification_url}
             target="_blank"
-            rel="noreferrer noopener">Open verification page</a
+            rel="noreferrer noopener"
           >
+            Open verification page
+          </a>
           {@render copyButton(device.verification_url, 'verification URL')}
         </div>
       </li>
@@ -123,8 +127,10 @@
         class="button button-secondary"
         type="button"
         disabled={Boolean(busy)}
-        onclick={() => onCancel()}>Cancel sign-in</button
+        onclick={() => onCancel()}
       >
+        Cancel sign-in
+      </button>
     </div>
   {:else}
     <ol>
@@ -143,10 +149,11 @@
             href={enrollment.authorization_url}
             target="_blank"
             rel="noreferrer noopener"
-            >{secret && !oauthSecret
-              ? 'Open API key page'
-              : 'Open authorization page'}</a
           >
+            {secret && !oauthSecret
+              ? 'Open API key page'
+              : 'Open authorization page'}
+          </a>
           {@render copyButton(
             enrollment.authorization_url ?? '',
             'authorization URL'
@@ -157,11 +164,11 @@
         <form onsubmit={submit} aria-busy={busy === 'grant'}>
           <div class="form-field">
             {#if secret}
-              <label for="grant-input"
-                >{oauthSecret
+              <label for="grant-input">
+                {oauthSecret
                   ? 'Paste callback and OAuth client secret as JSON'
-                  : 'Paste the API key the vendor issued'}</label
-              ><input
+                  : 'Paste the API key the vendor issued'}
+              </label><input
                 id="grant-input"
                 type="password"
                 aria-describedby="grant-input-help"
@@ -188,22 +195,22 @@
                 {/if}
               </small>
             {:else}
-              <label for="grant-input"
-                >Paste back the callback URL or code the upstream returned</label
-              ><input
+              <label for="grant-input">
+                Paste back the callback URL or code the upstream returned
+              </label><input
                 id="grant-input"
                 aria-describedby="grant-input-help"
                 autocomplete="off"
                 spellcheck="false"
                 bind:value={input}
                 required
-              /><small id="grant-input-help"
-                >After you sign in, the upstream sends your browser to a
-                callback URL that may not load: copy it from the address bar. Or
-                copy the code the upstream displays. Continue before {formatDate(
+              /><small id="grant-input-help">
+                After you sign in, the upstream sends your browser to a callback
+                URL that may not load: copy it from the address bar. Or copy the
+                code the upstream displays. Continue before {formatDate(
                   enrollment.expires_at
-                )}; each sign-in can be used once.</small
-              >
+                )}; each sign-in can be used once.
+              </small>
             {/if}
           </div>
           <div class="actions">
@@ -211,27 +218,29 @@
               class="button button-primary"
               type="submit"
               disabled={Boolean(busy)}
-              >{busy === 'grant'
+            >
+              {busy === 'grant'
                 ? secret
                   ? 'Enrolling the key…'
                   : 'Enrolling the grant…'
-                : 'Continue'}</button
-            >
+                : 'Continue'}
+            </button>
             <button
               class="button button-secondary"
               type="button"
               disabled={Boolean(busy)}
               onclick={() => onCancel()}
-              >{secret ? 'Cancel enrollment' : 'Cancel sign-in'}</button
             >
+              {secret ? 'Cancel enrollment' : 'Cancel sign-in'}
+            </button>
           </div>
         </form>
       </li>
     </ol>
   {/if}
-  <span class="sr-only" aria-live="polite"
-    >{copied ? `Copied the ${copied} to the clipboard.` : ''}</span
-  >
+  <span class="sr-only" aria-live="polite">
+    {copied ? `Copied the ${copied} to the clipboard.` : ''}
+  </span>
   {#if copyError}<p class="inline-problem" role="alert">{copyError}</p>{/if}
 </section>
 

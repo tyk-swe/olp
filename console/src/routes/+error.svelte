@@ -17,11 +17,13 @@
       <button
         class="button button-primary"
         type="button"
-        onclick={() => window.location.reload()}>Reload page</button
+        onclick={() => window.location.reload()}
       >
-      <a class="button button-secondary" href={resolve('')}
-        >Return to overview</a
-      >
+        Reload page
+      </button>
+      <a class="button button-secondary" href={resolve('')}>
+        Return to overview
+      </a>
     </div>
   </section>
 </main>

@@ -58,28 +58,31 @@
     </p>{/if}
 
   <form onsubmit={save}>
-    <label
-      ><input
+    <label>
+      <input
         type="checkbox"
         bind:checked={exposed}
         disabled={action.busy ||
           !etag ||
           !access.allows('PUT /api/v1/routes/{route_id}/catalog')}
-      /> Disclose upstream model names in authenticated and published catalogs</label
-    >
+      /> Disclose upstream model names in authenticated and published catalogs
+    </label>
     <div class="actions">
       <button
         class="button button-primary"
         disabled={action.busy ||
           !etag ||
           !access.allows('PUT /api/v1/routes/{route_id}/catalog')}
-        >Save disclosure</button
-      ><button
+      >
+        Save disclosure
+      </button><button
         class="button button-secondary"
         type="button"
         disabled={action.busy || exposure.isFetching}
-        onclick={reload}>Reload disclosure</button
+        onclick={reload}
       >
+        Reload disclosure
+      </button>
     </div>
   </form>
 </section>

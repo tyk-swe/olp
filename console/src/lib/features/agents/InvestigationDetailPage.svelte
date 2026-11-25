@@ -53,8 +53,9 @@
         {#if item.filters.run_id}<a
             class="text-button"
             href={resolve(`activity/runs/${item.filters.run_id}`)}
-            ><code>{item.filters.run_id}</code></a
           >
+            <code>{item.filters.run_id}</code>
+          </a>
         {:else}
           Any
         {/if}
@@ -100,28 +101,32 @@
               <a
                 class="text-button"
                 href={resolve(`activity/runs/${reference.id}`)}
-                ><code>{reference.id}</code></a
               >
+                <code>{reference.id}</code>
+              </a>
             {:else if reference.kind === 'task'}
               <a
                 class="text-button"
                 href={resolve(`activity/tasks/${reference.id}`)}
-                ><code>{reference.id}</code></a
               >
+                <code>{reference.id}</code>
+              </a>
             {:else if reference.kind === 'delegation'}
               <a
                 class="text-button"
                 href={`${resolve('activity/delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
-                ><code>{reference.id}</code></a
               >
+                <code>{reference.id}</code>
+              </a>
             {:else if reference.run_id}
               <a
                 class="text-button"
                 href={reference.kind === 'step' || reference.kind === 'span'
                   ? `${resolve(`activity/runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
                   : resolve(`activity/runs/${reference.run_id}`)}
-                ><code>{reference.id}</code></a
               >
+                <code>{reference.id}</code>
+              </a>
             {:else}
               <code>{reference.id}</code>
             {/if}

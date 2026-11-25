@@ -33,29 +33,35 @@
       required
       placeholder="Attempt ID, also the CloudEvents event ID"
     />
-    <small
-      >Accepted means this sink answered 2xx and OLP recorded it. It says
-      nothing about downstream ledger posting.</small
-    >
+    <small>
+      Accepted means this sink answered 2xx and OLP recorded it. It says nothing
+      about downstream ledger posting.
+    </small>
   </div>
   <div class="form-actions">
     <button
       class="button button-secondary"
       type="submit"
-      disabled={!attemptInput.trim() || lookup.isFetching}>Look up</button
+      disabled={!attemptInput.trim() || lookup.isFetching}
     >
+      Look up
+    </button>
   </div>
 </form>
 {#if submitted}
-  {#if lookup.isPending}<span class="inline-status" role="status"
-      >Looking up delivery…</span
-    >
-  {:else if lookup.isError}<span class="inline-problem" role="alert"
-      >Delivery lookup is unavailable.
-      <button class="text-button" type="button" onclick={() => lookup.refetch()}
-        >Retry</button
-      ></span
-    >
+  {#if lookup.isPending}<span class="inline-status" role="status">
+      Looking up delivery…
+    </span>
+  {:else if lookup.isError}<span class="inline-problem" role="alert">
+      Delivery lookup is unavailable.
+      <button
+        class="text-button"
+        type="button"
+        onclick={() => lookup.refetch()}
+      >
+        Retry
+      </button>
+    </span>
   {:else if lookup.data}
     {@const delivery = lookup.data}
     <dl class="delivery-lookup">

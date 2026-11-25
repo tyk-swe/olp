@@ -88,15 +88,15 @@
 <div class="toolbar">
   <div class="page-actions">
     {#if canManage}
-      <a class="button button-primary" href={resolve('routes/new')}
-        >New route draft <NavIcon name="arrow" /></a
-      >
+      <a class="button button-primary" href={resolve('routes/new')}>
+        New route draft <NavIcon name="arrow" />
+      </a>
     {/if}
   </div>
 </div>
-{#if !canManage}<ReadOnlyNote
-    >Your role can view routes but not create, edit, or activate them.</ReadOnlyNote
-  >{/if}
+{#if !canManage}<ReadOnlyNote>
+    Your role can view routes but not create, edit, or activate them.
+  </ReadOnlyNote>{/if}
 {#if drafts.isPending && activeRoutes.isPending}
   <div class="loading-state" role="status">Loading routes and drafts…</div>
 {:else if !drafts.data?.items.length && !activeRoutes.data?.items.length && !drafts.isError && !activeRoutes.isError && !drafts.isPending && !activeRoutes.isPending && listState.draft.history.length === 0 && listState.route.history.length === 0}
@@ -108,8 +108,10 @@
       </p>
       {#if canManage}<a
           class="button button-primary"
-          href={resolve('routes/new')}>Build first route</a
+          href={resolve('routes/new')}
         >
+          Build first route
+        </a>
       {/if}
     </div>
   </section>
@@ -120,9 +122,9 @@
         <p class="eyebrow">Published runtime</p>
         <h2 id="published-routes-heading">Published routes</h2>
       </div>
-      <span class="badge success"
-        >{activeRoutes.data?.items.length ?? 0} on this page</span
-      >
+      <span class="badge success">
+        {activeRoutes.data?.items.length ?? 0} on this page
+      </span>
     </div>
     <!-- Active routes and drafts come from separate endpoints; one failing must not hide the other. -->
     {#if retireError}
@@ -136,8 +138,10 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => activeRoutes.refetch()}>Retry</button
+          onclick={() => activeRoutes.refetch()}
         >
+          Retry
+        </button>
       </div>
     {:else if !activeRoutes.data?.items.length}
       <div class="card empty-state compact">
@@ -152,41 +156,45 @@
         busy={activeRoutes.isPlaceholderData}
       >
         <table class="data-table">
-          <thead
-            ><tr
-              ><th>Public slug</th><th>Status</th><th>Latest revision</th><th
-                >Operations</th
-              ><th>Targets</th><th>Activated</th><th>Created by</th><th
-                ><span class="sr-only">Actions</span></th
-              ></tr
-            ></thead
-          ><tbody
-            >{#each activeRoutes.data.items as item (item.id)}{@const retiringCount =
-                retiringTargets(item.latest_revision.targets)}<tr
-                ><td
-                  ><strong><code>{item.slug}</code></strong><br /><small
-                    >{item.project_name ?? 'Installation-wide'}</small
-                  ></td
-                ><td
-                  ><span class="badge" class:success={item.state === 'active'}
-                    >{item.state}</span
-                  ></td
-                ><td
-                  >Revision {item.latest_revision.revision}<br /><small
-                    >{item.revision_count} total</small
-                  ></td
-                ><td>{item.latest_revision.operations.join(', ')}</td><td
-                  >{item.latest_revision.targets.length}{#if retiringCount}<br
-                    /><span class="badge warning">{retiringCount} retiring</span
-                    >{/if}</td
-                ><td>{formatDate(item.latest_revision.activated_at)}</td><td
-                  >{item.created_by_email ?? 'A removed account'}</td
-                ><td class="row-actions"
-                  ><a
+          <thead>
+            <tr>
+              <th>Public slug</th><th>Status</th><th>Latest revision</th><th>
+                Operations
+              </th><th>Targets</th><th>Activated</th><th>Created by</th><th>
+                <span class="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead><tbody>
+            {#each activeRoutes.data.items as item (item.id)}{@const retiringCount =
+                retiringTargets(item.latest_revision.targets)}<tr>
+                <td>
+                  <strong><code>{item.slug}</code></strong><br /><small>
+                    {item.project_name ?? 'Installation-wide'}
+                  </small>
+                </td><td>
+                  <span class="badge" class:success={item.state === 'active'}>
+                    {item.state}
+                  </span>
+                </td><td>
+                  Revision {item.latest_revision.revision}<br /><small>
+                    {item.revision_count} total
+                  </small>
+                </td><td>{item.latest_revision.operations.join(', ')}</td><td>
+                  {item.latest_revision.targets.length}{#if retiringCount}<br
+                    /><span class="badge warning">
+                      {retiringCount} retiring
+                    </span>{/if}
+                </td><td>
+                  {formatDate(item.latest_revision.activated_at)}
+                </td><td>{item.created_by_email ?? 'A removed account'}</td><td
+                  class="row-actions"
+                >
+                  <a
                     class="button button-secondary"
                     href={resolve(`routes/${item.id}/revisions`)}
-                    >History & restore</a
                   >
+                    History & restore
+                  </a>
 
                   {#if canManage && item.state === 'active'}
                     <button
@@ -194,11 +202,12 @@
                       type="button"
                       disabled={retiring !== null}
                       onclick={() => retire(item)}
-                      >{retiring === item.id ? 'Retiring…' : 'Retire'}</button
-                    >{/if}</td
-                ></tr
-              >{/each}</tbody
-          >
+                    >
+                      {retiring === item.id ? 'Retiring…' : 'Retire'}
+                    </button>{/if}
+                </td>
+              </tr>{/each}
+          </tbody>
         </table>
       </ScrollTable>
     {/if}
@@ -225,8 +234,10 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => drafts.refetch()}>Retry</button
+          onclick={() => drafts.refetch()}
         >
+          Retry
+        </button>
       </div>
     {:else if !drafts.data?.items.length}
       <div class="card empty-state compact">
@@ -257,9 +268,9 @@
 
               <tr>
                 <td>
-                  <a class="route-link" href={resolve(`routes/${item.id}`)}
-                    >{item.slug}</a
-                  >
+                  <a class="route-link" href={resolve(`routes/${item.id}`)}>
+                    {item.slug}
+                  </a>
 
                   <br />
                   <small>{item.project_name ?? 'Installation-wide'}</small>
@@ -269,22 +280,27 @@
                   <span
                     class:success={item.state === 'validated'}
                     class:warning={item.state !== 'validated'}
-                    class="badge">{item.state}</span
-                  ></td
-                ><td>{item.operations.join(', ')}</td><td
-                  >{item.targets.length}{#if retiringCount}<br /><span
-                      class="badge warning">{retiringCount} retiring</span
-                    >{/if}</td
-                ><td
-                  >{formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}</td
-                ><td>{formatDate(item.updated_at)}</td><td
-                  >{item.created_by_email ?? 'A removed account'}</td
-                ><td
-                  ><a
+                    class="badge"
+                  >
+                    {item.state}
+                  </span>
+                </td><td>{item.operations.join(', ')}</td><td>
+                  {item.targets.length}{#if retiringCount}<br /><span
+                      class="badge warning"
+                    >
+                      {retiringCount} retiring
+                    </span>{/if}
+                </td><td>
+                  {formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}
+                </td><td>{formatDate(item.updated_at)}</td><td>
+                  {item.created_by_email ?? 'A removed account'}
+                </td><td>
+                  <a
                     class="button button-secondary"
                     href={resolve(`routes/${item.id}`)}
-                    >{canManage ? 'Open Studio' : 'View draft'}</a
                   >
+                    {canManage ? 'Open Studio' : 'View draft'}
+                  </a>
                 </td>
               </tr>
             {/each}

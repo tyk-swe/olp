@@ -120,8 +120,10 @@
             class="button button-secondary"
             disabled={write.busy}
             onclick={() => edit(group)}
-            >{editable ? 'Edit' : 'View'} {group.display_name}</button
           >
+            {editable ? 'Edit' : 'View'}
+            {group.display_name}
+          </button>
         </li>{/each}
     </ul>
   </section>
@@ -138,24 +140,30 @@
         <label for="scim-role">Additional installation role</label><select
           id="scim-role"
           bind:value={role}
-          ><option value="">No additional role</option><option value="viewer"
-            >Viewer</option
-          ><option value="developer">Developer</option><option value="operator"
-            >Operator</option
-          ><option value="owner">Owner</option></select
         >
+          <option value="">No additional role</option><option value="viewer">
+            Viewer
+          </option><option value="developer">Developer</option><option
+            value="operator"
+          >
+            Operator
+          </option><option value="owner">Owner</option>
+        </select>
       </div>
       <div class="form-field">
         <label for="scim-scope">Access scope</label><select
           id="scim-scope"
           bind:value={scope}
-          ><option value="assigned">Assigned projects</option><option
-            value="global">All projects</option
-          ></select
-        ><small
-          >Installation operations still require their existing role. Global
-          scope broadens access to all projects.</small
         >
+          <option value="assigned">Assigned projects</option><option
+            value="global"
+          >
+            All projects
+          </option>
+        </select><small>
+          Installation operations still require their existing role. Global
+          scope broadens access to all projects.
+        </small>
       </div>
       <h3>Inherited project memberships</h3>
       {#each memberships as member (member.id)}<div class="membership">
@@ -172,8 +180,9 @@
             </select>
           </div>
           <div class="form-field">
-            <label for={`scim-project-role-${member.id}`}>Project role</label
-            ><select
+            <label for={`scim-project-role-${member.id}`}>
+              Project role
+            </label><select
               id={`scim-project-role-${member.id}`}
               bind:value={member.role}
             >
@@ -186,8 +195,9 @@
             class="button button-secondary"
             onclick={() =>
               (memberships = memberships.filter((p) => p.id !== member.id))}
-            >Remove membership</button
           >
+            Remove membership
+          </button>
         </div>
       {/each}
       <button
@@ -198,21 +208,25 @@
           (memberships = [
             ...memberships,
             { id: crypto.randomUUID(), value: '', role: 'viewer' }
-          ])}>Add project membership</button
+          ])}
       >
+        Add project membership
+      </button>
     </fieldset>
     {#if write.error}<p class="inline-problem" role="alert">
         {write.error}
       </p>{/if}
     <div class="actions">
-      {#if editable}<button class="button button-primary" disabled={write.busy}
-          >{write.busy ? 'Saving…' : 'Save group access'}</button
-        >{/if}<button
+      {#if editable}<button class="button button-primary" disabled={write.busy}>
+          {write.busy ? 'Saving…' : 'Save group access'}
+        </button>{/if}<button
         type="button"
         class="button button-secondary"
         disabled={write.busy}
-        onclick={() => (current = null)}>Close</button
+        onclick={() => (current = null)}
       >
+        Close
+      </button>
     </div>
   </form>{/if}
 

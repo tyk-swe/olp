@@ -67,9 +67,9 @@
 />
 <div class="code-mode">
   {#if !readable}
-    <EmptyState title="Nothing here for your role"
-      >Ask an operator for access to code mode.</EmptyState
-    >
+    <EmptyState title="Nothing here for your role">
+      Ask an operator for access to code mode.
+    </EmptyState>
   {:else if projects.isPending}<p class="loading-state" role="status">
       Loading projects…
     </p>
@@ -79,14 +79,16 @@
       {#snippet actions()}<button
           class="button button-secondary"
           type="button"
-          onclick={() => projects.refetch()}>Try again</button
-        >{/snippet}
+          onclick={() => projects.refetch()}
+        >
+          Try again
+        </button>{/snippet}
     </Callout>
   {:else if !projects.data?.length}
-    <EmptyState title="No projects yet"
-      >Code mode accounts, pools and routes belong to a project. Create a
-      project first.</EmptyState
-    >
+    <EmptyState title="No projects yet">
+      Code mode accounts, pools and routes belong to a project. Create a project
+      first.
+    </EmptyState>
   {:else}
     <div class="setup">
       <div class="form-field">
@@ -94,10 +96,13 @@
           id="code-project"
           value={projectId}
           onchange={changeProject}
-          >{#each projects.data as project (project.id)}<option
-              value={project.id}>{project.name}</option
-            >{/each}</select
         >
+          {#each projects.data as project (project.id)}<option
+              value={project.id}
+            >
+              {project.name}
+            </option>{/each}
+        </select>
       </div>
       <Advanced label="Gateway address">
         <div class="form-field">
@@ -119,8 +124,10 @@
               draftDirty = false;
               tab = item.id;
             }
-          }}>{item.label}</button
-        >{/each}
+          }}
+        >
+          {item.label}
+        </button>{/each}
     </nav>
     {#if projectId}
       {#key `${principal}:${projectId}:${tab}`}

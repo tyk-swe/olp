@@ -17,106 +17,105 @@
 
 <form class="card filters" aria-label="Usage filters" onsubmit={onApply}>
   <div class="filter-grid">
-    <label
-      >From <input
-        bind:value={draft.start}
-        type="datetime-local"
-        required
-      /></label
-    >
-    <label
-      >To <input bind:value={draft.end} type="datetime-local" required /></label
-    >
-    <label
-      >Break down by <select bind:value={draft.dimension}
-        ><option value="route">Route</option><option value="provider"
-          >Provider</option
-        ><option value="end_user">End user (digest)</option><option
-          value="model">Model</option
-        ><option value="model_family">Model family</option><option
-          value="estimate_provenance">Estimate provenance</option
-        ><option value="api_key">API key</option><option value="operation"
-          >Operation</option
-        ><option value="attribution">Attribution</option><option value="project"
-          >Project</option
-        ><option value="session">Session</option></select
-      ></label
-    >
-    <label
-      >Time buckets <select bind:value={draft.granularity}
-        ><option value="hour">Hourly</option><option value="day">Daily</option
-        ></select
-      ></label
-    >
+    <label>
+      From <input bind:value={draft.start} type="datetime-local" required />
+    </label>
+    <label>
+      To <input bind:value={draft.end} type="datetime-local" required />
+    </label>
+    <label>
+      Break down by <select bind:value={draft.dimension}>
+        <option value="route">Route</option><option value="provider">
+          Provider
+        </option><option value="end_user">End user (digest)</option><option
+          value="model"
+        >
+          Model
+        </option><option value="model_family">Model family</option><option
+          value="estimate_provenance"
+        >
+          Estimate provenance
+        </option><option value="api_key">API key</option><option
+          value="operation"
+        >
+          Operation
+        </option><option value="attribution">Attribution</option><option
+          value="project"
+        >
+          Project
+        </option><option value="session">Session</option>
+      </select>
+    </label>
+    <label>
+      Time buckets <select bind:value={draft.granularity}>
+        <option value="hour">Hourly</option><option value="day">Daily</option>
+      </select>
+    </label>
   </div>
   <Advanced label="More filters" open={hasNarrowingFilters}>
     <div class="filter-grid">
-      <label
-        >Route <input
-          bind:value={draft.route}
-          placeholder="All routes"
-        /></label
-      >
-      <label
-        >Provider ID <input
+      <label>
+        Route <input bind:value={draft.route} placeholder="All routes" />
+      </label>
+      <label>
+        Provider ID <input
           bind:value={draft.provider_id}
           class="mono"
           placeholder="All providers"
-        /></label
-      >
-      <label
-        >Model <input
-          bind:value={draft.model}
-          placeholder="All models"
-        /></label
-      >
-      <label
-        >API key ID <input
+        />
+      </label>
+      <label>
+        Model <input bind:value={draft.model} placeholder="All models" />
+      </label>
+      <label>
+        API key ID <input
           bind:value={draft.api_key_id}
           class="mono"
           placeholder="All keys"
-        /></label
-      >
-      <label
-        >Operation <input
+        />
+      </label>
+      <label>
+        Operation <input
           bind:value={draft.operation}
           placeholder="All operations"
-        /></label
-      >
-      <label
-        >Project ID <input
+        />
+      </label>
+      <label>
+        Project ID <input
           bind:value={draft.project_id}
           class="mono"
           placeholder="All projects"
-        /></label
-      >
-      <label
-        >Session ID <input
+        />
+      </label>
+      <label>
+        Session ID <input
           bind:value={draft.session_id}
           class="mono"
           placeholder="All sessions"
-        /></label
-      >
-      <label
-        >Attribution key <input
+        />
+      </label>
+      <label>
+        Attribution key <input
           bind:value={draft.attribution_key}
           placeholder="e.g. team"
-        /></label
-      >
-      <label
-        >Attribution value <input
+        />
+      </label>
+      <label>
+        Attribution value <input
           bind:value={draft.attribution_value}
           placeholder="Any value"
-        /></label
-      >
+        />
+      </label>
     </div>
   </Advanced>
   <div class="filter-actions">
     <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={onReset}>Reset</button
+      onclick={onReset}
     >
+      Reset
+    </button>
   </div>
 </form>
 

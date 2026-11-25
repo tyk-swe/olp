@@ -154,8 +154,10 @@
   >
     <option value="">Choose a provider</option>
     {#each (providers.data ?? []).filter((p) => p.project_id === projectId) as provider (provider.id)}<option
-        value={provider.id}>{provider.name}</option
-      >{/each}
+        value={provider.id}
+      >
+        {provider.name}
+      </option>{/each}
     {#if providerId && !providers.data?.some((p) => p.id === providerId && p.project_id === projectId)}
       <option value={providerId}>{providerId} · current selection</option>
     {/if}
@@ -173,14 +175,16 @@
   >
     <option value="">Choose an enrolled grant</option>
     {#each (credentials.data ?? []).filter((c) => c.grant) as credential (credential.id)}
-      <option value={credential.id}
-        >Version {credential.version} · {credential.grant?.principal}
-        {credential.revoked_at ? '· revoked' : ''}</option
-      >
+      <option value={credential.id}>
+        Version {credential.version} · {credential.grant?.principal}
+        {credential.revoked_at ? '· revoked' : ''}
+      </option>
     {/each}
     {#if credentialId && !credentials.data?.some((c) => c.id === credentialId)}<option
-        value={credentialId}>{credentialId} · current selection</option
-      >{/if}
+        value={credentialId}
+      >
+        {credentialId} · current selection
+      </option>{/if}
   </select>
   <p>
     Replacing a credential must preserve the observed principal. Existing trees
@@ -220,9 +224,9 @@
       anniversary of this date. Without an anchor no reset is reported.
     </p>
   {/if}
-  <label class="choice"
-    ><input type="checkbox" bind:checked={enabled} />Enabled</label
-  >
+  <label class="choice">
+    <input type="checkbox" bind:checked={enabled} />Enabled
+  </label>
   {#if showsExtraUsage(extraUsageAdapter)}
     <label for="code-extra-usage">Extra Usage</label>
     <select id="code-extra-usage" bind:value={extraUsage}>

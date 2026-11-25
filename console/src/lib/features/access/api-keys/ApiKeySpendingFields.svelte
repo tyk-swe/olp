@@ -44,22 +44,22 @@
   </p>
   <div class="form-grid budget-inputs">
     <div class="form-field">
-      <label for="budget-group">Shared budget group (optional)</label
-      >{#if groups.isPending}<span class="inline-status" role="status"
-          >Loading groups…</span
-        >{:else}<select
+      <label for="budget-group">
+        Shared budget group (optional)
+      </label>{#if groups.isPending}<span class="inline-status" role="status">
+          Loading groups…
+        </span>{:else}<select
           id="budget-group"
           bind:value={form.budgetGroupId}
           disabled={!canManage}
         >
           <option value="">No shared group</option>
-          {#each matchingGroups as group (group.id)}<option value={group.id}
-              >{group.name}</option
-            >{/each}
-        </select><small
-          >All keys in the group share its cost budget and keep their own
-          limits.</small
-        >{/if}
+          {#each matchingGroups as group (group.id)}<option value={group.id}>
+              {group.name}
+            </option>{/each}
+        </select><small>
+          All keys in the group share its cost budget and keep their own limits.
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="daily-budget">Daily cost budget (optional)</label><input
@@ -74,8 +74,10 @@
           : undefined}
       />{#if errors.dailyCostLimit}<small
           class="field-error"
-          id="daily-budget-error">{errors.dailyCostLimit}</small
-        >{/if}
+          id="daily-budget-error"
+        >
+          {errors.dailyCostLimit}
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="weekly-budget">Weekly cost budget (optional)</label><input
@@ -90,8 +92,10 @@
           : undefined}
       />{#if errors.weeklyCostLimit}<small
           class="field-error"
-          id="weekly-budget-error">{errors.weeklyCostLimit}</small
-        >{/if}
+          id="weekly-budget-error"
+        >
+          {errors.weeklyCostLimit}
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="monthly-budget">Monthly cost budget (optional)</label><input
@@ -106,8 +110,10 @@
           : undefined}
       />{#if errors.monthlyCostLimit}<small
           class="field-error"
-          id="monthly-budget-error">{errors.monthlyCostLimit}</small
-        >{/if}
+          id="monthly-budget-error"
+        >
+          {errors.monthlyCostLimit}
+        </small>{/if}
     </div>
   </div>
   {#if editing && services.limitsEnforced}
@@ -118,20 +124,20 @@
     <div class="budget-detail" role="region" aria-label="Current spend budget">
       <div>
         <span>Daily accrued / limit</span>
-        <strong class:danger-text={daily === 'exhausted'}
-          >{formatBudget(editing.budget.daily.accrued)} / {editing.budget.daily
+        <strong class:danger-text={daily === 'exhausted'}>
+          {formatBudget(editing.budget.daily.accrued)} / {editing.budget.daily
             .limit === null
             ? 'No limit'
-            : formatBudget(currentBudgetLimit(editing.budget.daily))}</strong
-        >
-        <small
-          >Window ends (local time) {formatDate(
+            : formatBudget(currentBudgetLimit(editing.budget.daily))}
+        </strong>
+        <small>
+          Window ends (local time) {formatDate(
             editing.budget.daily.window_ends_at
-          )}</small
-        >
-        {#if dailyNote}<small class:danger-text={daily === 'exhausted'}
-            >{dailyNote}</small
-          >{/if}
+          )}
+        </small>
+        {#if dailyNote}<small class:danger-text={daily === 'exhausted'}>
+            {dailyNote}
+          </small>{/if}
       </div>
       {#if editing.budget.weekly}{@const weekly = budgetWindowState(
           editing.budget,
@@ -139,37 +145,37 @@
         )}{@const weeklyNote = budgetStateNote(weekly)}
         <div>
           <span>Weekly accrued / limit</span>
-          <strong class:danger-text={weekly === 'exhausted'}
-            >{formatBudget(editing.budget.weekly.accrued)} / {editing.budget
+          <strong class:danger-text={weekly === 'exhausted'}>
+            {formatBudget(editing.budget.weekly.accrued)} / {editing.budget
               .weekly.limit === null
               ? 'No limit'
-              : formatBudget(currentBudgetLimit(editing.budget.weekly))}</strong
-          >
-          <small
-            >Window ends (local time) {formatDate(
+              : formatBudget(currentBudgetLimit(editing.budget.weekly))}
+          </strong>
+          <small>
+            Window ends (local time) {formatDate(
               editing.budget.weekly.window_ends_at
-            )}</small
-          >
-          {#if weeklyNote}<small class:danger-text={weekly === 'exhausted'}
-              >{weeklyNote}</small
-            >{/if}
+            )}
+          </small>
+          {#if weeklyNote}<small class:danger-text={weekly === 'exhausted'}>
+              {weeklyNote}
+            </small>{/if}
         </div>{/if}
       <div>
         <span>Monthly accrued / limit</span>
-        <strong class:danger-text={monthly === 'exhausted'}
-          >{formatBudget(editing.budget.monthly.accrued)} / {editing.budget
+        <strong class:danger-text={monthly === 'exhausted'}>
+          {formatBudget(editing.budget.monthly.accrued)} / {editing.budget
             .monthly.limit === null
             ? 'No limit'
-            : formatBudget(currentBudgetLimit(editing.budget.monthly))}</strong
-        >
-        <small
-          >Window ends (local time) {formatDate(
+            : formatBudget(currentBudgetLimit(editing.budget.monthly))}
+        </strong>
+        <small>
+          Window ends (local time) {formatDate(
             editing.budget.monthly.window_ends_at
-          )}</small
-        >
-        {#if monthlyNote}<small class:danger-text={monthly === 'exhausted'}
-            >{monthlyNote}</small
-          >{/if}
+          )}
+        </small>
+        {#if monthlyNote}<small class:danger-text={monthly === 'exhausted'}>
+            {monthlyNote}
+          </small>{/if}
       </div>
       <div>
         <span>Unpriced attempts this UTC month</span>

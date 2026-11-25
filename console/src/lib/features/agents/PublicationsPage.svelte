@@ -337,8 +337,10 @@
     class="button button-secondary"
     type="button"
     disabled={busy}
-    onclick={retryRefresh}>Retry refresh</button
-  >{/if}
+    onclick={retryRefresh}
+  >
+    Retry refresh
+  </button>{/if}
 <PublicationList
   {kind}
   {busy}

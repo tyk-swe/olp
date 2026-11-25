@@ -38,26 +38,28 @@
     {m.email} · {m.project_role}{#if editable}<button
         class="button button-secondary"
         disabled={busy}
-        onclick={() => onRemove(m)}>Remove project member {m.email}</button
-      >{/if}
+        onclick={() => onRemove(m)}
+      >
+        Remove project member {m.email}
+      </button>{/if}
   </p>{/each}
 {#if editable}<form onsubmit={add}>
-    <label class="form-field"
-      >Person<EntityPicker
+    <label class="form-field">
+      Person<EntityPicker
         id="organization-project-member"
         source={personOptions}
         required
         bind:value={projectUser}
         emptyLabel="Choose someone"
         disabled={busy}
-      /></label
-    ><label class="form-field"
-      >Role<select bind:value={projectRole} disabled={busy}
-        ><option value="viewer">Viewer</option><option value="manager"
-          >Manager</option
-        ></select
-      ></label
-    ><button class="button button-primary" disabled={busy}
-      >Add to project</button
-    >
+      />
+    </label><label class="form-field">
+      Role<select bind:value={projectRole} disabled={busy}>
+        <option value="viewer">Viewer</option><option value="manager">
+          Manager
+        </option>
+      </select>
+    </label><button class="button button-primary" disabled={busy}>
+      Add to project
+    </button>
   </form>{/if}

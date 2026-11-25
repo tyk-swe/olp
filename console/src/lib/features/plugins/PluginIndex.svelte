@@ -26,14 +26,16 @@
         <div class="plugin-head">
           <strong>{plugin.name}</strong>
           <span>{plugin.description}</span>
-          <small
-            >Maintained by {plugin.maintainer} ·
+          <small>
+            Maintained by {plugin.maintainer} ·
             <a
               href={plugin.documentation_url}
               target="_blank"
-              rel="noreferrer noopener">Documentation</a
-            ></small
-          >
+              rel="noreferrer noopener"
+            >
+              Documentation
+            </a>
+          </small>
         </div>
         {#each plugin.releases as release (release.digest)}
           <dl class="release">
@@ -45,8 +47,9 @@
                   class="badge"
                   class:success={release.approved}
                   class:warning={release.installed && !release.approved}
-                  >{releaseStatus(release)}</span
                 >
+                  {releaseStatus(release)}
+                </span>
               </dd>
             </div>
             <div>
@@ -69,8 +72,9 @@
                   href={sourceURL(plugin, release)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  >source at {release.commit.slice(0, 12)}</a
                 >
+                  source at {release.commit.slice(0, 12)}
+                </a>
               </dd>
             </div>
           </dl>

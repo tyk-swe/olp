@@ -76,15 +76,14 @@
   <p class="silence-status" aria-live="polite">
     <strong>{status}</strong>
     {#if silence}
-      <span
-        >Starts <time datetime={silence.starts_at}
-          >{utcLabel(silence.starts_at)}</time
-        ></span
-      >
-      <span
-        >Ends <time datetime={silence.ends_at}>{utcLabel(silence.ends_at)}</time
-        ></span
-      >
+      <span>
+        Starts <time datetime={silence.starts_at}>
+          {utcLabel(silence.starts_at)}
+        </time>
+      </span>
+      <span>
+        Ends <time datetime={silence.ends_at}>{utcLabel(silence.ends_at)}</time>
+      </span>
     {/if}
   </p>
   {#if action.error}<Callout tone="danger">{action.error}</Callout>{/if}
@@ -120,8 +119,10 @@
       <button
         class="button button-primary"
         type="submit"
-        disabled={disabled || action.busy}>Schedule silence</button
+        disabled={disabled || action.busy}
       >
+        Schedule silence
+      </button>
     </form>
   {/if}
 </section>

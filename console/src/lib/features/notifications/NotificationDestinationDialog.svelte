@@ -78,17 +78,20 @@
                   projectId: draft.projectId
                 });
             }}
-            >{#each destinationTypes as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}</select
           >
+            {#each destinationTypes as option (option.value)}<option
+                value={option.value}
+              >
+                {option.label}
+              </option>{/each}
+          </select>
         </div>
         <div class="form-field">
           <label for="dest-url">
             {#if draft.type === 'slack' || draft.type === 'msteams' || draft.type === 'discord'}Channel
               origin URL{:else if draft.type === 'pagerduty'}Events API endpoint{:else if draft.type === 'email'}SMTP
-              URL{:else}Webhook URL{/if}</label
-          ><input
+              URL{:else}Webhook URL{/if}
+          </label><input
             id="dest-url"
             type="url"
             bind:value={draft.url}
@@ -194,8 +197,9 @@
           class="button button-primary"
           type="submit"
           disabled={busy || !draft.name.trim() || !draft.url.trim()}
-          >{busy ? 'Creating…' : 'Create destination'}</button
         >
+          {busy ? 'Creating…' : 'Create destination'}
+        </button>
       </div>
     </fieldset>
   </form>

@@ -45,8 +45,8 @@
 </script>
 
 <form class="card filters" aria-label="Media job filters" onsubmit={onApply}>
-  <label
-    >Route <input bind:value={listState.route} placeholder="All routes" />
+  <label>
+    Route <input bind:value={listState.route} placeholder="All routes" />
   </label>
 
   <label>
@@ -84,32 +84,37 @@
       bind:value={listState.apiKeyId}
       class="mono"
       placeholder="All keys"
-    /></label
-  >
-  <label
-    >Provider ID <input
+    />
+  </label>
+  <label>
+    Provider ID <input
       bind:value={listState.providerId}
       class="mono"
       placeholder="All providers"
-    /></label
-  >
-  <label
-    >Created after <input
+    />
+  </label>
+  <label>
+    Created after <input
       bind:value={listState.createdAfter}
       type={timeInputType(listState.createdAfter)}
-    /></label
-  >
-  <label
-    >Created before <input
+    />
+  </label>
+  <label>
+    Created before <input
       bind:value={listState.createdBefore}
       type={timeInputType(listState.createdBefore)}
-    /></label
-  >
+    />
+  </label>
   <div class="filter-actions">
-    <button class="button button-primary" type="submit">Apply filters</button
-    ><button class="button button-secondary" type="button" onclick={onClear}
-      >Clear</button
+    <button class="button button-primary" type="submit">
+      Apply filters
+    </button><button
+      class="button button-secondary"
+      type="button"
+      onclick={onClear}
     >
+      Clear
+    </button>
   </div>
 </form>
 {#if problem}<div class="inline-problem" role="alert">
@@ -134,38 +139,49 @@
       aria-label="Media job results"
     >
       <table class="data-table job-table">
-        <caption class="sr-only">Asynchronous media jobs</caption><thead
-          ><tr
-            ><th scope="col">Route / operation</th><th scope="col">Provider</th
-            ><th scope="col">State</th><th scope="col">Lifecycle</th><th
-              scope="col">Progress</th
-            ><th scope="col">Created</th><th scope="col">Updated</th><th
-              scope="col"><span class="sr-only">Actions</span></th
-            ></tr
-          ></thead
-        ><tbody
-          >{#each items as job (job.id)}<tr
-              ><td data-label="Route / operation"
-                ><strong>{job.route}</strong><small>{job.operation}</small></td
-              ><td data-label="Provider"
-                >{job.provider_name}<small>{job.provider_model}</small><small
-                  class="mono">{job.provider_id}</small
-                ></td
-              ><td data-label="State"
-                ><span class={`badge ${tone(job.state)}`}>{job.state}</span></td
-              ><td data-label="Lifecycle">{stateLabel(job.lifecycle)}</td><td
-                data-label="Progress"
-                >{job.progress_percent == null
+        <caption class="sr-only">Asynchronous media jobs</caption><thead>
+          <tr>
+            <th scope="col">Route / operation</th><th scope="col">
+              Provider
+            </th><th scope="col">State</th><th scope="col">Lifecycle</th><th
+              scope="col"
+            >
+              Progress
+            </th><th scope="col">Created</th><th scope="col">Updated</th><th
+              scope="col"
+            >
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead><tbody>
+          {#each items as job (job.id)}<tr>
+              <td data-label="Route / operation">
+                <strong>{job.route}</strong><small>{job.operation}</small>
+              </td><td data-label="Provider">
+                {job.provider_name}<small>{job.provider_model}</small><small
+                  class="mono"
+                >
+                  {job.provider_id}
+                </small>
+              </td><td data-label="State">
+                <span class={`badge ${tone(job.state)}`}>{job.state}</span>
+              </td><td data-label="Lifecycle">
+                {stateLabel(job.lifecycle)}
+              </td><td data-label="Progress">
+                {job.progress_percent == null
                   ? '—'
-                  : `${job.progress_percent}%`}</td
-              ><td data-label="Created">{formatDate(job.created_at)}</td><td
-                data-label="Updated">{formatDate(job.updated_at)}</td
-              ><td class="job-action"
-                ><a
+                  : `${job.progress_percent}%`}
+              </td><td data-label="Created">{formatDate(job.created_at)}</td><td
+                data-label="Updated"
+              >
+                {formatDate(job.updated_at)}
+              </td><td class="job-action">
+                <a
                   class="button button-secondary"
                   href={resolve(`media-jobs/${job.id}${page.url.search}`)}
-                  >View</a
                 >
+                  View
+                </a>
               </td>
             </tr>
           {/each}

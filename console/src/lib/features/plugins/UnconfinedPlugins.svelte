@@ -190,9 +190,9 @@
       <p class="eyebrow">Experimental</p>
       <h2 id="unconfined-heading">Unconfined plugins</h2>
     </div>
-    <span class="badge" class:warning={enabled}
-      >{enabled ? 'Enabled' : 'Disabled'}</span
-    >
+    <span class="badge" class:warning={enabled}>
+      {enabled ? 'Enabled' : 'Disabled'}
+    </span>
   </header>
   {#if !enabled}
     <p class="muted">
@@ -209,9 +209,9 @@
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<Callout tone="success">{notice}</Callout>{/if}
     {#if !canManage}
-      <ReadOnlyNote
-        >Only owners can review and permit unconfined plugins.</ReadOnlyNote
-      >
+      <ReadOnlyNote>
+        Only owners can review and permit unconfined plugins.
+      </ReadOnlyNote>
     {:else if executables.isPending}
       <div class="loading-state" role="status">Loading executables…</div>
     {:else if executables.isError}
@@ -220,38 +220,40 @@
         <button
           class="text-button"
           type="button"
-          onclick={() => executables.refetch()}>Retry</button
+          onclick={() => executables.refetch()}
         >
+          Retry
+        </button>
       </div>
     {:else if !executables.data?.length}
       <p class="muted">The unconfined plugin directory holds no executables.</p>
     {:else}
       <ScrollTable label="Unconfined plugin executables">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th>Executable</th><th>Digest</th><th>Size</th><th>Status</th><th
-                ><span class="sr-only">Actions</span></th
-              ></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th>Executable</th><th>Digest</th><th>Size</th><th>Status</th><th>
+                <span class="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {#each executables.data as file (file.name)}
               <tr>
                 <td><code>{file.name}</code></td>
-                <td
-                  ><code title={file.digest}>{shortDigest(file.digest)}</code
-                  ></td
-                >
+                <td>
+                  <code title={file.digest}>{shortDigest(file.digest)}</code>
+                </td>
                 <td>{formatBytes(file.size_bytes)}</td>
-                <td
-                  ><span
+                <td>
+                  <span
                     class="badge"
                     class:success={file.permitted}
                     class:warning={!file.permitted}
-                    >{file.permitted ? 'Permitted' : 'Not permitted'}</span
-                  ></td
-                >
+                  >
+                    {file.permitted ? 'Permitted' : 'Not permitted'}
+                  </span>
+                </td>
                 <td class="row-action">
                   {#if !file.permitted}<button
                       class="button button-secondary"
@@ -259,10 +261,9 @@
                       aria-label={`Review ${file.name}`}
                       disabled={Boolean(busy)}
                       onclick={() => reviewExecutable(file.name)}
-                      >{busy === `review-${file.name}`
-                        ? 'Reviewing…'
-                        : 'Review'}</button
-                    >{/if}
+                    >
+                      {busy === `review-${file.name}` ? 'Reviewing…' : 'Review'}
+                    </button>{/if}
                 </td>
               </tr>
             {/each}

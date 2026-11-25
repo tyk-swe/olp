@@ -44,8 +44,10 @@
           confirming = false;
           await done(result);
         }
-      )}>Confirm {label.toLowerCase()}</button
+      )}
   >
+    Confirm {label.toLowerCase()}
+  </button>
   <button
     class="button button-secondary"
     type="button"
@@ -53,8 +55,10 @@
     onclick={() => {
       confirming = false;
       intent.reset();
-    }}>Cancel</button
+    }}
   >
+    Cancel
+  </button>
 {:else}
   <button
     class="button button-secondary"
@@ -63,7 +67,9 @@
     disabled={disabled || action.busy}
     onclick={() => {
       confirming = true;
-    }}>{label}</button
+    }}
   >
+    {label}
+  </button>
 {/if}
 {#if action.error}<p class="inline-problem" role="alert">{action.error}</p>{/if}

@@ -150,14 +150,17 @@
       class="button button-secondary"
       type="button"
       onclick={refreshUsage}
-      disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
-    ><button
+      disabled={usage.isFetching || Boolean(urlProblem)}
+    >
+      Refresh
+    </button><button
       class="button button-secondary"
       type="button"
       onclick={exportCsv}
       disabled={exporting || Boolean(urlProblem)}
-      >{exporting ? 'Exporting…' : 'Download CSV'}</button
     >
+      {exporting ? 'Exporting…' : 'Download CSV'}
+    </button>
   </div>
 </div>
 {#if exportError}<div class="inline-problem" role="alert">
@@ -179,9 +182,9 @@
 {:else if usage.isError}
   <div class="inline-problem" role="alert">
     {errorMessage(usage.error, 'Usage could not be loaded.')}
-    <button class="text-button" onclick={() => usage.refetch()}
-      >Try again</button
-    >
+    <button class="text-button" onclick={() => usage.refetch()}>
+      Try again
+    </button>
   </div>
 {:else if usage.data}
   <UsageCompletenessStatus completeness={usage.data.completeness} />

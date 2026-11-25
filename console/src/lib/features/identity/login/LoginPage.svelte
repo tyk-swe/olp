@@ -154,8 +154,10 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={loadCapabilities}>Retry</button
+        onclick={loadCapabilities}
       >
+        Retry
+      </button>
     </div>
   {/if}
 
@@ -200,10 +202,9 @@
       aria-disabled={ssoBusy || busy}
       aria-busy={ssoBusy}
       onclick={beginSso}
-      >{ssoBusy
-        ? 'Starting single sign-on…'
-        : 'Continue with single sign-on'}</a
     >
+      {ssoBusy ? 'Starting single sign-on…' : 'Continue with single sign-on'}
+    </a>
   {:else if !capabilitiesLoading && !capabilitiesError && !capabilities.local_login_enabled && !capabilities.saml_login_enabled}
     <div class="form-alert" role="alert">
       No sign-in method is currently available.
@@ -212,8 +213,10 @@
   {#if !capabilitiesLoading && !capabilitiesError && capabilities.saml_login_enabled}<button
       class="button button-secondary oidc"
       disabled={busy || ssoBusy}
-      onclick={samlLogin}>Continue with SAML</button
-    >{/if}
+      onclick={samlLogin}
+    >
+      Continue with SAML
+    </button>{/if}
 </SetupFrame>
 
 <style>

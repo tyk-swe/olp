@@ -44,9 +44,9 @@
   <PageHeader title={item.label} description={item.description} {actions} />
 {/if}
 {#if !visible}
-  <EmptyState title="Nothing here for your role"
-    >Ask an owner for access if you need this page.</EmptyState
-  >
+  <EmptyState title="Nothing here for your role">
+    Ask an owner for access if you need this page.
+  </EmptyState>
 {:else}
   <Tabs tabs={visible.tabs} label={item?.label ?? ''} />
   {#if current}{@render children()}{/if}

@@ -71,17 +71,21 @@
     session starts with no saved views.
   </p>
   <div class="view-actions">
-    <label
-      >Saved view<select
+    <label>
+      Saved view<select
         class="filter-control"
         aria-label="Saved view"
         bind:value={selected}
-        ><option value="">Choose a view</option
-        >{#each filters as filter (filter.name)}<option value={filter.name}
-            >{filter.name}</option
-          >{/each}</select
-      ></label
-    >
+      >
+        <option value="">
+          Choose a view
+        </option>{#each filters as filter (filter.name)}<option
+            value={filter.name}
+          >
+            {filter.name}
+          </option>{/each}
+      </select>
+    </label>
     <button
       class="button button-secondary"
       type="button"
@@ -89,27 +93,31 @@
       onclick={() => {
         const view = filters.find((entry) => entry.name === selected);
         if (view) apply(view.search);
-      }}>Apply view</button
+      }}
     >
+      Apply view
+    </button>
     <button
       class="button button-quiet"
       type="button"
       disabled={!selected || !session}
-      onclick={remove}>Delete view</button
+      onclick={remove}
     >
+      Delete view
+    </button>
   </div>
   <form onsubmit={save}>
-    <label
-      >View name<input
+    <label>
+      View name<input
         class="filter-control"
         bind:value={name}
         maxlength="60"
         required
         disabled={!session}
-      /></label
-    ><button class="button button-secondary" disabled={!session}
-      >Save current filters</button
-    >
+      />
+    </label><button class="button button-secondary" disabled={!session}>
+      Save current filters
+    </button>
   </form>
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 </details>

@@ -57,13 +57,13 @@
     </p>
     <ScrollTable label="Vector shapes">
       <table class="data-table">
-        <thead
-          ><tr
-            ><th>Result</th><th>Input index</th><th>Layout / dtype</th><th
-              >Logical shape</th
-            ><th>Storage shape</th></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th>Result</th><th>Input index</th><th>Layout / dtype</th><th>
+              Logical shape
+            </th><th>Storage shape</th>
+          </tr>
+        </thead>
         <tbody>
           {#each vectors as vector (vector.position)}
             <tr>
@@ -84,13 +84,13 @@
     </p>
     <ScrollTable label="Native ranked results">
       <table class="data-table">
-        <thead
-          ><tr
-            ><th>Rank</th><th>Input index</th><th>Input ID</th><th
-              >Native score</th
-            ></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th>Rank</th><th>Input index</th><th>Input ID</th><th>
+              Native score
+            </th>
+          </tr>
+        </thead>
         <tbody>
           {#each ranks as rank (rank.position)}
             <tr>

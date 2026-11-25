@@ -19,24 +19,26 @@
     role={notice === 'conflict' ? 'alert' : 'status'}
   >
     <div>
-      <strong
-        >{notice === 'conflict'
+      <strong>
+        {notice === 'conflict'
           ? 'This item changed elsewhere.'
-          : 'A newer version is available.'}</strong
-      >
-      <span
-        >{notice === 'conflict'
+          : 'A newer version is available.'}
+      </strong>
+      <span>
+        {notice === 'conflict'
           ? 'Reload the latest version before saving again.'
-          : 'Your unsaved changes have not been overwritten.'}</span
-      >
+          : 'Your unsaved changes have not been overwritten.'}
+      </span>
       <small>Reloading discards your unsaved changes.</small>
     </div>
     <button
       class="button button-secondary"
       type="button"
       onclick={onReload}
-      {disabled}>Reload</button
+      {disabled}
     >
+      Reload
+    </button>
   </div>
 {/if}
 

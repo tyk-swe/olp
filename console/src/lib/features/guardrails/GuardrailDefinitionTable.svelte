@@ -22,28 +22,28 @@
   } = $props();
 </script>
 
-{#if !pending && !items.length}<EmptyState title="No checks yet"
-    >Create a check, then add it to a policy.</EmptyState
-  >{:else}
+{#if !pending && !items.length}<EmptyState title="No checks yet">
+    Create a check, then add it to a policy.
+  </EmptyState>{:else}
   <ScrollTable label="Checks">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Name</th><th scope="col">Type</th><th scope="col"
-            >Revision</th
-          ><th scope="col"><span class="sr-only">Actions</span></th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Name</th><th scope="col">Type</th><th scope="col">
+            Revision
+          </th><th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
       <tbody>
         {#each items as value (value.id)}<tr>
-            <td
-              ><button class="text-button" onclick={() => onEdit(value)}
-                >{value.name}</button
-              ></td
-            >
+            <td>
+              <button class="text-button" onclick={() => onEdit(value)}>
+                {value.name}
+              </button>
+            </td>
             <td class="mono">{value.type}</td>
-            <td
-              >{value.revision}
+            <td>
+              {value.revision}
               <StatusBadge
                 label={value.active_revision_id === value.revision_id
                   ? 'Active'
@@ -51,18 +51,18 @@
                 tone={value.active_revision_id === value.revision_id
                   ? 'success'
                   : 'warning'}
-              /></td
-            >
-            <td
-              >{#if !value.retired_at && canRetire}<ConfirmAction
+              />
+            </td>
+            <td>
+              {#if !value.retired_at && canRetire}<ConfirmAction
                   danger
                   label="Retire check"
                   description={`Retire ${value.name}`}
                   identity={`${value.id}:${value.etag}`}
                   run={(requestId) => onRetire(value, requestId)}
                   done={() => onRetired(value)}
-                />{/if}</td
-            >
+                />{/if}
+            </td>
           </tr>{/each}
       </tbody>
     </table>

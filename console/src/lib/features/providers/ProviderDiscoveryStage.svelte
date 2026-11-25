@@ -50,10 +50,9 @@
     type="button"
     onclick={onDeclareModels}
     {disabled}
-    >{busy === 'declare-models'
-      ? 'Adding…'
-      : 'Add identifiers for review'}</button
   >
+    {busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}
+  </button>
 {/snippet}
 
 <section class="card stage" aria-labelledby="discovery-heading">
@@ -80,10 +79,9 @@
       type="button"
       onclick={onDiscover}
       {disabled}
-      >{busy === 'discover'
-        ? 'Discovering…'
-        : 'Discover upstream models'}</button
     >
+      {busy === 'discover' ? 'Discovering…' : 'Discover upstream models'}
+    </button>
     {#if provider?.configuration.kind === 'openai_compatible'}
       <details class="manual-fallback">
         <summary>Endpoint has no model-list API?</summary>

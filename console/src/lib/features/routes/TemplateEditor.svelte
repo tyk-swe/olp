@@ -91,79 +91,82 @@
 
 <form class="card form-card" onsubmit={submit}>
   <h2>{current ? 'Edit template' : 'Create template'}</h2>
-  <label class="form-field"
-    >Name<input
+  <label class="form-field">
+    Name<input
       required
       pattern={'[a-z0-9][a-z0-9\\-]{0,62}'}
       bind:value={name}
-    /></label
-  >
-  <label class="form-field"
-    >Project<select disabled={Boolean(baseline)} bind:value={project}
-      ><option value="">Installation</option
-      >{#each projects as item (item.id)}<option value={item.id}
-          >{item.name}</option
-        >{/each}</select
-    ></label
-  >
-  <label class="form-field"
-    >Provider selector<input
+    />
+  </label>
+  <label class="form-field">
+    Project<select disabled={Boolean(baseline)} bind:value={project}>
+      <option value="">
+        Installation
+      </option>{#each projects as item (item.id)}<option value={item.id}>
+          {item.name}
+        </option>{/each}
+    </select>
+  </label>
+  <label class="form-field">
+    Provider selector<input
       required
       placeholder="provider UUID or vendor ID, prefixed with provider: or vendor:"
       bind:value={selector}
-    /></label
-  >
-  <label class="form-field"
-    >Model filter<input required bind:value={filter} /></label
-  >
-  <label class="form-field"
-    >Route slug pattern<input required bind:value={slug} /></label
-  >
+    />
+  </label>
+  <label class="form-field">
+    Model filter<input required bind:value={filter} />
+  </label>
+  <label class="form-field">
+    Route slug pattern<input required bind:value={slug} />
+  </label>
   <p class="inline-status">
     Use {'{model}'} and optionally {'{vendor}'} in the slug pattern
   </p>
-  <label class="form-field"
-    >Timeout in milliseconds<input
+  <label class="form-field">
+    Timeout in milliseconds<input
       type="number"
       min="1"
       max="3600000"
       required
       bind:value={timeout}
-    /></label
-  >
-  <label class="form-field"
-    >Maximum attempts<input
+    />
+  </label>
+  <label class="form-field">
+    Maximum attempts<input
       type="number"
       min="1"
       max="32767"
       required
       bind:value={attempts}
-    /></label
-  >
-  <label class="form-field"
-    >Fidelity<select bind:value={fidelity}
-      >{#each fidelityOptions as option (option.value)}<option
-          value={option.value}>{option.label}</option
-        >{/each}</select
-    ></label
-  >
-  <label class="form-field full"
-    >Routing policy JSON<textarea
+    />
+  </label>
+  <label class="form-field">
+    Fidelity<select bind:value={fidelity}>
+      {#each fidelityOptions as option (option.value)}<option
+          value={option.value}
+        >
+          {option.label}
+        </option>{/each}
+    </select>
+  </label>
+  <label class="form-field full">
+    Routing policy JSON<textarea
       bind:value={policy}
-      placeholder="Leave blank to inherit"></textarea></label
-  >
-  <label class="check-field"
-    ><input type="checkbox" bind:checked={publish} />Automatically publish
-    generated routes</label
-  >
+      placeholder="Leave blank to inherit"></textarea>
+  </label>
+  <label class="check-field">
+    <input type="checkbox" bind:checked={publish} />Automatically publish
+    generated routes
+  </label>
   {#if publish}<p class="inline-status">
       Applying this template or activating a matching provider can publish
       routes immediately
     </p>{/if}
   <div class="page-actions">
-    <button class="button button-primary" disabled={action.busy}
-      >Save template</button
-    >
+    <button class="button button-primary" disabled={action.busy}>
+      Save template
+    </button>
   </div>
   {#if reload && current?.etag !== baseline?.etag}
     <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />

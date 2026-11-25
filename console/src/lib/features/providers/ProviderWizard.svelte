@@ -25,9 +25,9 @@
   description="Credentials are write-only. Test reachability, review model capabilities, then activate."
 >
   {#snippet actions()}
-    <a class="button button-secondary" href={resolve('providers')}
-      >{wizard.wizardProvider ? 'Save and exit' : 'Cancel'}</a
-    >
+    <a class="button button-secondary" href={resolve('providers')}>
+      {wizard.wizardProvider ? 'Save and exit' : 'Cancel'}
+    </a>
   {/snippet}
 </PageHeader>
 <p class="step-progress" aria-hidden="true">
@@ -85,8 +85,10 @@
           provider. <button
             class="button button-secondary"
             type="button"
-            onclick={() => wizard.providerKinds.refetch()}>Retry</button
+            onclick={() => wizard.providerKinds.refetch()}
           >
+            Retry
+          </button>
         </div>
       {:else if wizard.draft && wizard.selectedSpec}
         <ProviderConnectorForm
@@ -155,14 +157,18 @@
           class="button button-secondary"
           type="button"
           onclick={wizard.goBack}
-          disabled={Boolean(wizard.busy)}>Back</button
+          disabled={Boolean(wizard.busy)}
         >
+          Back
+        </button>
         <button
           class="button button-primary"
           type="button"
           disabled={Boolean(wizard.busy)}
-          onclick={() => (wizard.wizardStep = 3)}>Continue to activation</button
+          onclick={() => (wizard.wizardStep = 3)}
         >
+          Continue to activation
+        </button>
       </div>
     {:else if wizard.wizardStep === 3 && wizard.wizardProvider}
       <ProviderActivationStage

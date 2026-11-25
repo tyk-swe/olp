@@ -56,9 +56,9 @@
   <div class="frame">
     <header>
       <h2 id="{id}-title">{title}</h2>
-      <button class="close" type="button" aria-label="Close" onclick={close}
-        >×</button
-      >
+      <button class="close" type="button" aria-label="Close" onclick={close}>
+        ×
+      </button>
     </header>
     {#if description}<p id="{id}-description" class="description">
         {description}

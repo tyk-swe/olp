@@ -54,6 +54,29 @@
     pending = null;
   }
 
+  async function runTurn(
+    actionKey: string,
+    owner: number,
+    send: (signal: AbortSignal) => Promise<ReadyTurn>
+  ) {
+    const controller = new AbortController();
+    abort = controller;
+    await turnAction.run(
+      () => send(controller.signal),
+      (turn, current) => {
+        if (owner === epoch && current()) addTurn(turn);
+      },
+      {
+        key: actionKey,
+        failure: (reason) => (owner === epoch ? problem(reason) : error)
+      }
+    );
+    if (owner === epoch) {
+      error = turnAction.error;
+      abort = null;
+    }
+  }
+
   async function begin() {
     if (busy) return;
     reset();
@@ -66,22 +89,9 @@
     const request = built.value;
     const submission = submissionID();
     pending = { submission, request };
-    const firstController = new AbortController();
-    abort = firstController;
-    await turnAction.run(
-      () => streamTurn(key, request, submission, firstController.signal),
-      (turn, current) => {
-        if (owner === epoch && current()) addTurn(turn);
-      },
-      {
-        key: 'first',
-        failure: (reason) => (owner === epoch ? problem(reason) : error)
-      }
+    await runTurn('first', owner, (signal) =>
+      streamTurn(key, request, submission, signal)
     );
-    if (owner === epoch) {
-      error = turnAction.error;
-      abort = null;
-    }
   }
 
   async function continueWithResults() {
@@ -104,29 +114,10 @@
     const submission = submissionID();
     pending = { submission, request };
     error = '';
-    const nextController = new AbortController();
-    abort = nextController;
-    await turnAction.run(
-      () =>
-        unaryTurn(
-          key,
-          request,
-          submission,
-          active.handle,
-          nextController.signal
-        ),
-      (turn, current) => {
-        if (owner === epoch && current()) addTurn(turn);
-      },
-      {
-        key: 'next',
-        failure: (reason) => (owner === epoch ? problem(reason) : error)
-      }
+    const handle = active.handle;
+    await runTurn('next', owner, (signal) =>
+      unaryTurn(key, request, submission, handle, signal)
     );
-    if (owner === epoch) {
-      error = turnAction.error;
-      abort = null;
-    }
   }
 
   async function recover() {
@@ -134,28 +125,9 @@
     const owner = epoch;
     error = '';
     const pendingTurn = pending;
-    const recoverController = new AbortController();
-    abort = recoverController;
-    await turnAction.run(
-      () =>
-        recoverTurn(
-          key,
-          pendingTurn.submission,
-          pendingTurn.request,
-          recoverController.signal
-        ),
-      (turn, current) => {
-        if (owner === epoch && current()) addTurn(turn);
-      },
-      {
-        key: 'recover',
-        failure: (reason) => (owner === epoch ? problem(reason) : error)
-      }
+    await runTurn('recover', owner, (signal) =>
+      recoverTurn(key, pendingTurn.submission, pendingTurn.request, signal)
     );
-    if (owner === epoch) {
-      error = turnAction.error;
-      abort = null;
-    }
   }
 
   function select(index: number) {
@@ -181,9 +153,9 @@
     call. It does not execute tools for you.
   </p>
   <div class="form-field">
-    <label for="strict-api-key"
-      >Inference API key with provider-state permission</label
-    >
+    <label for="strict-api-key">
+      Inference API key with provider-state permission
+    </label>
     <input
       id="strict-api-key"
       type="password"
@@ -209,20 +181,25 @@
       class="button button-primary"
       onclick={begin}
       disabled={Boolean(busy) || !key || !route}
-      >{busy === 'first'
-        ? 'Waiting for ready continuation…'
-        : 'Run strict first turn'}</button
     >
+      {busy === 'first'
+        ? 'Waiting for ready continuation…'
+        : 'Run strict first turn'}
+    </button>
     {#if busy}<button
         type="button"
         class="button button-secondary"
-        onclick={() => abort?.abort()}>Cancel delivery</button
-      >{/if}
+        onclick={() => abort?.abort()}
+      >
+        Cancel delivery
+      </button>{/if}
     {#if turns.length || pending}<button
         type="button"
         class="button button-secondary"
-        onclick={reset}>Clear interaction</button
-      >{/if}
+        onclick={reset}
+      >
+        Clear interaction
+      </button>{/if}
   </div>
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if pending && !busy}
@@ -236,8 +213,10 @@
         type="button"
         class="button button-secondary"
         onclick={recover}
-        disabled={!key}>Recover committed delivery</button
+        disabled={!key}
       >
+        Recover committed delivery
+      </button>
     </div>
   {/if}
   {#if turns.length > 1}
@@ -248,19 +227,20 @@
           class="button button-secondary"
           aria-pressed={activeIndex === index}
           onclick={() => select(index)}
-          >Turn {index + 1}{turn.assistant.tool_calls?.length
-            ? ' · tools'
-            : ' · final'}</button
         >
+          Turn {index + 1}{turn.assistant.tool_calls?.length
+            ? ' · tools'
+            : ' · final'}
+        </button>
       {/each}
     </div>
   {/if}
   {#if active}
     <div class="ready" role="status">
       <strong>Recoverable continuation ready</strong>
-      <span
-        >Tool actions became available after the encrypted state commit.</span
-      >
+      <span>
+        Tool actions became available after the encrypted state commit.
+      </span>
     </div>
     {#if active.observations.length}
       <div>
@@ -268,13 +248,13 @@
         <ol class="observations">
           {#each active.observations as observation, index (index)}
             <li>
-              <strong
-                >{observation.type.replaceAll('_', ' ')} · {observation.phase}</strong
-              >
+              <strong>
+                {observation.type.replaceAll('_', ' ')} · {observation.phase}
+              </strong>
               {#if observation.type === 'thinking' || observation.type === 'redacted_thinking'}
-                <span
-                  >Opaque reasoning dependency retained; content hidden.</span
-                >
+                <span>
+                  Opaque reasoning dependency retained; content hidden.
+                </span>
               {:else if observation.type === 'text' && observation.text}
                 <span>{observation.text}</span>
               {:else if observation.type === 'tool_use' && observation.name}
@@ -310,9 +290,9 @@
               <summary>Arguments</summary>
               <pre>{call.function.arguments}</pre>
             </details>
-            <label for={`strict-tool-result-${index}`}
-              >Result for call {index + 1}</label
-            >
+            <label for={`strict-tool-result-${index}`}>
+              Result for call {index + 1}
+            </label>
             <textarea
               id={`strict-tool-result-${index}`}
               bind:value={results[index]}
@@ -327,10 +307,11 @@
           disabled={Boolean(busy) ||
             !key ||
             results.some((value) => !value?.trim())}
-          >{busy === 'next'
-            ? 'Submitting tool results…'
-            : 'Submit ordered tool results'}</button
         >
+          {busy === 'next'
+            ? 'Submitting tool results…'
+            : 'Submit ordered tool results'}
+        </button>
       </div>
     {/if}
   {/if}

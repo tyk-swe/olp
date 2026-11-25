@@ -33,15 +33,15 @@
     <ol class="session-list">
       {#each sessionItems as request (request.id)}
         <li>
-          <time datetime={request.started_at}
-            >{formatDate(request.started_at)}</time
-          >
-          <span
-            >{request.route} · {request.operation} · {statusLabel(
+          <time datetime={request.started_at}>
+            {formatDate(request.started_at)}
+          </time>
+          <span>
+            {request.route} · {request.operation} · {statusLabel(
               request.status_code,
               request.error_class
-            )}</span
-          >
+            )}
+          </span>
           <a href={resolve(`requests/${request.id}${page.url.search}`)}>View</a>
         </li>
       {/each}

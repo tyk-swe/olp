@@ -157,15 +157,17 @@
         accepting this invitation. Your invitation has not been consumed.
       </p>
 
-      <a class="button button-secondary" href={resolve('login')}
-        >Go to sign in</a
-      >
+      <a class="button button-secondary" href={resolve('login')}>
+        Go to sign in
+      </a>
 
       <button
         class="button button-secondary"
         type="button"
-        onclick={checkPolicy}>Retry</button
+        onclick={checkPolicy}
       >
+        Retry
+      </button>
     </div>
   {:else if view === 'unavailable'}
     <div class="state" role="alert">
@@ -174,8 +176,10 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={checkPolicy}>Retry</button
+        onclick={checkPolicy}
       >
+        Retry
+      </button>
     </div>
   {:else if view === 'invalid'}
     <div class="state" role="alert">
@@ -183,9 +187,9 @@
       <h1>This invitation link is incomplete.</h1>
       <p>Ask an installation owner for a fresh one-time invitation link.</p>
 
-      <a class="button button-secondary" href={resolve('login')}
-        >Go to sign in</a
-      >
+      <a class="button button-secondary" href={resolve('login')}>
+        Go to sign in
+      </a>
     </div>
   {:else if view === 'expired'}
     <div class="state" role="alert">
@@ -196,9 +200,9 @@
         owner for a new link.
       </p>
 
-      <a class="button button-secondary" href={resolve('login')}
-        >Go to sign in</a
-      >
+      <a class="button button-secondary" href={resolve('login')}>
+        Go to sign in
+      </a>
     </div>
   {:else}
     <div class="heading">
@@ -222,9 +226,12 @@
         aria-describedby={errors.displayName ? 'display-name-error' : undefined}
         disabled={accept.busy}
       />
-      {#if errors.displayName}<small id="display-name-error" class="field-error"
-          >{errors.displayName}</small
-        >{/if}
+      {#if errors.displayName}<small
+          id="display-name-error"
+          class="field-error"
+        >
+          {errors.displayName}
+        </small>{/if}
 
       <label for="invited-password">Password</label>
       <input
@@ -241,9 +248,9 @@
         disabled={accept.busy}
       />
       <small id="password-help">{PASSWORD_TOO_SHORT}</small>
-      {#if errors.password}<small id="password-error" class="field-error"
-          >{errors.password}</small
-        >{/if}
+      {#if errors.password}<small id="password-error" class="field-error">
+          {errors.password}
+        </small>{/if}
 
       <label for="invited-confirm-password">Confirm password</label>
       <input
@@ -259,16 +266,19 @@
       />
       {#if errors.confirmPassword}<small
           id="confirm-password-error"
-          class="field-error">{errors.confirmPassword}</small
-        >{/if}
+          class="field-error"
+        >
+          {errors.confirmPassword}
+        </small>{/if}
 
       <button
         class="button button-primary"
         type="submit"
         disabled={accept.busy}
         aria-busy={accept.busy}
-        >{accept.busy ? 'Creating account…' : 'Accept invitation'}</button
       >
+        {accept.busy ? 'Creating account…' : 'Accept invitation'}
+      </button>
     </form>
   {/if}
 </SetupFrame>

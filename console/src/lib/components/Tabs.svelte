@@ -23,8 +23,9 @@
             class:active={tab.href === current}
             href={tab.href}
             aria-current={tab.href === current ? 'page' : undefined}
-            >{tab.label}</a
           >
+            {tab.label}
+          </a>
         </li>
       {/each}
     </ul>

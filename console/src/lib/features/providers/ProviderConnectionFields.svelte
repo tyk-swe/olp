@@ -113,8 +113,10 @@
     >
       {#if !authOptions.some(([mode]) => mode === values.authMode)}<option
           value={values.authMode}
-          disabled>Current authentication is incompatible</option
-        >{/if}
+          disabled
+        >
+          Current authentication is incompatible
+        </option>{/if}
       {#each authOptions as option (option[0])}
         <option value={option[0]}>{option[1]}</option>
       {/each}
@@ -139,23 +141,22 @@
       value="caller"
       disabled={spec.kind === 'plugin' ||
         !['api_key', 'headers', 'static'].includes(values.authMode)}
-      >Caller supplies each request</option
     >
+      Caller supplies each request
+    </option>
   </select>
-  <small
-    >Caller mode requires X-OLP-Provider-Credential and keeps the endpoint and
+  <small>
+    Caller mode requires X-OLP-Provider-Credential and keeps the endpoint and
     profile fixed. Keep an operator credential for probes and certification.
-    Caller secrets are never saved or shared between targets.</small
-  >
+    Caller secrets are never saved or shared between targets.
+  </small>
 </div>
 <!-- A plugin provider's endpoint is its profile's address, which the server sets. -->
 {#if spec.kind !== 'plugin' && (hasCustomEndpoint(spec) || values.profileId)}
   <div class="form-field full">
-    <label for={`${idPrefix}-endpoint`}
-      >{spec.kind === 'azure_openai'
-        ? 'Azure resource endpoint'
-        : 'Endpoint'}</label
-    >
+    <label for={`${idPrefix}-endpoint`}>
+      {spec.kind === 'azure_openai' ? 'Azure resource endpoint' : 'Endpoint'}
+    </label>
     <input
       id={`${idPrefix}-endpoint`}
       type="url"
@@ -178,10 +179,10 @@
       required={!v1}
       aria-describedby={`${idPrefix}-version-help`}
     />
-    {#if v1}<small id={`${idPrefix}-version-help`}
-        >Azure v1 does not use a dated API version. Clear this field explicitly
-        when migrating.</small
-      >{/if}
+    {#if v1}<small id={`${idPrefix}-version-help`}>
+        Azure v1 does not use a dated API version. Clear this field explicitly
+        when migrating.
+      </small>{/if}
   </div>
 {/if}
 {#if hasCloudRegion(spec)}
@@ -210,9 +211,9 @@
 {/if}
 {#if batchStorageProfile}
   <div class="form-field full">
-    <label for={`${idPrefix}-batch-input-uri-prefix`}
-      >Batch input URI prefix</label
-    >
+    <label for={`${idPrefix}-batch-input-uri-prefix`}>
+      Batch input URI prefix
+    </label>
     <input
       id={`${idPrefix}-batch-input-uri-prefix`}
       value={batchStorageValue('input_uri_prefix')}
@@ -224,9 +225,9 @@
     <small>Allowed object storage prefix for batch input files.</small>
   </div>
   <div class="form-field full">
-    <label for={`${idPrefix}-batch-output-uri-prefix`}
-      >Batch output URI prefix</label
-    >
+    <label for={`${idPrefix}-batch-output-uri-prefix`}>
+      Batch output URI prefix
+    </label>
     <input
       id={`${idPrefix}-batch-output-uri-prefix`}
       value={batchStorageValue('output_uri_prefix')}
@@ -253,9 +254,9 @@
 {/if}
 {#if documentProcessingProfile}
   <div class="form-field full">
-    <label for={`${idPrefix}-document-uri-prefixes`}
-      >Document URI prefixes</label
-    >
+    <label for={`${idPrefix}-document-uri-prefixes`}>
+      Document URI prefixes
+    </label>
     <textarea
       id={`${idPrefix}-document-uri-prefixes`}
       value={documentPrefixes()}
@@ -263,12 +264,12 @@
       disabled={fieldsDisabled}
       placeholder="gs://bucket/documents/"
       rows="3"></textarea>
-    <small
-      >One GCS prefix per line. Native document locations outside these prefixes
+    <small>
+      One GCS prefix per line. Native document locations outside these prefixes
       are refused, and an empty list grants no document locations. Inline
       documents need no prefix. The cloud region is the Document AI location,
-      such as us or eu, and each model names a processor ID.</small
-    >
+      such as us or eu, and each model names a processor ID.
+    </small>
   </div>
 {/if}
 {#if hasDeployment(spec)}

@@ -188,9 +188,9 @@
           disabled={!canManage}
           aria-invalid={errors.name ? 'true' : undefined}
           aria-describedby={errors.name ? 'key-name-error' : undefined}
-        />{#if errors.name}<small class="field-error" id="key-name-error"
-            >{errors.name}</small
-          >{/if}
+        />{#if errors.name}<small class="field-error" id="key-name-error">
+            {errors.name}
+          </small>{/if}
       </div>
       <div class="form-field">
         <label for="key-expiry">Expires at (optional)</label><input
@@ -200,18 +200,21 @@
           disabled={!canManage}
           aria-invalid={errors.expiresAt ? 'true' : undefined}
           aria-describedby={errors.expiresAt ? 'key-expiry-error' : undefined}
-        />{#if errors.expiresAt}<small class="field-error" id="key-expiry-error"
-            >{errors.expiresAt}</small
-          >{/if}
+        />{#if errors.expiresAt}<small
+            class="field-error"
+            id="key-expiry-error"
+          >
+            {errors.expiresAt}
+          </small>{/if}
       </div>
       {#if !editing}<ProjectScopeField
           id="key-project"
           bind:value={form.projectId}
           disabled={!canManage}
         />{:else}<div class="form-field">
-          <span class="scope-label">Project</span><span
-            >{editing.project_name ?? 'Installation-wide'}</span
-          >
+          <span class="scope-label">Project</span><span>
+            {editing.project_name ?? 'Installation-wide'}
+          </span>
         </div>{/if}
     </div>
   </section>
@@ -245,13 +248,16 @@
         class="button button-secondary"
         type="button"
         disabled={Boolean(busy)}
-        onclick={onCancel}>Cancel</button
+        onclick={onCancel}
       >
+        Cancel
+      </button>
       <button
         class="button button-primary"
         type="submit"
         disabled={!canManage || Boolean(busy) || publicationBlocked}
-        >{busy === 'create'
+      >
+        {busy === 'create'
           ? 'Creating securely…'
           : busy === 'update'
             ? 'Saving policy…'
@@ -260,8 +266,8 @@
                 ? 'Save and publish'
                 : 'Save policy'
               : 'Create and show key'}
-        <NavIcon name="arrow" /></button
-      >
+        <NavIcon name="arrow" />
+      </button>
     </div>{/if}
 </form>
 

@@ -68,9 +68,9 @@
       value={active}
       onchange={(event) => (selected = event.currentTarget.value)}
       {disabled}
-      >{#each entries as [key] (key)}<option value={key}>{key}</option
-        >{/each}</select
     >
+      {#each entries as [key] (key)}<option value={key}>{key}</option>{/each}
+    </select>
   </div>{/if}
 {#if active}
   {#if nativeObject(binding)}
@@ -104,8 +104,10 @@
     onclick={() => {
       draft.set(['options', 'bindings', active], undefined);
       onChange();
-    }}>Remove model binding</button
+    }}
   >
+    Remove model binding
+  </button>
 {/if}
 <div class="add-binding">
   <div class="form-field">
@@ -120,8 +122,9 @@
     type="button"
     onclick={add}
     disabled={disabled || (value !== undefined && !nativeObject(value))}
-    >Add model binding</button
   >
+    Add model binding
+  </button>
 </div>
 {#if issue}<p class="inline-problem" role="alert">{issue}</p>{/if}
 

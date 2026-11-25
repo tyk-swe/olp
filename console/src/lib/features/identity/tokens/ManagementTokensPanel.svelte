@@ -200,13 +200,17 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={copySecret}>{copied ? 'Token copied' : 'Copy token'}</button
-        ><button
+          onclick={copySecret}
+        >
+          {copied ? 'Token copied' : 'Copy token'}
+        </button><button
           class="button button-primary"
           type="button"
           data-autofocus
-          onclick={close}>I have saved it</button
+          onclick={close}
         >
+          I have saved it
+        </button>
         <span class="sr-only" aria-live="polite">
           {copied ? 'Token secret copied to clipboard.' : ''}
         </span>
@@ -229,8 +233,10 @@
       <button
         class="button button-primary"
         type="button"
-        onclick={() => (creating = true)}>New token</button
+        onclick={() => (creating = true)}
       >
+        New token
+      </button>
     </div>
   </div>
 {/if}
@@ -257,53 +263,57 @@
     emptyWhen={!tokens.data?.items.length && pagination.history.length === 0}
   >
     {#snippet empty()}
-      <EmptyState title="No management tokens yet"
-        >Create one when a script or pipeline needs to manage this installation.</EmptyState
-      >
+      <EmptyState title="No management tokens yet">
+        Create one when a script or pipeline needs to manage this installation.
+      </EmptyState>
     {/snippet}
     <ScrollTable label="Management tokens">
       <table class="data-table">
-        <thead
-          ><tr
-            ><th>Name / created by</th><th>Scopes</th><th>Projects</th><th
-              >Status</th
-            ><th>Expires / created</th><th
-              ><span class="sr-only">Actions</span></th
-            ></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th>Name / created by</th><th>Scopes</th><th>Projects</th><th>
+              Status
+            </th><th>Expires / created</th><th>
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
         <tbody>
           {#each tokens.data?.items ?? [] as token (token.id)}
             <tr>
-              <td
-                ><strong>{token.name}</strong><br /><small
-                  >Created by {token.created_by_email}</small
-                ></td
-              ><td><code>{token.scopes.join(', ')}</code></td>
+              <td>
+                <strong>{token.name}</strong><br /><small>
+                  Created by {token.created_by_email}
+                </small>
+              </td><td><code>{token.scopes.join(', ')}</code></td>
               <td>{projectScopeLabel(token)}</td>
-              <td
-                ><span
+              <td>
+                <span
                   class:success={status(token) === 'active'}
                   class:warning={status(token) === 'expired'}
                   class:danger={status(token) === 'revoked'}
-                  class="badge">{status(token)}</span
-                >{#if token.revoked_at}<br /><small
-                    >Revoked {formatDate(token.revoked_at)}</small
-                  >{/if}</td
-              >
-              <td
-                >{formatDate(token.expires_at)}<br /><small
-                  >Created {formatDate(token.created_at)}</small
-                ></td
-              >
-              <td
-                >{#if status(token) === 'active'}<button
+                  class="badge"
+                >
+                  {status(token)}
+                </span>{#if token.revoked_at}<br /><small>
+                    Revoked {formatDate(token.revoked_at)}
+                  </small>{/if}
+              </td>
+              <td>
+                {formatDate(token.expires_at)}<br /><small>
+                  Created {formatDate(token.created_at)}
+                </small>
+              </td>
+              <td>
+                {#if status(token) === 'active'}<button
                     class="button button-secondary button-danger"
                     type="button"
                     onclick={() => revoke(token)}
-                    disabled={write.busy}>Revoke</button
-                  >{/if}</td
-              >
+                    disabled={write.busy}
+                  >
+                    Revoke
+                  </button>{/if}
+              </td>
             </tr>
           {/each}
         </tbody>

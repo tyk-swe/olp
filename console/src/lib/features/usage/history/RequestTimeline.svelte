@@ -20,9 +20,9 @@
 {:else if detail.isError}
   <div class="inline-problem" role="alert">
     {errorMessage(detail.error, 'The request timeline could not be loaded.')}
-    <button class="text-button" onclick={() => detail.refetch()}
-      >Try again</button
-    >
+    <button class="text-button" onclick={() => detail.refetch()}>
+      Try again
+    </button>
   </div>
 {:else if detail.data}
   {#if detail.data.cache_result}

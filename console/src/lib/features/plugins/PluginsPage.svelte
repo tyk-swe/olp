@@ -137,28 +137,27 @@
       </p>
     </div>
     <form onsubmit={install} novalidate>
-      <label
-        ><span>Plugin module (.wasm)</span><input
+      <label>
+        <span>Plugin module (.wasm)</span><input
           type="file"
           accept=".wasm,application/wasm"
           onchange={(event) =>
             (module = event.currentTarget.files?.[0] ?? null)}
-        /></label
-      >
+        />
+      </label>
       <button
         class="button button-primary"
         type="submit"
         disabled={pluginAction.key === 'install'}
-        >{pluginAction.key === 'install'
-          ? 'Installing…'
-          : 'Install plugin'}</button
       >
+        {pluginAction.key === 'install' ? 'Installing…' : 'Install plugin'}
+      </button>
     </form>
   </section>
 {:else}
-  <ReadOnlyNote
-    >Only owners can install, approve or uninstall plugins.</ReadOnlyNote
-  >
+  <ReadOnlyNote>
+    Only owners can install, approve or uninstall plugins.
+  </ReadOnlyNote>
 {/if}
 
 {#if plugins.isPending}
@@ -166,9 +165,9 @@
 {:else if plugins.isError}
   <div class="inline-problem" role="alert">
     {errorMessage(plugins.error)}
-    <button class="text-button" type="button" onclick={() => plugins.refetch()}
-      >Retry</button
-    >
+    <button class="text-button" type="button" onclick={() => plugins.refetch()}>
+      Retry
+    </button>
   </div>
 {:else if !plugins.data?.items.length}
   <section class="card empty-state">

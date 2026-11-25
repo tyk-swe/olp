@@ -28,8 +28,8 @@
     void startAgentEnrollment();
   }}
 >
-  <label class="form-field"
-    >Published agent <select
+  <label class="form-field">
+    Published agent <select
       value={$pageState.agentID}
       disabled={working}
       onchange={(event) => {
@@ -42,18 +42,20 @@
       {#each (agents.data ?? []).filter((item) => item.revision_id && !item.retired) as item (item.id)}
         <option value={item.id}>{item.name}</option>
       {/each}
-    </select></label
-  >
-  <label class="form-field"
-    >Agent API key UUID <input
+    </select>
+  </label>
+  <label class="form-field">
+    Agent API key UUID <input
       value={$pageState.agentKeyID}
       disabled={working}
       oninput={(event) => patch({ agentKeyID: event.currentTarget.value })}
       required
-    /></label
-  >
+    />
+  </label>
   <button
     class="button button-secondary"
-    disabled={working || !$pageState.agentID}>Start agent key enrollment</button
+    disabled={working || !$pageState.agentID}
   >
+    Start agent key enrollment
+  </button>
 </form>

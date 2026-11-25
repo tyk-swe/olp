@@ -41,9 +41,9 @@
       </select>
     </div>
     <div class="form-field full">
-      <label for="source-url"
-        >Document URL{format === 'catalog' ? ' (optional)' : ''}</label
-      ><input
+      <label for="source-url">
+        Document URL{format === 'catalog' ? ' (optional)' : ''}
+      </label><input
         id="source-url"
         type="url"
         aria-describedby="source-url-help"
@@ -52,16 +52,16 @@
         placeholder={format === 'catalog'
           ? 'https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json'
           : 'https://prices.example.com/openai.json'}
-      /><small id="source-url-help"
-        >{format === 'catalog'
+      /><small id="source-url-help">
+        {format === 'catalog'
           ? bundledCatalogHint(catalog)
-          : 'A JSON price list, fetched through the egress policy.'}</small
-      >
+          : 'A JSON price list, fetched through the egress policy.'}
+      </small>
     </div>
   </div>
-  <button class="button button-primary" type="submit" disabled={busy || !ready}
-    >{busy ? 'Creating…' : 'Create pricing source'}</button
-  >
+  <button class="button button-primary" type="submit" disabled={busy || !ready}>
+    {busy ? 'Creating…' : 'Create pricing source'}
+  </button>
 </form>
 
 <style>

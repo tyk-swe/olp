@@ -116,12 +116,15 @@
             id="policy-sink"
             bind:value={policySinkId}
             required
-            ><option value="" disabled>Choose an installation sink</option
-            >{#each sinkOptions as option (option.export_sink_id)}<option
-                value={option.export_sink_id}
-                >{option.name} ({option.type})</option
-              >{/each}</select
           >
+            <option value="" disabled>
+              Choose an installation sink
+            </option>{#each sinkOptions as option (option.export_sink_id)}<option
+                value={option.export_sink_id}
+              >
+                {option.name} ({option.type})
+              </option>{/each}
+          </select>
         </div>
         <div class="form-field">
           <label for="policy-ratio">Sample ratio</label><input
@@ -134,13 +137,13 @@
         <fieldset class="form-field">
           <legend>Include</legend>
           {#each ['input', 'output', 'tool_calls'] as part (part)}
-            <label class="inline-check"
-              ><input
+            <label class="inline-check">
+              <input
                 type="checkbox"
                 checked={policyInclude.includes(part)}
                 onchange={() => toggleInclude(part)}
-              />{part}</label
-            >
+              />{part}
+            </label>
           {/each}
         </fieldset>
         <fieldset class="form-field">
@@ -154,9 +157,9 @@
           />
           <datalist id="capture-redactor-options">
             {#each eligibleRedactors as detector (detector.id)}
-              <option value={detector.name}
-                >{detector.type} · {detector.project_id}</option
-              >
+              <option value={detector.name}>
+                {detector.type} · {detector.project_id}
+              </option>
             {/each}
           </datalist>
           <button
@@ -164,8 +167,9 @@
             class="text-button"
             onclick={addRedactor}
             disabled={!redactorName.trim() || policyRedactors.length >= 128}
-            >Add redactor</button
           >
+            Add redactor
+          </button>
           <ol>
             {#each policyRedactors as name, index (name)}
               <li>
@@ -174,22 +178,28 @@
                   type="button"
                   aria-label={`Move ${name} up`}
                   disabled={index === 0}
-                  onclick={() => moveRedactor(index, -1)}>↑</button
+                  onclick={() => moveRedactor(index, -1)}
                 >
+                  ↑
+                </button>
                 <button
                   type="button"
                   aria-label={`Move ${name} down`}
                   disabled={index === policyRedactors.length - 1}
-                  onclick={() => moveRedactor(index, 1)}>↓</button
+                  onclick={() => moveRedactor(index, 1)}
                 >
+                  ↓
+                </button>
                 <button
                   type="button"
                   aria-label={`Remove ${name}`}
                   onclick={() =>
                     (policyRedactors = policyRedactors.filter(
                       (_, i) => i !== index
-                    ))}>Remove</button
+                    ))}
                 >
+                  Remove
+                </button>
               </li>
             {/each}
           </ol>
@@ -207,8 +217,9 @@
               class="text-button"
               onclick={() => (refreshRedactors = true)}
               disabled={refreshRedactors || !policyRedactors.length}
-              >Refresh pinned revisions on save</button
             >
+              Refresh pinned revisions on save
+            </button>
             {#if refreshRedactors}<p role="status">
                 Saving will adopt the active detector revisions.
               </p>{/if}
@@ -249,20 +260,19 @@
           onChange={(expiry) => (policyExpiry = expiry)}
         />
         <div class="form-field">
-          <label class="inline-check"
-            ><input
-              type="checkbox"
-              bind:checked={policyEnabled}
-            />Enabled</label
-          >
+          <label class="inline-check">
+            <input type="checkbox" bind:checked={policyEnabled} />Enabled
+          </label>
         </div>
       </div>
       <div class="form-actions">
         {#if editingPolicy}<button
             class="button button-secondary"
             type="button"
-            onclick={onCancel}>Cancel</button
-          >{/if}
+            onclick={onCancel}
+          >
+            Cancel
+          </button>{/if}
         <button
           class="button button-primary"
           type="submit"
@@ -270,12 +280,13 @@
             !policySinkId ||
             !policyRatio.trim() ||
             !policyInclude.length}
-          >{busy
+        >
+          {busy
             ? 'Saving…'
             : editingPolicy
               ? 'Save capture policy'
-              : 'Create capture policy'}</button
-        >
+              : 'Create capture policy'}
+        </button>
       </div>
     </fieldset>
   </form>

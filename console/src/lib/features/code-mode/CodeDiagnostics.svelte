@@ -254,8 +254,10 @@
       disabled={selected.isFetching ||
         accounts.isFetching ||
         !!retireMutation.key}
-      onclick={refresh}>Refresh</button
+      onclick={refresh}
     >
+      Refresh
+    </button>
   </div>
   <p>
     Metadata only: no prompts, outputs, tool payloads, raw headers or

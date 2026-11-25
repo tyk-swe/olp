@@ -347,9 +347,9 @@
           onRemove={remove}
         />
       {:else}
-        <ReadOnlyNote
-          >Billing imports are managed by connection managers.</ReadOnlyNote
-        >
+        <ReadOnlyNote>
+          Billing imports are managed by connection managers.
+        </ReadOnlyNote>
       {/if}
 
       <p class="section-help">

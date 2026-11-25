@@ -345,8 +345,10 @@
       Models could not be loaded. <button
         class="button button-secondary"
         type="button"
-        onclick={() => models.refetch()}>Retry</button
+        onclick={() => models.refetch()}
       >
+        Retry
+      </button>
     </div>{/if}
   <BulkModelInputs
     items={models.data?.items ?? []}

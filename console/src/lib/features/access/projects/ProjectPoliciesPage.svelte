@@ -120,8 +120,10 @@
       It may have been removed, or you may not be a member.
       {#snippet action()}<a
           class="button button-secondary"
-          href={resolve('projects')}>All projects</a
-        >{/snippet}
+          href={resolve('projects')}
+        >
+          All projects
+        </a>{/snippet}
     </EmptyState>
   {/snippet}
   {#if selected}
@@ -134,13 +136,17 @@
                   rename.error = '';
                   removal.error = '';
                   renaming = true;
-                }}>Rename</button
-              >{/if}
+                }}
+              >
+                Rename
+              </button>{/if}
             {#if access.allows('DELETE /api/v1/projects/{project_id}')}<button
                 type="button"
                 class="danger"
-                onclick={remove}>Delete project</button
-              >{/if}
+                onclick={remove}
+              >
+                Delete project
+              </button>{/if}
           </Menu>{/if}{/snippet}
       {#snippet meta()}<StatusBadge
           label={selected.role === 'manager' ? 'Manager' : 'Member'}
@@ -153,9 +159,9 @@
         can manage keys.
       </p>
     {/if}
-    {#if (rename.error || removal.error) && !renaming}<Callout tone="danger"
-        >{rename.error || removal.error}</Callout
-      >{/if}
+    {#if (rename.error || removal.error) && !renaming}<Callout tone="danger">
+        {rename.error || removal.error}
+      </Callout>{/if}
     {#key selected.id}
       {#if detail.data}
         <section class="group" aria-labelledby="project-members">
@@ -202,15 +208,16 @@
             {rename.error}
           </p>{/if}
         <div class="page-actions">
-          <button class="button button-secondary" type="button" onclick={close}
-            >Cancel</button
-          >
+          <button class="button button-secondary" type="button" onclick={close}>
+            Cancel
+          </button>
           <button
             class="button button-primary"
             type="submit"
             disabled={rename.busy || !renameValue.trim()}
-            >{rename.busy ? 'Saving…' : 'Save'}</button
           >
+            {rename.busy ? 'Saving…' : 'Save'}
+          </button>
         </div>
       </form>
     {/snippet}

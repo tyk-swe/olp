@@ -101,23 +101,23 @@
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 
   <form onsubmit={save}>
-    <label
-      >Installation name<input
+    <label>
+      Installation name<input
         class="filter-control"
         bind:value={name}
         maxlength="100"
         required
         disabled={!editable}
-      /></label
-    >
-    <label
-      >Logo<input
+      />
+    </label>
+    <label>
+      Logo<input
         type="file"
         accept="image/png,image/jpeg"
         onchange={(event) => chooseLogo(event.currentTarget.files?.[0])}
         disabled={!editable}
-      /></label
-    >
+      />
+    </label>
     <p class="muted">
       PNG or JPEG, at most 64 KiB and 512 × 512 pixels. Leave the logo empty to
       use the default brand mark.
@@ -144,8 +144,10 @@
         class="button button-secondary"
         type="button"
         onclick={() => (accent = '')}
-        disabled={!accent || !editable}>Use default color</button
+        disabled={!accent || !editable}
       >
+        Use default color
+      </button>
     </fieldset>
     <p class="muted">
       Primary buttons use this color with white text, so it needs at least 4.5:1
@@ -163,18 +165,23 @@
         type="button"
         onclick={() => (logo = '')}
         disabled={!logo || !access.can('settings.update') || busy}
-        >Use default logo</button
       >
+        Use default logo
+      </button>
       <button
         class="button button-secondary"
         type="button"
         onclick={reload}
-        disabled={busy}>Reload identity</button
+        disabled={busy}
       >
+        Reload identity
+      </button>
       {#if access.can('settings.update')}<button
           class="button button-primary"
-          disabled={busy || !etag}>{busy ? 'Saving…' : 'Save identity'}</button
-        >{/if}
+          disabled={busy || !etag}
+        >
+          {busy ? 'Saving…' : 'Save identity'}
+        </button>{/if}
     </div>
   </form>
 </section>

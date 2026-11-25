@@ -121,8 +121,10 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={editor.retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}
       >
+        Retry refresh
+      </button>
     </p>{/if}
   <div class="section-heading">
     <div>
@@ -130,9 +132,9 @@
       <h2 id="models-heading">Models and capabilities</h2>
     </div>
 
-    <a class="button button-secondary" href={resolve('models')}
-      >Inventory view</a
-    >
+    <a class="button button-secondary" href={resolve('models')}>
+      Inventory view
+    </a>
   </div>
   <div class="discovery-row">
     <p class="muted">
@@ -169,8 +171,9 @@
         disabled until capability review.
       </p>
       <div class="form-field">
-        <label for="manual-models-detail">Upstream model identifiers</label
-        ><textarea
+        <label for="manual-models-detail">
+          Upstream model identifiers
+        </label><textarea
           id="manual-models-detail"
           bind:value={manualModelNames}
           placeholder="model-a
@@ -181,18 +184,19 @@ model-b"></textarea>
         type="button"
         onclick={declareModels}
         disabled={!canManage || Boolean(busy)}
-        >{busy === 'detail-declare'
-          ? 'Adding…'
-          : 'Add identifiers for review'}</button
       >
+        {busy === 'detail-declare' ? 'Adding…' : 'Add identifiers for review'}
+      </button>
     </details>{/if}
   {#if Boolean(error)}<div class="inline-problem" role="alert">
       {errorMessage(error)} The last loaded model page remains available below.
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => editor.snapshot.refetch()}>Retry</button
+        onclick={() => editor.snapshot.refetch()}
       >
+        Retry
+      </button>
     </div>
   {/if}
 
@@ -204,16 +208,17 @@ model-b"></textarea>
     {@const modelPage = visibleModelPage}
     <ScrollTable label="Discovered models">
       <table class="data-table">
-        <thead><tr><th>Model</th><th>Explicit capability review</th></tr></thead
-        ><tbody>
-          {#each modelPage.items as model (model.id)}<tr
-              ><td
-                ><strong>{model.display_name}</strong><br /><code
-                  >{model.upstream_model}</code
-                >{#if model.discovered_at}<br /><small class="discovered"
-                    >Discovered {formatDate(model.discovered_at)}</small
-                  >{/if}</td
-              ><td>
+        <thead>
+          <tr><th>Model</th><th>Explicit capability review</th></tr>
+        </thead><tbody>
+          {#each modelPage.items as model (model.id)}<tr>
+              <td>
+                <strong>{model.display_name}</strong><br /><code>
+                  {model.upstream_model}
+                </code>{#if model.discovered_at}<br /><small class="discovered">
+                    Discovered {formatDate(model.discovered_at)}
+                  </small>{/if}
+              </td><td>
                 <CapabilityReview
                   {model}
                   providerEtag={modelPage.provider.etag}
@@ -244,19 +249,21 @@ model-b"></textarea>
                       refreshPending ||
                       editingLocked ||
                       !model.capabilities.length}
-                    >{busy === `certify-${model.id}`
-                      ? 'Server-certifying…'
-                      : 'Server-certify capabilities'}</button
                   >
+                    {busy === `certify-${model.id}`
+                      ? 'Server-certifying…'
+                      : 'Server-certify capabilities'}
+                  </button>
                   {#if certificationResults[model.id]}{@const result =
                       certificationResults[model.id]}<span
                       class:success={result.status === 'succeeded'}
                       class:warning={result.status !== 'succeeded'}
-                      >{result.certified_count}/{result.attempted_count} certified</span
-                    >{/if}
+                    >
+                      {result.certified_count}/{result.attempted_count} certified
+                    </span>{/if}
                 </div>
-              </td></tr
-            >{/each}
+              </td>
+            </tr>{/each}
         </tbody>
       </table>
     </ScrollTable>

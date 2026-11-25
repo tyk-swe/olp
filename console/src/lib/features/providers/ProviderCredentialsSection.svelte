@@ -103,8 +103,10 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={editor.retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}
       >
+        Retry refresh
+      </button>
     </p>{/if}
   <p class="eyebrow">Secrets</p>
   <h2 id="credential-heading">Credential versions</h2>
@@ -116,33 +118,33 @@
   {#if providerSpec && requiresGrant(providerSpec, current.configuration.auth_mode)}<div
       class="identity-note"
     >
-      <strong>Grant</strong><span
-        >Credential versions come from grant enrollment: an operator signs in to
+      <strong>Grant</strong><span>
+        Credential versions come from grant enrollment: an operator signs in to
         the upstream account through the provider plugin, and re-enrolls a
-        slot's grant from the credential pool. There is no credential to paste.</span
-      >
+        slot's grant from the credential pool. There is no credential to paste.
+      </span>
     </div>{:else if providerSpec && !requiresCredential(providerSpec, current.configuration.auth_mode)}<div
       class="identity-note"
     >
-      <strong
-        >{providerSpec.auth_modes.find(
+      <strong>
+        {providerSpec.auth_modes.find(
           (auth) => auth.mode === current.configuration.auth_mode
-        )?.label}</strong
-      ><span
-        >Identity is supplied by this deployment; there is no encrypted
-        credential version.</span
-      >
+        )?.label}
+      </strong><span>
+        Identity is supplied by this deployment; there is no encrypted
+        credential version.
+      </span>
     </div>{:else}<form class="credential-form" onsubmit={rotate}>
-      <label
-        ><input
+      <label>
+        <input
           type="checkbox"
           bind:checked={useExternal}
           disabled={!canManage ||
             editingLocked ||
             refreshPending ||
             Boolean(busy)}
-        />Use an external credential version</label
-      >
+        />Use an external credential version
+      </label>
       {#if useExternal}<ExternalReferenceEditor
           bind:value={externalValue}
           disabled={!canManage ||
@@ -150,8 +152,9 @@
             refreshPending ||
             Boolean(busy)}
         />{:else}
-        <label class="sr-only" for="rotation-secret">New credential</label
-        ><input
+        <label class="sr-only" for="rotation-secret">
+          New credential
+        </label><input
           id="rotation-secret"
           type="password"
           autocomplete="new-password"
@@ -170,8 +173,9 @@
           !providerSpec ||
           editingLocked ||
           refreshPending}
-        >{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button
       >
+        {busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}
+      </button>
     </form>
     {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}{/if}
   {#if credentials.isError}<div class="inline-problem" role="alert">
@@ -179,8 +183,10 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => credentials.refetch()}>Retry</button
+        onclick={() => credentials.refetch()}
       >
+        Retry
+      </button>
     </div>{:else if credentials.isPending}<p
       class="inline-status"
       role="status"
@@ -190,26 +196,29 @@
       {#each credentials.data ?? [] as credential (credential.id)}{@const lapsed =
           credential.grant?.lapsed_at}
         <li>
-          <span
-            ><strong>Version {credential.version}</strong
-            >{#if credential.external_reference}<small
-                >{credential.external_reference.store} · pinned store version {credential
-                  .external_reference.version}</small
-              >{/if}<small>{formatDate(credential.created_at)}</small
-            >{#if credential.grant}<small
-                >Observed principal {credential.grant.principal}</small
-              >{/if}{#if lapsed}<small
-                >Grant lapsed {formatDate(lapsed)}: it can no longer be
-                refreshed, so it serves no more.</small
-              >{/if}</span
-          ><span
+          <span>
+            <strong>
+              Version {credential.version}
+            </strong>{#if credential.external_reference}<small>
+                {credential.external_reference.store} · pinned store version {credential
+                  .external_reference.version}
+              </small>{/if}<small>
+              {formatDate(credential.created_at)}
+            </small>{#if credential.grant}<small>
+                Observed principal {credential.grant.principal}
+              </small>{/if}{#if lapsed}<small>
+                Grant lapsed {formatDate(lapsed)}: it can no longer be
+                refreshed, so it serves no more.
+              </small>{/if}
+          </span><span
             class:success={credential.active && !lapsed}
             class:warning={credential.draft_selected &&
               !credential.active &&
               !lapsed}
             class:danger={Boolean(credential.revoked_at || lapsed)}
             class="badge"
-            >{credential.revoked_at
+          >
+            {credential.revoked_at
               ? 'revoked'
               : lapsed
                 ? 'grant lapsed'
@@ -219,16 +228,20 @@
                     ? 'runtime active'
                     : credential.draft_selected
                       ? 'pending activation'
-                      : 'retired'}</span
-          >{#if canManage && lapsed && credential.draft_selected && !credential.revoked_at}<a
+                      : 'retired'}
+          </span>{#if canManage && lapsed && credential.draft_selected && !credential.revoked_at}<a
               class="button button-primary"
-              href="#credential-pool-heading">Re-enroll grant</a
-            >{/if}{#if canManage && !credential.active && !credential.draft_selected && !credential.revoked_at}<button
+              href="#credential-pool-heading"
+            >
+              Re-enroll grant
+            </a>{/if}{#if canManage && !credential.active && !credential.draft_selected && !credential.revoked_at}<button
               class="button button-secondary"
               type="button"
               onclick={() => revoke(credential)}
-              disabled={Boolean(busy) || refreshPending}>Revoke</button
-            >{/if}
+              disabled={Boolean(busy) || refreshPending}
+            >
+              Revoke
+            </button>{/if}
         </li>{/each}
     </ul>{/if}
 </section>

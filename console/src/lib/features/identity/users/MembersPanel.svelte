@@ -199,41 +199,49 @@
       aria-label="Selected people"
     >
       <strong>{selected.length} selected</strong>
-      <label
-        ><span class="sr-only">Action for selected people</span><select
+      <label>
+        <span class="sr-only">Action for selected people</span><select
           bind:value={bulkAction}
           class="filter-control"
           disabled={write.busy}
-          ><option value="deactivate">Deactivate</option><option
-            value="reactivate">Reactivate</option
-          >{#each FIXED_ROLES as role (role)}<option value={`role:${role}`}
-              >Make {ROLE_DETAILS[role].label.toLowerCase()}</option
-            >{/each}</select
-        ></label
-      >
+        >
+          <option value="deactivate">Deactivate</option><option
+            value="reactivate"
+          >
+            Reactivate
+          </option>{#each FIXED_ROLES as role (role)}<option
+              value={`role:${role}`}
+            >
+              Make {ROLE_DETAILS[role].label.toLowerCase()}
+            </option>{/each}
+        </select>
+      </label>
       <button
         class="button button-primary"
         type="button"
         disabled={write.busy}
         onclick={applyBulk}
-        >{write.key === 'bulk' ? 'Applying…' : 'Apply'}</button
       >
+        {write.key === 'bulk' ? 'Applying…' : 'Apply'}
+      </button>
       <button
         class="button button-quiet"
         type="button"
         disabled={write.busy}
-        onclick={() => (selected = [])}>Clear</button
+        onclick={() => (selected = [])}
       >
+        Clear
+      </button>
     </div>
   {/if}
 
   {#if users.data}
     <ScrollTable label="Members">
       <table class="data-table">
-        <thead
-          ><tr
-            >{#if canManage}<th class="check"
-                ><input
+        <thead>
+          <tr>
+            {#if canManage}<th class="check">
+                <input
                   type="checkbox"
                   aria-label="Select everyone on this page"
                   disabled={write.busy}
@@ -263,31 +271,33 @@
         <tbody>
           {#each users.data.items as user (user.id)}
             <tr>
-              {#if canManage}<td class="check"
-                  ><input
+              {#if canManage}<td class="check">
+                  <input
                     type="checkbox"
                     aria-label={`Select ${user.display_name}`}
                     value={user.id}
                     bind:group={selected}
                     disabled={user.id === viewer?.id || write.busy}
-                  /></td
-                >{/if}
-              <td
-                ><strong>{user.display_name}</strong
-                >{#if user.id === viewer?.id}<span class="you">You</span
-                  >{/if}<br /><span class="muted">{user.email}</span></td
-              >
-              <td
-                >{ROLE_DETAILS[user.role].label}<br /><span class="muted"
-                  >{SCOPE_DETAILS[user.access_scope].label}</span
-                ></td
-              >
-              <td
-                ><StatusBadge
+                  />
+                </td>{/if}
+              <td>
+                <strong>
+                  {user.display_name}
+                </strong>{#if user.id === viewer?.id}<span class="you">
+                    You
+                  </span>{/if}<br /><span class="muted">{user.email}</span>
+              </td>
+              <td>
+                {ROLE_DETAILS[user.role].label}<br /><span class="muted">
+                  {SCOPE_DETAILS[user.access_scope].label}
+                </span>
+              </td>
+              <td>
+                <StatusBadge
                   label={user.active ? 'Active' : 'Deactivated'}
                   tone={user.active ? 'success' : 'danger'}
-                /></td
-              >
+                />
+              </td>
               <td>{formatDay(user.created_at)}</td>
               <td class="row-actions">
                 <Menu label={`Actions for ${user.display_name}`}>
@@ -295,20 +305,23 @@
                     {#if user.active}<button
                         type="button"
                         disabled={write.busy}
-                        onclick={() => (editing = user)}>Change access</button
-                      >{/if}
+                        onclick={() => (editing = user)}
+                      >
+                        Change access
+                      </button>{/if}
                     <button
                       type="button"
                       disabled={write.busy}
                       class:danger={user.active}
                       onclick={() => changeActive(user)}
-                      >{user.active ? 'Deactivate' : 'Reactivate'}</button
                     >
+                      {user.active ? 'Deactivate' : 'Reactivate'}
+                    </button>
                     <hr />
                   {/if}
-                  <a href={`${resolve('keys')}?created_by=${user.id}`}
-                    >API keys they created</a
-                  >
+                  <a href={`${resolve('keys')}?created_by=${user.id}`}>
+                    API keys they created
+                  </a>
                 </Menu>
               </td>
             </tr>

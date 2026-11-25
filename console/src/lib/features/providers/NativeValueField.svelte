@@ -73,15 +73,15 @@
 <div class="form-field native-field">
   <div class="field-heading">
     <label for={id}>{label}</label>
-    <span class="presence"
-      >{present
+    <span class="presence">
+      {present
         ? value === null
           ? 'Native null'
           : 'Configured'
         : required
           ? 'Required'
-          : 'Not configured'}</span
-    >
+          : 'Not configured'}
+    </span>
   </div>
   {#if choices.length}
     <select
@@ -94,11 +94,12 @@
       aria-describedby={`${id}-help`}
     >
       <option value="" disabled>Choose a value</option>
-      {#if source && !choices.includes(source)}<option value={source}
-          >{source}</option
-        >{/if}
-      {#each choices as choice (choice)}<option value={choice}>{choice}</option
-        >{/each}
+      {#if source && !choices.includes(source)}<option value={source}>
+          {source}
+        </option>{/if}
+      {#each choices as choice (choice)}<option value={choice}>
+          {choice}
+        </option>{/each}
     </select>
   {:else if multiline}
     <textarea
@@ -146,14 +147,18 @@
         class="button button-secondary"
         type="button"
         onclick={setNull}
-        {disabled}>Use native null</button
-      >{/if}
+        {disabled}
+      >
+        Use native null
+      </button>{/if}
     <button
       class="button button-secondary"
       type="button"
       onclick={remove}
-      disabled={disabled || !present}>Remove value</button
+      disabled={disabled || !present}
     >
+      Remove value
+    </button>
   </div>
 </div>
 

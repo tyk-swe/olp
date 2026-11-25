@@ -80,8 +80,10 @@
       onclick={() => {
         draft.set(path, undefined);
         onChange();
-      }}>Remove invalid setting</button
+      }}
     >
+      Remove invalid setting
+    </button>
   {/if}
   {#each entries as [key] (key)}
     <NativeValueField
@@ -102,12 +104,13 @@
     <div class="add-row">
       <div class="form-field">
         <label for={`${idPrefix}-name`}>{title} field</label>
-        {#if available}<select id={`${idPrefix}-name`} bind:value={name}
-            ><option value="">Choose a field</option
-            >{#each available as option (option)}<option value={option}
-                >{fields?.[option]?.title ?? option}</option
-              >{/each}</select
-          >
+        {#if available}<select id={`${idPrefix}-name`} bind:value={name}>
+            <option value="">
+              Choose a field
+            </option>{#each available as option (option)}<option value={option}>
+                {fields?.[option]?.title ?? option}
+              </option>{/each}
+          </select>
         {:else}<input
             id={`${idPrefix}-name`}
             bind:value={name}
@@ -118,8 +121,10 @@
         class="button button-secondary"
         type="button"
         onclick={add}
-        disabled={disabled || !valid}>Add {title.toLowerCase()} field</button
+        disabled={disabled || !valid}
       >
+        Add {title.toLowerCase()} field
+      </button>
     </div>
   {/if}
   {#if issue}<p class="inline-problem" role="alert">{issue}</p>{/if}

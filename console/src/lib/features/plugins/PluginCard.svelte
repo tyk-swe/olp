@@ -41,9 +41,9 @@
     </div>
     <div class="badges">
       {#if plugin.executable}<span class="badge danger">Unconfined</span>{/if}
-      <span class="badge" class:success={approved} class:warning={!approved}
-        >{status}</span
-      >
+      <span class="badge" class:success={approved} class:warning={!approved}>
+        {status}
+      </span>
     </div>
   </header>
   <dl class="facts">
@@ -51,11 +51,11 @@
       <dt>Digest</dt>
       <dd>
         <details>
-          <summary
-            ><code>{shortDigest(plugin.digest)}</code><span class="sr-only"
-              >Show the full digest</span
-            ></summary
-          >
+          <summary>
+            <code>{shortDigest(plugin.digest)}</code><span class="sr-only">
+              Show the full digest
+            </span>
+          </summary>
           <code class="digest">{plugin.digest}</code>
         </details>
       </dd>
@@ -77,18 +77,18 @@
     <div>
       <dt>{plugin.executable ? 'Permitted' : 'Installed'}</dt>
       <dd>
-        {formatDate(plugin.installed_at)}<br /><small
-          >by {plugin.installed_by_email}</small
-        >
+        {formatDate(plugin.installed_at)}<br /><small>
+          by {plugin.installed_by_email}
+        </small>
       </dd>
     </div>
     {#if approved && !plugin.executable}
       <div>
         <dt>Approved</dt>
         <dd>
-          {formatDate(plugin.approved_at)}<br /><small
-            >by {plugin.approved_by_email}</small
-          >
+          {formatDate(plugin.approved_at)}<br /><small>
+            by {plugin.approved_by_email}
+          </small>
         </dd>
       </div>
     {/if}
@@ -98,25 +98,26 @@
       <h3 id={`${headingId}-profiles`}>Profiles</h3>
       <ScrollTable label="Plugin profiles">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th>Profile</th><th>Label</th><th>Dialect</th><th
-                >Authentication</th
-              ><th>Address</th></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th>Profile</th><th>Label</th><th>Dialect</th><th>
+                Authentication
+              </th><th>Address</th>
+            </tr>
+          </thead>
           <tbody>
             {#each plugin.manifest.profiles as profile (profile.id)}
-              <tr
-                ><td><code>{profile.id}</code></td><td>{profile.label}</td><td
-                  ><code>{profile.dialect}</code></td
-                ><td
-                  >{profile.grant
+              <tr>
+                <td><code>{profile.id}</code></td><td>{profile.label}</td><td>
+                  <code>{profile.dialect}</code>
+                </td><td>
+                  {profile.grant
                     ? 'Grant, enrolled by the plugin'
-                    : 'Static credential'}</td
-                ><td><code class="address">{profile.hosting.address}</code></td
-                ></tr
-              >
+                    : 'Static credential'}
+                </td><td>
+                  <code class="address">{profile.hosting.address}</code>
+                </td>
+              </tr>
             {/each}
           </tbody>
         </table>
@@ -159,14 +160,17 @@
             type="button"
             disabled={Boolean(actionKey)}
             onclick={() => approve(plugin)}
-            >{actionKey === `approve-${plugin.digest}`
+          >
+            {actionKey === `approve-${plugin.digest}`
               ? 'Approving…'
-              : 'Approve origins'}</button
-          ><button
+              : 'Approve origins'}
+          </button><button
             class="button button-secondary"
             type="button"
-            onclick={() => (reviewing = '')}>Cancel</button
+            onclick={() => (reviewing = '')}
           >
+            Cancel
+          </button>
         </div>
       </section>
     {/if}
@@ -175,17 +179,20 @@
           class="button button-primary"
           type="button"
           disabled={Boolean(actionKey)}
-          onclick={() => (reviewing = plugin.digest)}>Review and approve</button
-        >{/if}
+          onclick={() => (reviewing = plugin.digest)}
+        >
+          Review and approve
+        </button>{/if}
       <button
         class="button button-secondary button-danger"
         type="button"
         disabled={Boolean(actionKey)}
         onclick={() => uninstall(plugin)}
-        >{actionKey === `uninstall-${plugin.digest}`
-          ? 'Uninstalling…'
-          : 'Uninstall'}</button
       >
+        {actionKey === `uninstall-${plugin.digest}`
+          ? 'Uninstalling…'
+          : 'Uninstall'}
+      </button>
     </div>
   {/if}
 </article>

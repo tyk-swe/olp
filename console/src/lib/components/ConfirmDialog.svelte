@@ -25,8 +25,10 @@
         class="button button-secondary"
         type="button"
         data-autofocus
-        onclick={close}>Cancel</button
+        onclick={close}
       >
+        Cancel
+      </button>
       <button
         class="button"
         class:button-primary={!danger}
@@ -35,8 +37,10 @@
         onclick={() => {
           confirmed = true;
           close();
-        }}>{confirmLabel}</button
+        }}
       >
+        {confirmLabel}
+      </button>
     </div>
   {/snippet}
 </Dialog>

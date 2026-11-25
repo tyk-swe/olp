@@ -192,8 +192,8 @@
       name to multiple models to create a route with multiple provider targets.
     </p>
     <div class="choices">
-      {#each models as entry (entry.model.id)}<label
-          ><input
+      {#each models as entry (entry.model.id)}<label>
+          <input
             type="checkbox"
             checked={chosen.some(
               (item) => item.entry.model.id === entry.model.id
@@ -203,8 +203,8 @@
               !entry.model.enabled ||
               !entry.available}
             onchange={(event) => choose(entry, event.currentTarget.checked)}
-          />{entry.provider_name} · {entry.model.display_name}<small
-            >{entry.available ? 'Published' : 'Activate connection first'} · Context:
+          />{entry.provider_name} · {entry.model.display_name}<small>
+            {entry.available ? 'Published' : 'Activate connection first'} · Context:
             {entry.metadata?.context_length ?? 'Unknown'} · Region: {entry
               .metadata?.region ?? 'Unknown'} · Output limit: {entry.metadata
               ?.max_output_tokens ?? 'Unknown'} · Quantization: {entry.metadata
@@ -213,22 +213,21 @@
               ? 'Unknown'
               : entry.metadata.zero_data_retention
                 ? 'Yes'
-                : 'No'}</small
-          ></label
-        >{/each}
+                : 'No'}
+          </small>
+        </label>{/each}
     </div>
     {#if chosen.length}<form onsubmit={create}>
-        {#each chosen as item (item.entry.model.id)}<label class="route-name"
-            >{item.entry.provider_name} · {item.entry.model
-              .upstream_model}<input
+        {#each chosen as item (item.entry.model.id)}<label class="route-name">
+            {item.entry.provider_name} · {item.entry.model.upstream_model}<input
               bind:value={item.slug}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
               maxlength="63"
               required
               aria-label="Route name for {item.entry.provider_name} {item.entry
                 .model.upstream_model}"
-            /></label
-          >{/each}
+            />
+          </label>{/each}
         <div class="form-field">
           <label for="bulk-route-fidelity">Route fidelity</label>
           <select
@@ -238,18 +237,20 @@
             aria-describedby="bulk-route-fidelity-help"
           >
             {#each fidelityOptions as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}
+                value={option.value}
+              >
+                {option.label}
+              </option>{/each}
           </select>
-          <small id="bulk-route-fidelity-help"
-            >Applies to every draft created here. Strict targets require
+          <small id="bulk-route-fidelity-help">
+            Applies to every draft created here. Strict targets require
             versioned provider profiles; declare the routes transformed to use
-            Automatic providers or translate between dialects.</small
-          >
+            Automatic providers or translate between dialects.
+          </small>
         </div>
-        <button class="button button-primary" disabled={busy}
-          >{busy ? 'Creating…' : 'Create reviewed route drafts'}</button
-        >
+        <button class="button button-primary" disabled={busy}>
+          {busy ? 'Creating…' : 'Create reviewed route drafts'}
+        </button>
       </form>{/if}
     {#if busy}<button
         class="button button-secondary"
@@ -257,8 +258,10 @@
         disabled={cancelled}
         onclick={() => {
           cancelled = true;
-        }}>{cancelled ? 'Stopping…' : 'Stop after current route'}</button
-      >{/if}
+        }}
+      >
+        {cancelled ? 'Stopping…' : 'Stop after current route'}
+      </button>{/if}
     {#if errors.length}<ul class="inline-problem" role="alert">
         {#each errors as error (error)}<li>{error}</li>{/each}
       </ul>{/if}
@@ -277,8 +280,10 @@
         class="button button-primary"
         type="button"
         disabled={busy || published.length === created.length}
-        onclick={publish}>Validate and publish reviewed routes</button
-      >{/if}
+        onclick={publish}
+      >
+        Validate and publish reviewed routes
+      </button>{/if}
   </details>
 {/if}
 

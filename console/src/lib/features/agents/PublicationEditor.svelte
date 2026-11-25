@@ -77,10 +77,10 @@
     }}
   >
     <fieldset disabled={busy || !canManage}>
-      <label class="form-field"
-        >Name <input bind:value={form.name} maxlength="100" required /></label
-      ><label class="form-field"
-        >Project <select
+      <label class="form-field">
+        Name <input bind:value={form.name} maxlength="100" required />
+      </label><label class="form-field">
+        Project <select
           aria-label="Project"
           bind:value={form.project}
           disabled={!!current}
@@ -123,9 +123,9 @@
           bind:removeCredential
           bind:entraClientSecret
         />
-      {/if}<button class="button button-primary" type="submit"
-        >Save draft</button
-      >
+      {/if}<button class="button button-primary" type="submit">
+        Save draft
+      </button>
     </fieldset>
   </form>
   {#if current}<p>
@@ -140,16 +140,20 @@
         !!credential ||
         !!entraClientSecret ||
         removeCredential}
-      onclick={() => onWrite('publish')}>Publish saved draft</button
-    >{#if unsaved}<p>Save edits before publishing.</p>{/if}
-    <label class="form-field"
-      >Revision UUID <input bind:value={revisionID} disabled={busy} /></label
-    ><button
+      onclick={() => onWrite('publish')}
+    >
+      Publish saved draft
+    </button>{#if unsaved}<p>Save edits before publishing.</p>{/if}
+    <label class="form-field">
+      Revision UUID <input bind:value={revisionID} disabled={busy} />
+    </label><button
       class="button button-secondary"
       type="button"
       disabled={busy || !revisionID}
-      onclick={onInspect}>Inspect immutable revision</button
+      onclick={onInspect}
     >
+      Inspect immutable revision
+    </button>
     {#if inspected}<p>
         Digest: <code>{inspected.digest}</code>; labels: {inspected.labels.join(
           ', '
@@ -164,31 +168,39 @@
         class="button button-secondary"
         type="button"
         disabled={busy || !canManage || !revisionID || unsaved}
-        onclick={() => onWrite('staging')}>Set staging</button
-      ><button
+        onclick={() => onWrite('staging')}
+      >
+        Set staging
+      </button><button
         class="button button-secondary"
         type="button"
         disabled={busy || !canManage || !revisionID || unsaved}
-        onclick={() => onWrite('production')}>Set production</button
-      >{/if}
-    <label class="check-field"
-      ><input
+        onclick={() => onWrite('production')}
+      >
+        Set production
+      </button>{/if}
+    <label class="check-field">
+      <input
         type="checkbox"
         bind:checked={confirmRetire}
         disabled={busy || !canManage}
-      /> Retire and revoke this publication</label
-    ><button
+      /> Retire and revoke this publication
+    </label><button
       class="button button-secondary"
       type="button"
       disabled={busy || !canManage || !confirmRetire}
-      onclick={() => onWrite('retire')}>Confirm retirement</button
+      onclick={() => onWrite('retire')}
     >
+      Confirm retirement
+    </button>
   {/if}<button
     class="button button-secondary"
     type="button"
     disabled={busy}
-    onclick={onAbandon}>Close</button
+    onclick={onAbandon}
   >
+    Close
+  </button>
 </section>
 
 <style>

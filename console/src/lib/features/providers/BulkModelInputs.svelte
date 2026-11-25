@@ -21,23 +21,27 @@
     id="bulk-operation"
     bind:value={operation}
     disabled={busy || !canManage}
-    ><option value="configured">Keep configured capabilities</option><option
-      value="generation">Generation (unary and streaming)</option
-    ><option value="embeddings">Embeddings</option><option value="token_count"
-      >Token count</option
-    ></select
   >
+    <option value="configured">Keep configured capabilities</option><option
+      value="generation"
+    >
+      Generation (unary and streaming)
+    </option><option value="embeddings">Embeddings</option><option
+      value="token_count"
+    >
+      Token count
+    </option>
+  </select>
 </div>
 <div class="model-list">
-  {#each items as model (model.id)}<label
-      ><input
+  {#each items as model (model.id)}<label>
+      <input
         type="checkbox"
         value={model.id}
         bind:group={selected}
         disabled={!canManage || busy}
-      /><span>{model.display_name}<small>{model.upstream_model}</small></span
-      ></label
-    >{/each}
+      /><span>{model.display_name}<small>{model.upstream_model}</small></span>
+    </label>{/each}
 </div>
 
 <style>

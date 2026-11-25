@@ -190,14 +190,18 @@
       <div class="page-actions">
         <a
           class="button button-secondary"
-          href={resolve(`media-jobs${page.url.search}`)}>All media jobs</a
+          href={resolve(`media-jobs${page.url.search}`)}
         >
+          All media jobs
+        </a>
         <button
           class="button button-secondary"
           type="button"
           onclick={() => detail.refetch()}
-          disabled={detail.isFetching}>Refresh</button
+          disabled={detail.isFetching}
         >
+          Refresh
+        </button>
       </div>
     {/snippet}
   </PageHeader>
@@ -206,9 +210,13 @@
     </div>
   {:else if detail.isError}<div class="inline-problem" role="alert">
       {errorMessage(detail.error, 'The media job could not be loaded.')}
-      <button class="text-button" type="button" onclick={() => detail.refetch()}
-        >Retry</button
+      <button
+        class="text-button"
+        type="button"
+        onclick={() => detail.refetch()}
       >
+        Retry
+      </button>
     </div>
   {:else if detail.data}
     <MediaJobDetail
@@ -232,8 +240,10 @@
         class="button button-secondary"
         type="button"
         onclick={() => jobs.refetch()}
-        disabled={jobs.isFetching || Boolean(urlProblem)}>Refresh</button
+        disabled={jobs.isFetching || Boolean(urlProblem)}
       >
+        Refresh
+      </button>
     {/snippet}
   </PageHeader>
   <MediaJobList

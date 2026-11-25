@@ -87,9 +87,9 @@
       </ul>
     {/if}
     {#each requiredSecrets as ref (ref)}
-      <label for={`secret-${ref}`}
-        >Credential <span class="mono">{ref}</span></label
-      >
+      <label for={`secret-${ref}`}>
+        Credential <span class="mono">{ref}</span>
+      </label>
       <input
         id={`secret-${ref}`}
         type="password"

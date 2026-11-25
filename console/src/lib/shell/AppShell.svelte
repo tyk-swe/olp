@@ -62,23 +62,29 @@
         type="button"
         aria-label="Open navigation"
         aria-haspopup="dialog"
-        onclick={() => drawer?.showModal()}><NavIcon name="menu" /></button
+        onclick={() => drawer?.showModal()}
       >
-      <span class="mobile-brand" aria-hidden="true"
-        ><InstallationMark size={20} /></span
-      >
+        <NavIcon name="menu" />
+      </button>
+      <span class="mobile-brand" aria-hidden="true">
+        <InstallationMark size={20} />
+      </span>
       {#if crumbs.length}
         <nav class="crumbs" aria-label="Breadcrumb">
           <ol>
             {#each crumbs as crumb, index (index)}
               <li>
                 {#if crumb.href && index < crumbs.length - 1}<a
-                    href={crumb.href}>{crumb.label}</a
-                  >{:else}<span
+                    href={crumb.href}
+                  >
+                    {crumb.label}
+                  </a>{:else}<span
                     aria-current={index === crumbs.length - 1
                       ? 'page'
-                      : undefined}>{crumb.label}</span
-                  >{/if}
+                      : undefined}
+                  >
+                    {crumb.label}
+                  </span>{/if}
               </li>
             {/each}
           </ol>
@@ -88,8 +94,10 @@
         class="icon-button search-button"
         type="button"
         aria-label="Search the console"
-        onclick={openSearch}><NavIcon name="search" /></button
+        onclick={openSearch}
       >
+        <NavIcon name="search" />
+      </button>
     </header>
 
     <main id="main-content" tabindex="-1">
@@ -102,8 +110,10 @@
           <button
             class="button button-secondary"
             type="button"
-            onclick={onSignOut}>Try again</button
+            onclick={onSignOut}
           >
+            Try again
+          </button>
         </div>
       {/if}
       {@render children()}
@@ -123,8 +133,10 @@
     class="icon-button close"
     type="button"
     aria-label="Close navigation"
-    onclick={() => drawer?.close()}><NavIcon name="close" /></button
+    onclick={() => drawer?.close()}
   >
+    <NavIcon name="close" />
+  </button>
   {@render sidebar(() => drawer?.close())}
 </dialog>
 

@@ -21,15 +21,19 @@
     class="button button-secondary"
     type="button"
     onclick={onPrevious}
-    disabled={!hasPrevious}>Previous</button
+    disabled={!hasPrevious}
   >
+    Previous
+  </button>
   <span aria-live="polite" aria-atomic="true">Page {page}</span>
   <button
     class="button button-secondary"
     type="button"
     onclick={onNext}
-    disabled={!hasNext}>Next</button
+    disabled={!hasNext}
   >
+    Next
+  </button>
 </nav>
 
 <style>

@@ -78,8 +78,10 @@
       Boolean(busy) ||
       Boolean(pendingRefresh) ||
       !canSave ||
-      editingLocked}>Save draft</button
+      editingLocked}
   >
+    Save draft
+  </button>
   {#if canManage && hasDraft}
     <button
       class="button button-secondary"
@@ -91,10 +93,11 @@
         dirty ||
         !canSave ||
         !capabilitiesCertified(current)}
-      >{busy === 'detail-probe'
-        ? 'Testing completed draft…'
-        : 'Test completed draft'}</button
     >
+      {busy === 'detail-probe'
+        ? 'Testing completed draft…'
+        : 'Test completed draft'}
+    </button>
     <button
       class="button button-primary"
       type="button"
@@ -104,8 +107,10 @@
         Boolean(pendingRefresh) ||
         dirty ||
         !canSave ||
-        !activationReady(current)}>Activate changes</button
+        !activationReady(current)}
     >
+      Activate changes
+    </button>
   {/if}
   {#if canManage && editingLocked}
     <button
@@ -113,18 +118,20 @@
       type="button"
       onclick={editor.restoreDraft}
       disabled={Boolean(busy) || Boolean(pendingRefresh)}
-      >{busy === 'detail-restore-draft'
-        ? 'Restoring provider…'
-        : 'Restore provider as draft'}</button
     >
+      {busy === 'detail-restore-draft'
+        ? 'Restoring provider…'
+        : 'Restore provider as draft'}
+    </button>
   {:else if canManage && current.active_revision != null}
     <button
       class="button button-secondary button-danger"
       type="button"
       onclick={disable}
       disabled={Boolean(busy) || Boolean(pendingRefresh)}
-      >{busy === 'detail-disable' ? 'Disabling…' : 'Disable provider'}</button
     >
+      {busy === 'detail-disable' ? 'Disabling…' : 'Disable provider'}
+    </button>
   {/if}
 </div>
 {#if pendingRefresh}<p class="inline-problem" role="status">
@@ -134,8 +141,10 @@
       class="button button-secondary"
       type="button"
       disabled={Boolean(busy)}
-      onclick={editor.retryRefresh}>Retry refresh</button
+      onclick={editor.retryRefresh}
     >
+      Retry refresh
+    </button>
   </p>{/if}
 {#if editorView.referenceConflict}<p class="inline-problem" role="alert">
     {editorView.referenceConflict} Retarget every route that still uses this provider's

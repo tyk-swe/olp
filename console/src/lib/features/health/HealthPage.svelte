@@ -105,8 +105,10 @@
       class="button button-secondary"
       type="button"
       onclick={refresh}
-      disabled={fetching}>Refresh</button
+      disabled={fetching}
     >
+      Refresh
+    </button>
   {/snippet}
 </PageHeader>
 <p class="refresh-note" aria-live="polite">
@@ -120,9 +122,9 @@
     <strong>Control health is unavailable.</strong>
     {errorMessage(readiness.error, 'The control API did not respond.')} The gateway
     may still be serving its last-known-good runtime.
-    <button class="text-button" onclick={() => readiness.refetch()}
-      >Try again</button
-    >
+    <button class="text-button" onclick={() => readiness.refetch()}>
+      Try again
+    </button>
   </div>
 {:else if !readiness.data}
   <div class="loading-state" role="status">Checking the installation…</div>
@@ -154,9 +156,9 @@
           generations.error,
           'Runtime generations are unavailable.'
         )}
-        <button class="text-button" onclick={() => generations.refetch()}
-          >Try again</button
-        >
+        <button class="text-button" onclick={() => generations.refetch()}>
+          Try again
+        </button>
       </div>
     {:else if !generations.data}
       <div class="loading-state" role="status">
@@ -165,28 +167,35 @@
     {:else}
       <ScrollTable label="Runtime generation history">
         <table class="data-table">
-          <caption class="sr-only"
-            >Recently published immutable runtime generations</caption
-          ><thead
-            ><tr
-              ><th scope="col">Generation</th><th scope="col">Digest</th><th
-                scope="col">Activated by</th
-              ><th scope="col">Created</th><th scope="col">Gateway state</th
-              ></tr
-            ></thead
-          ><tbody
-            >{#each generations.data.items as generation (generation.id)}<tr
-                ><td><strong>#{generation.sequence}</strong></td><td
-                  class="mono">{generation.sha256.slice(0, 16)}…</td
-                ><td>{generation.created_by_email}</td><td
-                  >{formatDate(generation.created_at)}</td
-                ><td
-                  >{#if generation.sequence === readiness.data.generation}<span
-                      class="badge success">Loaded</span
-                    >{:else}<span class="badge">Historical</span>{/if}</td
-                ></tr
-              >{/each}</tbody
-          >
+          <caption class="sr-only">
+            Recently published immutable runtime generations
+          </caption><thead>
+            <tr>
+              <th scope="col">Generation</th><th scope="col">Digest</th><th
+                scope="col"
+              >
+                Activated by
+              </th><th scope="col">Created</th><th scope="col">
+                Gateway state
+              </th>
+            </tr>
+          </thead><tbody>
+            {#each generations.data.items as generation (generation.id)}<tr>
+                <td><strong>#{generation.sequence}</strong></td><td
+                  class="mono"
+                >
+                  {generation.sha256.slice(0, 16)}…
+                </td><td>{generation.created_by_email}</td><td>
+                  {formatDate(generation.created_at)}
+                </td><td>
+                  {#if generation.sequence === readiness.data.generation}<span
+                      class="badge success"
+                    >
+                      Loaded
+                    </span>{:else}<span class="badge">Historical</span>{/if}
+                </td>
+              </tr>{/each}
+          </tbody>
         </table>
       </ScrollTable>
       <CursorPagination

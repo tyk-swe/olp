@@ -75,8 +75,10 @@
   {#snippet actions()}
     {#if canManage}<a
         class="button button-primary"
-        href={resolve('providers/new')}>Add provider <NavIcon name="arrow" /></a
+        href={resolve('providers/new')}
       >
+        Add provider <NavIcon name="arrow" />
+      </a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -87,8 +89,8 @@
 {/if}
 
 <div class="toolbar" role="search">
-  <label class="search"
-    ><span class="sr-only">Search connections</span><input
+  <label class="search">
+    <span class="sr-only">Search connections</span><input
       id="provider-search"
       class="filter-control"
       type="search"
@@ -98,8 +100,8 @@
         else search.schedule();
       }}
       placeholder="Name or vendor"
-    /></label
-  >
+    />
+  </label>
 </div>
 
 {#if canManage}
@@ -120,8 +122,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => providers.refetch()}>Retry</button
+      onclick={() => providers.refetch()}
     >
+      Retry
+    </button>
   </div>
 {:else if providers.data?.items.length === 0 && listState.history.length === 0}
   <section class="card empty-state">
@@ -130,8 +134,10 @@
       <p>Connect an upstream and test it before building a route.</p>
       {#if canManage}<a
           class="button button-primary"
-          href={resolve('providers/new')}>Connect provider</a
+          href={resolve('providers/new')}
         >
+          Connect provider
+        </a>
       {/if}
     </div>
   </section>
@@ -148,23 +154,24 @@
     aria-busy={providers.isPlaceholderData}
   >
     <table class="data-table">
-      <thead
-        ><tr
-          ><th><span class="sr-only">Select</span></th><th>Name</th><th
-            >Vendor / connector</th
-          ><th>Status</th><th>Models</th><th>Last probe</th><th
-            ><span class="sr-only">Actions</span></th
-          ></tr
-        ></thead
-      ><tbody
-        >{#each groups as [vendor, connections] (vendor)}<tr
+      <thead>
+        <tr>
+          <th><span class="sr-only">Select</span></th><th>Name</th><th>
+            Vendor / connector
+          </th><th>Status</th><th>Models</th><th>Last probe</th><th>
+            <span class="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead><tbody>
+        {#each groups as [vendor, connections] (vendor)}<tr
             class="vendor-group"
-            ><th colspan="7" scope="rowgroup"
-              >{vendor} · {connections.length} connections on this page</th
-            ></tr
-          >{#each connections as item (item.id)}<tr
-              ><td
-                >{#if canManage}<input
+          >
+            <th colspan="7" scope="rowgroup">
+              {vendor} · {connections.length} connections on this page
+            </th>
+          </tr>{#each connections as item (item.id)}<tr>
+              <td>
+                {#if canManage}<input
                     type="checkbox"
                     aria-label="Select {item.name}"
                     checked={selectedSet.has(item.id)}
@@ -178,9 +185,9 @@
                 {/if}
               </td>
               <td>
-                <a class="table-link" href={resolve(`providers/${item.id}`)}
-                  >{item.name}</a
-                >
+                <a class="table-link" href={resolve(`providers/${item.id}`)}>
+                  {item.name}
+                </a>
                 <br />
                 <small>{item.project_name ?? 'Installation-wide'}</small>
               </td>
@@ -188,23 +195,24 @@
                 {item.vendor_id ?? 'Custom'}
                 <small class="connector-name">{stateLabel(item.kind)}</small>
               </td>
-              <td
-                ><span class="badge {providerStatusTone(item)}"
-                  >{providerStatus(item)}</span
-                ></td
-              >
+              <td>
+                <span class="badge {providerStatusTone(item)}">
+                  {providerStatus(item)}
+                </span>
+              </td>
               <td>{item.enabled_model_count} enabled</td>
-              <td
-                >{item.last_probe_at
+              <td>
+                {item.last_probe_at
                   ? formatDate(item.last_probe_at)
-                  : 'Not tested'}</td
-              >
+                  : 'Not tested'}
+              </td>
               <td>
                 <a
                   class="button button-secondary"
                   href={resolve(`providers/${item.id}`)}
-                  >{canManage ? 'Manage' : 'View'}</a
                 >
+                  {canManage ? 'Manage' : 'View'}
+                </a>
               </td>
             </tr>
           {/each}

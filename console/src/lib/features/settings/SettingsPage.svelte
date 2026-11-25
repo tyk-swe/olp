@@ -176,10 +176,10 @@
 {#if view === 'general'}<BrandingPanel />{/if}
 
 {#if view === 'security' && services.managementNetworkRestricted}
-  <Callout tone="info"
-    >This console only accepts connections from networks set in the deployment
-    configuration. Change that list in the deployment, not here.</Callout
-  >
+  <Callout tone="info">
+    This console only accepts connections from networks set in the deployment
+    configuration. Change that list in the deployment, not here.
+  </Callout>
 {/if}
 
 {#if conflictKey}
@@ -188,8 +188,10 @@
     {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        onclick={reloadConflict}>Reload</button
-      >{/snippet}
+        onclick={reloadConflict}
+      >
+        Reload
+      </button>{/snippet}
   </Callout>
 {/if}
 {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
@@ -202,8 +204,10 @@
     {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        onclick={() => settings.refetch()}>Try again</button
-      >{/snippet}
+        onclick={() => settings.refetch()}
+      >
+        Try again
+      </button>{/snippet}
   </Callout>
 {:else if shown.length === 0}
   <EmptyState title="No settings here yet" />
@@ -230,9 +234,9 @@
               {/each}
             </ul>
           {/if}
-          <small
-            >Last changed {formatDate(setting.updated_at)} by {setting.updated_by}</small
-          >
+          <small>
+            Last changed {formatDate(setting.updated_at)} by {setting.updated_by}
+          </small>
         </div>
         <div class="control">
           {#if SIGN_IN_KEYS.includes(setting.key)}
@@ -288,22 +292,25 @@
               oninput={(event) => edit(setting, event.currentTarget.value)}
             />
           {/if}
-          {#if fieldError}<small class="field-error" role="alert"
-              >{fieldError}</small
-            >{/if}
+          {#if fieldError}<small class="field-error" role="alert">
+              {fieldError}
+            </small>{/if}
           {#if dirty}
             <div class="actions">
               <button
                 class="button button-secondary"
                 type="button"
-                onclick={() => discard(setting.key)}>Cancel</button
+                onclick={() => discard(setting.key)}
               >
+                Cancel
+              </button>
               <button
                 class="button button-primary"
                 type="submit"
                 disabled={Boolean(savingKey)}
-                >{savingKey === setting.key ? 'Saving…' : 'Save'}</button
               >
+                {savingKey === setting.key ? 'Saving…' : 'Save'}
+              </button>
             </div>
           {/if}
         </div>

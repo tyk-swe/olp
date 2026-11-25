@@ -82,9 +82,9 @@
             : 'This does not trigger any notification rules.'}
         </p>
         <div class="test-actions">
-          <button class="button" type="button" data-autofocus onclick={close}
-            >Cancel</button
-          >
+          <button class="button" type="button" data-autofocus onclick={close}>
+            Cancel
+          </button>
           <button class="button button-primary" type="button" onclick={confirm}>
             Send test
           </button>
@@ -117,22 +117,28 @@
             class="button"
             type="button"
             disabled={action.busy}
-            onclick={refresh}>Refresh status</button
+            onclick={refresh}
           >
+            Refresh status
+          </button>
           {#if result?.status === 'missing' || (!result && !action.busy)}
             <button
               class="button"
               type="button"
               disabled={action.busy}
-              onclick={() => send(actionId)}>Retry same test</button
+              onclick={() => send(actionId)}
             >
+              Retry same test
+            </button>
           {:else if result && result.status !== 'pending'}
             <button
               class="button"
               type="button"
               disabled={action.busy}
-              onclick={() => (confirming = true)}>Start a new test</button
+              onclick={() => (confirming = true)}
             >
+              Start a new test
+            </button>
           {/if}
         </div>
       {/if}

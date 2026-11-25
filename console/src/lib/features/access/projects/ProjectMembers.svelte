@@ -134,46 +134,50 @@
     {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        onclick={() => members.refetch()}>Try again</button
-      >{/snippet}
+        onclick={() => members.refetch()}
+      >
+        Try again
+      </button>{/snippet}
   </Callout>
 {:else}
   <ScrollTable label="Project members">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th>Name</th><th>Email</th><th>Role</th><th
-            ><span class="sr-only">Actions</span></th
-          ></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th>Name</th><th>Email</th><th>Role</th><th>
+            <span class="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead>
       <tbody>
         {#each members.data.items as member (member.user_id)}
           <tr>
             <td>{member.display_name}</td>
             <td>{member.email}</td>
-            <td
-              ><select
+            <td>
+              <select
                 aria-label="Role for {member.email}"
                 value={member.project_role}
                 disabled={action.busy}
                 onchange={(event) => changeRole(member, event.currentTarget)}
-                ><option value="manager">Manager</option><option value="viewer"
-                  >Viewer</option
-                ></select
-              ></td
-            >
-            <td class="row-actions"
-              ><button
+              >
+                <option value="manager">Manager</option><option value="viewer">
+                  Viewer
+                </option>
+              </select>
+            </td>
+            <td class="row-actions">
+              <button
                 class="text-button danger"
                 type="button"
                 disabled={action.busy}
                 onclick={() => remove(member)}
-                >{action.key === `remove:${member.user_id}`
+              >
+                {action.key === `remove:${member.user_id}`
                   ? 'Removing…'
-                  : 'Remove'}</button
-              ></td
-            >
+                  : 'Remove'}
+              </button>
+            </td>
           </tr>
         {:else}
           <tr><td colspan="4" class="empty">No members yet</td></tr>
@@ -194,32 +198,34 @@
       bind:value={addUserId}
       disabled={action.busy || !allMembers.data}
       required
-      ><option value="" disabled
-        >{candidates.length
-          ? 'Choose someone'
-          : 'Everyone is already a member'}</option
-      >{#each candidates as candidate (candidate.id)}<option
-          value={candidate.id}
-          >{candidate.display_name || candidate.email}</option
-        >{/each}</select
     >
+      <option value="" disabled>
+        {candidates.length ? 'Choose someone' : 'Everyone is already a member'}
+      </option>{#each candidates as candidate (candidate.id)}<option
+          value={candidate.id}
+        >
+          {candidate.display_name || candidate.email}
+        </option>{/each}
+    </select>
   </div>
   <div class="form-field">
     <label for="member-role">Role</label><select
       id="member-role"
       bind:value={addRole}
       disabled={action.busy}
-      ><option value="viewer">Viewer</option><option value="manager"
-        >Manager</option
-      ></select
     >
+      <option value="viewer">Viewer</option><option value="manager">
+        Manager
+      </option>
+    </select>
   </div>
   <button
     class="button button-secondary"
     type="submit"
     disabled={action.busy || !addUserId}
-    >{action.key === 'add' ? 'Adding…' : 'Add member'}</button
   >
+    {action.key === 'add' ? 'Adding…' : 'Add member'}
+  </button>
 </form>
 
 <style>

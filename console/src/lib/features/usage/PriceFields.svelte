@@ -94,8 +94,9 @@
   />
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cached-input-price`}>Cached input / million</label
-  ><input
+  <label for={`${idPrefix}-cached-input-price`}>
+    Cached input / million
+  </label><input
     id={`${idPrefix}-cached-input-price`}
     bind:value={cachedInputPrice}
     inputmode="decimal"
@@ -104,8 +105,9 @@
   /><small>Leave empty to bill cached tokens at the full input rate.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cache-write-price`}>Cache write / million</label
-  ><input
+  <label for={`${idPrefix}-cache-write-price`}>
+    Cache write / million
+  </label><input
     id={`${idPrefix}-cache-write-price`}
     bind:value={cacheWritePrice}
     inputmode="decimal"
@@ -114,9 +116,9 @@
   /><small>Leave empty to bill cache writes at the full input rate.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cache-write-5m-price`}
-    >Cache write 5m / million</label
-  ><input
+  <label for={`${idPrefix}-cache-write-5m-price`}>
+    Cache write 5m / million
+  </label><input
     id={`${idPrefix}-cache-write-5m-price`}
     bind:value={cacheWrite5mPrice}
     inputmode="decimal"
@@ -125,9 +127,9 @@
   /><small>Defaults to the cache write rate, then input.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cache-write-1h-price`}
-    >Cache write 1h / million</label
-  ><input
+  <label for={`${idPrefix}-cache-write-1h-price`}>
+    Cache write 1h / million
+  </label><input
     id={`${idPrefix}-cache-write-1h-price`}
     bind:value={cacheWrite1hPrice}
     inputmode="decimal"
@@ -154,8 +156,9 @@
   />
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-audio-input-price`}>Audio input / million</label
-  ><input
+  <label for={`${idPrefix}-audio-input-price`}>
+    Audio input / million
+  </label><input
     id={`${idPrefix}-audio-input-price`}
     bind:value={audioInputPrice}
     inputmode="decimal"
@@ -164,9 +167,9 @@
   />
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cached-audio-input-price`}
-    >Cached audio input / million</label
-  ><input
+  <label for={`${idPrefix}-cached-audio-input-price`}>
+    Cached audio input / million
+  </label><input
     id={`${idPrefix}-cached-audio-input-price`}
     bind:value={cachedAudioInputPrice}
     inputmode="decimal"
@@ -175,8 +178,9 @@
   /><small>Defaults to cached input, then input.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-audio-output-price`}>Audio output / million</label
-  ><input
+  <label for={`${idPrefix}-audio-output-price`}>
+    Audio output / million
+  </label><input
     id={`${idPrefix}-audio-output-price`}
     bind:value={audioOutputPrice}
     inputmode="decimal"
@@ -185,8 +189,9 @@
   /><small>Defaults to the output rate.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-image-input-price`}>Image input / million</label
-  ><input
+  <label for={`${idPrefix}-image-input-price`}>
+    Image input / million
+  </label><input
     id={`${idPrefix}-image-input-price`}
     bind:value={imageInputPrice}
     inputmode="decimal"
@@ -195,9 +200,9 @@
   /><small>Defaults to the input rate.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cached-image-input-price`}
-    >Cached image input / million</label
-  ><input
+  <label for={`${idPrefix}-cached-image-input-price`}>
+    Cached image input / million
+  </label><input
     id={`${idPrefix}-cached-image-input-price`}
     bind:value={cachedImageInputPrice}
     inputmode="decimal"
@@ -206,8 +211,9 @@
   /><small>Defaults to cached input, then input.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-image-output-price`}>Image output / million</label
-  ><input
+  <label for={`${idPrefix}-image-output-price`}>
+    Image output / million
+  </label><input
     id={`${idPrefix}-image-output-price`}
     bind:value={imageOutputPrice}
     inputmode="decimal"
@@ -246,9 +252,9 @@
   <small>One GiB is 1,073,741,824 bytes.</small>
 </div>
 <div class="form-field">
-  <label for={`${idPrefix}-cache-storage-price`}
-    >Cache storage / million token-hours</label
-  >
+  <label for={`${idPrefix}-cache-storage-price`}>
+    Cache storage / million token-hours
+  </label>
   <input
     id={`${idPrefix}-cache-storage-price`}
     bind:value={cacheStoragePrice}
@@ -264,10 +270,9 @@
     inputmode="decimal"
     placeholder="0.50"
     disabled={!canEdit}
-  /><small
-    >Applies to usage marked batch; batch usage without a multiplier is
-    unpriced.</small
-  >
+  /><small>
+    Applies to usage marked batch; batch usage without a multiplier is unpriced.
+  </small>
 </div>
 <PriceExtraFields
   {idPrefix}

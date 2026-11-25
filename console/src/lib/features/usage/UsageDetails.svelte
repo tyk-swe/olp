@@ -55,22 +55,23 @@
         {@const note = budgetStateNote(state)}
         <div>
           <p>{titleCase(name)} accrued / limit</p>
-          <strong class:danger-text={state === 'exhausted'}
-            >{formatBudget(window.accrued, currency)} / {limit === null
+          <strong class:danger-text={state === 'exhausted'}>
+            {formatBudget(window.accrued, currency)} / {limit === null
               ? 'No limit'
-              : formatBudget(limit, currency)}</strong
-          >
+              : formatBudget(limit, currency)}
+          </strong>
           <span>Window ends {formatDate(window.window_ends_at)}</span>
-          {#if note}<span class:danger-text={state === 'exhausted'}>{note}</span
-            >{/if}
+          {#if note}<span class:danger-text={state === 'exhausted'}>
+              {note}
+            </span>{/if}
         </div>
       {/if}
     {/each}
     <div>
       <p>Unpriced attempts this UTC month</p>
-      <strong class:unpriced={budget.unpriced_attempts > 0}
-        >{formatInteger(budget.unpriced_attempts)}</strong
-      >
+      <strong class:unpriced={budget.unpriced_attempts > 0}>
+        {formatInteger(budget.unpriced_attempts)}
+      </strong>
       <span>Unpriced attempts accrue 0.</span>
     </div>
   </section>
@@ -89,69 +90,65 @@
       <strong
         class:danger-text={completeness.request_metadata_consumer.state ===
           'stale'}
-        >{titleCase(completeness.request_metadata_consumer.state)}</strong
       >
-      <span
-        >{!completeness.request_metadata_consumer.checked_at
+        {titleCase(completeness.request_metadata_consumer.state)}
+      </strong>
+      <span>
+        {!completeness.request_metadata_consumer.checked_at
           ? 'No worker checkpoint recorded'
           : completeness.request_metadata_consumer.heartbeat_age_seconds == null
             ? 'Checkpoint age unknown'
-            : `Checkpoint ${completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}</span
-      >
+            : `Checkpoint ${completeness.request_metadata_consumer.heartbeat_age_seconds}s ago`}
+      </span>
     </article>
     <article class="card pipeline-card">
       <p>Pending acknowledgements</p>
-      <strong
-        >{formatCompact(
-          completeness.request_metadata_consumer.pending_events
-        )}</strong
-      >
-      <span
-        >{completeness.request_metadata_consumer.oldest_pending_at
+      <strong>
+        {formatCompact(completeness.request_metadata_consumer.pending_events)}
+      </strong>
+      <span>
+        {completeness.request_metadata_consumer.oldest_pending_at
           ? 'Oldest pending event is tracked'
-          : 'No delivered events waiting'}</span
-      >
+          : 'No delivered events waiting'}
+      </span>
     </article>
     <article class="card pipeline-card">
       <p>Stream lag</p>
-      <strong
-        >{formatCompact(
-          completeness.request_metadata_consumer.lag_events
-        )}</strong
-      >
+      <strong>
+        {formatCompact(completeness.request_metadata_consumer.lag_events)}
+      </strong>
       <span>Events not yet delivered to the worker</span>
     </article>
     <article class="card pipeline-card">
       <p>Range coverage</p>
-      <strong class:danger-text={completeness.coverage.approximate}
-        >{completeness.coverage.range_complete ? 'Exact' : 'Incomplete'}</strong
-      >
-      <span
-        >{completeness.coverage.approximate
+      <strong class:danger-text={completeness.coverage.approximate}>
+        {completeness.coverage.range_complete ? 'Exact' : 'Incomplete'}
+      </strong>
+      <span>
+        {completeness.coverage.approximate
           ? 'Approximate totals · '
           : ''}{completeness.coverage.excluded_partial_aggregate_boundaries} partial
         retained-hour {completeness.coverage
           .excluded_partial_aggregate_boundaries === 1
           ? 'boundary'
-          : 'boundaries'} excluded</span
-      >
+          : 'boundaries'} excluded
+      </span>
     </article>
     <article class="card pipeline-card">
       <p>Priced requests</p>
       <strong>{formatCompact(completeness.priced_count)}</strong>
-      <span
-        >of {formatCompact(completeness.request_count)} requests in range</span
-      >
+      <span>
+        of {formatCompact(completeness.request_count)} requests in range
+      </span>
     </article>
     <article class="card pipeline-card">
       <p>Gateway epoch uncertainty</p>
       <strong
         class:danger-text={completeness.uncertain_request_metadata_gap_count >
           0}
-        >{formatCompact(
-          completeness.uncertain_request_metadata_gap_count
-        )}</strong
       >
+        {formatCompact(completeness.uncertain_request_metadata_gap_count)}
+      </strong>
       <span>Unclean process epochs with an unknown exact loss count</span>
     </article>
   </section>

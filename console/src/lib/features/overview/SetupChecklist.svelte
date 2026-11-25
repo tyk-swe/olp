@@ -18,13 +18,13 @@
         {progress.complete ? 'Setup complete' : 'Publish your first route'}
       </h2>
     </div>
-    <span class="completion"
-      >{progress.loading
+    <span class="completion">
+      {progress.loading
         ? 'Checking…'
         : progress.failed
           ? 'Unknown'
-          : `${progress.completeCount} of 5`}</span
-    >
+          : `${progress.completeCount} of 5`}
+    </span>
   </div>
 
   <div
@@ -42,8 +42,10 @@
     <div class="check-error" role="alert">
       Setup progress could not be refreshed. <button
         type="button"
-        onclick={onRetry}>Try again</button
+        onclick={onRetry}
       >
+        Try again
+      </button>
     </div>
   {/if}
 

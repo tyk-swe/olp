@@ -33,17 +33,18 @@
   } = $props();
 </script>
 
-<tr
-  ><td
-    ><input
+<tr>
+  <td>
+    <input
       aria-label="Rule name"
       bind:value={name}
       disabled={busy}
       required
-    /><br /><small>{rule.project_name ?? 'Installation-wide'}</small></td
-  ><td>{notificationEvents[rule.event].label}</td><td>{subjectLabel(rule)}</td
-  ><td>{windowLabel(rule.window_kind)}</td><td
-    ><div class="form-grid">
+    /><br /><small>{rule.project_name ?? 'Installation-wide'}</small>
+  </td><td>{notificationEvents[rule.event].label}</td><td>
+    {subjectLabel(rule)}
+  </td><td>{windowLabel(rule.window_kind)}</td><td>
+    <div class="form-grid">
       {#each notificationEvents[rule.event].fields as field (field.key)}
         <input
           aria-label={field.label}
@@ -62,39 +63,49 @@
           aria-label="Metric"
           bind:value={configuration.metric}
           disabled={busy}
-          ><option value="ttft">Time to first token</option><option
-            value="latency">Total latency</option
-          ></select
-        >{/if}
+        >
+          <option value="ttft">Time to first token</option><option
+            value="latency"
+          >
+            Total latency
+          </option>
+        </select>{/if}
       {#if configuration.event === 'report.spend'}<select
           aria-label="Period"
           bind:value={configuration.period}
           disabled={busy}
-          ><option value="daily">Daily</option><option value="weekly"
-            >Weekly</option
-          ><option value="monthly">Monthly</option></select
-        >{/if}
-    </div></td
-  ><td
-    ><select aria-label="Destination" bind:value={destinationId} disabled={busy}
-      >{#each destinations.filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
-          value={destination.id}>{destination.name}</option
-        >{/each}</select
-    ></td
-  ><td>{rule.enabled ? 'Yes' : 'No'}</td><td
-    ><button
+        >
+          <option value="daily">Daily</option><option value="weekly">
+            Weekly
+          </option><option value="monthly">Monthly</option>
+        </select>{/if}
+    </div>
+  </td><td>
+    <select aria-label="Destination" bind:value={destinationId} disabled={busy}>
+      {#each destinations.filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
+          value={destination.id}
+        >
+          {destination.name}
+        </option>{/each}
+    </select>
+  </td><td>{rule.enabled ? 'Yes' : 'No'}</td><td>
+    <button
       class="text-button"
       type="button"
       disabled={busy}
-      onclick={() => onSave()}>{busy ? 'Saving…' : 'Save'}</button
-    ><button
+      onclick={() => onSave()}
+    >
+      {busy ? 'Saving…' : 'Save'}
+    </button><button
       class="text-button"
       type="button"
       disabled={busy}
-      onclick={onCancel}>Cancel</button
-    ></td
-  ></tr
->
+      onclick={onCancel}
+    >
+      Cancel
+    </button>
+  </td>
+</tr>
 {#if editingRule?.event === 'route.latency' && editingRule.project_id && destinations.some((destination) => destination.id === editingRule?.destination_id && destination.type === 'webhook')}
   <tr>
     <td colspan="8">

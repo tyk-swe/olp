@@ -38,9 +38,9 @@
   }
 </script>
 
-<a class="text-button" href={resolve('mcp-servers')}
-  >Register or manage MCP servers</a
->
+<a class="text-button" href={resolve('mcp-servers')}>
+  Register or manage MCP servers
+</a>
 
 <label class="form-field">
   Certified MCP server
@@ -49,12 +49,16 @@
     aria-label="Certified MCP server"
     bind:value={serverID}
     onchange={onChooseServer}
-    ><option value="">Choose a server</option
-    >{#each servers.filter((value) => value.project_id === form.project && value.enabled) as value (value.id)}<option
-        value={value.id}>{value.name}</option
-      >{/each}</select
-  ></label
->
+  >
+    <option value="">
+      Choose a server
+    </option>{#each servers.filter((value) => value.project_id === form.project && value.enabled) as value (value.id)}<option
+        value={value.id}
+      >
+        {value.name}
+      </option>{/each}
+  </select>
+</label>
 {#if server}<p>
     Transport <code>{server.transport}</code>, MCP
     <code>{server.catalog.protocol_version}</code>
@@ -67,8 +71,10 @@
       disabled={form.tools.length >= 128 ||
         form.tools.some(
           (value) => value.server_id === server?.id && value.name === tool.name
-        )}>Add {tool.name}</button
-    >{/each}{/if}
+        )}
+    >
+      Add {tool.name}
+    </button>{/each}{/if}
 <ul>
   {#each form.tools as tool (tool.alias)}<li>
       {tool.name} <code>{tool.revision_id}</code>
@@ -90,8 +96,10 @@
         onclick={() =>
           (form.tools = form.tools.filter(
             (value) => value.alias !== tool.alias
-          ))}>Remove</button
+          ))}
       >
+        Remove
+      </button>
     </li>
   {/each}
 </ul>
@@ -103,48 +111,47 @@
 {#if server && pricing}
   <fieldset>
     <legend>Tool pricing and limits</legend>
-    <label class="form-field"
-      >Server unit price (blank unpriced, 0 free) <input
+    <label class="form-field">
+      Server unit price (blank unpriced, 0 free) <input
         bind:value={pricing.unitPrice}
         inputmode="decimal"
-      /></label
-    >
+      />
+    </label>
     {#each server.catalog.tools as tool (tool.name)}
-      <label class="form-field"
-        >{tool.name} unit price
-        <input
-          bind:value={pricing.toolPrices[tool.name]}
-          inputmode="decimal"
-        /></label
-      >
+      <label class="form-field">
+        {tool.name} unit price
+        <input bind:value={pricing.toolPrices[tool.name]} inputmode="decimal" />
+      </label>
     {/each}
-    <label class="form-field"
-      >Server calls per minute <input
+    <label class="form-field">
+      Server calls per minute <input
         bind:value={pricing.callsPerMinute}
         inputmode="numeric"
-      /></label
-    ><label class="form-field"
-      >Server max concurrency <input
+      />
+    </label><label class="form-field">
+      Server max concurrency <input
         bind:value={pricing.maxConcurrency}
         inputmode="numeric"
-      /></label
-    ><label class="form-field"
-      >Per-key calls per minute <input
+      />
+    </label><label class="form-field">
+      Per-key calls per minute <input
         bind:value={pricing.perKeyCallsPerMinute}
         inputmode="numeric"
-      /></label
-    ><label class="form-field"
-      >Per-key max concurrency <input
+      />
+    </label><label class="form-field">
+      Per-key max concurrency <input
         bind:value={pricing.perKeyMaxConcurrency}
         inputmode="numeric"
-      /></label
-    >
+      />
+    </label>
     <button
       class="button button-secondary"
       type="button"
       disabled={busy || !canPrice}
-      onclick={() => void onSavePricing()}>Save pricing</button
+      onclick={() => void onSavePricing()}
     >
+      Save pricing
+    </button>
     <p>
       Prices are in the installation pricing currency and pin with the certified
       server revision. Saving recertifies the server, so republish toolsets to

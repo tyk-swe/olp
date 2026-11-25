@@ -83,13 +83,14 @@
     </p>
   </div>
   {#if progress.complete}
-    <a class="button button-primary" href={resolve('requests')}
-      >Explore requests <NavIcon name="arrow" /></a
-    >
+    <a class="button button-primary" href={resolve('requests')}>
+      Explore requests <NavIcon name="arrow" />
+    </a>
   {:else if progress.nextStep}
-    <a class="button button-primary" href={resolve(progress.nextStep.href)}
-      >{progress.nextStep.label} <NavIcon name="arrow" /></a
-    >
+    <a class="button button-primary" href={resolve(progress.nextStep.href)}>
+      {progress.nextStep.label}
+      <NavIcon name="arrow" />
+    </a>
   {/if}
 </div>
 

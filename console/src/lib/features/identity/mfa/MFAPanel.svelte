@@ -172,20 +172,22 @@
       {#if status.data.factors.length}<ul>
           {#each status.data.factors as factor (factor.id)}<li>
               <div>
-                <strong>{factor.name}</strong><span
-                  >{factor.kind === 'totp'
+                <strong>{factor.name}</strong><span>
+                  {factor.kind === 'totp'
                     ? 'Authenticator app'
                     : 'Security key or passkey'} · Added {formatDate(
                     factor.created_at
-                  )}</span
-                >
+                  )}
+                </span>
               </div>
               <button
                 class="button button-secondary"
                 disabled={mfa.busy ||
                   (status.data.required && status.data.factors.length === 1)}
-                onclick={() => remove(factor)}>Remove {factor.name}</button
+                onclick={() => remove(factor)}
               >
+                Remove {factor.name}
+              </button>
             </li>{/each}
         </ul>
         <p>
@@ -195,12 +197,14 @@
         <button
           class="button button-secondary"
           disabled={mfa.busy}
-          onclick={regenerate}>Replace recovery codes</button
-        >{/if}
+          onclick={regenerate}
+        >
+          Replace recovery codes
+        </button>{/if}
       {#if codes}<div class="form-field">
-          <label for="profile-recovery-codes"
-            >New recovery codes — save privately</label
-          ><textarea
+          <label for="profile-recovery-codes">
+            New recovery codes — save privately
+          </label><textarea
             id="profile-recovery-codes"
             readonly
             rows="10"
@@ -210,16 +214,19 @@
           class="button button-secondary"
           onclick={() => {
             codes = null;
-          }}>I saved these codes</button
-        >{/if}
+          }}
+        >
+          I saved these codes
+        </button>{/if}
       {#if !status.data.factors.length && hasLinkedIdentity && !oidcConfirmed}
         <button
           type="button"
           class="button button-secondary"
           disabled={mfa.busy}
           onclick={confirmLinkedIdentity}
-          >Verify linked identity for enrollment</button
         >
+          Verify linked identity for enrollment
+        </button>
       {/if}
       <form
         onsubmit={(e) => {
@@ -238,16 +245,19 @@
             <label for="profile-mfa-kind">Authenticator type</label><select
               id="profile-mfa-kind"
               bind:value={kind}
-              ><option
+            >
+              <option
                 value="totp"
                 disabled={status.data.factors.some((f) => f.kind === 'totp')}
-                >Authenticator app</option
-              ><option
+              >
+                Authenticator app
+              </option><option
                 value="webauthn"
                 disabled={status.data?.webauthn_available === false}
-                >Security key or passkey</option
-              ></select
-            >
+              >
+                Security key or passkey
+              </option>
+            </select>
           </div>
           <div class="form-field">
             <label for="profile-mfa-name">Authenticator name</label><input
@@ -260,9 +270,9 @@
           {#if !status.data.factors.length && hasLocalPassword && !oidcConfirmed}<div
               class="form-field"
             >
-              <label for="profile-mfa-password"
-                >Current password for enrollment</label
-              ><input
+              <label for="profile-mfa-password">
+                Current password for enrollment
+              </label><input
                 id="profile-mfa-password"
                 type="password"
                 autocomplete="current-password"
@@ -270,9 +280,9 @@
                 bind:value={password}
               />
             </div>{/if}
-          <button class="button button-primary" type="submit"
-            >{mfa.busy ? 'Confirming…' : 'Enroll authenticator'}</button
-          >
+          <button class="button button-primary" type="submit">
+            {mfa.busy ? 'Confirming…' : 'Enroll authenticator'}
+          </button>
         </fieldset>
       </form>
     {/if}

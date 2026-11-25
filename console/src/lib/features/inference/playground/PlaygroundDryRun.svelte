@@ -28,10 +28,10 @@
           <option value={dialect}>{dialect}</option>
         {/each}
       </select>
-      <small
-        >The request JSON above must name this route when its native dialect
-        carries a model field.</small
-      >
+      <small>
+        The request JSON above must name this route when its native dialect
+        carries a model field.
+      </small>
     </div>
   {/if}
   <div class="route-grid">
@@ -45,9 +45,9 @@
         {#each playground.apiKeys.data ?? [] as key (key.id)}
           {#if !key.revoked_at}<option value={key.id}>{key.name}</option>{/if}
         {/each}
-      </select><small id="simulate-key-help"
-        >Applies that key's route allowlist and scopes to the explanation.</small
-      >
+      </select><small id="simulate-key-help">
+        Applies that key's route allowlist and scopes to the explanation.
+      </small>
     </div>
     <div class="form-field">
       <label for="playground-simulate-seed">Seed</label><input
@@ -63,9 +63,9 @@
           event.preventDefault();
           if (!playground.simulation.isPending) void playground.explain();
         }}
-      /><small id="simulate-seed-help"
-        >Fixes weighted tie-breaks so the order is reproducible.</small
-      >
+      /><small id="simulate-seed-help">
+        Fixes weighted tie-breaks so the order is reproducible.
+      </small>
     </div>
   </div>
   {#if playground.simulationError}<p class="field-error" role="alert">
@@ -76,8 +76,9 @@
     type="button"
     disabled={playground.simulation.isPending}
     onclick={playground.explain}
-    >{playground.simulation.isPending ? 'Inspecting…' : 'Inspect plan'}</button
   >
+    {playground.simulation.isPending ? 'Inspecting…' : 'Inspect plan'}
+  </button>
 </details>
 
 <style>

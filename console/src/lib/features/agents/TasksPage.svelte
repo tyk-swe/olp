@@ -64,25 +64,25 @@
 {:else}
   <ScrollTable label="A2A tasks">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Task</th><th scope="col">Project</th><th scope="col"
-            >State</th
-          ><th scope="col">Callbacks</th><th scope="col">Started</th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Task</th><th scope="col">Project</th><th scope="col">
+            State
+          </th><th scope="col">Callbacks</th><th scope="col">Started</th>
+        </tr>
+      </thead>
       <tbody>
         {#each tasks.data.items as task (task.id)}
           <tr>
-            <td
-              ><a href={resolve(`activity/tasks/${task.id}`)}
-                ><code>{task.id}</code></a
-              ></td
-            >
-            <td
-              >{projects.data?.find((project) => project.id === task.project_id)
-                ?.name ?? task.project_id}</td
-            >
+            <td>
+              <a href={resolve(`activity/tasks/${task.id}`)}>
+                <code>{task.id}</code>
+              </a>
+            </td>
+            <td>
+              {projects.data?.find((project) => project.id === task.project_id)
+                ?.name ?? task.project_id}
+            </td>
             <td>{stateLabel(task.state)}</td>
             <td>{task.callback_attempts ?? 'Unknown'}</td>
             <td>{formatDate(task.created_at)}</td>
@@ -99,8 +99,9 @@
     disabled={!$filters.cursor || tasks.isFetching}
     onclick={() =>
       filters.update((current) => ({ ...current, cursor: undefined }))}
-    >Newest</button
   >
+    Newest
+  </button>
   <button
     class="button button-secondary"
     type="button"
@@ -109,12 +110,16 @@
       filters.update((current) => ({
         ...current,
         cursor: tasks.data?.nextCursor ?? undefined
-      }))}>Older</button
+      }))}
   >
+    Older
+  </button>
   <button
     class="button button-secondary"
     type="button"
     disabled={tasks.isFetching}
-    onclick={() => tasks.refetch()}>Refresh</button
+    onclick={() => tasks.refetch()}
   >
+    Refresh
+  </button>
 </nav>

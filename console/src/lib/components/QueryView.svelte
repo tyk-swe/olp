@@ -37,8 +37,10 @@
     {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        onclick={() => query.refetch()}>{retryLabel}</button
-      >{/snippet}
+        onclick={() => query.refetch()}
+      >
+        {retryLabel}
+      </button>{/snippet}
   </Callout>
 {:else if emptyWhen && empty}
   {@render empty()}

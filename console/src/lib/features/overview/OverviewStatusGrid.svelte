@@ -20,24 +20,28 @@
       class:ready={activeProviders > 0 && !overview.isError}
       class:neutral={activeProviders === 0 || overview.isError}
       class="status-icon"
-      aria-hidden="true"><NavIcon name="provider" /></span
+      aria-hidden="true"
     >
+      <NavIcon name="provider" />
+    </span>
     <div>
       <p>Providers</p>
-      <strong
-        >{overview.isError
+      <strong>
+        {overview.isError
           ? 'Unavailable'
           : overview.isPending
             ? 'Checking…'
             : activeProviders
               ? `${activeProviders} active`
-              : 'Not configured'}</strong
-      >
+              : 'Not configured'}
+      </strong>
       {#if overview.isError}<button
           class="text-button"
           type="button"
-          onclick={() => overview.refetch()}>Try again</button
-        >{/if}
+          onclick={() => overview.refetch()}
+        >
+          Try again
+        </button>{/if}
     </div>
   </article>
   <article class="card status-card">
@@ -45,30 +49,34 @@
       class:ready={readyRoutes > 0 && !overview.isError}
       class:neutral={readyRoutes === 0 || overview.isError}
       class="status-icon"
-      aria-hidden="true"><NavIcon name="route" /></span
+      aria-hidden="true"
     >
+      <NavIcon name="route" />
+    </span>
     <div>
       <p>Active routes</p>
-      <strong
-        >{overview.isError
+      <strong>
+        {overview.isError
           ? 'Unavailable'
           : overview.isPending
             ? 'Checking…'
             : readyRoutes
               ? `${readyRoutes} active`
-              : 'Awaiting activation'}</strong
-      >
+              : 'Awaiting activation'}
+      </strong>
       {#if overview.isError}<button
           class="text-button"
           type="button"
-          onclick={() => overview.refetch()}>Try again</button
-        >{/if}
+          onclick={() => overview.refetch()}
+        >
+          Try again
+        </button>{/if}
     </div>
   </article>
   <article class="card status-card">
-    <span class="status-icon ready" aria-hidden="true"
-      ><NavIcon name="health" /></span
-    >
+    <span class="status-icon ready" aria-hidden="true">
+      <NavIcon name="health" />
+    </span>
     <div>
       <p>Control API</p>
       <strong>Console connected</strong>

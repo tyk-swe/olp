@@ -44,8 +44,10 @@
           class="button button-secondary"
           type="button"
           disabled={busy}
-          onclick={() => onEdit(account)}>Edit account</button
-        ><AccountDrainControl {account} disabled={busy} />{/if}
+          onclick={() => onEdit(account)}
+        >
+          Edit account
+        </button><AccountDrainControl {account} disabled={busy} />{/if}
     </div>
     <dl>
       <dt>Subscription</dt>

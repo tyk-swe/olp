@@ -10,20 +10,21 @@
 
 <fieldset class="policy" {disabled}>
   <legend>Per-end-user limits</legend>
-  <label class="enable"
-    ><input type="checkbox" bind:checked={form.enabled} /> Enable end-user policy</label
-  >
+  <label class="enable">
+    <input type="checkbox" bind:checked={form.enabled} /> Enable end-user policy
+  </label>
   {#if form.enabled}<div class="form-field">
-      <label for={`${prefix}-limit-template`}>End-user limit template</label
-      ><input
+      <label for={`${prefix}-limit-template`}>
+        End-user limit template
+      </label><input
         id={`${prefix}-limit-template`}
         bind:value={form.limitTemplate}
         {disabled}
         maxlength="100"
-      /><small
-        >The template caps defaults and digest overrides independently. Empty
-        detaches the template.</small
-      >
+      /><small>
+        The template caps defaults and digest overrides independently. Empty
+        detaches the template.
+      </small>
     </div>
     <p class="muted">
       Each identified user gets these limits. Blank limits are unlimited.
@@ -40,9 +41,9 @@
         <fieldset class="override">
           <legend>Override {index + 1}</legend>
           <div class="form-field">
-            <label for={`${prefix}-${override.id}-digest`}
-              >End-user digest</label
-            >
+            <label for={`${prefix}-${override.id}-digest`}>
+              End-user digest
+            </label>
             <input
               id={`${prefix}-${override.id}-digest`}
               bind:value={override.digest}
@@ -61,8 +62,10 @@
             onclick={() =>
               (form.overrides = form.overrides.filter(
                 (row) => row.id !== override.id
-              ))}>Remove override {index + 1}</button
+              ))}
           >
+            Remove override {index + 1}
+          </button>
         </fieldset>
       {/each}
       <button
@@ -74,8 +77,10 @@
             id: crypto.randomUUID(),
             digest: '',
             limits: limitForm()
-          })}>Add digest override</button
+          })}
       >
+        Add digest override
+      </button>
       <div class="form-field blocked">
         <label for={`${prefix}-blocked`}>Blocked digests</label>
         <textarea
@@ -84,10 +89,10 @@
           rows="3"
           spellcheck="false"
           aria-describedby={`${prefix}-blocked-help`}></textarea>
-        <small id={`${prefix}-blocked-help`}
-          >One lowercase SHA-256 digest per line, up to 256. Use the key’s
-          end-user lookup to derive a digest.</small
-        >
+        <small id={`${prefix}-blocked-help`}>
+          One lowercase SHA-256 digest per line, up to 256. Use the key’s
+          end-user lookup to derive a digest.
+        </small>
       </div>
     </details>
   {/if}

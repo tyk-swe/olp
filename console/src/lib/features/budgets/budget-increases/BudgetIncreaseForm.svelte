@@ -51,14 +51,15 @@
         <label for="increase-kind">Budget boundary</label><select
           id="increase-kind"
           bind:value={kind}
-          >{#each kinds as option (option.value)}<option value={option.value}
-              >{option.label}</option
-            >{/each}{#if canOrganize}<option value="organization"
-              >Organization</option
-            >{/if}{#if canInstall}<option value="installation"
-              >Installation</option
-            >{/if}</select
         >
+          {#each kinds as option (option.value)}<option value={option.value}>
+              {option.label}
+            </option>{/each}{#if canOrganize}<option value="organization">
+              Organization
+            </option>{/if}{#if canInstall}<option value="installation">
+              Installation
+            </option>{/if}
+        </select>
       </div>
       {#if targetPicker}<div class="form-field">
           <label for="increase-resource">{targetPicker.label}</label>
@@ -92,9 +93,9 @@
             bind:value={digest}
             required
             pattern={'[0-9a-f]{64}'}
-          /><small
-            >Use the digest from end-user lookup, never a raw identifier.</small
-          >
+          /><small>
+            Use the digest from end-user lookup, never a raw identifier.
+          </small>
         </div>{/if}
       {#if kind === 'attribution'}<div class="form-field">
           <label for="increase-label">Attribution label</label><input
@@ -114,9 +115,11 @@
         <label for="increase-window">Budget window</label><select
           id="increase-window"
           bind:value={window}
-          ><option value="day">Day</option><option value="week">Week</option
-          ><option value="month">Month</option></select
         >
+          <option value="day">Day</option><option value="week">
+            Week
+          </option><option value="month">Month</option>
+        </select>
       </div>
       <div class="form-field">
         <label for="increase-amount">Additional USD</label><input
@@ -143,15 +146,17 @@
       </div>
     </div>
   </fieldset>
-  <button class="button button-primary" disabled={busy} type="submit"
-    >{submitted ? 'Retry increase' : 'Create increase'}</button
-  >
+  <button class="button button-primary" disabled={busy} type="submit">
+    {submitted ? 'Retry increase' : 'Create increase'}
+  </button>
   {#if submitted}<button
       class="button button-secondary"
       type="button"
       disabled={busy}
-      onclick={onReset}>Start another request</button
+      onclick={onReset}
     >
+      Start another request
+    </button>
     <p>
       Retry preserves the original request to recover a lost response without
       adding another increase.

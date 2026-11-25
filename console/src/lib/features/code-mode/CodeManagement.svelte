@@ -183,14 +183,18 @@
         type="button"
         class="button button-primary"
         disabled={!!editing || publishMutation.busy}
-        onclick={() => (editing = { kind })}>Create {section.noun}</button
-      >{/if}
+        onclick={() => (editing = { kind })}
+      >
+        Create {section.noun}
+      </button>{/if}
     <button
       type="button"
       class="button button-secondary"
       disabled={publishMutation.busy || selected.isFetching}
-      onclick={() => selected.refetch()}>Refresh</button
+      onclick={() => selected.refetch()}
     >
+      Refresh
+    </button>
   </div>
   {#if !allowed}<ReadOnlyNote>
       Read only. Changes require configure permission and project manager or
@@ -207,8 +211,10 @@
         <button
           class="text-button"
           type="button"
-          onclick={() => (editing = null)}>Cancel</button
+          onclick={() => (editing = null)}
         >
+          Cancel
+        </button>
       </LoadError>
     {:else if inventory.data}
       {#key editing}<ResourceEditor

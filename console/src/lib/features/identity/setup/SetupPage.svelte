@@ -59,9 +59,9 @@
       <span class="error-symbol" aria-hidden="true">!</span>
       <h2>Setup is not reachable</h2>
       <p>{message}</p>
-      <button class="button button-primary" type="button" onclick={checkStatus}
-        >Try again</button
-      >
+      <button class="button button-primary" type="button" onclick={checkStatus}>
+        Try again
+      </button>
     </div>
   {:else if setupView === 'no-token'}
     <div class="status-card" role="alert">
@@ -73,9 +73,9 @@
         <code>OLP_BOOTSTRAP_TOKEN_FILE</code>, or restart with Docker Compose,
         which generates it on first start.
       </p>
-      <button class="button button-primary" type="button" onclick={checkStatus}
-        >Check again</button
-      >
+      <button class="button button-primary" type="button" onclick={checkStatus}>
+        Check again
+      </button>
     </div>
   {:else}
     <OwnerSetup onComplete={onDone} />

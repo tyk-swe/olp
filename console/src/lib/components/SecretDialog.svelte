@@ -55,8 +55,10 @@
       class="dialog-close"
       type="button"
       aria-label="Close"
-      onclick={close}>×</button
+      onclick={close}
     >
+      ×
+    </button>
   </div>
   <h2 id={`${dialogId}-title`} class="dialog-title">{title}</h2>
   <p id={`${dialogId}-description`} class="dialog-description">{description}</p>

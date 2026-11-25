@@ -22,8 +22,10 @@
           class="button button-secondary"
           type="button"
           disabled={busy}
-          onclick={() => onEdit(pool)}>Edit pool</button
-        >{/if}
+          onclick={() => onEdit(pool)}
+        >
+          Edit pool
+        </button>{/if}
     </div>
     <dl>
       <dt>Pool</dt>

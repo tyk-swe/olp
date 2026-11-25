@@ -5,6 +5,6 @@
   const branding = useBranding();
 </script>
 
-<svelte:head
-  ><title>{title} · {branding.data?.name ?? productName}</title></svelte:head
->
+<svelte:head>
+  <title>{title} · {branding.data?.name ?? productName}</title>
+</svelte:head>

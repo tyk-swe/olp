@@ -205,13 +205,17 @@
           role="tab"
           aria-selected={mode === 'route'}
           class:active={mode === 'route'}
-          onclick={() => (mode = 'route')}>Route</button
-        ><button
+          onclick={() => (mode = 'route')}
+        >
+          Route
+        </button><button
           role="tab"
           aria-selected={mode === 'usage'}
           class:active={mode === 'usage'}
-          onclick={() => (mode = 'usage')}>Usage</button
+          onclick={() => (mode = 'usage')}
         >
+          Usage
+        </button>
       </div>
     </div>
 
@@ -220,10 +224,13 @@
         <label for="calc-route">Route</label><select
           id="calc-route"
           bind:value={route}
-          >{#each routes.data ?? [] as option (option.id)}<option
-              value={option.slug}>{option.slug}</option
-            >{/each}</select
         >
+          {#each routes.data ?? [] as option (option.id)}<option
+              value={option.slug}
+            >
+              {option.slug}
+            </option>{/each}
+        </select>
         <label for="calc-route-input">Input tokens</label><input
           id="calc-route-input"
           bind:value={routeInput}
@@ -236,43 +243,44 @@
           inputmode="numeric"
           placeholder="Default reply allowance"
         />
-        <button disabled={routeBusy} onclick={simulate}
-          >{routeBusy ? 'Simulating…' : 'Simulate'}</button
-        >
+        <button disabled={routeBusy} onclick={simulate}>
+          {routeBusy ? 'Simulating…' : 'Simulate'}
+        </button>
       </div>
       {#if routeError}<p class="field-error" role="alert">{routeError}</p>{/if}
       {#if routeResult}
         <div class="table-wrap">
           <table>
-            <thead
-              ><tr
-                ><th scope="col">Target</th><th scope="col">Eligible</th><th
-                  scope="col">Minimum</th
-                ><th scope="col">Maximum</th></tr
-              ></thead
-            >
-            <tbody
-              >{#each routeResult as row (row.key)}<tr
-                  ><td
-                    >{row.title}<small
-                      >{row.credentialSlotId ??
-                        'Connection authentication'}</small
-                    ></td
-                  ><td
-                    >{row.eligible
+            <thead>
+              <tr>
+                <th scope="col">Target</th><th scope="col">Eligible</th><th
+                  scope="col"
+                >
+                  Minimum
+                </th><th scope="col">Maximum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each routeResult as row (row.key)}<tr>
+                  <td>
+                    {row.title}<small>
+                      {row.credentialSlotId ?? 'Connection authentication'}
+                    </small>
+                  </td><td>
+                    {row.eligible
                       ? 'Yes'
-                      : (row.reason?.replaceAll('_', ' ') ?? 'No')}</td
-                  ><td
-                    >{row.estimatedCost
+                      : (row.reason?.replaceAll('_', ' ') ?? 'No')}
+                  </td><td>
+                    {row.estimatedCost
                       ? `${row.estimatedCost.minimum} ${row.estimatedCost.currency}`
-                      : '—'}</td
-                  ><td
-                    >{row.estimatedCost
+                      : '—'}
+                  </td><td>
+                    {row.estimatedCost
                       ? `${row.estimatedCost.maximum} ${row.estimatedCost.currency}`
-                      : '—'}</td
-                  ></tr
-                >{/each}</tbody
-            >
+                      : '—'}
+                  </td>
+                </tr>{/each}
+            </tbody>
           </table>
         </div>
       {/if}

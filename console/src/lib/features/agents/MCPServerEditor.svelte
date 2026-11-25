@@ -171,187 +171,178 @@
 </script>
 
 <form class="form-card" onsubmit={save}>
-  <label class="form-field"
-    >Name<input required maxlength="100" bind:value={name} /></label
-  >
-  <label class="form-field"
-    >Project<select required disabled={Boolean(current)} bind:value={project}
-      ><option value="">Choose project</option
-      >{#each projects as item (item.id)}<option value={item.id}
-          >{item.name}</option
-        >{/each}</select
-    ></label
-  >
-  <label class="form-field"
-    >Transport<select disabled={Boolean(current)} bind:value={transport}
-      ><option value="streamable_http">Streamable HTTP</option><option
-        value="sse">SSE</option
-      ><option value="stdio">Local stdio</option></select
-    ></label
-  >
+  <label class="form-field">
+    Name<input required maxlength="100" bind:value={name} />
+  </label>
+  <label class="form-field">
+    Project<select required disabled={Boolean(current)} bind:value={project}>
+      <option value="">
+        Choose project
+      </option>{#each projects as item (item.id)}<option value={item.id}>
+          {item.name}
+        </option>{/each}
+    </select>
+  </label>
+  <label class="form-field">
+    Transport<select disabled={Boolean(current)} bind:value={transport}>
+      <option value="streamable_http">Streamable HTTP</option><option
+        value="sse"
+      >
+        SSE
+      </option><option value="stdio">Local stdio</option>
+    </select>
+  </label>
   {#if transport === 'stdio'}
-    <label class="form-field"
-      >Approved executable<input
+    <label class="form-field">
+      Approved executable<input
         required
         disabled={Boolean(current)}
         bind:value={executable}
-      /></label
-    >
-    <label class="form-field"
-      >Executable SHA256<input
+      />
+    </label>
+    <label class="form-field">
+      Executable SHA256<input
         required
         pattern={'[a-f0-9]{64}'}
         disabled={Boolean(current)}
         bind:value={digest}
-      /></label
-    >
-  {:else}<label class="form-field"
-      >Endpoint<input type="url" required bind:value={endpoint} /></label
-    >{/if}
-  <label class="check-field"
-    ><input type="checkbox" bind:checked={enabled} />Enabled</label
-  >
+      />
+    </label>
+  {:else}<label class="form-field">
+      Endpoint<input type="url" required bind:value={endpoint} />
+    </label>{/if}
+  <label class="check-field">
+    <input type="checkbox" bind:checked={enabled} />Enabled
+  </label>
   {#if transport !== 'stdio'}
-    <label class="form-field"
-      >Bearer credential<input
+    <label class="form-field">
+      Bearer credential<input
         type="password"
         autocomplete="new-password"
         bind:value={credential}
         disabled={removeCredential}
-      /></label
-    >
-    {#if baseline?.has_credential}<label class="check-field"
-        ><input type="checkbox" bind:checked={removeCredential} />Remove stored
-        bearer credential</label
-      >{/if}
+      />
+    </label>
+    {#if baseline?.has_credential}<label class="check-field">
+        <input type="checkbox" bind:checked={removeCredential} />Remove stored
+        bearer credential
+      </label>{/if}
     <p class="inline-status">
       Leave secret fields blank to retain existing values
     </p>
   {/if}
   <fieldset>
     <legend>Pricing and limits</legend>
-    <label class="form-field"
-      >Price per call<input
+    <label class="form-field">
+      Price per call<input
         pattern={'[0-9]{1,12}(\\.[0-9]{1,12})?'}
         bind:value={pricing.unitPrice}
-      /></label
-    >
+      />
+    </label>
     <p class="inline-status">Blank means unpriced. Use 0 for free calls</p>
     {#each baseline?.catalog.tools ?? [] as tool (tool.name)}<label
         class="form-field"
-        >{tool.name} price<input
-          bind:value={pricing.toolPrices[tool.name]}
-        /></label
-      >{/each}
-    <label class="form-field"
-      >Calls per minute<input
+      >
+        {tool.name} price<input bind:value={pricing.toolPrices[tool.name]} />
+      </label>{/each}
+    <label class="form-field">
+      Calls per minute<input
         required
         inputmode="numeric"
         bind:value={pricing.callsPerMinute}
-      /></label
-    >
-    <label class="form-field"
-      >Concurrent calls<input
+      />
+    </label>
+    <label class="form-field">
+      Concurrent calls<input
         required
         inputmode="numeric"
         bind:value={pricing.maxConcurrency}
-      /></label
-    >
-    <label class="form-field"
-      >Calls per minute per key<input
+      />
+    </label>
+    <label class="form-field">
+      Calls per minute per key<input
         required
         inputmode="numeric"
         bind:value={pricing.perKeyCallsPerMinute}
-      /></label
-    >
-    <label class="form-field"
-      >Concurrent calls per key<input
+      />
+    </label>
+    <label class="form-field">
+      Concurrent calls per key<input
         required
         inputmode="numeric"
         bind:value={pricing.perKeyMaxConcurrency}
-      /></label
-    >
+      />
+    </label>
   </fieldset>
   {#if transport !== 'stdio'}
     <fieldset>
       <legend>Personal OAuth</legend>
-      <label class="check-field"
-        ><input type="checkbox" bind:checked={oauthEnabled} />Require individual
-        grants</label
-      >
+      <label class="check-field">
+        <input type="checkbox" bind:checked={oauthEnabled} />Require individual
+        grants
+      </label>
       {#if oauthEnabled}
-        <label class="form-field"
-          >Client ID<input required bind:value={clientID} /></label
-        >
-        <label class="form-field"
-          >Audience<input required bind:value={audience} /></label
-        >
-        <label class="form-field"
-          >Scopes separated by spaces<input
-            required
-            bind:value={scopes}
-          /></label
-        >
-        <label class="form-field"
-          >Authorization endpoint<input
+        <label class="form-field">
+          Client ID<input required bind:value={clientID} />
+        </label>
+        <label class="form-field">
+          Audience<input required bind:value={audience} />
+        </label>
+        <label class="form-field">
+          Scopes separated by spaces<input required bind:value={scopes} />
+        </label>
+        <label class="form-field">
+          Authorization endpoint<input
             type="url"
             bind:value={authorizationEndpoint}
-          /></label
-        >
-        <label class="form-field"
-          >Token endpoint<input
-            required
-            type="url"
-            bind:value={tokenEndpoint}
-          /></label
-        >
-        <label class="form-field"
-          >Device authorization endpoint<input
+          />
+        </label>
+        <label class="form-field">
+          Token endpoint<input required type="url" bind:value={tokenEndpoint} />
+        </label>
+        <label class="form-field">
+          Device authorization endpoint<input
             type="url"
             bind:value={deviceEndpoint}
-          /></label
-        >
-        <label class="form-field"
-          >Entra delegated issuer<input bind:value={entraIssuer} /></label
-        >
-        <label class="form-field"
-          >Entra client secret<input
+          />
+        </label>
+        <label class="form-field">
+          Entra delegated issuer<input bind:value={entraIssuer} />
+        </label>
+        <label class="form-field">
+          Entra client secret<input
             type="password"
             autocomplete="new-password"
             bind:value={entraSecret}
-          /></label
-        >
+          />
+        </label>
       {/if}
     </fieldset>
     <fieldset>
       <legend>Delegation</legend>
-      <label class="check-field"
-        ><input type="checkbox" bind:checked={delegationEnabled} />Enable
-        delegation</label
-      >
+      <label class="check-field">
+        <input type="checkbox" bind:checked={delegationEnabled} />Enable
+        delegation
+      </label>
       {#if delegationEnabled}
-        <label class="form-field"
-          >Issuer<input
-            required
-            type="url"
-            bind:value={delegationIssuer}
-          /></label
-        >
-        <label class="form-field"
-          >Audience<input required bind:value={delegationAudience} /></label
-        >
-        <label class="form-field full"
-          >PKCS8 Ed25519 private key<textarea
+        <label class="form-field">
+          Issuer<input required type="url" bind:value={delegationIssuer} />
+        </label>
+        <label class="form-field">
+          Audience<input required bind:value={delegationAudience} />
+        </label>
+        <label class="form-field full">
+          PKCS8 Ed25519 private key<textarea
             autocomplete="off"
-            bind:value={privateKey}></textarea></label
-        >
+            bind:value={privateKey}></textarea>
+        </label>
       {/if}
     </fieldset>
   {/if}
   <div class="page-actions">
-    <button class="button button-primary" disabled={action.busy}
-      >Save and certify</button
-    >
+    <button class="button button-primary" disabled={action.busy}>
+      Save and certify
+    </button>
   </div>
   {#if reload && current?.etag !== baseline?.etag}
     <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />

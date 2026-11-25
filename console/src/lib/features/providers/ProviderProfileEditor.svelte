@@ -121,18 +121,20 @@
           <option value="">Automatic provider · no profile selected</option>
           {#if values.profileId && !selected}<option
               value={`${values.profileId}@${values.profileRevision}`}
-              >{values.profileId} · revision {values.profileRevision}</option
-            >{/if}
+            >
+              {values.profileId} · revision {values.profileRevision}
+            </option>{/if}
           {#each compatible as profile (`${profile.id}@${profile.revision}`)}<option
               value={`${profile.id}@${profile.revision}`}
-              >{profile.label} · revision {profile.revision}</option
-            >{/each}
+            >
+              {profile.label} · revision {profile.revision}
+            </option>{/each}
         </select>
-        <small
-          >Profiles select the API dialect, hosting and supported configuration.
+        <small>
+          Profiles select the API dialect, hosting and supported configuration.
           They do not establish model quality or complete interaction
-          compatibility.</small
-        >
+          compatibility.
+        </small>
       </div>{/if}
     {#if profiles.isError || schemas.isError}<p
         class="inline-problem"
@@ -144,18 +146,20 @@
           onclick={() => {
             profiles.refetch();
             schemas.refetch();
-          }}>Retry metadata</button
+          }}
         >
+          Retry metadata
+        </button>
       </p>{/if}
     {#if selected}<p class="profile-summary">
-        <strong>{selected.label}</strong><span
-          >{selected.hosting} · {selected.dialect} · API {selected.dialect_revision}</span
-        >
+        <strong>{selected.label}</strong><span>
+          {selected.hosting} · {selected.dialect} · API {selected.dialect_revision}
+        </span>
       </p>{:else if !values.profileId && !plugin}<p class="profile-summary">
-        <strong>Automatic provider</strong><span
-          >Endpoints follow the connector kind. Only transformed routes can use
-          this provider.</span
-        >
+        <strong>Automatic provider</strong><span>
+          Endpoints follow the connector kind. Only transformed routes can use
+          this provider.
+        </span>
       </p>{/if}
     {#if conflictingParameterDefaults}<div class="inline-problem" role="alert">
         <p>
@@ -170,8 +174,10 @@
           onclick={() => {
             draft.set(['options', 'parameter_defaults'], undefined);
             onChange();
-          }}>Remove parameter defaults</button
+          }}
         >
+          Remove parameter defaults
+        </button>
       </div>{/if}
     {#if conflictingScoped}<div class="inline-problem" role="alert">
         <p>
@@ -187,8 +193,10 @@
             for (const name of profileScopedSettings)
               draft.set(['options', name], undefined);
             onChange();
-          }}>Remove profile-scoped settings</button
+          }}
         >
+          Remove profile-scoped settings
+        </button>
       </div>{/if}
     {#if selected}
       <details class="configuration-group">
@@ -280,8 +288,10 @@
           onclick={() => {
             draft.set(['options', 'network'], undefined);
             onChange();
-          }}>Remove connection overrides</button
-        >{/if}
+          }}
+        >
+          Remove connection overrides
+        </button>{/if}
     </details>
     <details class="configuration-group advanced">
       <summary>Advanced configuration JSON</summary>

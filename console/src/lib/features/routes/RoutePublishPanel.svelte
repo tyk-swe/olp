@@ -125,9 +125,9 @@
         }}
       >
         <option value="">Choose an example</option>
-        {#each examples as example (example.key)}<option value={example.key}
-            >{example.label}</option
-          >{/each}
+        {#each examples as example (example.key)}<option value={example.key}>
+            {example.label}
+          </option>{/each}
       </select>
     {/if}
     <label for="simulation-request">Native request for inspection</label>
@@ -150,35 +150,37 @@
       type="button"
       onclick={() => editor.simulate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button
     >
+      {editor.busy === 'simulate' ? 'Simulating…' : 'Simulate order'}
+    </button>
     <button
       class="button button-secondary"
       type="button"
       onclick={() => editor.validate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'validate' ? 'Validating…' : 'Validate draft'}</button
     >
+      {editor.busy === 'validate' ? 'Validating…' : 'Validate draft'}
+    </button>
     <button
       class="button button-primary"
       type="button"
       onclick={() => editor.activate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'activate' ? 'Activating…' : 'Activate route'}</button
     >
+      {editor.busy === 'activate' ? 'Activating…' : 'Activate route'}
+    </button>
   {/if}
 
   {#if editor.activation}
     <div class="activation">
       <strong>Revision {editor.activation.revision} active</strong>
-      <span
-        >Runtime generation {editor.activation.runtime_generation
-          .sequence}</span
-      >
+      <span>
+        Runtime generation {editor.activation.runtime_generation.sequence}
+      </span>
 
-      <a href={resolve(`routes/${editor.activation.route_id}/revisions`)}
-        >View revision history</a
-      >
+      <a href={resolve(`routes/${editor.activation.route_id}/revisions`)}>
+        View revision history
+      </a>
     </div>
   {/if}
 </aside>

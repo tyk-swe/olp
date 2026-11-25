@@ -172,13 +172,16 @@
           class="button button-secondary"
           type="button"
           onclick={copyInvitation}
-          >{copied ? 'Link copied' : 'Copy invitation link'}</button
-        ><button
+        >
+          {copied ? 'Link copied' : 'Copy invitation link'}
+        </button><button
           class="button button-primary"
           type="button"
           data-autofocus
-          onclick={close}>I have shared it</button
+          onclick={close}
         >
+          I have shared it
+        </button>
         <span class="sr-only" aria-live="polite">
           {copied ? 'Invitation link copied to clipboard.' : ''}
         </span>
@@ -213,59 +216,63 @@
   emptyWhen={!invitations.data?.items.length && pagination.history.length === 0}
 >
   {#snippet empty()}
-    <EmptyState title="No invitations yet"
-      >Invite someone by email and choose their role.</EmptyState
-    >
+    <EmptyState title="No invitations yet">
+      Invite someone by email and choose their role.
+    </EmptyState>
   {/snippet}
   <ScrollTable label="Invitations">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th>Email / invited by</th><th>Role</th><th>Status</th><th
-            >Expires / created</th
-          ><th><span class="sr-only">Actions</span></th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th>Email / invited by</th><th>Role</th><th>Status</th><th>
+            Expires / created
+          </th><th><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
       <tbody>
         {#each invitations.data?.items ?? [] as invitation (invitation.id)}
           <tr>
-            <td
-              ><strong>{invitation.email}</strong><br /><small
-                >Invited by {invitedBy(invitation)}</small
-              ></td
-            ><td><span class="badge">{invitation.role}</span></td>
-            <td
-              ><span
+            <td>
+              <strong>{invitation.email}</strong><br /><small>
+                Invited by {invitedBy(invitation)}
+              </small>
+            </td><td><span class="badge">{invitation.role}</span></td>
+            <td>
+              <span
                 class:success={invitation.status === 'accepted'}
                 class:warning={invitation.status === 'pending'}
                 class:danger={invitation.status === 'revoked'}
-                class="badge">{invitation.status}</span
-              >{#if invitation.accepted_at}<br /><small
-                  >Accepted {formatDate(
+                class="badge"
+              >
+                {invitation.status}
+              </span>{#if invitation.accepted_at}<br /><small>
+                  Accepted {formatDate(
                     invitation.accepted_at
                   )}{#if invitation.accepted_by_email}
-                    by {invitation.accepted_by_email}{/if}</small
-                >{/if}{#if invitation.revoked_at}<br /><small
-                  >Revoked {formatDate(
+                    by {invitation.accepted_by_email}{/if}
+                </small>{/if}{#if invitation.revoked_at}<br /><small>
+                  Revoked {formatDate(
                     invitation.revoked_at
                   )}{#if invitation.revoked_by_email}
-                    by {invitation.revoked_by_email}{/if}</small
-                >{/if}</td
-            >
-            <td
-              >{formatDate(invitation.expires_at)}<br /><small
-                >Created {formatDate(invitation.created_at)}</small
-              ></td
-            >
-            <td
-              >{#if canManage && invitation.status === 'pending'}<button
+                    by {invitation.revoked_by_email}{/if}
+                </small>{/if}
+            </td>
+            <td>
+              {formatDate(invitation.expires_at)}<br /><small>
+                Created {formatDate(invitation.created_at)}
+              </small>
+            </td>
+            <td>
+              {#if canManage && invitation.status === 'pending'}<button
                   class="button button-secondary button-danger"
                   type="button"
                   onclick={() =>
                     removeInvitation(invitation.id, invitation.email)}
-                  disabled={write.busy}>Revoke</button
-                >{/if}</td
-            >
+                  disabled={write.busy}
+                >
+                  Revoke
+                </button>{/if}
+            </td>
           </tr>
         {/each}
       </tbody>

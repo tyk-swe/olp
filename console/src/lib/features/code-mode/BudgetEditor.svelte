@@ -83,26 +83,30 @@
     id="code-budget-route"
     bind:value={routeId}
     disabled={!!current}
-    ><option value="">All project routes</option
-    >{#each routes as route (route.id)}<option value={route.id}
-        >{route.slug}</option
-      >{/each}
+  >
+    <option value="">
+      All project routes
+    </option>{#each routes as route (route.id)}<option value={route.id}>
+        {route.slug}
+      </option>{/each}
     {#if routeId && !routes.some((r) => r.id === routeId)}
       <option value={routeId}>{routeId} · current selection</option>
-    {/if}</select
-  >
+    {/if}
+  </select>
   <label for="code-budget-key">Key scope</label><select
     id="code-budget-key"
     bind:value={keyId}
     disabled={!!current}
-    ><option value="">All project keys</option
-    >{#each projectKeysList as key (key.id)}<option value={key.id}
-        >{key.name}</option
-      >{/each}
+  >
+    <option value="">
+      All project keys
+    </option>{#each projectKeysList as key (key.id)}<option value={key.id}>
+        {key.name}
+      </option>{/each}
     {#if keyId && !projectKeysList.some((key) => key.id === keyId)}
       <option value={keyId}>{keyId} · current selection</option>
-    {/if}</select
-  >
+    {/if}
+  </select>
   <label for="code-daily">Daily hard token limit (UTC)</label><input
     id="code-daily"
     inputmode="numeric"
@@ -125,7 +129,7 @@
     erase reservations. Scope is immutable; all matching route, key and project
     budgets apply together.
   </p>
-  <label class="choice"
-    ><input type="checkbox" bind:checked={enabled} />Enabled</label
-  >
+  <label class="choice">
+    <input type="checkbox" bind:checked={enabled} />Enabled
+  </label>
 </ResourceEditorForm>

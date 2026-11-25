@@ -60,8 +60,9 @@
       <a
         class="button button-secondary"
         href={`${resolve('investigations/new')}?project=${encodeURIComponent(run.data.project_id)}&run=${encodeURIComponent(runID)}`}
-        >Save investigation</a
       >
+        Save investigation
+      </a>
     </p>
   {/if}
   <dl class="detail-list">
@@ -113,9 +114,9 @@
   {#if selectedStepID}
     {#if run.data.steps.some((step) => step.id === selectedStepID)}
       <p>
-        Referenced step <a href={`#step-${selectedStepID}`}
-          ><code>{selectedStepID}</code></a
-        >
+        Referenced step <a href={`#step-${selectedStepID}`}>
+          <code>{selectedStepID}</code>
+        </a>
       </p>
     {:else}
       <p>The referenced step is no longer available in this run.</p>
@@ -132,27 +133,30 @@
     {:else}
       <ScrollTable label="Run steps and attempts">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Step / tool</th><th scope="col">Attempt</th><th
-                scope="col">State / outcome</th
-              ><th scope="col">Observed cost / charge</th><th scope="col"
-                >Unresolved cost / charge</th
-              ><th scope="col">Started</th></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th scope="col">Step / tool</th><th scope="col">Attempt</th><th
+                scope="col"
+              >
+                State / outcome
+              </th><th scope="col">Observed cost / charge</th><th scope="col">
+                Unresolved cost / charge
+              </th><th scope="col">Started</th>
+            </tr>
+          </thead>
           <tbody>
             {#each run.data.steps as step (step.id)}
               <tr
                 id={`step-${step.id}`}
                 class:selected-evidence={step.id === selectedStepID}
               >
-                <td
-                  >{#if step.id === selectedStepID}<strong
-                      >Selected evidence</strong
-                    ><br /><code>{step.id}</code><br />{/if}{step.ordinal + 1}. {step.kind}{#if step.tool_alias}<br
-                    /><code>{step.tool_alias}</code>{/if}</td
-                >
+                <td>
+                  {#if step.id === selectedStepID}<strong>
+                      Selected evidence
+                    </strong><br /><code>{step.id}</code><br
+                    />{/if}{step.ordinal + 1}. {step.kind}{#if step.tool_alias}<br
+                    /><code>{step.tool_alias}</code>{/if}
+                </td>
                 <td><code>{step.dispatch_id}</code></td>
 
                 <td>
@@ -198,23 +202,25 @@
     {:else}
       <ScrollTable label="Run approvals">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Approval</th><th scope="col">Expires</th><th
-                scope="col">Consumed</th
-              ><th scope="col">Attempt</th></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th scope="col">Approval</th><th scope="col">Expires</th><th
+                scope="col"
+              >
+                Consumed
+              </th><th scope="col">Attempt</th>
+            </tr>
+          </thead>
           <tbody>
             {#each run.data.approvals as approval (approval.id)}
               <tr>
                 <td><code>{approval.id}</code></td>
                 <td>{formatDate(approval.expires_at)}</td>
-                <td
-                  >{approval.consumed_at
+                <td>
+                  {approval.consumed_at
                     ? formatDate(approval.consumed_at)
-                    : 'Not consumed'}</td
-                >
+                    : 'Not consumed'}
+                </td>
                 <td><code>{approval.dispatch_id ?? 'None'}</code></td>
               </tr>
             {/each}
@@ -234,21 +240,24 @@
     {:else}
       <ScrollTable label="Linked spans">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Trace / span</th><th scope="col">Attempt</th><th
-                scope="col">Category / status</th
-              ><th scope="col">Started</th><th scope="col">Ended</th></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th scope="col">Trace / span</th><th scope="col">Attempt</th><th
+                scope="col"
+              >
+                Category / status
+              </th><th scope="col">Started</th><th scope="col">Ended</th>
+            </tr>
+          </thead>
           <tbody>
             {#each spans.data.items as span (span.id)}
               <tr>
-                <td
-                  ><code>{span.trace_id}</code><br /><code>{span.span_id}</code
-                  >{#if span.parent_span_id}<br />Parent
-                    <code>{span.parent_span_id}</code>{/if}</td
-                >
+                <td>
+                  <code>{span.trace_id}</code><br /><code>
+                    {span.span_id}
+                  </code>{#if span.parent_span_id}<br />Parent
+                    <code>{span.parent_span_id}</code>{/if}
+                </td>
                 <td><code>{span.attempt_id ?? 'Run only'}</code></td>
                 <td>{stateLabel(span.category)} / {spanStatus[span.status]}</td>
                 <td>{spanTime(span.started_nanos)}</td>
@@ -264,21 +273,26 @@
         class="button button-secondary"
         type="button"
         disabled={!$cursor || spans.isFetching}
-        onclick={() => cursor.set(undefined)}>Newest</button
+        onclick={() => cursor.set(undefined)}
       >
+        Newest
+      </button>
       <button
         class="button button-secondary"
         type="button"
         disabled={!!spans.error || !spans.data?.nextCursor || spans.isFetching}
         onclick={() => cursor.set(spans.data?.nextCursor ?? undefined)}
-        >Older</button
       >
+        Older
+      </button>
       <button
         class="button button-secondary"
         type="button"
         disabled={spans.isFetching}
-        onclick={() => spans.refetch()}>Refresh</button
+        onclick={() => spans.refetch()}
       >
+        Refresh
+      </button>
     </nav>
   </section>
 {/if}

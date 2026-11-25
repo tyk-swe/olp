@@ -100,12 +100,13 @@
         <tbody>
           {#each visibleCredentials as value (value.id)}
             <tr>
-              <td><strong>{value.name}</strong><br /><code>{value.id}</code></td
-              >
-              <td
-                >{projects.find((item) => item.id === value.project_id)?.name ??
-                  value.project_id}</td
-              >
+              <td>
+                <strong>{value.name}</strong><br /><code>{value.id}</code>
+              </td>
+              <td>
+                {projects.find((item) => item.id === value.project_id)?.name ??
+                  value.project_id}
+              </td>
               <td>
                 <div class="page-actions">
                   {#if access.allows('DELETE /api/v1/guardrail-credentials/{credential_id}')}
@@ -130,31 +131,33 @@
   {/if}
   {#if access.allows('POST /api/v1/guardrail-credentials')}
     <form class="form-card credential-form" onsubmit={submit}>
-      <label class="form-field"
-        >Project<select
+      <label class="form-field">
+        Project<select
           required
           bind:value={project}
           disabled={Boolean(projectID)}
-          ><option value="">Choose project</option
-          >{#each projects as item (item.id)}<option value={item.id}
-              >{item.name}</option
-            >{/each}</select
-        ></label
-      >
-      <label class="form-field"
-        >New credential name<input required bind:value={name} /></label
-      >
-      <label class="form-field full"
-        >Secret fields as JSON<textarea
+        >
+          <option value="">
+            Choose project
+          </option>{#each projects as item (item.id)}<option value={item.id}>
+              {item.name}
+            </option>{/each}
+        </select>
+      </label>
+      <label class="form-field">
+        New credential name<input required bind:value={name} />
+      </label>
+      <label class="form-field full">
+        Secret fields as JSON<textarea
           required
           autocomplete="off"
           spellcheck="false"
-          bind:value={credential}></textarea></label
-      >
+          bind:value={credential}></textarea>
+      </label>
       <div class="page-actions">
-        <button class="button button-primary" disabled={action.busy}
-          >Create credential</button
-        >
+        <button class="button button-primary" disabled={action.busy}>
+          Create credential
+        </button>
       </div>
     </form>
   {/if}

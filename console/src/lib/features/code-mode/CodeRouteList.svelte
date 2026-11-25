@@ -39,19 +39,24 @@
           class="button button-secondary"
           type="button"
           disabled={busy}
-          onclick={() => onEdit(route)}>Edit draft</button
-        ><button
+          onclick={() => onEdit(route)}
+        >
+          Edit draft
+        </button><button
           class="button button-primary"
           type="button"
           disabled={busy}
-          onclick={() => onPublish(route)}>Publish route</button
-        >{/if}<button
+          onclick={() => onPublish(route)}
+        >
+          Publish route
+        </button>{/if}<button
         class="button button-secondary"
         type="button"
         aria-expanded={detail === route.id}
         onclick={() => (detail = detail === route.id ? '' : route.id)}
-        >Revisions and client setup</button
       >
+        Revisions and client setup
+      </button>
     </div>
     <dl>
       <dt>Base path</dt>

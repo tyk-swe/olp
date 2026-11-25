@@ -311,14 +311,16 @@
     bind:value={poolId}
     onchange={() => (researchAccount = '')}
     required
-    ><option value="">Choose a pool</option
-    >{#each pools as pool (pool.id)}<option value={pool.id}
-        >{pool.name} · {pool.kind}</option
-      >{/each}
+  >
+    <option value="">
+      Choose a pool
+    </option>{#each pools as pool (pool.id)}<option value={pool.id}>
+        {pool.name} · {pool.kind}
+      </option>{/each}
     {#if poolId && !pools.some((p) => p.id === poolId)}
       <option value={poolId}>{poolId} · current selection</option>
-    {/if}</select
-  >
+    {/if}
+  </select>
   <p>
     Saving changes only the draft. Publish to update the immutable route and its
     frozen provider connections. Republish after connection changes or adding an
@@ -332,10 +334,10 @@
       bind:value={maxBodyBytes}
       placeholder="Installation limit"
     />
-    <small
-      >Limits encoded and decoded requests and client WebSocket messages; cannot
-      raise installation limits.</small
-    >
+    <small>
+      Limits encoded and decoded requests and client WebSocket messages; cannot
+      raise installation limits.
+    </small>
   </div>
   <CodePaidRoutingFields
     bind:paidParticipation
@@ -373,7 +375,7 @@
     {researchAccounts}
     {services}
   />
-  <label class="choice"
-    ><input type="checkbox" bind:checked={enabled} />Enabled in next publication</label
-  >
+  <label class="choice">
+    <input type="checkbox" bind:checked={enabled} />Enabled in next publication
+  </label>
 </ResourceEditorForm>

@@ -30,14 +30,14 @@
     <ul>
       {#each model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}
         <li>
-          <code
-            >{capability.operation}/{capability.surface}/{capability.mode}</code
-          >
+          <code>
+            {capability.operation}/{capability.surface}/{capability.mode}
+          </code>
           · {scope(capability.source)}
           {#if capability.source === 'certified' && capability.certified_at}
-            · <time datetime={capability.certified_at}
-              >{formatDate(capability.certified_at)}</time
-            >
+            · <time datetime={capability.certified_at}>
+              {formatDate(capability.certified_at)}
+            </time>
           {/if}
         </li>
       {/each}

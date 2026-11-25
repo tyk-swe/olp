@@ -107,8 +107,10 @@
             class="axis-label"
             x={bounds.left - 8}
             y={tick.y + 4}
-            text-anchor="end">{formatCompact(tick.value)}</text
+            text-anchor="end"
           >
+            {formatCompact(tick.value)}
+          </text>
         {/each}
         <g class="plot">
           <polygon
@@ -121,16 +123,18 @@
             <circle class="point" cx={point.x} cy={point.y} r="2.5" />
           {/each}
         </g>
-        <text class="axis-label" x={bounds.left} y={bounds.height - 8}
-          >{bucketLabel(points[0].bucket)}</text
-        >
+        <text class="axis-label" x={bounds.left} y={bounds.height - 8}>
+          {bucketLabel(points[0].bucket)}
+        </text>
         {#if points.length > 1}
           <text
             class="axis-label"
             x={bounds.width - bounds.right}
             y={bounds.height - 8}
-            text-anchor="end">{bucketLabel(points.at(-1)?.bucket)}</text
+            text-anchor="end"
           >
+            {bucketLabel(points.at(-1)?.bucket)}
+          </text>
         {/if}
       </svg>
     </div>
@@ -138,36 +142,41 @@
       <summary>View chart data</summary>
       <ScrollTable label="Chart data table">
         <table class="data-table">
-          <caption class="sr-only"
-            >Exact usage values shown in the time-series chart</caption
-          >
-          <thead
-            ><tr
-              ><th scope="col">Bucket</th><th scope="col">Requests</th><th
-                scope="col">Input tokens</th
-              ><th scope="col">Cached input</th><th scope="col">Cache write</th
-              ><th scope="col">Output tokens</th><th scope="col"
-                >Estimated cost</th
-              ><th scope="col">Status</th></tr
-            ></thead
-          >
+          <caption class="sr-only">
+            Exact usage values shown in the time-series chart
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Bucket</th><th scope="col">Requests</th><th
+                scope="col"
+              >
+                Input tokens
+              </th><th scope="col">Cached input</th><th scope="col">
+                Cache write
+              </th><th scope="col">Output tokens</th><th scope="col">
+                Estimated cost
+              </th><th scope="col">Status</th>
+            </tr>
+          </thead>
           <tbody>
             {#each points as point (point.bucket)}
-              <tr
-                ><td>{bucketLabel(point.bucket)}</td><td
-                  >{point.request_count}</td
-                ><td>{point.input_tokens}</td><td
-                  >{point.cached_input_tokens ?? '—'}</td
-                ><td>{point.cache_write_input_tokens ?? '—'}</td><td
-                  >{point.output_tokens}</td
-                ><td>{formatCost(point.estimated_cost, point.currency)}</td><td
-                  >{point.incomplete_count > 0
+              <tr>
+                <td>{bucketLabel(point.bucket)}</td><td>
+                  {point.request_count}
+                </td><td>{point.input_tokens}</td><td>
+                  {point.cached_input_tokens ?? '—'}
+                </td><td>{point.cache_write_input_tokens ?? '—'}</td><td>
+                  {point.output_tokens}
+                </td><td>
+                  {formatCost(point.estimated_cost, point.currency)}
+                </td><td>
+                  {point.incomplete_count > 0
                     ? `${point.incomplete_count} incomplete`
                     : point.unpriced_count > 0
                       ? `${point.unpriced_count} unpriced`
-                      : 'Complete'}</td
-                ></tr
-              >
+                      : 'Complete'}
+                </td>
+              </tr>
             {/each}
           </tbody>
         </table>

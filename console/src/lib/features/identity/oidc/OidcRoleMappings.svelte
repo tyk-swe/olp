@@ -51,13 +51,15 @@
       type="button"
       onclick={onLinkIdentity}
       disabled={!oidcEnabled || busy}
-      >{busyKey === 'oidc-link' ? 'Redirecting…' : 'Link my identity'}</button
-    ><button
+    >
+      {busyKey === 'oidc-link' ? 'Redirecting…' : 'Link my identity'}
+    </button><button
       class="button button-primary"
       type="submit"
       disabled={!canManage || busy}
-      >{busyKey === 'oidc-save' ? 'Validating…' : 'Save and validate'}</button
     >
+      {busyKey === 'oidc-save' ? 'Validating…' : 'Save and validate'}
+    </button>
   </div>
 </section>
 

@@ -61,39 +61,44 @@
     it to their configured endpoints.
   </p>
   <form onsubmit={evaluate}>
-    <label class="form-field"
-      >Policy revision<select required bind:value={evaluatePolicy}
-        ><option value="">Choose a policy</option
-        >{#each policies as value (value.policy_id)}<option
+    <label class="form-field">
+      Policy revision<select required bind:value={evaluatePolicy}>
+        <option value="">
+          Choose a policy
+        </option>{#each policies as value (value.policy_id)}<option
             value={value.revision_id}
-            >{value.name} · Revision {value.revision}</option
-          >{/each}</select
-      ></label
+          >
+            {value.name} · Revision {value.revision}
+          </option>{/each}
+      </select>
+    </label>
+    <label class="form-field">
+      Phase<select bind:value={phase}>
+        {#each phases as value (value)}<option {value}>{value}</option>{/each}
+      </select>
+    </label>
+    <label class="form-field">
+      Text<textarea rows="8" required bind:value={text}></textarea>
+    </label><button
+      class="button button-secondary"
+      disabled={busy || !canEvaluate}
     >
-    <label class="form-field"
-      >Phase<select bind:value={phase}
-        >{#each phases as value (value)}<option {value}>{value}</option
-          >{/each}</select
-      ></label
-    >
-    <label class="form-field"
-      >Text<textarea rows="8" required bind:value={text}></textarea></label
-    ><button class="button button-secondary" disabled={busy || !canEvaluate}
-      >Evaluate</button
-    ><button
+      Evaluate
+    </button><button
       class="button button-secondary"
       type="button"
       onclick={() => {
         text = '';
         result = null;
-      }}>Clear content</button
+      }}
     >
+      Clear content
+    </button>
   </form>
   {#if result}<div role="status">
       <h3>{result.blocked ? 'Blocked' : 'Allowed'}</h3>
       <ul>
-        {#each result.decisions as decision (`${decision.guardrail_id}-${decision.phase}-${decision.outcome}`)}<li
-          >
+        {#each result.decisions as decision (`${decision.guardrail_id}-${decision.phase}-${decision.outcome}`)}<li>
             {decision.guardrail_id} · {decision.phase} · {decision.outcome} · {(
               decision.categories ?? []
             ).join(', ')}

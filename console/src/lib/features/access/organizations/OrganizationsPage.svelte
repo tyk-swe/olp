@@ -144,17 +144,17 @@
       );
     }}
   >
-    <label class="form-field"
-      >New organization name<input
+    <label class="form-field">
+      New organization name<input
         required
         maxlength="100"
         bind:value={newName}
         disabled={write.busy}
-      /></label
-    >
-    <button class="button button-primary" disabled={write.busy}
-      >Create organization</button
-    >
+      />
+    </label>
+    <button class="button button-primary" disabled={write.busy}>
+      Create organization
+    </button>
   </form>
 {/if}
 <QueryView
@@ -164,19 +164,22 @@
   emptyWhen={!organization}
 >
   {#snippet empty()}
-    <EmptyState title="No organizations yet"
-      >Organizations group projects and people under one owner.</EmptyState
-    >
+    <EmptyState title="No organizations yet">
+      Organizations group projects and people under one owner.
+    </EmptyState>
   {/snippet}
   {#if organization}
-    <label class="form-field"
-      >Organization<select bind:value={selected}
-        ><option value="" disabled>Choose an organization</option
-        >{#each organizations.data ?? [] as o (o.id)}<option value={o.id}
-            >{o.name}</option
-          >{/each}</select
-      ></label
-    >
+    <label class="form-field">
+      Organization<select bind:value={selected}>
+        <option value="" disabled>
+          Choose an organization
+        </option>{#each organizations.data ?? [] as o (o.id)}<option
+            value={o.id}
+          >
+            {o.name}
+          </option>{/each}
+      </select>
+    </label>
     <p>
       {editable
         ? 'You can manage this organization.'
@@ -194,17 +197,17 @@
           );
         }}
       >
-        <label class="form-field"
-          >Rename organization<input
+        <label class="form-field">
+          Rename organization<input
             required
             maxlength="100"
             placeholder={organization.name}
             bind:value={name}
             disabled={write.busy}
-          /></label
-        ><button class="button button-secondary" disabled={write.busy}
-          >Save name</button
-        >
+          />
+        </label><button class="button button-secondary" disabled={write.busy}>
+          Save name
+        </button>
       </form>{/if}
     {#key selected}<AggregateBudgetPanel
         organizationId={selected}
@@ -269,24 +272,24 @@
             );
           }}
         >
-          <label class="form-field"
-            >New project name<input
+          <label class="form-field">
+            New project name<input
               required
               maxlength="100"
               bind:value={projectName}
               disabled={write.busy}
-            /></label
-          ><button class="button button-primary" disabled={write.busy}
-            >Create organization project</button
-          >
+            />
+          </label><button class="button button-primary" disabled={write.busy}>
+            Create organization project
+          </button>
         </form>{/if}
-      {#if project}<label class="form-field"
-          >Organization project<select bind:value={projectId}
-            >{#each projects.data ?? [] as p (p.id)}<option value={p.id}
-                >{p.name}</option
-              >{/each}</select
-          ></label
-        >
+      {#if project}<label class="form-field">
+          Organization project<select bind:value={projectId}>
+            {#each projects.data ?? [] as p (p.id)}<option value={p.id}>
+                {p.name}
+              </option>{/each}
+          </select>
+        </label>
         <p>
           Use Project policies, API keys and Notifications to manage this
           project's controls.
@@ -308,17 +311,20 @@
               );
             }}
           >
-            <label class="form-field"
-              >Rename project<input
+            <label class="form-field">
+              Rename project<input
                 required
                 maxlength="100"
                 placeholder={project.name}
                 bind:value={renameProject}
                 disabled={write.busy}
-              /></label
-            ><button class="button button-secondary" disabled={write.busy}
-              >Save project name</button
+              />
+            </label><button
+              class="button button-secondary"
+              disabled={write.busy}
             >
+              Save project name
+            </button>
           </form>{/if}
         <DirectProjectMembers
           members={directMembers}

@@ -68,8 +68,10 @@
     The discovered models could not be loaded. <button
       class="button button-secondary"
       type="button"
-      onclick={onRetryModels}>Retry</button
+      onclick={onRetryModels}
     >
+      Retry
+    </button>
   </div>
 {:else if modelsPending}
   <div class="loading-state" role="status">Loading discovered models…</div>
@@ -90,9 +92,9 @@
             <td>
               <strong>{model.display_name}</strong><br />
               <code>{model.upstream_model}</code>
-              {#if model.discovered_at}<br /><small class="discovered"
-                  >Discovered {formatDate(model.discovered_at)}</small
-                >{/if}
+              {#if model.discovered_at}<br /><small class="discovered">
+                  Discovered {formatDate(model.discovered_at)}
+                </small>{/if}
             </td>
             <td>
               <CapabilityReview
@@ -113,18 +115,20 @@
                   type="button"
                   onclick={() => onCertify(model.id)}
                   disabled={disabled || !model.capabilities.length}
-                  >{busy === `certify-${model.id}`
-                    ? 'Server-certifying…'
-                    : 'Server-certify capabilities'}</button
                 >
+                  {busy === `certify-${model.id}`
+                    ? 'Server-certifying…'
+                    : 'Server-certify capabilities'}
+                </button>
                 {#if certificationResults[model.id]}
                   {@const certification = certificationResults[model.id]}
                   <span
                     class:success={certification.status === 'succeeded'}
                     class:warning={certification.status !== 'succeeded'}
-                    >{certification.certified_count}/{certification.attempted_count}
-                    certified</span
                   >
+                    {certification.certified_count}/{certification.attempted_count}
+                    certified
+                  </span>
                 {/if}
               </div>
             </td>

@@ -9,8 +9,10 @@
       <button
         type="button"
         aria-label="Dismiss"
-        onclick={() => toasts.dismiss(toast.id)}>×</button
+        onclick={() => toasts.dismiss(toast.id)}
       >
+        ×
+      </button>
     </div>
   {/each}
 </div>

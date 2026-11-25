@@ -45,8 +45,10 @@
 {#snippet refresh()}<button
     class="button button-secondary"
     disabled={catalog.isFetching}
-    onclick={() => catalog.refetch()}>Refresh catalog</button
-  >{/snippet}
+    onclick={() => catalog.refetch()}
+  >
+    Refresh catalog
+  </button>{/snippet}
 {#if publicProjectId}<PageHeader
     title="Model catalog"
     description="Published routes shared by this project’s owner, with capabilities and SDK examples."
@@ -60,18 +62,18 @@
     {@render refresh()}
   </div>
 {/if}
-<label class="catalog-search"
-  >Find a route<input
+<label class="catalog-search">
+  Find a route<input
     class="filter-control"
     type="search"
     bind:value={search}
     placeholder="Route name"
-  /></label
->
+  />
+</label>
 {#if catalog.isPending}<p role="status">Loading the model catalog…</p>
-{:else if catalog.isError}<Callout tone="danger"
-    >{errorMessage(catalog.error)}</Callout
-  >
+{:else if catalog.isError}<Callout tone="danger">
+    {errorMessage(catalog.error)}
+  </Callout>
 {:else if models.length === 0}<EmptyState title="No published routes">
     {search.trim()
       ? 'No published route matches this search.'
@@ -177,8 +179,9 @@
           <summary>{sample.sdk} SDK · {sample.operation}</summary><button
             class="button button-secondary"
             onclick={() => copy(sample.code, `${model.id} ${sample.sdk}`)}
-            >Copy {sample.sdk} example</button
           >
+            Copy {sample.sdk} example
+          </button>
           <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the complete example.) -->
           <pre
             role="region"

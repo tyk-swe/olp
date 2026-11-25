@@ -64,32 +64,32 @@
 
 <fieldset disabled={locked}>
   <legend>Caller-paid usage</legend>
-  <label
-    ><input
+  <label>
+    <input
       type="checkbox"
       bind:checked={editor.behavior.caller_cost_exempt}
       onchange={() => editor.touch()}
-    /> Exempt caller-paid attempts from cost budgets</label
-  >
-  <small
-    >All foreground targets must use caller credentials. Usage and prices remain
+    /> Exempt caller-paid attempts from cost budgets
+  </label>
+  <small>
+    All foreground targets must use caller credentials. Usage and prices remain
     visible; request, token and concurrency limits still apply. Fallback and
-    selector routes must use the same policy.</small
-  >
+    selector routes must use the same policy.
+  </small>
 </fieldset>
 <fieldset disabled={locked}>
   <legend>Provider-fetched documents</legend>
-  <label
-    ><input
+  <label>
+    <input
       type="checkbox"
       bind:checked={editor.behavior.provider_fetched_documents}
       onchange={() => editor.touch()}
-    /> Allow the provider to fetch https document URLs named by callers</label
-  >
-  <small
-    >The gateway never fetches document bytes itself. Leave this off unless this
-    route is meant to send caller-named document URLs to the provider.</small
-  >
+    /> Allow the provider to fetch https document URLs named by callers
+  </label>
+  <small>
+    The gateway never fetches document bytes itself. Leave this off unless this
+    route is meant to send caller-named document URLs to the provider.
+  </small>
 </fieldset>
 <fieldset disabled={locked}>
   <legend>Request size</legend>
@@ -112,10 +112,10 @@
       }}
       aria-describedby="route-max-body-help"
     />
-    <small id="route-max-body-help"
-      >Lowers the installation limit for JSON, uploads and client WebSocket
-      messages. Empty inherits the installation limit.</small
-    >
+    <small id="route-max-body-help">
+      Lowers the installation limit for JSON, uploads and client WebSocket
+      messages. Empty inherits the installation limit.
+    </small>
   </div>
 </fieldset>
 
@@ -146,14 +146,14 @@
           aria-label={`Conditions for fallback ${index + 1}`}
         >
           {#each fallbackConditions as [condition, label] (condition)}
-            <label class="check"
-              ><input
+            <label class="check">
+              <input
                 type="checkbox"
                 checked={fallback.on.includes(condition)}
                 onchange={() => toggleCondition(index, condition)}
                 disabled={locked}
-              />{label}</label
-            >
+              />{label}
+            </label>
           {/each}
         </div>
         <button
@@ -161,8 +161,10 @@
           class="secondary"
           aria-label={`Remove fallback ${index + 1}`}
           onclick={() => removeFallback(index)}
-          disabled={locked}>Remove</button
+          disabled={locked}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
@@ -170,8 +172,9 @@
       class="secondary"
       onclick={addFallback}
       disabled={locked || editor.behavior.fallbacks.length >= 4}
-      >Add fallback</button
     >
+      Add fallback
+    </button>
   </fieldset>
 
   <fieldset>
@@ -183,14 +186,14 @@
     {#each retryClasses as [kind, label] (kind)}
       {@const rule = editor.behavior.retry[kind]}
       <div class="retry">
-        <label class="check"
-          ><input
+        <label class="check">
+          <input
             type="checkbox"
             checked={Boolean(rule)}
             onchange={(event) => toggleRetry(kind, event.currentTarget.checked)}
             disabled={locked}
-          />{label}</label
-        >
+          />{label}
+        </label>
         {#if rule}
           <div class="form-field">
             <label for={`retry-${kind}-count`}>Retries</label><input
@@ -225,14 +228,14 @@
               disabled={locked}
             />
           </div>
-          <label class="check"
-            ><input
+          <label class="check">
+            <input
               type="checkbox"
               bind:checked={rule.respect_retry_after}
               onchange={editor.touch}
               disabled={locked}
-            />Honor Retry-After</label
-          >
+            />Honor Retry-After
+          </label>
         {/if}
       </div>
     {/each}
@@ -251,10 +254,10 @@
         <option value="cache_key">Prompt cache key</option>
         <option value="label">Attribution label</option>
       </select>
-      <small id="affinity-help"
-        >Keeps one session on the same target and slot while it stays eligible,
-        raising provider prompt-cache hits.</small
-      >
+      <small id="affinity-help">
+        Keeps one session on the same target and slot while it stays eligible,
+        raising provider prompt-cache hits.
+      </small>
     </div>
     {#if editor.behavior.affinity?.source === 'label'}
       <div class="form-field">
@@ -301,14 +304,14 @@
       disabled={locked}
       aria-describedby="selectors-help"
       aria-invalid={Boolean(selectorProblem)}></textarea>
-    <small id="selectors-help"
-      >The first selector whose predicate matches narrows the route to targets
+    <small id="selectors-help">
+      The first selector whose predicate matches narrows the route to targets
       carrying its tags, or delegates to another route. For example
-      <code
-        >[{'{'}"id": "short", "when": {'{'}"max_input_tokens": 2000}, "tags":
-        ["small"]}]</code
-      >. Simulation explains which selector matched.</small
-    >
+      <code>
+        [{'{'}"id": "short", "when": {'{'}"max_input_tokens": 2000}, "tags":
+        ["small"]}]
+      </code>. Simulation explains which selector matched.
+    </small>
     {#if selectorProblem}<p class="inline-problem" role="alert">
         {selectorProblem}
       </p>{/if}

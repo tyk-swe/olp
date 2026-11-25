@@ -62,10 +62,11 @@
   <label for="calc-provider">Provider</label><select
     id="calc-provider"
     bind:value={providerId}
-    >{#each providers as provider (provider.id)}<option value={provider.id}
-        >{provider.name}</option
-      >{/each}</select
   >
+    {#each providers as provider (provider.id)}<option value={provider.id}>
+        {provider.name}
+      </option>{/each}
+  </select>
   <label for="calc-model">Model</label><input
     id="calc-model"
     bind:value={model}
@@ -73,10 +74,11 @@
   <label for="calc-operation">Operation</label><select
     id="calc-operation"
     bind:value={operation}
-    >{#each operationKinds as option (option)}<option value={option}
-        >{option.replaceAll('_', ' ')}</option
-      >{/each}</select
   >
+    {#each operationKinds as option (option)}<option value={option}>
+        {option.replaceAll('_', ' ')}
+      </option>{/each}
+  </select>
   <label for="calc-input">Input tokens</label><input
     id="calc-input"
     bind:value={inputTokens}
@@ -141,8 +143,9 @@
     />
     {#each toolCalls as row, index (index)}
       <div class="tool-call-row">
-        <label class="sr-only" for="calc-tool-name-{index}">Tool name</label
-        ><input
+        <label class="sr-only" for="calc-tool-name-{index}">
+          Tool name
+        </label><input
           id="calc-tool-name-{index}"
           bind:value={row.name}
           placeholder="tool name"
@@ -157,16 +160,19 @@
           type="button"
           class="link"
           aria-label="Remove tool call"
-          onclick={() => toolCalls.splice(index, 1)}>Remove</button
+          onclick={() => toolCalls.splice(index, 1)}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
       type="button"
       class="link"
       onclick={() => toolCalls.push({ name: '', count: '1' })}
-      >Add tool call</button
     >
+      Add tool call
+    </button>
   </details>
   <label for="calc-media">Media units</label><input
     id="calc-media"
@@ -181,20 +187,22 @@
   <label for="calc-project">Consumer project</label><select
     id="calc-project"
     bind:value={projectId}
-    ><option value="">Installation card</option
-    >{#each projects as project (project.id)}<option value={project.id}
-        >{project.name}</option
-      >{/each}</select
   >
-  <label class="check"
-    ><input type="checkbox" bind:checked={batch} />Batch discount applies</label
-  >
-  <label class="check"
-    ><input type="checkbox" bind:checked={successful} />Successful attempt</label
-  >
-  <button disabled={busy} onclick={onSubmit}
-    >{busy ? 'Pricing…' : 'Quote'}</button
-  >
+    <option value="">
+      Installation card
+    </option>{#each projects as project (project.id)}<option value={project.id}>
+        {project.name}
+      </option>{/each}
+  </select>
+  <label class="check">
+    <input type="checkbox" bind:checked={batch} />Batch discount applies
+  </label>
+  <label class="check">
+    <input type="checkbox" bind:checked={successful} />Successful attempt
+  </label>
+  <button disabled={busy} onclick={onSubmit}>
+    {busy ? 'Pricing…' : 'Quote'}
+  </button>
 </div>
 
 <style>

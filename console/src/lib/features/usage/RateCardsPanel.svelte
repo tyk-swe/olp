@@ -160,9 +160,9 @@
       </p>
     </div>
   </div>
-  {#if !canEdit}<ReadOnlyNote
-      >Your role can view rate cards but not publish them.</ReadOnlyNote
-    >{/if}
+  {#if !canEdit}<ReadOnlyNote>
+      Your role can view rate cards but not publish them.
+    </ReadOnlyNote>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card card-form" onsubmit={addCard}>
@@ -172,10 +172,13 @@
           id="card-owner-kind"
           bind:value={ownerKind}
           disabled={!canEdit}
-          ><option value="installation">Installation</option><option
-            value="organization">Organization</option
-          ><option value="project">Project</option></select
         >
+          <option value="installation">Installation</option><option
+            value="organization"
+          >
+            Organization
+          </option><option value="project">Project</option>
+        </select>
       </div>
       {#if ownerKind === 'organization'}
         <div class="form-field">
@@ -183,11 +186,15 @@
             id="card-organization"
             bind:value={ownerOrganization}
             disabled={!canEdit}
-            ><option value="">Choose an organization</option
-            >{#each organizations.data ?? [] as org (org.id)}<option
-                value={org.id}>{org.name}</option
-              >{/each}</select
           >
+            <option value="">
+              Choose an organization
+            </option>{#each organizations.data ?? [] as org (org.id)}<option
+                value={org.id}
+              >
+                {org.name}
+              </option>{/each}
+          </select>
         </div>
       {:else if ownerKind === 'project'}
         <div class="form-field">
@@ -195,11 +202,15 @@
             id="card-project"
             bind:value={ownerProject}
             disabled={!canEdit}
-            ><option value="">Choose a project</option
-            >{#each projects.data ?? [] as project (project.id)}<option
-                value={project.id}>{project.name}</option
-              >{/each}</select
           >
+            <option value="">
+              Choose a project
+            </option>{#each projects.data ?? [] as project (project.id)}<option
+                value={project.id}
+              >
+                {project.name}
+              </option>{/each}
+          </select>
         </div>
       {/if}
     </div>
@@ -207,45 +218,49 @@
       class="button button-primary"
       type="submit"
       disabled={!canEdit || create.busy}
-      >{create.busy ? 'Creating…' : 'Create card'}</button
     >
+      {create.busy ? 'Creating…' : 'Create card'}
+    </button>
   </form>
   {#if cards.isPending}<div class="loading-state" role="status">
       Loading rate cards…
     </div>
   {:else if cards.isError}<div class="inline-problem" role="alert">
       {errorMessage(cards.error)}
-      <button class="text-button" onclick={() => cards.refetch()}
-        >Try again</button
-      >
+      <button class="text-button" onclick={() => cards.refetch()}>
+        Try again
+      </button>
     </div>
   {:else if (cards.data?.items ?? []).length === 0}
-    <EmptyState title="No rate cards yet"
-      >A rate card sets what consumers are charged, separate from what the
-      provider costs you.</EmptyState
-    >
+    <EmptyState title="No rate cards yet">
+      A rate card sets what consumers are charged, separate from what the
+      provider costs you.
+    </EmptyState>
   {:else}
     <ScrollTable label="Rate cards">
       <table class="data-table">
         <caption class="sr-only">Rate cards by owner</caption>
-        <thead
-          ><tr
-            ><th scope="col">Owner</th><th scope="col">Revisions</th><th
-              scope="col">Created</th
-            ><th scope="col">Actions</th></tr
-          ></thead
-        >
-        <tbody
-          >{#each cards.data?.items ?? [] as card (card.id)}<tr>
+        <thead>
+          <tr>
+            <th scope="col">Owner</th><th scope="col">Revisions</th><th
+              scope="col"
+            >
+              Created
+            </th><th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each cards.data?.items ?? [] as card (card.id)}<tr>
               <td>{ownerText(card)}</td>
-              <td
-                >{#each card.revisions ?? [] as revision (revision.id)}<span
+              <td>
+                {#each card.revisions ?? [] as revision (revision.id)}<span
                     class="mono"
-                    >r{revision.revision} ×{revision.markup}
-                    {formatDate(revision.effective_at)}</span
-                  ><br
-                  />{/each}{#if (card.revisions ?? []).length === 0}—{/if}</td
-              >
+                  >
+                    r{revision.revision} ×{revision.markup}
+                    {formatDate(revision.effective_at)}
+                  </span><br
+                  />{/each}{#if (card.revisions ?? []).length === 0}—{/if}
+              </td>
               <td>{formatDate(card.created_at)}</td>
               <td>
                 <button
@@ -253,10 +268,9 @@
                   type="button"
                   disabled={!canEdit || publish.busy}
                   onclick={() => startPublish(card)}
-                  >{publishCardId === card.id
-                    ? 'Close'
-                    : 'Publish revision'}</button
                 >
+                  {publishCardId === card.id ? 'Close' : 'Publish revision'}
+                </button>
               </td>
             </tr>
             {#if publishCardId === card.id}
@@ -276,8 +290,8 @@
                 </td>
               </tr>
             {/if}
-          {/each}</tbody
-        >
+          {/each}
+        </tbody>
       </table>
     </ScrollTable>
     <CursorPagination

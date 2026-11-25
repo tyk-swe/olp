@@ -17,8 +17,8 @@
 
 <p class="inline-problem" role="alert">
   {errorMessage(error)}
-  <button class="text-button" type="button" onclick={onRetry}
-    >{retryLabel}</button
-  >
+  <button class="text-button" type="button" onclick={onRetry}>
+    {retryLabel}
+  </button>
   {@render children?.()}
 </p>

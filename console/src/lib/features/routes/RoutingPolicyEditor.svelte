@@ -213,8 +213,10 @@
   {#if policy.isError}<p class="inline-problem" role="alert">
       Policy could not be loaded. <button
         type="button"
-        onclick={() => policy.refetch()}>Retry</button
+        onclick={() => policy.refetch()}
       >
+        Retry
+      </button>
     </p>{/if}
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if invalidSections}<p class="inline-problem" role="alert">
@@ -222,9 +224,9 @@
     </p>{/if}
   {#if conflict || error || invalidSections}<p>
       Your input is preserved. Reload to use the latest saved policy.
-      <button type="button" disabled={busy} onclick={reload}
-        >Reload policy</button
-      >
+      <button type="button" disabled={busy} onclick={reload}>
+        Reload policy
+      </button>
     </p>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   {#if policy.data}
@@ -274,8 +276,9 @@
             class="button button-primary"
             type="submit"
             disabled={conflict || invalidSections}
-            >{busy ? 'Saving…' : 'Save routing policy'}</button
-          >{/if}
+          >
+            {busy ? 'Saving…' : 'Save routing policy'}
+          </button>{/if}
       </fieldset>
     </form>
   {/if}
