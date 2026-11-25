@@ -122,7 +122,7 @@
     upload = false;
     body = query = '{}';
     result = '';
-    mutation.reset();
+    mutation.error = '';
     clearDownload();
   }
 

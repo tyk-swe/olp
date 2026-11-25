@@ -278,6 +278,7 @@ describe('resource metadata extraction and validation helpers', () => {
       '{broken',
       '[]',
       '{"unknown":"x"}',
+      '{"":"x","text":"content"}',
       '{"text":123}',
       '{"search":["ok",1]}',
       '{"metadata":{"tenant":42}}'

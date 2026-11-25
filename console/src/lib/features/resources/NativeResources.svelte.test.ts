@@ -103,7 +103,7 @@ function submitForm(target: HTMLElement) {
 }
 
 describe('NativeResources', () => {
-  it('reuses idempotency keys across equivalent retries, rotates on key change, captures gateway IDs, and notifies on success', async () => {
+  it('reuses idempotency keys after switching actions, rotates on key change, captures gateway IDs, and notifies on success', async () => {
     const recoveryId = `fine_tuning_job_${hex32('1')}`;
     const createdId = `fine_tuning_job_${hex32('2')}`;
     const gatewayCalls: {
@@ -160,7 +160,15 @@ describe('NativeResources', () => {
     const firstKey = gatewayCalls[0]?.key;
     expect(firstKey).toBeTruthy();
 
-    setValue(bodyInput, '{ "a": 1, "b": 2 }');
+    setValue(actionSelect, 'GET /v1/fine_tuning/jobs/{id}', 'change');
+    expect(control<HTMLInputElement>('fine tuning job ID')?.value).toBe(
+      recoveryId
+    );
+    setValue(actionSelect, 'POST /v1/fine_tuning/jobs', 'change');
+    setValue(
+      control<HTMLTextAreaElement>('Request body')!,
+      '{ "a": 1, "b": 2 }'
+    );
     submitForm(target);
     await eventually(() => expect(gatewayCalls).toHaveLength(2));
     expect(gatewayCalls[1].key).toBe(firstKey);

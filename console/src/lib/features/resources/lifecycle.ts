@@ -269,7 +269,7 @@ function parseRetrievalBindingFields(
     };
   const source = parsed.value;
   const unknownKey = Object.keys(source).find((k) => !fieldMappingKeys.has(k));
-  if (unknownKey)
+  if (unknownKey !== undefined)
     return { ok: false, message: `Unknown field mapping key "${unknownKey}".` };
   const badString = stringFieldKeys.find(
     (k) => Object.hasOwn(source, k) && typeof source[k] !== 'string'

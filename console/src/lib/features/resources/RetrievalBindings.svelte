@@ -87,7 +87,7 @@
       populate(null);
       return;
     }
-    if (!writeAction.conflict) writeAction.reset();
+    if (!writeAction.conflict) writeAction.error = '';
     await readAction.run(
       () => getRetrievalBinding(id),
       (value) => {

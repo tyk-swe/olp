@@ -247,6 +247,67 @@ it('handles save conflicts with ConflictNotice, reloads the latest version, and 
   );
 });
 
+it('replays a save with a lost response after the binding detail fails to load', async () => {
+  const savedBinding = {
+    ...bindingFixture,
+    name: 'Renamed KB',
+    etag: 'etag-2',
+    revision: 2
+  };
+  const details = vi
+    .fn<() => Response>()
+    .mockReturnValueOnce(json(bindingFixture))
+    .mockReturnValueOnce(json({ title: 'Detail unavailable' }, 503));
+  const writeKey = vi.fn((request: Request) =>
+    request.headers.get('Idempotency-Key')
+  );
+  const { target, button, fieldByLabel } = mountBindings((request) => {
+    const path = new URL(request.url).pathname;
+    if (path === '/api/v1/retrieval-bindings')
+      return json({ items: [bindingFixture], next_cursor: null });
+    if (path !== `/api/v1/retrieval-bindings/${bindingFixture.id}`)
+      return json({}, 404);
+    if (request.method === 'GET') return details();
+    if (request.method !== 'PUT') return json({}, 405);
+
+    const key = writeKey(request);
+    if (writeKey.mock.calls.length === 1)
+      return Promise.reject(new TypeError('Save response lost'));
+    if (key && key === writeKey.mock.results[0]?.value)
+      return json(savedBinding);
+    return json(
+      {
+        title: 'Binding has already changed',
+        type: 'https://openllmproxy.dev/problems/etag_mismatch'
+      },
+      412
+    );
+  });
+
+  await eventually(() => expect(button('Inspect / edit')).toBeDefined());
+  button('Inspect / edit')?.click();
+  await eventually(() => expect(button('Save revision')?.disabled).toBe(false));
+  const form = target.querySelector('form');
+  setFieldValue(fieldByLabel('Name'), savedBinding.name);
+  form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await eventually(() =>
+    expect(target.textContent).toContain('Save response lost')
+  );
+
+  button('Inspect / edit')?.click();
+  await eventually(() =>
+    expect(target.textContent).toContain('Detail unavailable')
+  );
+  expect(fieldByLabel('Name').value).toBe(savedBinding.name);
+
+  form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await eventually(() =>
+    expect(toasts.items.map((item) => item.message)).toContain(
+      'Binding revision saved.'
+    )
+  );
+});
+
 it('reuses the same Idempotency-Key when retrying a failed create and inspects revisions', async () => {
   const idempotencyKeys: (string | null)[] = [];
   let failCreate = true;
