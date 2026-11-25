@@ -187,6 +187,23 @@ describe('resource submissions', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it('keeps a create saved when the follow-up after the write fails', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    const onSaved = vi
+      .fn<Options['onSaved']>(async () => undefined)
+      .mockRejectedValueOnce(new TypeError('Refresh failed'));
+    const { state, onDraftChange } = renderSubmission({ persist, onSaved });
+    state.markDirty();
+
+    await state.save(submit());
+    flushSync();
+
+    expect(state.submitted).toBe(false);
+    expect(state.busy).toBe(false);
+    expect(state.error).toMatch(/^Changes saved/);
+    expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  });
+
   it('asks before discarding edits and keeps them when the user declines', () => {
     const confirm = vi
       .fn()
