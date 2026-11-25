@@ -64,7 +64,7 @@ func (c Config) ApplySemantic(req *http.Request) error {
 		return err
 	}
 	p, _ := c.profile()
-	if p.Hosting == "direct-anthropic" {
+	if p.SendsRevisionHeader() {
 		req.Header.Set("Anthropic-Version", p.DialectRevision)
 	}
 	for name, value := range c.SemanticHeaders {

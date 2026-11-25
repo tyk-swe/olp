@@ -30,7 +30,7 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 	if failure != nil {
 		return nil, nil, failure
 	}
-	cloud := request.Op() == OpImageGeneration && (cfg.Kind == "vertex_ai" || cfg.Kind == "bedrock")
+	cloud := request.Op() == OpImageGeneration && cfg.NativeCloud()
 	effective, failure := withDefaults(request, defaults, cloud)
 	if failure != nil {
 		return nil, nil, failure

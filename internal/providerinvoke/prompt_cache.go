@@ -24,12 +24,12 @@ func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cachepol
 	}
 	root := source.Fields()
 	changed := false
-	if (inv.Wire == wire.Chat || inv.Wire == wire.Responses) && (config.Kind == "openai" || config.Kind == "azure_openai") {
+	if (inv.Wire == wire.Chat || inv.Wire == wire.Responses) && config.NativeOpenAI() {
 		if _, exists := root["prompt_cache_key"]; !exists && key != "" {
 			root["prompt_cache_key"], _ = json.Marshal(key)
 			changed = true
 		}
-	} else if inv.Wire == wire.Anthropic && (config.Kind == "anthropic" || config.Kind == "vertex_ai" || config.Kind == "bedrock") {
+	} else if inv.Wire == wire.Anthropic && config.AcceptsCacheControl() {
 		positions := policy.Positions
 		if len(positions) == 0 {
 			positions = []string{"system", "tools", "last_user"}

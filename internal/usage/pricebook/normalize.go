@@ -27,6 +27,10 @@ func NewNormalizer(vendorKind func(vendor string) (string, bool)) Normalizer {
 
 func validProviderKind(value string) bool { return contract.ProviderKind(value).Valid() }
 
+func pluginKind(value string) bool {
+	return contract.ProviderKind(value) == contract.ProviderKindPlugin
+}
+
 // validatePrices checks one revision as a whole and returns the normalized
 // rates plus the revision currency.
 func validatePrices(prices []rates.Price, normalizer Normalizer) ([]rates.Price, string, error) {
@@ -116,7 +120,7 @@ func normalizePrice(price rates.Price, normalizer Normalizer) (rates.Price, erro
 			return rates.Price{}, invalid("prices", "Use a valid provider identifier.")
 		}
 		entry.ProviderID = &id
-	} else if entry.ProviderKind == "plugin" {
+	} else if pluginKind(entry.ProviderKind) {
 		// No list price applies to plugin providers, which may front any
 		// upstream on any terms; the operator prices each one.
 		return rates.Price{}, invalid("prices", "Scope a plugin provider's price to that provider.")

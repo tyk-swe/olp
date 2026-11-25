@@ -94,7 +94,7 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 			receipts = append(receipts, oif.Disposition{Field: "/query/" + name, Disposition: "introduced", Rule: "profile_semantic_query", Evidence: t.codec.Evidence})
 		}
 	}
-	if t.profile.Hosting == "direct-anthropic" && !seen["Anthropic-Version"] {
+	if t.profile.SendsRevisionHeader() && !seen["Anthropic-Version"] {
 		receipts = append(receipts, oif.Disposition{Field: "/headers/Anthropic-Version", Disposition: "introduced", Rule: "profile_api_revision", Evidence: t.codec.Evidence})
 	}
 	return config, receipts, nil

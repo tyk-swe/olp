@@ -78,7 +78,7 @@ func (t *Template) Bind(request *wire.Request, context Context) (*Plan, error) {
 	}
 	// Hosting wrappers may only perform the reviewed address/model/API-revision
 	// binding. Semantic preparation is already complete and its document retained.
-	if t.profile.Hosting == "vertex-anthropic" || t.profile.Hosting == "bedrock-anthropic-invoke" {
+	if config.EnvelopsMessages() {
 		wrapped, err := config.WrapBody(effective.Bytes(), t.wire)
 		if err != nil {
 			return nil, incompatible("target_capability", "/profile", "hosting_wrapper", "The hosting wrapper conflicts with native request requirements.")
@@ -273,7 +273,7 @@ func (t *Template) bindSemantic(request *wire.Request, context Context) (connect
 			receipts = append(receipts, oif.Disposition{Field: "/query/" + name, Disposition: "introduced", Rule: "profile_semantic_query", Evidence: evidenceNative})
 		}
 	}
-	if t.profile.Hosting == "direct-anthropic" && !seen["Anthropic-Version"] {
+	if t.profile.SendsRevisionHeader() && !seen["Anthropic-Version"] {
 		receipts = append(receipts, oif.Disposition{Field: "/headers/Anthropic-Version", Disposition: "introduced", Rule: "profile_api_revision", Evidence: evidenceNative})
 	}
 	return config, receipts, nil

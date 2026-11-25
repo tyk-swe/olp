@@ -30,7 +30,7 @@ func continuationFailure(field, requirement string) error {
 	return incompatible("state_carrier", field, requirement, "The selected client continuation contract cannot preserve this interaction.")
 }
 func (t *Template) prepareTools(request *wire.Request, context Context, receipt *oif.Receipt) (oif.Prepared, error) {
-	if context.ContinuationVersion != ContinuationV1 || request.Family != wire.Chat || t.wire != wire.Anthropic || t.profile.Hosting != "direct-anthropic" {
+	if context.ContinuationVersion != ContinuationV1 || request.Family != wire.Chat || t.wire != wire.Anthropic || !t.profile.SendsRevisionHeader() {
 		return oif.Prepared{}, continuationFailure("/client_contract", "qualified_continuation_version")
 	}
 	if !context.DurableContinuation {

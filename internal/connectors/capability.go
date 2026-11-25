@@ -26,10 +26,11 @@ var (
 	reviewed    = []Kind{KindOpenAI, KindOpenAICompatible, KindAnthropic, KindGemini, KindVertexAI, KindAzureOpenAI, KindBedrock}
 	openAIKinds = []Kind{KindOpenAI, KindAzureOpenAI, KindOpenAICompatible}
 
-	openAIUnary      = []offer{{surface: "openai", modes: unary, kinds: openAIKinds}}
-	openAIGenerating = []offer{{surface: "openai", modes: generating, kinds: openAIKinds}}
-	vendorUnary      = []offer{{surface: "openai", modes: unary, vendorKind: true}}
-	nativeClouds     = []Kind{KindVertexAI, KindBedrock}
+	openAIUnary       = []offer{{surface: "openai", modes: unary, kinds: openAIKinds}}
+	openAIGenerating  = []offer{{surface: "openai", modes: generating, kinds: openAIKinds}}
+	vendorUnary       = []offer{{surface: "openai", modes: unary, vendorKind: true}}
+	nativeClouds      = []Kind{KindVertexAI, KindBedrock}
+	cacheControlKinds = []Kind{KindAnthropic, KindVertexAI, KindBedrock}
 
 	openAIEndpoint = DefaultEndpoint(KindOpenAI, "", "")
 )
@@ -267,3 +268,7 @@ func (c Config) SupportsFilesBatches() bool {
 func (c Config) NativeOpenAI() bool { return c.Kind == KindOpenAI || c.Kind == KindAzureOpenAI }
 
 func (c Config) CountsCachedContents() bool { return c.Kind == KindGemini }
+
+func (c Config) AcceptsCacheControl() bool { return slices.Contains(cacheControlKinds, c.Kind) }
+
+func (c Config) NativeCloud() bool { return slices.Contains(nativeClouds, c.Kind) }

@@ -21,6 +21,7 @@ type hostingTraits struct {
 	misplaced         string
 	messages          upstreamPath
 	openAIRealtime    []string
+	revisionHeader    bool
 }
 
 const (
@@ -37,6 +38,7 @@ var hostings = map[string]hostingTraits{
 	"azure-responses-legacy":   {deployment: true, apiVersion: true, resourceResponses: true, azureScope: cognitiveServicesScope},
 	"azure-v1":                 {baseSuffix: "/openai/v1", azureScope: "https://ai.azure.com/.default", openAIRealtime: []string{"realtime"}},
 	"direct-openai":            {openAIRealtime: []string{"realtime", "webrtc"}},
+	"direct-anthropic":         {revisionHeader: true},
 	"bedrock-converse":         {awsService: "bedrock", eventStream: true},
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true, messages: bedrockInvokePath},
 	"bedrock-invoke":           {awsService: "bedrock"},
@@ -67,6 +69,8 @@ func (c Config) AddressesDeployments() bool { return c.traits().deployment }
 func (p Profile) HostsRealtime(mode string) bool {
 	return slices.Contains(hostings[p.Hosting].openAIRealtime, mode)
 }
+
+func (p Profile) SendsRevisionHeader() bool { return hostings[p.Hosting].revisionHeader }
 
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {

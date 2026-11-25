@@ -14,6 +14,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
@@ -331,7 +332,7 @@ func consumedQuantity(quantity decimal.Decimal, unit string) (decimal.Decimal, s
 
 func vendorID(configured, kind string) string {
 	switch {
-	case kind == "plugin":
+	case connectors.Kind(kind) == connectors.KindPlugin:
 		return "plugin"
 	case configured != "":
 		return configured

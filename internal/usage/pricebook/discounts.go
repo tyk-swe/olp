@@ -80,7 +80,7 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 			return d, fmt.Errorf("read discount provider: %w", err)
 		}
 		d.ProviderID = &id
-	} else if d.ProviderKind == "plugin" {
+	} else if pluginKind(d.ProviderKind) {
 		return d, invalid("provider_id",
 			"Scope a plugin provider's discount to that provider.")
 	}
