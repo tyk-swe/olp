@@ -79,8 +79,8 @@ func (s Scope) Valid() bool { return slices.Contains(scopes[:], s) }
 
 const (
 	MaxEntries       = 128
-	MaxEvidenceBytes = 256 << 10
-	MaxCategories    = 32
+	maxEvidenceBytes = 256 << 10
+	maxCategories    = 32
 )
 
 var (

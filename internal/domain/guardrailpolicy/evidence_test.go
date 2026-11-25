@@ -15,7 +15,7 @@ func TestMergeEvidenceFoldsRepeatsWithinLimits(t *testing.T) {
 		t.Fatalf("repeated evaluations were not folded into one record: %+v (input %+v)", merged, first)
 	}
 	categories := func(prefix string) []string {
-		values := make([]string, MaxCategories)
+		values := make([]string, maxCategories)
 		for i := range values {
 			values[i] = prefix + strconv.Itoa(i)
 		}
@@ -32,7 +32,7 @@ func TestMergeEvidenceFoldsRepeatsWithinLimits(t *testing.T) {
 	}
 	bounded := MergeEvidence(nil, values)
 	raw, err := json.Marshal(bounded)
-	if err != nil || len(bounded) == 0 || len(bounded) == len(values) || len(raw) > MaxEvidenceBytes {
+	if err != nil || len(bounded) == 0 || len(bounded) == len(values) || len(raw) > maxEvidenceBytes {
 		t.Fatalf("evidence escaped the byte limit: %d records, %d bytes", len(bounded), len(raw))
 	}
 }
