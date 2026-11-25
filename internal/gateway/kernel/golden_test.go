@@ -3,15 +3,20 @@ package kernel
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -23,13 +28,113 @@ import (
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
-	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness/money"
 )
+
+var update = flag.Bool("update", false, "rewrite golden files from the current behavior")
+
+type recordedPart struct {
+	Name        string `json:"name"`
+	Filename    string `json:"filename,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Digest      string `json:"digest,omitempty"`
+}
+
+type recordedRequest struct {
+	Method  string              `json:"method"`
+	Path    string              `json:"path"`
+	Query   string              `json:"query,omitempty"`
+	Headers map[string]string   `json:"headers"`
+	JSON    json.RawMessage     `json:"json,omitempty"`
+	Parts   []recordedPart      `json:"parts,omitempty"`
+	Digest  string              `json:"digest,omitempty"`
+	Form    map[string][]string `json:"form,omitempty"`
+}
+
+type recordedAttempt struct {
+	Mode      string       `json:"mode"`
+	Status    int          `json:"status"`
+	Class     string       `json:"class"`
+	Committed bool         `json:"committed"`
+	Usage     any          `json:"usage,omitempty"`
+	Price     *money.Price `json:"price,omitempty"`
+}
+
+func digest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8]) + "/" + strconv.Itoa(len(b))
+}
+
+func canonicalJSON(raw []byte, upstream string) (json.RawMessage, bool) {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return nil, false
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	return json.RawMessage(strings.ReplaceAll(string(out), upstream, "{upstream}")), true
+}
+
+func jsonEqual(a, b []byte) bool {
+	var x, y any
+	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
+}
+
+func recordRequest(t *testing.T, r *http.Request, upstream string) recordedRequest {
+	t.Helper()
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Errorf("read upstream body: %v", err)
+	}
+	headers := map[string]string{}
+	for name, values := range r.Header {
+		switch name {
+		case "Accept-Encoding", "User-Agent", "Content-Length", "Traceparent", "Tracestate":
+			continue
+		}
+		headers[name] = strings.Join(values, ",")
+	}
+	got := recordedRequest{Method: r.Method, Path: strings.TrimPrefix(r.URL.Path, "/a"), Query: r.URL.RawQuery, Headers: headers}
+	mediaType, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	switch {
+	case mediaType == "multipart/form-data":
+		headers["Content-Type"] = mediaType
+		reader := multipart.NewReader(bytes.NewReader(raw), params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Errorf("read upstream multipart: %v", err)
+				break
+			}
+			content, _ := io.ReadAll(part)
+			recorded := recordedPart{Name: part.FormName(), Filename: part.FileName(), ContentType: part.Header.Get("Content-Type")}
+			if part.FileName() == "" {
+				recorded.Text = string(content)
+			} else {
+				recorded.Digest = digest(content)
+			}
+			got.Parts = append(got.Parts, recorded)
+		}
+	case len(raw) == 0:
+	default:
+		if canonical, ok := canonicalJSON(raw, upstream); ok {
+			got.JSON = canonical
+		} else {
+			got.Digest = digest(raw)
+		}
+	}
+	return got
+}
 
 type recordedEnvelope struct {
 	Operation  string           `json:"operation"`
@@ -90,10 +195,6 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
-		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.Egress,
-		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.Log,
-	})}
 	h.gateway.Deps.Staging = spool
 	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
 	requests := int64(60)

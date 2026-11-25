@@ -131,7 +131,6 @@ type Dependencies struct {
 	WorkflowRuns                WorkflowRunStore
 	WorkflowTools               WorkflowToolRunner
 	Traces                      *traceingest.Store
-	Media                       *MediaDeps
 	Staging                     *staging.Spool
 	Uploads                     *staging.Admission
 	Capture                     *capture.Manager

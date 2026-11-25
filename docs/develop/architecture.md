@@ -180,7 +180,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/bedrock` | Bedrock Converse and Invoke under `/bedrock/model/{model}` | `fault`, `kernel` |
 | `gateway/surface/geminilive` | Gemini Live sessions under `/gemini/ws/` and `/ws/` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota` |
-| `gateway/surface/media` | OpenAI images, audio and video jobs under `/v1/images`, `/v1/audio` and `/v1/videos` | `fault`, `kernel` |
+| `gateway/surface/media` | OpenAI images, audio and video jobs under `/v1/images`, `/v1/audio` and `/v1/videos`, including media execution, delivery and video job lifecycles | `events`, `fault`, `kernel`, `quota` |
 | `gateway/surface/nativeduplex` | Native duplex sessions under `/native/{dialect}/sessions` | `duplexrelay`, `fault`, `ingress`, `kernel` |
 | `gateway/surface/openaistate` | OpenAI files, batches, stored responses and continuations | `fault`, `generationrefs`, `ingress`, `kernel` |
 | `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |

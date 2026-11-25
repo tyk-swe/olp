@@ -59,6 +59,18 @@ func providerConnectionScope(provider *routing.Provider, slot routing.Slot) stri
 	return (providerinvoke.Target{Provider: *provider, Slot: slot}).ConnectionScope()
 }
 
+func (s *Server) ResolveSlotSecrets(ctx context.Context, x *Call, slot routing.Slot, provider *routing.Provider, model string) ([]byte, []byte, string, error) {
+	secret, err := s.slotSecret(ctx, x, slot, provider, model)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	networkSecret, err := s.providerNetworkSecret(ctx, x.request.release, provider)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return secret, networkSecret, providerConnectionScope(provider, slot), nil
+}
+
 func (s *Server) providerClient(ctx context.Context, pinned *release.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
 	return s.targetResolver().Bind(pinned, providerinvoke.Target{Provider: *provider, Slot: slot}, nil).Client(ctx)
 }

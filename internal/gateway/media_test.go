@@ -1,4 +1,4 @@
-package kernel
+package gateway_test
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"image"
 	"image/png"
@@ -28,16 +27,14 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness/money"
 )
-
-var update = flag.Bool("update", false, "rewrite testdata/media.golden.json from the current behavior")
 
 const mediaGolden = "testdata/media.golden.json"
 
@@ -74,7 +71,7 @@ func (w mediaDeadlineFailure) Unwrap() http.ResponseWriter { return w.ResponseWr
 
 func (mediaDeadlineFailure) SetWriteDeadline(time.Time) error { return io.ErrClosedPipe }
 
-type recordedPart struct {
+type mediaRecordedPart struct {
 	Name        string `json:"name"`
 	Filename    string `json:"filename,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
@@ -82,39 +79,30 @@ type recordedPart struct {
 	Digest      string `json:"digest,omitempty"`
 }
 
-type recordedRequest struct {
+type mediaRecordedRequest struct {
 	Method  string              `json:"method"`
 	Path    string              `json:"path"`
 	Query   string              `json:"query,omitempty"`
 	Headers map[string]string   `json:"headers"`
 	JSON    json.RawMessage     `json:"json,omitempty"`
-	Parts   []recordedPart      `json:"parts,omitempty"`
+	Parts   []mediaRecordedPart `json:"parts,omitempty"`
 	Digest  string              `json:"digest,omitempty"`
 	Form    map[string][]string `json:"form,omitempty"`
 }
 
-type recordedAttempt struct {
-	Mode      string       `json:"mode"`
-	Status    int          `json:"status"`
-	Class     string       `json:"class"`
-	Committed bool         `json:"committed"`
-	Usage     any          `json:"usage,omitempty"`
-	Price     *money.Price `json:"price,omitempty"`
-}
-
 type mediaRecord struct {
-	Upstream    []recordedRequest `json:"upstream"`
-	Status      int               `json:"status"`
-	ContentType string            `json:"content_type"`
-	Body        any               `json:"body"`
-	Operation   string            `json:"operation"`
-	Usage       any               `json:"usage,omitempty"`
-	Attempts    []recordedAttempt `json:"attempts"`
-	Cost        string            `json:"cost,omitempty"`
-	Holds       []money.Hold      `json:"holds,omitempty"`
+	Upstream    []mediaRecordedRequest `json:"upstream"`
+	Status      int                    `json:"status"`
+	ContentType string                 `json:"content_type"`
+	Body        any                    `json:"body"`
+	Operation   string                 `json:"operation"`
+	Usage       any                    `json:"usage,omitempty"`
+	Attempts    []recordedAttempt      `json:"attempts"`
+	Cost        string                 `json:"cost,omitempty"`
+	Holds       []money.Hold           `json:"holds,omitempty"`
 }
 
-func digest(b []byte) string {
+func mediaDigest(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8]) + "/" + strconv.Itoa(len(b))
 }
@@ -128,7 +116,7 @@ func onePixelPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-func canonicalJSON(raw []byte, upstream string) (json.RawMessage, bool) {
+func mediaCanonicalJSON(raw []byte, upstream string) (json.RawMessage, bool) {
 	var v any
 	if json.Unmarshal(raw, &v) != nil {
 		return nil, false
@@ -140,7 +128,7 @@ func canonicalJSON(raw []byte, upstream string) (json.RawMessage, bool) {
 	return json.RawMessage(strings.ReplaceAll(string(out), upstream, "{upstream}")), true
 }
 
-func recordRequest(t *testing.T, r *http.Request, upstream string) recordedRequest {
+func recordMediaRequest(t *testing.T, r *http.Request, upstream string) mediaRecordedRequest {
 	t.Helper()
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -154,7 +142,7 @@ func recordRequest(t *testing.T, r *http.Request, upstream string) recordedReque
 		}
 		headers[name] = strings.Join(values, ",")
 	}
-	got := recordedRequest{Method: r.Method, Path: strings.TrimPrefix(r.URL.Path, "/a"), Query: r.URL.RawQuery, Headers: headers}
+	got := mediaRecordedRequest{Method: r.Method, Path: strings.TrimPrefix(r.URL.Path, "/a"), Query: r.URL.RawQuery, Headers: headers}
 	mediaType, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	switch {
 	case mediaType == "multipart/form-data":
@@ -170,31 +158,31 @@ func recordRequest(t *testing.T, r *http.Request, upstream string) recordedReque
 				break
 			}
 			content, _ := io.ReadAll(part)
-			recorded := recordedPart{Name: part.FormName(), Filename: part.FileName(), ContentType: part.Header.Get("Content-Type")}
+			recorded := mediaRecordedPart{Name: part.FormName(), Filename: part.FileName(), ContentType: part.Header.Get("Content-Type")}
 			if part.FileName() == "" {
 				recorded.Text = string(content)
 			} else {
-				recorded.Digest = digest(content)
+				recorded.Digest = mediaDigest(content)
 			}
 			got.Parts = append(got.Parts, recorded)
 		}
 	case len(raw) == 0:
 	default:
-		if canonical, ok := canonicalJSON(raw, upstream); ok {
+		if canonical, ok := mediaCanonicalJSON(raw, upstream); ok {
 			got.JSON = canonical
 		} else {
-			got.Digest = digest(raw)
+			got.Digest = mediaDigest(raw)
 		}
 	}
 	return got
 }
 
-func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.HandlerFunc, func() []recordedRequest) {
+func scriptedMedia(t *testing.T, replies []mediaReply, upstream func() string) (http.HandlerFunc, func() []mediaRecordedRequest) {
 	var mu sync.Mutex
-	var seen []recordedRequest
+	var seen []mediaRecordedRequest
 	return func(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
-			seen = append(seen, recordRequest(t, r, upstream()))
+			seen = append(seen, recordMediaRequest(t, r, upstream()))
 			n := len(seen)
 			mu.Unlock()
 			if n > len(replies) {
@@ -204,8 +192,8 @@ func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.
 			reply := replies[n-1]
 			w.Header().Set("Content-Type", reply.contentType)
 			w.WriteHeader(reply.status)
-			io.WriteString(w, strings.ReplaceAll(reply.body, "{upstream}", upstream()))
-		}, func() []recordedRequest {
+			_, _ = io.WriteString(w, strings.ReplaceAll(reply.body, "{upstream}", upstream()))
+		}, func() []mediaRecordedRequest {
 			mu.Lock()
 			defer mu.Unlock()
 			return slices.Clone(seen)
@@ -214,20 +202,8 @@ func scripted(t *testing.T, replies []mediaReply, upstream func() string) (http.
 
 func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	t.Helper()
-	admission, ledger := money.Scripted(t)
-	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20}, Dependencies{Admission: admission})
-	h.rt.keys[fullKey] = ledger.Budget(h.rt.keys[fullKey])
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.Deps.Media = &MediaDeps{Transport: transport.New(transport.Deps{
-		Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.Egress,
-		Spool: spool, MaxResponseBytes: 1 << 20, Log: h.gateway.Log,
-	})}
-	h.gateway.Deps.Staging = spool
-	h.gateway.Deps.Uploads = staging.NewAdmission(spool.CapacityBytes())
+	h := newSurfaceHarness(t, false)
+	h.rt.keys[fullKey] = h.ledger.Budget(h.rt.keys[fullKey])
 	mode := tc.mode
 	if mode == "" {
 		mode = "unary"
@@ -261,23 +237,34 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 			tc.route(&route)
 		}
 		snapshot.Routes[routeSlug] = route
-		ledger.Cap(snapshot, routeSlug)
+		h.ledger.Cap(snapshot, routeSlug)
 		h.rt.inputs = money.Inputs(t, snapshot, money.Operations...)
 	})
-	handler, seen := scripted(t, tc.replies, func() string { return h.upstream.URL })
-	h.mock.set("a", handler)
-	fallback, fallbackSeen := scripted(t, tc.fallbackReplies, func() string { return h.upstream.URL })
-	h.mock.set("b", fallback)
-	mux := http.NewServeMux()
-	RegisterGateway(h.gateway, mux)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if tc.failWriteDeadline {
+	handler, seen := scriptedMedia(t, tc.replies, func() string { return h.upstream.URL })
+	h.mock.answer("a", handler)
+	fallback, fallbackSeen := scriptedMedia(t, tc.fallbackReplies, func() string { return h.upstream.URL })
+	h.mock.answer("b", fallback)
+
+	targetURL := h.server.URL
+	returned := h.returned
+	if tc.failWriteDeadline {
+		mux := http.NewServeMux()
+		mediaDeps := surfacemedia.Deps{Transport: transport.New(transport.Deps{
+			Client: h.gateway.Egress.Client(kernel.UpstreamHeaderTimeout),
+			Auth:   connectors.NewAuth(h.gateway.Egress, func(string) string { return "" }),
+			Egress: h.gateway.Egress, Spool: h.gateway.Deps.Staging, MaxResponseBytes: 1 << 20,
+			Log: slog.New(slog.DiscardHandler),
+		})}
+		gateway.Register(h.gateway, mux, gateway.WithMedia(mediaDeps))
+		done := make(chan struct{}, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() { done <- struct{}{} }()
 			mux.ServeHTTP(mediaDeadlineFailure{w}, r)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
+		}))
+		t.Cleanup(srv.Close)
+		targetURL = srv.URL
+		returned = done
+	}
 
 	var body bytes.Buffer
 	contentType := "application/json"
@@ -311,13 +298,13 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		contentType = form.FormDataContentType()
 	}
 	started := time.Now()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tc.path, &body)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, targetURL+tc.path, &body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+fullKey)
 	req.Header.Set("Content-Type", contentType)
-	resp, err := server.Client().Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,28 +313,35 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := mediaRecord{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Cost: resp.Header.Get(headerCost)}
+	<-returned
+	record := mediaRecord{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Cost: resp.Header.Get(money.CostHeader)}
 	switch mediaType, _, _ := mime.ParseMediaType(record.ContentType); {
 	case mediaType == "application/json":
-		var body map[string]any
-		if json.Unmarshal(raw, &body) != nil {
+		var parsed map[string]any
+		if json.Unmarshal(raw, &parsed) != nil {
 			t.Fatalf("client body is not a JSON object: %s", raw)
 		}
-		if created, ok := body["created"].(float64); ok && int64(created) >= started.Unix() {
-			body["created"] = "{now}"
+		if created, ok := parsed["created"].(float64); ok && int64(created) >= started.Unix() {
+			parsed["created"] = "{now}"
 		}
-		encoded, err := json.Marshal(body)
+		encoded, err := json.Marshal(parsed)
 		if err != nil {
 			t.Fatal(err)
 		}
-		canonical, _ := canonicalJSON(encoded, h.upstream.URL)
+		canonical, _ := mediaCanonicalJSON(encoded, h.upstream.URL)
 		record.Body = canonical
 	case strings.HasPrefix(mediaType, "text/"):
 		record.Body = strings.ReplaceAll(string(raw), h.upstream.URL, "{upstream}")
 	default:
-		record.Body = digest(raw)
+		record.Body = mediaDigest(raw)
 	}
-	envelope := h.sink.last(t)
+	h.sink.mu.Lock()
+	if len(h.sink.envs) == 0 {
+		h.sink.mu.Unlock()
+		t.Fatal("expected a terminal envelope")
+	}
+	envelope := h.sink.envs[len(h.sink.envs)-1]
+	h.sink.mu.Unlock()
 	record.Upstream, record.Operation = slices.Concat(seen(), fallbackSeen()), envelope.Operation
 	if envelope.Usage != nil {
 		record.Usage = envelope.Usage
@@ -359,15 +353,15 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		}
 		record.Attempts = append(record.Attempts, recorded)
 	}
-	record.Holds = ledger.Drain()
+	record.Holds = h.ledger.Drain()
 	return record
 }
 
-func vendor(kind connectors.Kind, vendorID string) func(*routing.Provider) {
+func mediaVendor(kind connectors.Kind, vendorID string) func(*routing.Provider) {
 	return func(p *routing.Provider) { p.Kind, p.VendorID = kind, vendorID }
 }
 
-func reply(contentType, body string) []mediaReply {
+func mediaReplyOK(contentType, body string) []mediaReply {
 	return []mediaReply{{status: http.StatusOK, contentType: contentType, body: body}}
 }
 
@@ -383,47 +377,47 @@ func mediaCases(t *testing.T) []mediaCase {
 	return []mediaCase{
 		{name: "openai image generation", operation: media.OpImageGeneration, path: "/v1/images/generations",
 			json:    `{"model":"{route}","prompt":"a red fox","n":1,"size":"1024x1024","quality":"high","response_format":"b64_json","user":"u-1","vendor_flag":true}`,
-			replies: reply("application/json", openAIImage)},
+			replies: mediaReplyOK("application/json", openAIImage)},
 		{name: "openai image generation stream", operation: media.OpImageGeneration, mode: "streaming", path: "/v1/images/generations",
 			json:    `{"model":"{route}","prompt":"a red fox","stream":true,"partial_images":1}`,
-			replies: reply("text/event-stream", "event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\""+pixel64+"\",\"usage\":{\"input_tokens\":5,\"output_tokens\":7,\"total_tokens\":12}}\n\n")},
+			replies: mediaReplyOK("text/event-stream", "event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\""+pixel64+"\",\"usage\":{\"input_tokens\":5,\"output_tokens\":7,\"total_tokens\":12}}\n\n")},
 		{name: "openai image edit", operation: media.OpImageEdit, path: "/v1/images/edits",
 			fields: [][2]string{{"prompt", "add a hat"}, {"n", "1"}, {"input_fidelity", "high"}}, files: []mediaFile{image, mask},
-			replies: reply("application/json", openAIImage)},
+			replies: mediaReplyOK("application/json", openAIImage)},
 		{name: "openai image variation", operation: media.OpImageVariation, path: "/v1/images/variations",
 			fields: [][2]string{{"n", "2"}, {"size", "256x256"}, {"response_format", "url"}}, files: []mediaFile{image},
-			replies: reply("application/json", `{"created":1,"data":[{"url":"https://cdn.example.test/1.png"},{"url":"https://cdn.example.test/2.png"}]}`)},
+			replies: mediaReplyOK("application/json", `{"created":1,"data":[{"url":"https://cdn.example.test/1.png"},{"url":"https://cdn.example.test/2.png"}]}`)},
 		{name: "openai speech", operation: media.OpSpeech, path: "/v1/audio/speech",
 			json:    `{"model":"{route}","input":"hello there","voice":"alloy","response_format":"mp3","speed":1.25,"instructions":"cheerful"}`,
-			replies: reply("audio/mpeg", "ID3-fake-mp3")},
+			replies: mediaReplyOK("audio/mpeg", "ID3-fake-mp3")},
 		{name: "openai speech stream", operation: media.OpSpeech, mode: "streaming", path: "/v1/audio/speech",
 			json:    `{"model":"{route}","input":"hello","voice":"alloy","stream_format":"sse"}`,
-			replies: reply("text/event-stream", "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AAAA\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":3,\"output_tokens\":9,\"total_tokens\":12}}\n\n")},
+			replies: mediaReplyOK("text/event-stream", "data: {\"type\":\"speech.audio.delta\",\"audio\":\"AAAA\"}\n\ndata: {\"type\":\"speech.audio.done\",\"usage\":{\"input_tokens\":3,\"output_tokens\":9,\"total_tokens\":12}}\n\n")},
 		{name: "openai transcription json", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"language", "en"}, {"prompt", "names: Ada"}, {"temperature", "0.2"}}, files: []mediaFile{wav},
-			replies: reply("application/json", transcript)},
+			replies: mediaReplyOK("application/json", transcript)},
 		{name: "openai transcription chunking auto", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"chunking_strategy", "auto"}}, files: []mediaFile{wav},
-			replies: reply("application/json", transcript)},
+			replies: mediaReplyOK("application/json", transcript)},
 		{name: "profiled transcription chunking default", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			provider: func(p *routing.Provider) {
 				p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
 				p.OperationDefaults = map[string]connectors.DefaultSet{string(media.OpTranscription): {Dialect: "direct-compatible/transcription", Values: map[string]json.RawMessage{"chunking_strategy": json.RawMessage(`"auto"`)}}}
 			},
 			files:   []mediaFile{wav},
-			replies: reply("application/json", transcript)},
+			replies: mediaReplyOK("application/json", transcript)},
 		{name: "openai transcription verbose", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"response_format", "verbose_json"}, {"timestamp_granularities[]", "word"}}, files: []mediaFile{wav},
-			replies: reply("application/json", `{"task":"transcribe","language":"english","duration":1.5,"text":"hello there","words":[{"word":"hello","start":0,"end":0.5},{"word":"there","start":0.6,"end":1.1}]}`)},
+			replies: mediaReplyOK("application/json", `{"task":"transcribe","language":"english","duration":1.5,"text":"hello there","words":[{"word":"hello","start":0,"end":0.5},{"word":"there","start":0.6,"end":1.1}]}`)},
 		{name: "openai transcription text", operation: media.OpTranscription, path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"response_format", "text"}}, files: []mediaFile{wav},
-			replies: reply("text/plain", "hello there\n")},
+			replies: mediaReplyOK("text/plain", "hello there\n")},
 		{name: "openai transcription stream", operation: media.OpTranscription, mode: "streaming", path: "/v1/audio/transcriptions",
 			fields: [][2]string{{"stream", "true"}}, files: []mediaFile{wav},
-			replies: reply("text/event-stream", "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}\n\n")},
+			replies: mediaReplyOK("text/event-stream", "data: {\"type\":\"transcript.text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"transcript.text.done\",\"text\":\"hello\",\"usage\":{\"type\":\"tokens\",\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}\n\n")},
 		{name: "openai translation", operation: media.OpTranslation, path: "/v1/audio/translations",
 			fields: [][2]string{{"prompt", "names: Ada"}}, files: []mediaFile{wav},
-			replies: reply("application/json", `{"text":"hello there"}`)},
+			replies: mediaReplyOK("application/json", `{"text":"hello there"}`)},
 		{name: "openai upstream rate limit", operation: media.OpImageGeneration, path: "/v1/images/generations",
 			json:    `{"model":"{route}","prompt":"a red fox"}`,
 			replies: []mediaReply{{status: http.StatusTooManyRequests, contentType: "application/json", body: `{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`}}},
@@ -433,35 +427,35 @@ func mediaCases(t *testing.T) []mediaCase {
 				p.OperationDefaults = map[string]connectors.DefaultSet{string(media.OpImageGeneration): {Dialect: "direct-compatible/image_generation", Values: map[string]json.RawMessage{"quality": json.RawMessage(`"low"`), "size": json.RawMessage(`"512x512"`)}}}
 			},
 			json:    `{"model":"{route}","prompt":"a red fox","size":"1024x1024"}`,
-			replies: reply("application/json", openAIImage)},
+			replies: mediaReplyOK("application/json", openAIImage)},
 		{name: "strict image generation", operation: media.OpImageGeneration, path: "/v1/images/generations",
 			provider: func(p *routing.Provider) {
 				p.ProfileID, p.ProfileRevision = "compatible-chat", connectors.ProfileRevision
 			},
 			route:   func(r *routing.Route) { r.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict} },
 			json:    `{"model":"{route}","prompt":"a red fox","size":"1024x1024","vendor_flag":true}`,
-			replies: reply("application/json", openAIImage)},
-		{name: "xai image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("openai_compatible", "xai"),
+			replies: mediaReplyOK("application/json", openAIImage)},
+		{name: "xai image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("openai_compatible", "xai"),
 			json:    `{"model":"{route}","prompt":"a red fox","n":2,"size":"1792x1024","response_format":"b64_json"}`,
-			replies: reply("application/json", `{"data":[{"b64_json":"`+pixel64+`"},{"b64_json":"`+pixel64+`"}]}`)},
-		{name: "groq transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: vendor("openai_compatible", "groq"),
+			replies: mediaReplyOK("application/json", `{"data":[{"b64_json":"`+pixel64+`"},{"b64_json":"`+pixel64+`"}]}`)},
+		{name: "groq transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: mediaVendor("openai_compatible", "groq"),
 			fields: [][2]string{{"language", "en"}}, files: []mediaFile{wav},
-			replies: reply("application/json", `{"text":"hello there","x_groq":{"id":"req_1"}}`)},
-		{name: "groq translation", operation: media.OpTranslation, path: "/v1/audio/translations", provider: vendor("openai_compatible", "groq"),
-			files: []mediaFile{wav}, replies: reply("application/json", `{"text":"hello there"}`)},
-		{name: "elevenlabs speech", operation: media.OpSpeech, path: "/v1/audio/speech", provider: vendor("openai_compatible", "elevenlabs"),
+			replies: mediaReplyOK("application/json", `{"text":"hello there","x_groq":{"id":"req_1"}}`)},
+		{name: "groq translation", operation: media.OpTranslation, path: "/v1/audio/translations", provider: mediaVendor("openai_compatible", "groq"),
+			files: []mediaFile{wav}, replies: mediaReplyOK("application/json", `{"text":"hello there"}`)},
+		{name: "elevenlabs speech", operation: media.OpSpeech, path: "/v1/audio/speech", provider: mediaVendor("openai_compatible", "elevenlabs"),
 			json:    `{"model":"{route}","input":"hello there","voice":"voice-1","response_format":"mp3","speed":1.1}`,
-			replies: reply("audio/mpeg", "ID3-fake-mp3")},
-		{name: "elevenlabs transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: vendor("openai_compatible", "elevenlabs"),
+			replies: mediaReplyOK("audio/mpeg", "ID3-fake-mp3")},
+		{name: "elevenlabs transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: mediaVendor("openai_compatible", "elevenlabs"),
 			fields: [][2]string{{"response_format", "verbose_json"}, {"language", "en"}}, files: []mediaFile{wav},
-			replies: reply("application/json", `{"language_code":"en","text":"hello there","words":[{"text":"hello","start":0,"end":0.5,"type":"word"},{"text":" ","start":0.5,"end":0.6,"type":"spacing"},{"text":"there","start":0.6,"end":1.1,"type":"word"}]}`)},
-		{name: "deepgram speech", model: "aura-2-thalia-en", operation: media.OpSpeech, path: "/v1/audio/speech", provider: vendor("openai_compatible", "deepgram"),
+			replies: mediaReplyOK("application/json", `{"language_code":"en","text":"hello there","words":[{"text":"hello","start":0,"end":0.5,"type":"word"},{"text":" ","start":0.5,"end":0.6,"type":"spacing"},{"text":"there","start":0.6,"end":1.1,"type":"word"}]}`)},
+		{name: "deepgram speech", model: "aura-2-thalia-en", operation: media.OpSpeech, path: "/v1/audio/speech", provider: mediaVendor("openai_compatible", "deepgram"),
 			json:    `{"model":"{route}","input":"hello there","voice":"thalia","response_format":"wav"}`,
 			replies: []mediaReply{{status: http.StatusOK, contentType: "audio/wav", body: string(audio)}}},
-		{name: "deepgram transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: vendor("openai_compatible", "deepgram"),
+		{name: "deepgram transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: mediaVendor("openai_compatible", "deepgram"),
 			fields: [][2]string{{"response_format", "verbose_json"}, {"language", "en"}}, files: []mediaFile{wav},
-			replies: reply("application/json", `{"metadata":{"duration":1.5},"results":{"channels":[{"detected_language":"en","alternatives":[{"transcript":"hello there","words":[{"word":"hello","start":0,"end":0.5},{"word":"there","start":0.6,"end":1.1}]}]}]}}`)},
-		{name: "assemblyai transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: vendor("openai_compatible", "assemblyai"),
+			replies: mediaReplyOK("application/json", `{"metadata":{"duration":1.5},"results":{"channels":[{"detected_language":"en","alternatives":[{"transcript":"hello there","words":[{"word":"hello","start":0,"end":0.5},{"word":"there","start":0.6,"end":1.1}]}]}]}}`)},
+		{name: "assemblyai transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: mediaVendor("openai_compatible", "assemblyai"),
 			fields: [][2]string{{"language", "en"}}, files: []mediaFile{wav},
 			replies: []mediaReply{
 				{http.StatusOK, "application/json", `{"upload_url":"https://cdn.assemblyai.com/upload/abc"}`},
@@ -469,38 +463,38 @@ func mediaCases(t *testing.T) []mediaCase {
 				{http.StatusOK, "application/json", `{"id":"tr_1","status":"completed","text":"hello there","language_code":"en","audio_duration":1.5,"words":[{"text":"hello","start":0,"end":500}]}`},
 				{http.StatusOK, "application/json", `{"id":"tr_1","status":"completed"}`},
 			}},
-		{name: "stability image generation", model: "stable-image-core", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("openai_compatible", "stability"),
+		{name: "stability image generation", model: "stable-image-core", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("openai_compatible", "stability"),
 			json:    `{"model":"{route}","prompt":"a red fox","size":"1024x1024","output_format":"png"}`,
-			replies: reply("application/json", `{"image":"`+pixel64+`","finish_reason":"SUCCESS","seed":1}`)},
-		{name: "stability image edit", model: "stable-image-inpaint", operation: media.OpImageEdit, path: "/v1/images/edits", provider: vendor("openai_compatible", "stability"),
+			replies: mediaReplyOK("application/json", `{"image":"`+pixel64+`","finish_reason":"SUCCESS","seed":1}`)},
+		{name: "stability image edit", model: "stable-image-inpaint", operation: media.OpImageEdit, path: "/v1/images/edits", provider: mediaVendor("openai_compatible", "stability"),
 			fields: [][2]string{{"prompt", "add a hat"}}, files: []mediaFile{image, mask},
-			replies: reply("application/json", `{"image":"`+pixel64+`","finish_reason":"SUCCESS","seed":1}`)},
-		{name: "recraft image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("openai_compatible", "recraft"),
+			replies: mediaReplyOK("application/json", `{"image":"`+pixel64+`","finish_reason":"SUCCESS","seed":1}`)},
+		{name: "recraft image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("openai_compatible", "recraft"),
 			json:    `{"model":"{route}","prompt":"a red fox","n":1,"size":"1024x1024","response_format":"b64_json"}`,
-			replies: reply("application/json", `{"created":1,"data":[{"b64_json":"`+pixel64+`"}]}`)},
-		{name: "bfl image generation", model: "flux-pro-1.1", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("openai_compatible", "bfl"),
+			replies: mediaReplyOK("application/json", `{"created":1,"data":[{"b64_json":"`+pixel64+`"}]}`)},
+		{name: "bfl image generation", model: "flux-pro-1.1", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("openai_compatible", "bfl"),
 			json: `{"model":"{route}","prompt":"a red fox","size":"1024x768","output_format":"png","response_format":"b64_json"}`,
 			replies: []mediaReply{
 				{http.StatusOK, "application/json", `{"id":"job-1","polling_url":"{upstream}/a/poll/job-1"}`},
 				{http.StatusOK, "application/json", `{"status":"Ready","result":{"sample":"{upstream}/a/sample.png"}}`},
 				{http.StatusOK, "image/png", string(pixel)},
 			}},
-		{name: "bfl refuses image count", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("openai_compatible", "bfl"),
+		{name: "bfl refuses image count", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("openai_compatible", "bfl"),
 			json: `{"model":"{route}","prompt":"a red fox","n":2}`},
-		{name: "gemini image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: vendor("gemini", "google"),
+		{name: "gemini image generation", operation: media.OpImageGeneration, path: "/v1/images/generations", provider: mediaVendor("gemini", "google"),
 			json:    `{"model":"{route}","prompt":"a red fox","size":"1024x1024","response_format":"b64_json"}`,
-			replies: reply("application/json", `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"`+pixel64+`"}}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":9,"totalTokenCount":13,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":9}]}}`)},
-		{name: "gemini speech", operation: media.OpSpeech, path: "/v1/audio/speech", provider: vendor("gemini", "google"),
+			replies: mediaReplyOK("application/json", `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"`+pixel64+`"}}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":9,"totalTokenCount":13,"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":9}]}}`)},
+		{name: "gemini speech", operation: media.OpSpeech, path: "/v1/audio/speech", provider: mediaVendor("gemini", "google"),
 			json:    `{"model":"{route}","input":"hello there","voice":"Kore","response_format":"wav"}`,
-			replies: reply("application/json", `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":"AAAAAA=="}}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":5,"totalTokenCount":8}}`)},
-		{name: "gemini transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: vendor("gemini", "google"),
-			files: []mediaFile{wav}, replies: reply("application/json", `{"candidates":[{"content":{"parts":[{"text":"hello there"}]}}],"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":3,"totalTokenCount":33}}`)},
+			replies: mediaReplyOK("application/json", `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":"AAAAAA=="}}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":5,"totalTokenCount":8}}`)},
+		{name: "gemini transcription", operation: media.OpTranscription, path: "/v1/audio/transcriptions", provider: mediaVendor("gemini", "google"),
+			files: []mediaFile{wav}, replies: mediaReplyOK("application/json", `{"candidates":[{"content":{"parts":[{"text":"hello there"}]}}],"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":3,"totalTokenCount":33}}`)},
 	}
 }
 
 func TestMediaUpstreamGolden(t *testing.T) {
 	want := map[string]json.RawMessage{}
-	if !*update {
+	if !*updateSurfaces {
 		raw, err := os.ReadFile(mediaGolden)
 		if err != nil {
 			t.Fatal(err)
@@ -523,13 +517,13 @@ func TestMediaUpstreamGolden(t *testing.T) {
 				mu.Lock()
 				got[tc.name] = encoded
 				mu.Unlock()
-				if !*update && !jsonEqual(want[tc.name], encoded) {
+				if !*updateSurfaces && !mediaJSONEqual(want[tc.name], encoded) {
 					t.Errorf("media behavior changed\nwant %s\ngot  %s", want[tc.name], encoded)
 				}
 			})
 		}
 	})
-	if !*update {
+	if !*updateSurfaces {
 		return
 	}
 	encoded, err := json.MarshalIndent(got, "", "  ")
@@ -547,13 +541,13 @@ func TestUnarySpeechWriteDeadlineFailureKeepsAttemptUncommitted(t *testing.T) {
 	got := runMediaCase(t, mediaCase{
 		operation: media.OpSpeech, path: "/v1/audio/speech",
 		json:              `{"model":"{route}","input":"hello","voice":"alloy","response_format":"mp3"}`,
-		replies:           reply("audio/mpeg", "ID3-fake-mp3"),
+		replies:           mediaReplyOK("audio/mpeg", "ID3-fake-mp3"),
 		failWriteDeadline: true,
 	})
 	if got.Status != http.StatusInternalServerError || len(got.Attempts) != 1 {
 		t.Fatalf("expected a delivery failure after one upstream attempt: %+v", got)
 	}
-	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != ClassSuccess || attempt.Committed {
+	if attempt := got.Attempts[0]; attempt.Status != http.StatusOK || attempt.Class != kernel.ClassSuccess || attempt.Committed {
 		t.Fatalf("unexpected attempt evidence: %+v", attempt)
 	}
 }
@@ -587,62 +581,6 @@ func TestVideoReadReplyRequiresRequestedIdentity(t *testing.T) {
 	}
 }
 
-func TestStoredVideoResponsesKeepFailedAttemptsUncommitted(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, method, body string
-		family             wire.Format
-		facts              []events.AttemptFact
-	}{
-		{
-			name: "list after a failed poll", method: http.MethodGet, family: wire.VideoList,
-			body: `{"data":[{"id":"stored-video"}]}`,
-			facts: []events.AttemptFact{
-				{Class: ClassSuccess, Status: http.StatusOK, Committed: true},
-				{Class: ClassUpstreamServer, Status: http.StatusServiceUnavailable},
-			},
-		},
-		{
-			name: "transformed delete after upstream 404", method: http.MethodDelete, family: wire.VideoDelete,
-			body:  `{"id":"stored-video","deleted":true}`,
-			facts: []events.AttemptFact{{Class: classUpstreamClient, Status: http.StatusNotFound}},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t, Config{})
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				x := &Call{family: tc.family, request: h.gateway.begin(w, r), facts: slices.Clone(tc.facts)}
-				out := &MediaOutcome{status: http.StatusOK}
-				h.gateway.DeliverMediaJSON(w, x, out, []byte(tc.body))
-				h.gateway.finishMedia(x, out, out.status)
-			}))
-			defer server.Close()
-			req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			response, err := server.Client().Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			body, err := io.ReadAll(response.Body)
-			_ = response.Body.Close()
-			if err != nil || response.StatusCode != http.StatusOK || string(body) != tc.body {
-				t.Fatalf("response = %d, %s, %v", response.StatusCode, body, err)
-			}
-			env := h.sink.last(t)
-			if !env.Committed || len(env.Attempts) != len(tc.facts) {
-				t.Fatalf("response committed = %v, attempts = %+v", env.Committed, env.Attempts)
-			}
-			for i, want := range tc.facts {
-				if got := env.Attempts[i]; got.Committed != want.Committed || got.Status != want.Status || got.Class != want.Class {
-					t.Fatalf("attempt %d changed after delivery: %+v", i, got)
-				}
-			}
-		})
-	}
-}
-
 func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 	t.Parallel()
 	for _, fallback := range []bool{false, true} {
@@ -650,7 +588,7 @@ func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 			t.Parallel()
 			tc := mediaCase{
 				model: "flux-pro-1.1", operation: media.OpImageGeneration, path: "/v1/images/generations",
-				provider: vendor("openai_compatible", "bfl"),
+				provider: mediaVendor("openai_compatible", "bfl"),
 				json:     `{"model":"{route}","prompt":"a red fox","size":"1024x768","output_format":"png","response_format":"b64_json"}`,
 				replies: []mediaReply{
 					{http.StatusOK, "application/json", `{"id":"job-1","polling_url":"{upstream}/a/poll/job-1"}`},
@@ -659,14 +597,14 @@ func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 			}
 			if fallback {
 				pixel := base64.StdEncoding.EncodeToString(onePixelPNG(t))
-				tc.fallbackReplies = reply("application/json", `{"created":1,"data":[{"b64_json":"`+pixel+`"}]}`)
+				tc.fallbackReplies = mediaReplyOK("application/json", `{"created":1,"data":[{"b64_json":"`+pixel+`"}]}`)
 			}
 			got := runMediaCase(t, tc)
-			if len(got.Attempts) == 0 || got.Attempts[0].Class != classContentFilter || got.Attempts[0].Committed {
+			if len(got.Attempts) == 0 || got.Attempts[0].Class != "content_filter" || got.Attempts[0].Committed {
 				t.Fatalf("moderation did not produce an uncommitted content filter attempt: %+v", got)
 			}
 			if fallback {
-				if got.Status != http.StatusOK || len(got.Upstream) != 3 || len(got.Attempts) != 2 || got.Attempts[1].Class != ClassSuccess {
+				if got.Status != http.StatusOK || len(got.Upstream) != 3 || len(got.Attempts) != 2 || got.Attempts[1].Class != kernel.ClassSuccess {
 					t.Fatalf("content filter fallback did not serve the image: %+v", got)
 				}
 				return
@@ -679,7 +617,7 @@ func TestModeratedImageUsesContentFilterFallback(t *testing.T) {
 	}
 }
 
-func jsonEqual(a, b []byte) bool {
+func mediaJSONEqual(a, b []byte) bool {
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
 }
@@ -704,29 +642,29 @@ func TestEachKindOfMediaProviderFailureIsClassifiedAndOnlyAStartedStreamIsCommit
 		committed       bool
 	}{
 		{name: "rate limited", replies: failed(http.StatusTooManyRequests),
-			status: http.StatusTooManyRequests, code: "upstream_rate_limit", class: classRateLimit, attemptStatus: http.StatusTooManyRequests},
+			status: http.StatusTooManyRequests, code: "upstream_rate_limit", class: "rate_limit", attemptStatus: http.StatusTooManyRequests},
 		{name: "credential refused", replies: failed(http.StatusUnauthorized),
-			status: http.StatusBadGateway, code: "upstream_authentication_failed", class: ClassCredential, attemptStatus: http.StatusUnauthorized},
+			status: http.StatusBadGateway, code: "upstream_authentication_failed", class: kernel.ClassCredential, attemptStatus: http.StatusUnauthorized},
 		{name: "request rejected", replies: failed(http.StatusBadRequest),
-			status: http.StatusBadRequest, code: "upstream_rejected", class: classUpstreamClient, attemptStatus: http.StatusBadRequest},
+			status: http.StatusBadRequest, code: "upstream_rejected", class: kernel.ClassUpstreamClient, attemptStatus: http.StatusBadRequest},
 		{name: "provider error", replies: failed(http.StatusInternalServerError),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous, attemptStatus: http.StatusInternalServerError},
-		{name: "unreadable reply", replies: reply("application/json", "not json"),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "transformed reply without data", replies: reply("application/json", `{"created":1}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "transformed reply with null data", replies: reply("application/json", `{"data":null}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "transformed reply with empty data", replies: reply("application/json", `{"data":[]}`),
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "strict reply without the image", replies: reply("application/json", `{"created":1}`), strict: true,
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "strict reply with empty data", replies: reply("application/json", `{"data":[]}`), strict: true,
-			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: ClassAmbiguous},
-		{name: "stream that never starts", replies: reply("text/event-stream", ""), streams: true,
-			status: http.StatusBadGateway, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK},
-		{name: "stream cut after its first frame", replies: reply("text/event-stream", delta), streams: true,
-			status: http.StatusOK, code: "provider_protocol_error", class: ClassProtocol, attemptStatus: http.StatusOK, committed: true},
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous, attemptStatus: http.StatusInternalServerError},
+		{name: "unreadable reply", replies: mediaReplyOK("application/json", "not json"),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "transformed reply without data", replies: mediaReplyOK("application/json", `{"created":1}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "transformed reply with null data", replies: mediaReplyOK("application/json", `{"data":null}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "transformed reply with empty data", replies: mediaReplyOK("application/json", `{"data":[]}`),
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "strict reply without the image", replies: mediaReplyOK("application/json", `{"created":1}`), strict: true,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "strict reply with empty data", replies: mediaReplyOK("application/json", `{"data":[]}`), strict: true,
+			status: http.StatusBadGateway, code: "ambiguous_upstream_result", class: kernel.ClassAmbiguous},
+		{name: "stream that never starts", replies: mediaReplyOK("text/event-stream", ""), streams: true,
+			status: http.StatusBadGateway, code: "provider_protocol_error", class: kernel.ClassProtocol, attemptStatus: http.StatusOK},
+		{name: "stream cut after its first frame", replies: mediaReplyOK("text/event-stream", delta), streams: true,
+			status: http.StatusOK, code: "provider_protocol_error", class: kernel.ClassProtocol, attemptStatus: http.StatusOK, committed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -787,7 +725,7 @@ func TestMediaTranscriptRequiresTextButAllowsSilence(t *testing.T) {
 					t.Parallel()
 					got := runMediaCase(t, mediaCase{
 						operation: endpoint.operation, path: endpoint.path, files: []mediaFile{wav},
-						replies: reply("application/json", tc.body),
+						replies: mediaReplyOK("application/json", tc.body),
 					})
 					if got.Status != tc.status {
 						t.Fatalf("reply = %d %s, want status %d", got.Status, got.Body, tc.status)
@@ -796,6 +734,89 @@ func TestMediaTranscriptRequiresTextButAllowsSilence(t *testing.T) {
 						t.Fatalf("reply = %s, want %s", got.Body, tc.body)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestTransformedMediaPreservesUsage(t *testing.T) {
+	t.Parallel()
+	h := newSurfaceHarness(t, false)
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+		for _, provider := range []routing.Provider{a, b} {
+			provider.Capabilities = []routing.Capability{
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpImageGeneration), Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: string(media.OpTranscription), Surface: "openai", Mode: "unary"},
+			}
+			snapshot.Providers[provider.ID] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{string(media.OpImageGeneration), string(media.OpTranscription)}
+		snapshot.Routes[routeSlug] = route
+	})
+
+	for _, tc := range []struct {
+		name, path, response string
+	}{
+		{"image breakdown", "/v1/images/generations", `{"created":1,"data":[{"url":"https://example.invalid/generated.png"}],"usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18,"input_tokens_details":{"text_tokens":3,"image_tokens":4},"output_tokens_details":{"image_tokens":11},"extension":{"count":2}}}`},
+		{"transcription tokens", "/v1/audio/transcriptions", `{"text":"fixture transcript","usage":{"type":"tokens","input_tokens":7,"output_tokens":11,"total_tokens":18,"input_token_details":{"text_tokens":3,"audio_tokens":4},"extension":{"count":2}}}`},
+		{"transcription duration", "/v1/audio/transcriptions", `{"text":"fixture transcript","usage":{"type":"duration","seconds":3.5}}`},
+		{"transcription without usage", "/v1/audio/transcriptions", `{"text":"fixture transcript"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.mock.answer("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, tc.response)
+			})
+			var body bytes.Buffer
+			contentType := "application/json"
+			if tc.path == "/v1/audio/transcriptions" {
+				form := multipart.NewWriter(&body)
+				if err := form.WriteField("model", routeSlug); err != nil {
+					t.Fatal(err)
+				}
+				file, err := form.CreateFormFile("file", "fixture.wav")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.Write(media.SilentWAV(10)); err != nil {
+					t.Fatal(err)
+				}
+				if err := form.Close(); err != nil {
+					t.Fatal(err)
+				}
+				contentType = form.FormDataContentType()
+			} else {
+				fmt.Fprintf(&body, `{"model":%q,"prompt":"fixture image"}`, routeSlug)
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.server.URL+tc.path, &body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", contentType)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			gotBody, err := io.ReadAll(resp.Body)
+			<-h.returned
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("media response status=%d body=%s error=%v", resp.StatusCode, gotBody, err)
+			}
+			var got, upstream map[string]any
+			if err := json.Unmarshal(gotBody, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.response), &upstream); err != nil {
+				t.Fatal(err)
+			}
+			actualUsage, actualPresent := got["usage"]
+			expectedUsage, expectedPresent := upstream["usage"]
+			if actualPresent != expectedPresent || !reflect.DeepEqual(actualUsage, expectedUsage) {
+				t.Fatalf("usage changed from %v to %v, client response %s", expectedUsage, actualUsage, gotBody)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -17,8 +18,8 @@ import (
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -51,9 +52,9 @@ type Call struct {
 	workflow             *workflowCall
 	evaluatorGuardrailID string
 	unary                *unaryCall
-	media                *media.Request
 	retained             retainedOperation
 	retainedAdmission    *RetainedAdmissionPlan
+	strictServing        func(targetID string) (oif.ServingIdentity, bool)
 
 	// Routing provenance and guardrails.
 	preferences           *routing.Preferences
@@ -97,22 +98,24 @@ type callPricing struct {
 	cardRevisionID     *string
 	cardRev            *rates.RoutingCardRevision
 	routingInputs      *routinginputs.Inputs
+	fixedUsage         *FixedUsageBound
 }
 
 // callBudget tracks attempt budgets, walk progress, fallback history, and cost caps.
 type callBudget struct {
-	planner     planner
-	fixed       bool
-	spent       int
-	allowance   int
-	spentCost   rates.Cost
-	spentCharge rates.Cost
-	seed        []byte
-	walk        routing.RouteWalk
-	fallbacks   []routing.FallbackStep
-	caps        []capHold
-	classified  map[string]classification
-	mirrors     bool
+	planner       planner
+	customPlanner func(context.Context, *Call) *fault.Error
+	fixed         bool
+	spent         int
+	allowance     int
+	spentCost     rates.Cost
+	spentCharge   rates.Cost
+	seed          []byte
+	walk          routing.RouteWalk
+	fallbacks     []routing.FallbackStep
+	caps          []capHold
+	classified    map[string]classification
+	mirrors       bool
 }
 
 // callPinning holds resource pinning and serving identity state.
@@ -190,4 +193,82 @@ func (x *Call) dropIngressQuery() *fault.Error {
 		return fault.InvalidRequest("invalid_request", message, &badParam)
 	}
 	return nil
+}
+
+func (x *Call) Family() wire.Format { return x.family }
+
+func (x *Call) SetFamily(family wire.Format) { x.family = family }
+
+func (x *Call) SetMode(mode string) { x.mode = mode }
+
+func (x *Call) UnaryFamily(family wire.Format) {
+	x.family = family
+	x.mode = "unary"
+}
+
+func (x *Call) SetEstimate(tokens int64, sized *int64) {
+	x.estimate = tokens
+	if sized != nil {
+		x.sizedInput = sized
+	}
+}
+
+func (x *Call) Estimate() int64 { return x.estimate }
+
+func (x *Call) SetAffinity(affinity []byte) { x.affinity = affinity }
+
+func (x *Call) SetStrictServing(fn func(targetID string) (oif.ServingIdentity, bool)) {
+	x.strictServing = fn
+}
+
+func (x *Call) SetFixedUsage(bound FixedUsageBound) { x.fixedUsage = &bound }
+
+func (x *Call) SemanticHeaders() http.Header { return x.semanticHeaders }
+
+func (x *Call) SemanticQuery() (url.Values, bool) { return x.semanticQuery, x.semanticQueryInvalid }
+
+func (x *Call) MarkDispatched() { x.dispatched = true }
+
+func (x *Call) NoteDispatchFailure(failure *AttemptFailure) {
+	x.dispatched = failure == nil || failure.dispatched
+}
+
+func (x *Call) NoteAttempt(fact events.AttemptFact) {
+	x.facts = append(x.facts, fact)
+	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
+}
+
+func (x *Call) RecordAttempt(fact *events.AttemptFact, dispatched bool) {
+	x.dispatched = x.dispatched || dispatched
+	if fact != nil {
+		x.facts = append(x.facts, *fact)
+	}
+}
+
+func (x *Call) SummarizeAttemptVendors() {
+	x.attemptCount, x.attemptVendor = len(x.facts), ""
+	if len(x.facts) == 0 {
+		return
+	}
+	x.attemptVendor = x.facts[0].VendorID
+	for _, fact := range x.facts[1:] {
+		if fact.VendorID != x.attemptVendor {
+			x.attemptVendor = ""
+			return
+		}
+	}
+}
+
+func (x *Call) RouteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return x.routeContext(ctx)
+}
+
+func (x *Call) StartAttemptTrace(ctx context.Context, providerKind, revisionID, model string) (context.Context, *telemetry.AttemptTrace) {
+	return x.request.trace.Attempt(ctx, providerKind, revisionID, model)
+}
+
+func (x *Call) SensitiveRef() *egress.Sensitive { return &x.sensitive }
+
+func (x *Call) IsCallerCredential(provider *routing.Provider) bool {
+	return provider.CredentialSource == "caller" && x.origin != "probe"
 }

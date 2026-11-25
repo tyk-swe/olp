@@ -14,7 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -220,14 +219,13 @@ func (x *Call) attemptChargeBound(attempt routing.Attempt, costBound rates.Cost)
 	if !ok {
 		return costBound
 	}
-	if x.media != nil || x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
+	if x.fixedUsage != nil || x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
 		u := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete}
-		if x.media != nil {
-			var ok bool
-			u, ok = videoCreateUsage(x.media)
-			if !ok {
+		if x.fixedUsage != nil {
+			if !x.fixedUsage.Bounded {
 				return costBound
 			}
+			u = x.fixedUsage.Usage
 		}
 		var priced *rates.Cost
 		if attempt.Price != nil {
@@ -274,12 +272,11 @@ func (x *Call) targetCostBound(provider routing.Provider, target routing.Target,
 	if x.committed(provider.ID) {
 		return routing.CostBound{}, true
 	}
-	if x.media != nil {
-		u, ok := videoCreateUsage(x.media)
-		if !ok {
+	if x.fixedUsage != nil {
+		if !x.fixedUsage.Bounded {
 			return routing.CostBound{}, false
 		}
-		cost, priced := price.Cost(u, x.request.startedAt, true, discount)
+		cost, priced := price.Cost(x.fixedUsage.Usage, x.request.startedAt, true, discount)
 		return routing.CostBound{Cost: cost}, priced
 	}
 	if x.retained.usage == retainedTokenlessUsage || x.OperationName() == "search" || x.OperationName() == routing.PassthroughOperation || retainedapi.Operation(x.OperationName()) {
@@ -302,15 +299,9 @@ func (x *Call) targetCostBound(provider routing.Provider, target routing.Target,
 	return routing.CostBound{Cost: cost, InputTokens: &admitted.input, OutputTokens: &admitted.reply}, ok
 }
 
-func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
-	if m == nil {
-		return usage.AttemptUsage{}, false
-	}
-	seconds, video := m.VideoSeconds()
-	if !video {
-		return usage.AttemptUsage{}, false
-	}
-	return usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}}, true
+type FixedUsageBound struct {
+	Usage   usage.AttemptUsage
+	Bounded bool
 }
 
 // committed reports whether the attempt's provider settled under provisioned

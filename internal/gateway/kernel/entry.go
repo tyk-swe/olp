@@ -2,12 +2,47 @@ package kernel
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
+
+func (s *Server) EnterPrioritized(w http.ResponseWriter, r *http.Request, family wire.Format) (*Call, keyauthority.Authority, bool) {
+	x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
+	x.semanticHeaders = semanticHeaders(r.Header)
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
+	if !s.Gate.AdmitLater(r.Context()) {
+		s.Refuse(x, w, fault.Overloaded)
+		return x, keyauthority.Authority{}, true
+	}
+	authority, e := s.Gate.Authenticate(r, "inference")
+	if e != nil {
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, e)
+		return x, keyauthority.Authority{}, true
+	}
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, e)
+		return x, keyauthority.Authority{}, true
+	}
+	if e = s.Gate.AwaitAdmission(r.Context(), x.priority); e != nil {
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, e)
+		return x, keyauthority.Authority{}, true
+	}
+	s.BindAuthority(x, authority)
+	if x.attribution, e = ingress.ParseAttribution(r, authority); e != nil {
+		s.Gate.Release(r.Context())
+		s.Refuse(x, w, e)
+		return x, keyauthority.Authority{}, true
+	}
+	return x, authority, false
+}
 
 func (s *Server) EnterCall(w http.ResponseWriter, r *http.Request, x *Call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {
 	if !s.Gate.Admit(r.Context()) {

@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // System work has no key/group/end-user spend but shares aggregate invoice caps.
@@ -102,4 +103,34 @@ func (x *Call) settledTokensFor(facts []events.AttemptFact, estimate int64) *int
 		}
 	}
 	return &total
+}
+
+func (s *Server) ReserveRouteKey(ctx context.Context, x *Call, authority keyauthority.Authority) *fault.Error {
+	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
+	var e *fault.Error
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute())
+	return e
+}
+
+func (s *Server) ReserveAttemptKeyCosted(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt) *fault.Error {
+	overall := time.Duration(x.Route.OverallTimeout) * time.Millisecond
+	admitted := x.AdmissionAuthority(authority)
+	var e *fault.Error
+	x.lease, e = s.Deps.Admission.ReserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute())
+	return e
+}
+
+func (s *Server) AdmitKeyRequest(parent context.Context, x *Call, authority keyauthority.Authority, ttl time.Duration) (context.Context, func(), *fault.Error) {
+	x.budgetGroupID = authority.BudgetGroupID
+	ctx, cancel := context.WithTimeout(parent, ttl)
+	var e *fault.Error
+	x.lease, e = s.Deps.Admission.ReserveKey(ctx, x.AdmissionAuthority(authority), x.clientSurface(), ResourceEstimate, ttl, x.limitRoute())
+	if e != nil {
+		cancel()
+		return nil, nil, e
+	}
+	return ctx, func() {
+		quota.SettleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.Log)
+		cancel()
+	}, nil
 }

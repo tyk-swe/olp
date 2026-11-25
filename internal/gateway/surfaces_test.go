@@ -31,6 +31,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
@@ -489,12 +490,12 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	dependencies := kernel.Dependencies{
 		Runtime: rt, Egress: &policy, Log: log, Sink: sink, Getenv: func(string) string { return "" },
 		Resources: resources.NewEncrypted(nil, "surface-golden", keys),
-		Media: &kernel.MediaDeps{Transport: transport.New(transport.Deps{
-			Client: policy.Client(kernel.UpstreamHeaderTimeout), Auth: connectors.NewAuth(&policy, func(string) string { return "" }),
-			Egress: &policy, Spool: spool, MaxResponseBytes: 1 << 20, Log: log,
-		})},
-		Staging: spool, Uploads: staging.NewAdmission(spool.CapacityBytes()),
+		Staging:   spool, Uploads: staging.NewAdmission(spool.CapacityBytes()),
 	}
+	mediaDeps := surfacemedia.Deps{Transport: transport.New(transport.Deps{
+		Client: policy.Client(kernel.UpstreamHeaderTimeout), Auth: connectors.NewAuth(&policy, func(string) string { return "" }),
+		Egress: &policy, Spool: spool, MaxResponseBytes: 1 << 20, Log: log,
+	})}
 	admission, ledger := money.Scripted(t)
 	dependencies.Admission = admission
 	if limited {
@@ -506,7 +507,7 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	}
 	gw := kernel.New(dependencies, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 	mux := http.NewServeMux()
-	gateway.Register(gw, mux)
+	gateway.Register(gw, mux, gateway.WithMedia(mediaDeps))
 	returned := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() { returned <- struct{}{} }()

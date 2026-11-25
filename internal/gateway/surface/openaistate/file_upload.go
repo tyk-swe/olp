@@ -77,7 +77,7 @@ func (s surface) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.kernel.Refuse(x, w, e)
 		return
 	}
-	form, e := s.kernel.ParseMediaForm(w, r, authority.ID, s.kernel.Config.MaxMediaBodyBytes, 1)
+	form, e := s.kernel.ParseMultipartForm(w, r, authority.ID, s.kernel.Config.MaxMediaBodyBytes, 1)
 	if e != nil {
 		s.kernel.Refuse(x, w, e)
 		return

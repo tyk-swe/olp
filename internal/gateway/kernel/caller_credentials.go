@@ -106,3 +106,19 @@ func (x *Call) callerCostExempt() bool {
 	}
 	return x.named().CallerCostExempt
 }
+
+func (x *Call) CallerSecret(provider, model string) ([]byte, error) {
+	return x.callerSecret(provider, model)
+}
+
+func (x *Call) BindCallerSecret(provider, model string) ([]byte, error) {
+	return x.bindCallerSecret(provider, model)
+}
+
+func (x *Call) CheckCallerTarget(provider *routing.Provider, model string) *fault.Error {
+	return x.checkCallerTarget(provider, model)
+}
+
+func (x *Call) CallerCostExempt() bool {
+	return x.callerCostExempt()
+}

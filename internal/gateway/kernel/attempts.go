@@ -15,6 +15,31 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
+type AttemptAdapter[Result any] struct {
+	Demand   func(routing.Attempt, *routing.Provider) quota.TokenDemand
+	Dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure)
+}
+
+type AttemptOutcome[Result any] struct {
+	Result    Result
+	Err       *fault.Error
+	Committed bool
+	Cancelled bool
+}
+
+func RunAttempts[Result any](ctx context.Context, s *Server, x *Call, adapter AttemptAdapter[Result]) AttemptOutcome[Result] {
+	out := runAttempts(ctx, s, x, attemptAdapter[Result]{
+		demand:   adapter.Demand,
+		dispatch: adapter.Dispatch,
+	})
+	return AttemptOutcome[Result]{
+		Result:    out.result,
+		Err:       out.err,
+		Committed: out.committed,
+		Cancelled: out.cancelled,
+	}
+}
+
 type attemptAdapter[Result any] struct {
 	demand   func(routing.Attempt, *routing.Provider) quota.TokenDemand
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, events.AttemptFact) (events.AttemptFact, Result, *AttemptFailure)
