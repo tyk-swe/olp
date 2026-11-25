@@ -8,6 +8,7 @@
 package vendors
 
 import (
+	"cmp"
 	"encoding/json"
 	"maps"
 	"slices"
@@ -261,22 +262,15 @@ func Speaks(vendor, dialect string) bool {
 	return !ok || contracts[i].Speaks(dialect)
 }
 
-func ForDialect(dialect string) (string, bool) {
-	if only := speakers[dialect]; len(only) == 1 {
-		return only[0], true
-	}
-	return "", false
+func SoleSpeaker(dialect string) (string, bool) {
+	vendor, ok := soleSpeakers[dialect]
+	return vendor, ok
 }
 
 // DefaultFor is the vendor a provider of kind gets when it names none: the
 // kind's default vendor, or the kind itself.
 func DefaultFor(kind string) string {
-	for _, c := range contracts {
-		if c.KindDefault && c.Connector == kind {
-			return c.ID
-		}
-	}
-	return kind
+	return cmp.Or(kindDefaults[kind], kind)
 }
 
 // Kind is the connector kind that serves a vendor.

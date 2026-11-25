@@ -217,10 +217,37 @@ var contracts = []Contract{
 // index maps vendor identifiers to their position in contracts, and shapes
 // holds each contract's request shapes as Contract.Request returns them.
 var (
-	index    = map[string]int{}
-	shapes   = make([]map[string]RequestShape, len(contracts))
-	speakers = map[string][]string{}
+	index  = map[string]int{}
+	shapes = make([]map[string]RequestShape, len(contracts))
 )
+
+var (
+	soleSpeakers = soleSpeakersOf(contracts)
+	kindDefaults = kindDefaultsOf(contracts)
+)
+
+func soleSpeakersOf(contracts []Contract) map[string]string {
+	sole := map[string]string{}
+	for _, c := range contracts {
+		for _, dialect := range c.Dialects {
+			shared := slices.ContainsFunc(contracts, func(other Contract) bool { return other.ID != c.ID && other.Speaks(dialect) })
+			if !shared {
+				sole[dialect] = c.ID
+			}
+		}
+	}
+	return sole
+}
+
+func kindDefaultsOf(contracts []Contract) map[string]string {
+	defaults := map[string]string{}
+	for _, c := range contracts {
+		if _, named := defaults[c.Connector]; c.KindDefault && !named {
+			defaults[c.Connector] = c.ID
+		}
+	}
+	return defaults
+}
 
 func init() {
 	for i, c := range contracts {
@@ -231,9 +258,6 @@ func init() {
 			panic(fmt.Sprintf("vendor contract %q is declared twice", c.ID))
 		}
 		index[c.ID] = i
-		for _, dialect := range c.Dialects {
-			speakers[dialect] = append(speakers[dialect], c.ID)
-		}
 		shapes[i] = make(map[string]RequestShape, len(c.Requests))
 		for operation := range c.Requests {
 			shapes[i][operation] = c.Request(operation)

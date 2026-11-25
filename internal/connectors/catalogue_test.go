@@ -78,19 +78,25 @@ func TestNoCatalogueProfilePublishesADialectForAnOperationItDoesNotServe(t *test
 	}
 }
 
-func TestAProfileInAVendorsOwnDialectIsSelectedOnlyByThatVendor(t *testing.T) {
+func TestASecondSpeakerCannotSilentlyUnpinAVendorOwnedProfile(t *testing.T) {
 	t.Parallel()
 	contracts := vendors.All()
-	candidates := []string{""}
-	for _, contract := range contracts {
-		candidates = append(candidates, contract.ID)
-	}
 	for _, p := range Profiles() {
 		spoken := slices.ContainsFunc(contracts, func(c vendors.Contract) bool { return c.Speaks(p.Dialect) })
 		owned := len(p.Operations) == 1 && slices.Contains([]string{"realtime", "decision", "ocr", "search"}, p.Operations[0])
 		if owned && spoken && p.Vendor() == "" {
 			t.Errorf("%s serves %s in a vendor's dialect and requires no vendor", p.ID, p.Operations[0])
 		}
+	}
+}
+
+func TestAPinnedProfileIsSelectedOnlyByItsVendor(t *testing.T) {
+	t.Parallel()
+	candidates := []string{""}
+	for _, contract := range vendors.All() {
+		candidates = append(candidates, contract.ID)
+	}
+	for _, p := range Profiles() {
 		if p.Vendor() == "" {
 			continue
 		}

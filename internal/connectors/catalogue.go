@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -248,7 +249,7 @@ func (p Profile) reviewedVendor() (string, bool) {
 	if len(p.Operations) != 1 || !slices.Contains(vendorOwnedOperations, p.Operations[0]) {
 		return "", false
 	}
-	return vendors.ForDialect(p.Dialect)
+	return vendors.SoleSpeaker(p.Dialect)
 }
 
 func (p Profile) vendorFamily() string {
@@ -333,13 +334,13 @@ func filesBatchesProfile(v vendors.Contract) Profile {
 }
 
 func vendorProfiles(offered func(vendors.Contract) bool, profile func(vendors.Contract) Profile) []Profile {
-	var out []Profile
-	for _, v := range vendors.All() {
-		if offered(v) {
-			out = append(out, profile(v))
+	return slices.SortedFunc(func(yield func(Profile) bool) {
+		for _, v := range vendors.All() {
+			if offered(v) && !yield(profile(v)) {
+				return
+			}
 		}
-	}
-	return out
+	}, func(a, b Profile) int { return cmp.Compare(a.ID, b.ID) })
 }
 
 var builtIns = builtIn(slices.Concat(
