@@ -47,8 +47,9 @@
       return;
     }
     comparisonError = '';
-    const result = await editor.compareRevisions(revisionFrom, revisionTo);
-    if (result) revisionDiff = result;
+    await editor.compareRevisions(revisionFrom, revisionTo, (diff) => {
+      revisionDiff = diff;
+    });
   }
 
   async function restore(revisionId: string, revision: number) {

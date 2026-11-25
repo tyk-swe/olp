@@ -82,6 +82,7 @@ export function useAction(options: ActionOptions = {}) {
     },
     set error(value: string) {
       error = value;
+      issues = [];
     },
     get conflict() {
       return conflict;
@@ -129,6 +130,8 @@ export function useAction(options: ActionOptions = {}) {
     }
   };
 }
+
+export type Action = ReturnType<typeof useAction>;
 
 export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
   const action = useAction({ refreshOnConflict });

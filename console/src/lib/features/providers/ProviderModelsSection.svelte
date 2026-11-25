@@ -108,9 +108,9 @@
   }
 
   async function certifyModel(provider: Provider, modelId: string) {
-    const result = await editor.certifyModel(provider, modelId);
-    if (result)
+    await editor.certifyModel(provider, modelId, (result) => {
       certificationResults = { ...certificationResults, [modelId]: result };
+    });
   }
 </script>
 

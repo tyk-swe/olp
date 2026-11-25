@@ -15,8 +15,9 @@
   });
 
   async function compare() {
-    const comparison = await editor.compareListing();
-    if (comparison) result = comparison;
+    await editor.compareListing((comparison) => {
+      result = comparison;
+    });
   }
 </script>
 

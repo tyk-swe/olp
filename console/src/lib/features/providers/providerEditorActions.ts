@@ -1,7 +1,9 @@
 import type { QueryClient } from '@tanstack/svelte-query';
 import { errorMessage } from '#lib/management/http.js';
 import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
+import type { Action } from '#lib/editing/action.svelte.js';
 import type { MutationIntentGroup } from '#lib/editing/editorSession.svelte.js';
+import { readResult } from '#lib/editing/result.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import {
   activateProvider,
@@ -18,8 +20,10 @@ import {
   declareProviderModels,
   discoverProviderModels,
   setProviderModel,
+  type CapabilityCertification,
   type CapabilityDeclaration,
   type ProviderKindCapability,
+  type ProviderListingComparison,
   type ProviderModelPage
 } from './models';
 import {
@@ -28,7 +32,11 @@ import {
   type ExternalCredentialReference,
   type ProviderCredential
 } from './credentials';
-import { diffProviderRevisions, restoreProviderRevision } from './revisions';
+import {
+  diffProviderRevisions,
+  restoreProviderRevision,
+  type ProviderRevisionDiff
+} from './revisions';
 import { acceptCatalogSuggestions } from './catalog';
 import {
   createNetworkCredential,
@@ -78,15 +86,17 @@ export type ProviderEditorContext = {
   readonly reportError: (message: string) => void;
   readonly touch: () => void;
   readonly resetModelPage: () => void;
-  readonly run: <T>(
-    label: string,
-    action: (isCurrent: () => boolean) => Promise<T>
-  ) => Promise<T | undefined>;
+  readonly run: Action['run'];
   readonly observe: (
     receipt: ProviderChangeReceipt,
     isCurrent: () => boolean
   ) => Promise<void>;
 };
+
+const activation = (id: string, notice: string): ProviderChangeReceipt => ({
+  change: { kind: 'activation', id },
+  notice
+});
 
 export function createProviderEditorActions(ctx: ProviderEditorContext) {
   const readyForWrite = () => {
@@ -99,128 +109,139 @@ export function createProviderEditorActions(ctx: ProviderEditorContext) {
       const current = readyForWrite();
       const spec = ctx.providerSpec();
       if (!current || !spec) return false;
-      return ctx.run('save', async (isCurrent) => {
-        const snapshotEtag = ctx.snapshotEtag();
-        if (!snapshotEtag)
-          throw new Error('Reload the provider before saving.');
-        const version = ctx.editVersion();
-        const updated = await updateProvider(
-          current.id,
-          snapshotEtag,
-          buildUpdateProviderInput(ctx.editValues(), spec)
-        );
-        if (!isCurrent()) return;
-        const stillDirty = ctx.editVersion() !== version;
-        ctx.markDraftSaved(updated.etag, stillDirty);
-        ctx.intents.reset('activate', 'disable', 'restore');
-        ctx.queryClient.setQueriesData<ProviderModelPage>(
-          { queryKey: providerKeys.modelsOf(current.id) },
-          (page) => (page ? { ...page, provider: updated } : page)
-        );
-        ctx.resetModelPage();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: stillDirty
-              ? 'Draft saved. You have additional unsaved changes.'
-              : 'Provider draft settings saved.'
-          },
-          isCurrent
-        );
-      });
+      const version = ctx.editVersion();
+      return ctx.run(
+        async () => {
+          const snapshotEtag = ctx.snapshotEtag();
+          if (!snapshotEtag)
+            throw new Error('Reload the provider before saving.');
+          return updateProvider(
+            current.id,
+            snapshotEtag,
+            buildUpdateProviderInput(ctx.editValues(), spec)
+          );
+        },
+        async (updated, isCurrent) => {
+          const stillDirty = ctx.editVersion() !== version;
+          ctx.markDraftSaved(updated.etag, stillDirty);
+          ctx.intents.reset('activate', 'disable', 'restore');
+          ctx.queryClient.setQueriesData<ProviderModelPage>(
+            { queryKey: providerKeys.modelsOf(current.id) },
+            (page) => (page ? { ...page, provider: updated } : page)
+          );
+          ctx.resetModelPage();
+          await ctx.observe(
+            activation(
+              current.id,
+              stillDirty
+                ? 'Draft saved. You have additional unsaved changes.'
+                : 'Provider draft settings saved.'
+            ),
+            isCurrent
+          );
+        },
+        { key: 'save' }
+      );
     },
 
     probe: async () => {
       const current = readyForWrite();
       if (!current || ctx.dirty()) return false;
-      return ctx.run('detail-probe', async (isCurrent) => {
-        const { result } = await probeProvider(current);
-        if (!isCurrent()) return;
-        if (!result.succeeded) throw new Error(result.detail);
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `Connection succeeded: ${probeSummary(result)}`
-          },
-          isCurrent
-        );
-      });
+      return ctx.run(
+        () => probeProvider(current),
+        async ({ result }, isCurrent) => {
+          if (!result.succeeded) throw new Error(result.detail);
+          await ctx.observe(
+            activation(
+              current.id,
+              `Connection succeeded: ${probeSummary(result)}`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'detail-probe' }
+      );
     },
 
     activate: async () => {
       const current = readyForWrite();
       if (!current || ctx.dirty()) return false;
-      return ctx.run('detail-activate', async (isCurrent) => {
-        const submission = ctx.intents.activate.prepare(current.id, () => ({
-          id: current.id,
-          etag: current.etag
-        }));
-        const generation = await activateProvider(
-          submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.activate.reset();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `Activated in runtime generation ${generation}.`
-          },
-          isCurrent
-        );
-      });
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.activate.prepare(current.id, () => ({
+            id: current.id,
+            etag: current.etag
+          }));
+          return activateProvider(submission.input, submission.requestId);
+        },
+        async (generation, isCurrent) => {
+          ctx.intents.activate.reset();
+          await ctx.observe(
+            activation(
+              current.id,
+              `Activated in runtime generation ${generation}.`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'detail-activate' }
+      );
     },
 
     disable: async () => {
       const current = readyForWrite();
       if (!current) return false;
-      return ctx.run('detail-disable', async (isCurrent) => {
-        const submission = ctx.intents.disable.prepare(current.id, () => ({
-          id: current.id,
-          etag: current.etag
-        }));
-        try {
-          const generation = await disableProvider(
-            submission.input,
-            submission.requestId
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.disable.prepare(current.id, () => ({
+            id: current.id,
+            etag: current.etag
+          }));
+          const disabled = await readResult(() =>
+            disableProvider(submission.input, submission.requestId)
           );
-          if (!isCurrent()) return;
+          if (!disabled.ok && !isProviderInUse(disabled.error))
+            throw disabled.error;
+          return disabled;
+        },
+        async (disabled, isCurrent) => {
+          if (!disabled.ok) {
+            ctx.setReferenceConflict(errorMessage(disabled.error));
+            return;
+          }
           ctx.intents.disable.reset();
           await ctx.observe(
-            {
-              change: { kind: 'activation', id: current.id },
-              notice: disableNotice(generation)
-            },
+            activation(current.id, disableNotice(disabled.value)),
             isCurrent
           );
-        } catch (error) {
-          if (!isCurrent()) return;
-          if (!isProviderInUse(error)) throw error;
-          ctx.setReferenceConflict(errorMessage(error));
-        }
-      });
+        },
+        { key: 'detail-disable' }
+      );
     },
 
     restoreDraft: async () => {
       const current = readyForWrite();
       if (!current) return false;
-      return ctx.run('detail-restore-draft', async (isCurrent) => {
-        const submission = ctx.intents.restore.prepare(current.id, () => ({
-          id: current.id,
-          etag: current.etag
-        }));
-        await restoreProviderAsDraft(submission.input, submission.requestId);
-        if (!isCurrent()) return;
-        ctx.intents.restore.reset();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice:
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.restore.prepare(current.id, () => ({
+            id: current.id,
+            etag: current.etag
+          }));
+          return restoreProviderAsDraft(submission.input, submission.requestId);
+        },
+        async (_restored, isCurrent) => {
+          ctx.intents.restore.reset();
+          await ctx.observe(
+            activation(
+              current.id,
               'Provider restored as a draft. Stored capabilities are declared again: re-certify and test before activation.'
-          },
-          isCurrent
-        );
-      });
+            ),
+            isCurrent
+          );
+        },
+        { key: 'detail-restore-draft' }
+      );
     },
 
     stageCredential: async (
@@ -228,139 +249,159 @@ export function createProviderEditorActions(ctx: ProviderEditorContext) {
     ) => {
       const current = readyForWrite();
       if (!current) return false;
-      return ctx.run('rotate-credential', async (isCurrent) => {
-        const submission = ctx.intents.stage.prepare(
-          { providerId: current.id, credential },
-          () => [{ id: current.id, etag: current.etag }, credential] as const
-        );
-        await rotateProviderCredential(
-          ...submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.stage.reset();
-        ctx.resetModelPage();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice:
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.stage.prepare(
+            { providerId: current.id, credential },
+            () => [{ id: current.id, etag: current.etag }, credential] as const
+          );
+          return rotateProviderCredential(
+            ...submission.input,
+            submission.requestId
+          );
+        },
+        async (_rotated, isCurrent) => {
+          ctx.intents.stage.reset();
+          ctx.resetModelPage();
+          await ctx.observe(
+            activation(
+              current.id,
               'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.'
-          },
-          isCurrent
-        );
-        return true;
-      });
+            ),
+            isCurrent
+          );
+        },
+        { key: 'rotate-credential' }
+      );
     },
 
     revokeCredential: async (credential: ProviderCredential) => {
       const current = readyForWrite();
       if (!current) return false;
-      return ctx.run(`revoke-${credential.id}`, async (isCurrent) => {
-        const submission = ctx.intents.revoke.prepare(
-          { providerId: current.id, credentialId: credential.id },
-          () => [{ id: current.id, etag: current.etag }, credential.id] as const
-        );
-        await revokeProviderCredential(
-          ...submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.revoke.reset();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `Credential version ${credential.version} revoked.`
-          },
-          isCurrent
-        );
-      });
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.revoke.prepare(
+            { providerId: current.id, credentialId: credential.id },
+            () =>
+              [{ id: current.id, etag: current.etag }, credential.id] as const
+          );
+          return revokeProviderCredential(
+            ...submission.input,
+            submission.requestId
+          );
+        },
+        async (_revoked, isCurrent) => {
+          ctx.intents.revoke.reset();
+          await ctx.observe(
+            activation(
+              current.id,
+              `Credential version ${credential.version} revoked.`
+            ),
+            isCurrent
+          );
+        },
+        { key: `revoke-${credential.id}` }
+      );
     },
 
     restoreRevision: async (revisionId: string, revision: number) => {
       const current = readyForWrite();
       if (!current) return false;
-      return ctx.run('revision-restore', async (isCurrent) => {
-        const submission = ctx.intents.revision.prepare(
-          { providerId: current.id, revisionId },
-          () => ({
-            provider: { id: current.id, etag: current.etag },
-            revisionId
-          })
-        );
-        await restoreProviderRevision(
-          submission.input.provider,
-          submission.input.revisionId,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.revision.reset();
-        ctx.resetModelPage();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `Revision ${revision} restored as a new draft. No historical credential was restored; the current credential selection was preserved. Test and certify before activation.`
-          },
-          isCurrent
-        );
-        return true;
-      });
-    },
-
-    compareListing: async () => {
-      const current = readyForWrite();
-      if (!current) return;
-      return ctx.run('listing-comparison', () =>
-        compareProviderListing(current.id)
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.revision.prepare(
+            { providerId: current.id, revisionId },
+            () => ({
+              provider: { id: current.id, etag: current.etag },
+              revisionId
+            })
+          );
+          return restoreProviderRevision(
+            submission.input.provider,
+            submission.input.revisionId,
+            submission.requestId
+          );
+        },
+        async (_restored, isCurrent) => {
+          ctx.intents.revision.reset();
+          ctx.resetModelPage();
+          await ctx.observe(
+            activation(
+              current.id,
+              `Revision ${revision} restored as a new draft. No historical credential was restored; the current credential selection was preserved. Test and certify before activation.`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'revision-restore' }
       );
     },
 
-    compareRevisions: async (from: string, to: string) => {
+    compareListing: async (
+      accept: (comparison: ProviderListingComparison) => void
+    ) => {
+      const current = readyForWrite();
+      if (!current) return false;
+      return ctx.run(() => compareProviderListing(current.id), accept, {
+        key: 'listing-comparison'
+      });
+    },
+
+    compareRevisions: async (
+      from: string,
+      to: string,
+      accept: (diff: ProviderRevisionDiff) => void
+    ) => {
       const current = ctx.current();
-      if (!current) return;
-      return ctx.run('revision-diff', () =>
-        diffProviderRevisions(current.id, from, to)
+      if (!current) return false;
+      return ctx.run(
+        () => diffProviderRevisions(current.id, from, to),
+        accept,
+        { key: 'revision-diff' }
       );
     },
 
     discoverModels: async () => {
       const current = readyForWrite();
-      if (!current) return;
-      return ctx.run('detail-discover', async (isCurrent) => {
-        const updated = await discoverProviderModels(current);
-        if (!isCurrent()) return;
-        ctx.resetModelPage();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
-          },
-          isCurrent
-        );
-        return true;
-      });
+      if (!current) return false;
+      return ctx.run(
+        () => discoverProviderModels(current),
+        async (updated, isCurrent) => {
+          ctx.resetModelPage();
+          await ctx.observe(
+            activation(
+              current.id,
+              `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'detail-discover' }
+      );
     },
 
     declareModels: async (input: string) => {
       const current = readyForWrite();
-      if (!current) return;
+      if (!current) return false;
       const names = parseManualModelNames(input);
       if (!names.length) {
         ctx.reportError('Enter at least one upstream model identifier.');
-        return;
+        return false;
       }
-      return ctx.run('detail-declare', async (isCurrent) => {
-        const updated = await declareProviderModels(current, names);
-        if (!isCurrent()) return;
-        ctx.resetModelPage();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`
-          },
-          isCurrent
-        );
-        return true;
-      });
+      return ctx.run(
+        () => declareProviderModels(current, names),
+        async (updated, isCurrent) => {
+          ctx.resetModelPage();
+          await ctx.observe(
+            activation(
+              current.id,
+              `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'detail-declare' }
+      );
     },
 
     reviewModel: async (
@@ -371,132 +412,154 @@ export function createProviderEditorActions(ctx: ProviderEditorContext) {
     ) => {
       if (!ctx.canManage() || ctx.pending() || provider.id !== ctx.providerId())
         return false;
-      return ctx.run(`model-${modelId}`, async (isCurrent) => {
-        await setProviderModel(provider, modelId, enabled, capabilities);
-        if (!isCurrent()) return false;
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: provider.id },
-            notice: 'Capability review saved with declared provenance.'
-          },
-          isCurrent
-        );
-        return true;
-      });
+      return ctx.run(
+        () => setProviderModel(provider, modelId, enabled, capabilities),
+        (_saved, isCurrent) =>
+          ctx.observe(
+            activation(
+              provider.id,
+              'Capability review saved with declared provenance.'
+            ),
+            isCurrent
+          ),
+        { key: `model-${modelId}` }
+      );
     },
 
-    certifyModel: async (provider: Provider, modelId: string) => {
+    certifyModel: async (
+      provider: Provider,
+      modelId: string,
+      accept: (result: CapabilityCertification) => void
+    ) => {
       if (!ctx.canManage() || ctx.pending() || provider.id !== ctx.providerId())
-        return;
-      return ctx.run(`certify-${modelId}`, async (isCurrent) => {
-        const probe = certificationPrerequisiteReady(provider)
-          ? undefined
-          : (await probeProvider(provider)).result;
-        if (!isCurrent()) return;
-        if (probe && !probe.succeeded) throw new Error(probe.detail);
-        const tested = probe
-          ? {
-              ...provider,
-              last_probe_at: probe.checked_at,
-              last_probe_status: 'succeeded',
-              last_probe_detail: probe.detail
-            }
-          : provider;
-        const { result } = await certifyProviderModel(tested, modelId);
-        if (!isCurrent()) return;
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: provider.id },
-            notice: `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`
-          },
-          isCurrent
-        );
-        return result;
-      });
+        return false;
+      return ctx.run(
+        async (isCurrent) => {
+          const probe = certificationPrerequisiteReady(provider)
+            ? undefined
+            : (await probeProvider(provider)).result;
+          if (!isCurrent()) return undefined;
+          if (probe && !probe.succeeded) throw new Error(probe.detail);
+          const tested = probe
+            ? {
+                ...provider,
+                last_probe_at: probe.checked_at,
+                last_probe_status: 'succeeded',
+                last_probe_detail: probe.detail
+              }
+            : provider;
+          return (await certifyProviderModel(tested, modelId)).result;
+        },
+        async (result, isCurrent) => {
+          if (!result) return;
+          await ctx.observe(
+            activation(
+              provider.id,
+              `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`
+            ),
+            isCurrent
+          );
+          if (isCurrent()) accept(result);
+        },
+        { key: `certify-${modelId}` }
+      );
     },
 
     acceptCatalog: async (digest: string, models: string[]) => {
       const current = readyForWrite();
-      if (!current || !models.length) return;
-      return ctx.run('catalog-accept', async (isCurrent) => {
-        const submission = ctx.intents.catalog.prepare(
-          { providerId: current.id, digest, models },
-          () =>
-            [{ id: current.id, etag: current.etag }, digest, models] as const
-        );
-        await acceptCatalogSuggestions(
-          ...submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.catalog.reset();
-        const count = submission.input[2].length;
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            notice: `Catalog facts stored for ${count} model${count === 1 ? '' : 's'}. Certify the provider's capabilities again before activation.`
-          },
-          isCurrent
-        );
-        return true;
-      });
+      if (!current || !models.length) return false;
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.catalog.prepare(
+            { providerId: current.id, digest, models },
+            () =>
+              [{ id: current.id, etag: current.etag }, digest, models] as const
+          );
+          await acceptCatalogSuggestions(
+            ...submission.input,
+            submission.requestId
+          );
+          return submission.input[2].length;
+        },
+        async (count, isCurrent) => {
+          ctx.intents.catalog.reset();
+          await ctx.observe(
+            activation(
+              current.id,
+              `Catalog facts stored for ${count} model${count === 1 ? '' : 's'}. Certify the provider's capabilities again before activation.`
+            ),
+            isCurrent
+          );
+        },
+        { key: 'catalog-accept' }
+      );
     },
 
     stageNetworkCredential: async (secret: string) => {
       const current = readyForWrite();
-      if (!current) return;
-      return ctx.run('network-credential', async (isCurrent) => {
-        if (!nativeObject(parseNativeJSON(secret)))
-          throw new Error('Enter a network credential JSON object.');
-        const submission = ctx.intents.networkCreate.prepare(
-          { providerId: current.id, secret },
-          () => [current.id, current.etag, secret] as const
-        );
-        const created = await createNetworkCredential(
-          ...submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.networkCreate.reset();
-        ctx
-          .editValues()
-          .document?.set(networkCredentialPath, created.credential_id);
-        ctx.touch();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            snapshot: { previousEtag: submission.input[1], etag: created.etag },
-            notice: 'Network credential stored and selected in the draft.'
-          },
-          isCurrent
-        );
-        return true;
-      });
+      if (!current) return false;
+      return ctx.run(
+        async () => {
+          if (!nativeObject(parseNativeJSON(secret)))
+            throw new Error('Enter a network credential JSON object.');
+          const submission = ctx.intents.networkCreate.prepare(
+            { providerId: current.id, secret },
+            () => [current.id, current.etag, secret] as const
+          );
+          const created = await createNetworkCredential(
+            ...submission.input,
+            submission.requestId
+          );
+          return { created, previousEtag: submission.input[1] };
+        },
+        async ({ created, previousEtag }, isCurrent) => {
+          ctx.intents.networkCreate.reset();
+          ctx
+            .editValues()
+            .document?.set(networkCredentialPath, created.credential_id);
+          ctx.touch();
+          await ctx.observe(
+            {
+              ...activation(
+                current.id,
+                'Network credential stored and selected in the draft.'
+              ),
+              snapshot: { previousEtag, etag: created.etag }
+            },
+            isCurrent
+          );
+        },
+        { key: 'network-credential' }
+      );
     },
 
     revokeNetworkCredential: async (credentialId: string) => {
       const current = readyForWrite();
-      if (!current) return;
-      return ctx.run('revoke-network-credential', async (isCurrent) => {
-        const submission = ctx.intents.networkRevoke.prepare(
-          { providerId: current.id, credentialId },
-          () => [current.id, current.etag, credentialId] as const
-        );
-        const revoked = await revokeNetworkCredential(
-          ...submission.input,
-          submission.requestId
-        );
-        if (!isCurrent()) return;
-        ctx.intents.networkRevoke.reset();
-        await ctx.observe(
-          {
-            change: { kind: 'activation', id: current.id },
-            snapshot: { previousEtag: submission.input[1], etag: revoked.etag },
-            notice: 'Network credential revoked.'
-          },
-          isCurrent
-        );
-      });
+      if (!current) return false;
+      return ctx.run(
+        async () => {
+          const submission = ctx.intents.networkRevoke.prepare(
+            { providerId: current.id, credentialId },
+            () => [current.id, current.etag, credentialId] as const
+          );
+          const revoked = await revokeNetworkCredential(
+            ...submission.input,
+            submission.requestId
+          );
+          return { revoked, previousEtag: submission.input[1] };
+        },
+        async ({ revoked, previousEtag }, isCurrent) => {
+          ctx.intents.networkRevoke.reset();
+          await ctx.observe(
+            {
+              ...activation(current.id, 'Network credential revoked.'),
+              snapshot: { previousEtag, etag: revoked.etag }
+            },
+            isCurrent
+          );
+        },
+        { key: 'revoke-network-credential' }
+      );
     }
   };
 }

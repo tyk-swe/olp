@@ -5,6 +5,7 @@ import {
   useQueryClient
 } from '@tanstack/svelte-query';
 import { useRole } from '#lib/session/useRole.svelte.js';
+import { useAction } from '#lib/editing/action.svelte.js';
 import {
   EditorSession,
   useMutationIntentGroup
@@ -19,12 +20,7 @@ import {
   reconcile
 } from '#lib/editing/concurrentEdit.js';
 import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
-import {
-  errorMessage,
-  fieldIssues,
-  isEtagMismatch,
-  type FieldIssue
-} from '#lib/management/http.js';
+import { isEtagMismatch } from '#lib/management/http.js';
 import { listProviderKinds, listProviderModelPage } from './models';
 import { providerKeys } from './providerKeys';
 import {
@@ -65,10 +61,7 @@ export class ProviderEditor {
       (candidate) => candidate.kind === this.current?.configuration.kind
     )
   );
-  private busy = $state('');
   private editVersion = 0;
-  private error = $state('');
-  private validationIssues = $state<FieldIssue[]>([]);
   private notice = $state('');
   private reloadVersion = $state(0);
   private explicitReloadEpoch = $state(0);
@@ -80,15 +73,21 @@ export class ProviderEditor {
   private sync = $state(initialConcurrentEdit());
   private readonly intents = useMutationIntentGroup(providerEditorIntentNames);
   private identity: string;
+  private readonly action = useAction({
+    current: () => this.providerId() === this.identity,
+    conflict: (cause) => {
+      if (!isEtagMismatch(cause)) return false;
+      this.markConflict();
+      return true;
+    },
+    begin: () => {
+      this.notice = this.referenceConflict = '';
+    }
+  });
 
   private readonly reset = () => {
-    this.busy =
-      this.error =
-      this.notice =
-      this.refreshError =
-      this.referenceConflict =
-        '';
-    this.validationIssues = [];
+    this.action.retire();
+    this.notice = this.refreshError = this.referenceConflict = '';
     this.pending = null;
     this.sync = initialConcurrentEdit();
     this.editValues = emptyEditValues();
@@ -114,10 +113,10 @@ export class ProviderEditor {
 
   get view() {
     return {
-      busy: this.busy,
-      error: this.error,
+      busy: this.action.key,
+      error: this.action.error,
       notice: this.notice,
-      validationIssues: this.validationIssues,
+      validationIssues: this.action.issues,
       refreshError: this.refreshError,
       refreshPending: Boolean(this.pending),
       referenceConflict: this.referenceConflict,
@@ -135,13 +134,11 @@ export class ProviderEditor {
     this.sync = markDirty(this.sync);
   };
   readonly reportError = (message: string) => {
-    this.error = message;
-    this.validationIssues = [];
+    this.action.error = message;
     this.notice = '';
   };
   readonly reportNotice = (message: string) => {
-    this.error = '';
-    this.validationIssues = [];
+    this.action.reset();
     this.notice = message;
   };
   readonly markConflict = () => {
@@ -149,31 +146,6 @@ export class ProviderEditor {
   };
   readonly resetModelPage = () => {
     resetCursor(this.modelPageState);
-  };
-
-  private run = async <T>(
-    label: string,
-    action: (isCurrent: () => boolean) => Promise<T>
-  ): Promise<T | undefined> => {
-    if (this.busy) return;
-    const isCurrent = this.captureOwner();
-    this.busy = label;
-    this.error = this.notice = this.referenceConflict = '';
-    this.validationIssues = [];
-    try {
-      const result = await action(isCurrent);
-      return isCurrent() ? result : undefined;
-    } catch (error) {
-      if (!isCurrent()) return;
-      if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
-      else {
-        this.error = errorMessage(error);
-        this.validationIssues = fieldIssues(error);
-      }
-      return;
-    } finally {
-      if (isCurrent()) this.busy = '';
-    }
   };
 
   private readSnapshot = async (mutation?: {
@@ -208,25 +180,26 @@ export class ProviderEditor {
   };
 
   readonly reload = async () => {
-    await this.run('reload', async (isCurrent) => {
-      const result = await this.snapshot.refetch();
-      if (!isCurrent()) return;
-      if (result.error) throw result.error;
-      if (!result.data)
-        throw new Error('The provider snapshot is unavailable.');
-      this.sync = markSaved(result.data.provider.etag, false);
-      if (this.providerSpec)
-        this.editValues = providerEditValues(
-          result.data.provider,
-          this.providerSpec
-        );
-      this.busy = '';
-      this.pending = null;
-      this.refreshError = '';
-      this.intents.resetAll();
-      this.explicitReloadEpoch += 1;
-      this.reloadVersion += 1;
-    });
+    await this.action.run(
+      async () => {
+        const result = await this.snapshot.refetch();
+        if (result.error) throw result.error;
+        if (!result.data)
+          throw new Error('The provider snapshot is unavailable.');
+        return result.data.provider;
+      },
+      (provider) => {
+        this.sync = markSaved(provider.etag, false);
+        if (this.providerSpec)
+          this.editValues = providerEditValues(provider, this.providerSpec);
+        this.pending = null;
+        this.refreshError = '';
+        this.intents.resetAll();
+        this.explicitReloadEpoch += 1;
+        this.reloadVersion += 1;
+      },
+      { key: 'reload' }
+    );
   };
 
   private observe = async (
@@ -255,8 +228,10 @@ export class ProviderEditor {
   readonly retryRefresh = async () => {
     const receipt = this.pending;
     if (receipt)
-      await this.run('refresh', (isCurrent) =>
-        this.observe(receipt, isCurrent)
+      await this.action.run(
+        (isCurrent) => this.observe(receipt, isCurrent),
+        undefined,
+        { key: 'refresh' }
       );
   };
 
@@ -282,7 +257,7 @@ export class ProviderEditor {
     reportError: this.reportError,
     touch: this.touch,
     resetModelPage: this.resetModelPage,
-    run: this.run,
+    run: this.action.run,
     observe: this.observe
   });
 
