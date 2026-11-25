@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Remote struct {
@@ -56,11 +57,21 @@ func (s *Store) Claim(ctx context.Context, taskID string) (bool, error) {
 	return err == nil && tag.RowsAffected() == 1, err
 }
 
-func (s *Store) Remote(ctx context.Context, id string) (Remote, error) {
-	var task Remote
-	err := s.pool.QueryRow(ctx, `SELECT t.id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,COALESCE(t.oauth_binding_digest,''),v.definition
+const remoteTaskSQL = `SELECT t.id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,COALESCE(t.oauth_binding_digest,''),v.definition
  FROM olp.a2a_tasks t JOIN olp.agent_publication_revisions v ON v.id=t.revision_id AND v.publication_id=t.publication_id
- WHERE t.id=$1`, id).Scan(&task.ID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Binding, &task.Definition)
+ WHERE t.id=$1`
+
+func (s *Store) Remote(ctx context.Context, id string) (Remote, error) {
+	return remoteTask(ctx, s.pool, id, remoteTaskSQL)
+}
+
+func (s *Store) RemoteForUpdate(ctx context.Context, q database.Queryer, id string) (Remote, error) {
+	return remoteTask(ctx, q, id, remoteTaskSQL+" FOR UPDATE OF t")
+}
+
+func remoteTask(ctx context.Context, q database.Queryer, id, query string) (Remote, error) {
+	var task Remote
+	err := q.QueryRow(ctx, query, id).Scan(&task.ID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Binding, &task.Definition)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Remote{}, ErrNotFound
 	}

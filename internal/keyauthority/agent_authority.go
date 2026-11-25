@@ -9,7 +9,7 @@ import (
 // group, inference scope, or installation-wide key cannot grant project tools.
 // The caller also checks the resource's current publication and revocation.
 func (a Authority) AllowsResource(scope, id, project string, now time.Time) bool {
-	if a.ProjectID == nil || *a.ProjectID != project || a.RevokedAt != nil || a.ExpiresAt != nil && !a.ExpiresAt.After(now) || !slices.Contains(a.Policy.Scopes, scope) {
+	if a.ProjectID == nil || *a.ProjectID != project || a.RevokedAt != nil || a.PausedAt != nil || a.ExpiresAt != nil && !a.ExpiresAt.After(now) || !slices.Contains(a.Policy.Scopes, scope) {
 		return false
 	}
 	switch scope {

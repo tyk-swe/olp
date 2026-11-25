@@ -106,6 +106,7 @@ func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scop
 				current, ok = issuer.bindings[principal.WorkloadMapping]
 				current.ID = principal.ID
 				current.RevokedAt = principal.RevokedAt
+				current.PausedAt = principal.PausedAt
 			}
 			break
 		}

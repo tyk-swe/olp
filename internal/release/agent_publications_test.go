@@ -245,7 +245,7 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 			if scope == "agents" {
 				kind = "agent"
 			}
-			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "changed project"} {
+			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "paused principal", "changed project"} {
 				t.Run(scenario, func(t *testing.T) {
 					principal := a
 					issuer := workloadIssuer{ID: issuerID, Revision: a.WorkloadRevision, Config: workload.Config{Enabled: true}, bindings: map[string]keyauthority.Authority{a.WorkloadMapping: a}}
@@ -265,6 +265,9 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 					case "revoked principal":
 						now := time.Now()
 						principal.RevokedAt = &now
+					case "paused principal":
+						now := time.Now()
+						principal.PausedAt = &now
 					case "changed project":
 						other := "other project"
 						live := a
