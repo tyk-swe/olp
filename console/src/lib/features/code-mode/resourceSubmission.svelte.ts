@@ -1,8 +1,9 @@
 import { confirmAction } from '#lib/components/confirm.js';
 import { onDestroy } from 'svelte';
 import { ApiProblem, errorMessage, unanswered } from '#lib/management/http.js';
+import { useAction } from '#lib/editing/action.svelte.js';
 import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-import { readResult } from '#lib/editing/result.js';
+import { captureResult } from '#lib/editing/result.js';
 import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
 import { mutationError } from './presentation';
 
@@ -27,21 +28,18 @@ export function useResourceSubmission<Input>(options: {
   onCancel: () => void;
 }) {
   const intent = useMutationIntent();
-  let busy = $state(false);
-  let error = $state('');
+  const action = useAction();
   let dirty = $state(false);
   // A create whose response was lost remains the same logical submission.
   // Keep its fields fixed until the operator retries or explicitly edits it.
   let submitted = $state(false);
-  let active = true;
 
   $effect(() =>
-    options.onDraftChange(dirty || submitted || !!options.blocked?.() || busy)
+    options.onDraftChange(
+      dirty || submitted || !!options.blocked?.() || action.busy
+    )
   );
-  onDestroy(() => {
-    active = false;
-    options.onDraftChange(false);
-  });
+  onDestroy(() => options.onDraftChange(false));
 
   function cancel() {
     if (confirmDiscardChanges(dirty || submitted || !!options.blocked?.()))
@@ -59,47 +57,45 @@ export function useResourceSubmission<Input>(options: {
       return;
     submitted = false;
     intent.reset();
-    error = '';
+    action.reset();
   }
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || options.blocked?.() || !options.allowed()) return;
-    busy = true;
-    error = '';
-    let dispatched = false;
-    try {
-      const submission = intent.prepare(options.build());
-      const promise = options.persist(submission.input, submission.requestId);
-      dispatched = true;
-      await promise;
-    } catch (e) {
-      if (!active) return;
-      submitted =
-        dispatched &&
-        options.creating() &&
-        (unanswered(e) || !(e instanceof ApiProblem));
-      error = mutationError(e);
-      busy = false;
+    if (action.busy || options.blocked?.() || !options.allowed()) return;
+    const prepared = captureResult(() => intent.prepare(options.build()));
+    if (!prepared.ok) {
+      submitted = false;
+      action.error = mutationError(prepared.error);
       return;
     }
-    if (!active) return;
-    intent.reset();
-    dirty = false;
-    submitted = false;
-    const followed = await readResult(() => options.onSaved());
-    if (!active) return;
-    busy = false;
-    if (!followed.ok)
-      error = `Changes saved, but the page could not update. ${errorMessage(followed.error)}`;
+    await action.run(
+      () => options.persist(prepared.value.input, prepared.value.requestId),
+      async () => {
+        intent.reset();
+        dirty = false;
+        submitted = false;
+        await options.onSaved();
+      },
+      {
+        failure: (cause, stage) => {
+          if (stage === 'accept')
+            return `Changes saved, but the page could not update. ${errorMessage(cause)}`;
+          submitted =
+            options.creating() &&
+            (unanswered(cause) || !(cause instanceof ApiProblem));
+          return mutationError(cause);
+        }
+      }
+    );
   }
 
   return {
     get busy() {
-      return busy;
+      return action.busy;
     },
     get error() {
-      return error;
+      return action.error;
     },
     get submitted() {
       return submitted;

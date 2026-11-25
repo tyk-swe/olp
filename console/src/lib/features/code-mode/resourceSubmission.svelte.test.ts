@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { ApiProblem } from '#lib/management/http.js';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import AccountEditor from './AccountEditor.svelte';
@@ -187,6 +188,46 @@ describe('resource submissions', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it('reports a draft that cannot be built without sending or locking the request', async () => {
+    const { state, persist } = renderSubmission({
+      build: () => {
+        throw new Error('Enter a name.');
+      }
+    });
+
+    await state.save(submit());
+
+    expect(persist).not.toHaveBeenCalled();
+    expect(state.error).toBe('Enter a name.');
+    expect(state.submitted).toBe(false);
+    expect(state.busy).toBe(false);
+  });
+
+  it('keeps the edits and says the resource changed when an update hits a stale version', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    persist.mockRejectedValueOnce(
+      new ApiProblem({
+        type: 'https://openllmproxy.dev/problems/etag_mismatch',
+        title: 'Precondition failed',
+        status: 412
+      })
+    );
+    const { state, onSaved, onDraftChange } = renderSubmission({
+      persist,
+      creating: () => false
+    });
+    state.markDirty();
+
+    await state.save(submit());
+    flushSync();
+
+    expect(state.error).toMatch(/^This resource changed\./);
+    expect(state.submitted).toBe(false);
+    expect(state.busy).toBe(false);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  });
+
   it('keeps a create saved when the follow-up after the write fails', async () => {
     const persist = vi.fn<Options['persist']>(async () => undefined);
     const onSaved = vi
@@ -237,6 +278,34 @@ describe('resource submissions', () => {
     await state.save(submit());
 
     expect(persist.mock.calls[1][1]).not.toBe(persist.mock.calls[0][1]);
+  });
+
+  it('ignores a save answered after another principal signed in', async () => {
+    const pending = Promise.withResolvers<void>();
+    const { state, onSaved } = renderSubmission({
+      persist: () => pending.promise
+    });
+    const saving = state.save(submit());
+    expect(state.busy).toBe(true);
+
+    authLifecycle.establishSession({
+      user: {
+        id: 'another-owner',
+        email: 'another@example.test',
+        display_name: 'Another owner',
+        role: 'owner',
+        access_scope: 'global',
+        operations: []
+      },
+      csrf_token: 'fixture-csrf'
+    });
+    expect(state.busy).toBe(false);
+    pending.reject(new Error('answered for the previous principal'));
+    await saving;
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(state.error).toBe('');
+    expect(state.submitted).toBe(false);
   });
 
   it('ignores a completed request after the editor is closed', async () => {
