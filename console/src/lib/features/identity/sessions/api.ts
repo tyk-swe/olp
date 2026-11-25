@@ -1,0 +1,29 @@
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/session/client.js';
+import { ensureOk, unwrapPage } from '#lib/management/http.js';
+import type { CursorPage } from '#lib/management/http.js';
+
+type Schemas = components['schemas'];
+
+export type Session = Schemas['SessionDetailResponse'];
+
+export async function listSessionPage(
+  userId?: string,
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<Session>> {
+  return unwrapPage(
+    await apiClient.GET('/api/v1/sessions', {
+      params: { query: { limit: 50, user_id: userId, cursor } },
+      signal
+    })
+  );
+}
+
+export async function revokeSession(id: string): Promise<void> {
+  ensureOk(
+    await apiClient.DELETE('/api/v1/sessions/{session_id}', {
+      params: { path: { session_id: id } }
+    })
+  );
+}

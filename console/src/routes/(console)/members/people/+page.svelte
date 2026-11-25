@@ -1,5 +1,5 @@
 <script lang="ts">
-  import MembersPanel from '#lib/features/access/users/MembersPanel.svelte';
+  import MembersPanel from '#lib/features/identity/users/MembersPanel.svelte';
 </script>
 
 <MembersPanel />

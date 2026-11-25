@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -12,8 +11,6 @@ import (
 )
 
 const revisionColumns = "v.id::text,g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,v.configuration,v.timeout_ms,v.on_error"
-
-const legacyRuleColumn = "CASE WHEN g.managed_route_revision_id IS NOT NULL THEN v.configuration->'rules'->0->>'id' ELSE '' END"
 
 type NamedPolicyRevision struct {
 	ID     string
@@ -28,11 +25,6 @@ func (d *Revision) columns() []any {
 func scanRevision(row pgx.CollectableRow) (Revision, error) {
 	var d Revision
 	return d, row.Scan(d.columns()...)
-}
-
-func scanPublishedRevision(row pgx.CollectableRow) (Revision, error) {
-	var d Revision
-	return d, row.Scan(append(d.columns(), &d.LegacyRuleID)...)
 }
 
 func collect[T any](ctx context.Context, q database.Queryer, sql string, scan pgx.RowToFunc[T], args ...any) ([]T, error) {
@@ -62,13 +54,13 @@ func ReadRevisions(ctx context.Context, q database.Queryer, ids []string) (map[s
 	return index(revisions, revisionEntry), nil
 }
 
-func ReadUnmanagedActiveRevisions(ctx context.Context, q database.Queryer) ([]Revision, error) {
-	return collect(ctx, q, "SELECT "+revisionColumns+" FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.active_revision_id WHERE g.retired_at IS NULL AND g.managed_route_revision_id IS NULL", scanRevision)
+func ReadActiveRevisions(ctx context.Context, q database.Queryer) ([]Revision, error) {
+	return collect(ctx, q, "SELECT "+revisionColumns+" FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.active_revision_id WHERE g.retired_at IS NULL", scanRevision)
 }
 
-func ReadUnmanagedPolicyRevisions(ctx context.Context, q database.Queryer) ([]NamedPolicyRevision, error) {
+func ReadNamedPolicyRevisions(ctx context.Context, q database.Queryer) ([]NamedPolicyRevision, error) {
 	return collect(ctx, q, `SELECT v.id::text,p.name,(v.id=p.active_revision_id) FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id
- WHERE p.managed_route_revision_id IS NULL AND ((p.retired_at IS NULL AND v.id=p.active_revision_id) OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`, pgx.RowToStructByPos[NamedPolicyRevision])
+ WHERE (p.retired_at IS NULL AND v.id=p.active_revision_id) OR v.id IN(SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments)`, pgx.RowToStructByPos[NamedPolicyRevision])
 }
 
 func ReadRegistry(ctx context.Context, q database.Queryer) (*Registry, error) {
@@ -86,10 +78,9 @@ func ReadRegistry(ctx context.Context, q database.Queryer) (*Registry, error) {
 	if unactivated {
 		return nil, errors.New("activate referenced guardrail and policy revisions before publication")
 	}
-	definitions, err := collect(ctx, q, "SELECT "+revisionColumns+","+legacyRuleColumn+` FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.guardrail_id=g.id
+	definitions, err := collect(ctx, q, "SELECT "+revisionColumns+` FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.guardrail_id=g.id
  WHERE v.id=g.active_revision_id OR v.id IN (SELECT (entry->>'revision_id')::uuid FROM olp.guardrail_policy_revisions p,
- jsonb_array_elements(p.entries) entry WHERE p.id IN (SELECT active_revision_id FROM olp.guardrail_policies UNION SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments)
- OR p.policy_id IN (SELECT id FROM olp.guardrail_policies WHERE managed_route_revision_id IN (SELECT latest_revision_id FROM olp.routes)))`, scanPublishedRevision)
+ jsonb_array_elements(p.entries) entry WHERE p.id IN (SELECT active_revision_id FROM olp.guardrail_policies UNION SELECT policy_revision_id FROM olp.guardrail_attachments UNION SELECT policy_revision_id FROM olp.guardrail_draft_attachments))`, scanRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +96,6 @@ func ReadRegistry(ctx context.Context, q database.Queryer) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Converted route policies follow the route revision, rather than a mutable
-	// attachment, so publishing or retiring a route cannot revive an old rule.
-	migrated, err := collect(ctx, q, "SELECT p.id::text,'route',r.id::text,p.active_revision_id::text,0 FROM olp.guardrail_policies p JOIN olp.routes r ON r.latest_revision_id=p.managed_route_revision_id WHERE r.state='active'", pgx.RowToStructByPos[Attachment])
-	if err != nil {
-		return nil, err
-	}
 	organizations, err := collect(ctx, q, "SELECT id::text,organization_id::text FROM olp.projects WHERE organization_id IS NOT NULL", pgx.RowToStructByPos[projectOrganization])
 	if err != nil {
 		return nil, err
@@ -119,15 +104,14 @@ func ReadRegistry(ctx context.Context, q database.Queryer) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(definitions) == 0 && len(policies) == 0 && len(attachments) == 0 && len(migrated) == 0 {
+	if len(definitions) == 0 && len(policies) == 0 && len(attachments) == 0 {
 		return nil, nil
 	}
 	r := &Registry{
 		Definitions:          index(definitions, revisionEntry),
 		Policies:             index(policies, func(p PolicyRevision) (string, PolicyRevision) { return p.ID, p }),
-		Attachments:          slices.Concat(attachments, migrated),
+		Attachments:          attachments,
 		ProjectOrganizations: index(organizations, func(o projectOrganization) (string, string) { return o.Project, o.Organization }),
-		MigratedRoutes:       index(migrated, func(a Attachment) (string, bool) { return a.ScopeID, true }),
 		WindowBytes:          window,
 	}
 	return r, r.Validate()

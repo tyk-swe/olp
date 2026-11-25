@@ -1,5 +1,5 @@
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { unwrap, unwrapPage, mutationHeaders } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import { nativeObject } from '#lib/nativeJson.js';

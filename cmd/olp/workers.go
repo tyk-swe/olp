@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
-	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
@@ -24,7 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/codeallowance"
+	"github.com/tyk-swe/olp/internal/codesessions/codeallowance"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/export/focus"
 	"github.com/tyk-swe/olp/internal/export/stream"
@@ -38,7 +38,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/retainedworker"
+	"github.com/tyk-swe/olp/internal/resources/retainedworker"
 	"github.com/tyk-swe/olp/internal/sinks"
 )
 
@@ -127,7 +127,7 @@ func startWorkers(ctx context.Context, supervise func(func()) func(), d workerDe
 		notifications.RunDelivery(ctx, notifications.DeliveryConfig{
 			Pool: pool, Keys: keys, Installation: installation, Log: log,
 			Sender: notifications.NewSender(*policy), Fleet: fleetState, Catalog: reference,
-			NewID: httpkit.NewID, Now: time.Now,
+			NewID: ids.New, Now: time.Now,
 		})
 	}))
 	wg.Go(supervise(func() { runDebitReconciliation(ctx, pool, store, syncer, log) }))

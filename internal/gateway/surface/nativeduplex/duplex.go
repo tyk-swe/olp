@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -27,7 +27,7 @@ type turn struct {
 	x          *kernel.Call
 	authority  keyauthority.Authority
 	token      string
-	descriptor duplexcontract.Profile
+	descriptor duplex.Profile
 	family     string
 	end        *turnEnd
 }
@@ -72,7 +72,7 @@ func (s surface) duplex(w http.ResponseWriter, r *http.Request) {
 		x.Failure, end.status = e, e.Status
 		fault.WriteSurfaceError(w, e, fault.RequestSurface(r))
 	}
-	descriptor, known := duplexcontract.Lookup(dialect)
+	descriptor, known := duplex.Lookup(dialect)
 	if !known {
 		fail(fault.NotFoundError("not_found", "Unknown native duplex dialect."))
 		return
@@ -185,12 +185,12 @@ func (t turn) readSetup(ctx context.Context, client *websocket.Conn, route *rout
 	if err != nil || messageType != websocket.MessageText {
 		return nil, limit, &closeError{fault: fault.InvalidRequest("invalid_duplex_setup", "A native duplex session requires a setup frame first.", nil), code: websocket.StatusPolicyViolation, reason: "setup required"}
 	}
-	setup, inspectErr := duplexcontract.InspectProfileSetup(t.descriptor, initial, int(limit))
+	setup, inspectErr := duplex.InspectProfileSetup(t.descriptor, initial, int(limit))
 	if inspectErr == nil && setup.Model != "" && setup.Model != route.Slug {
 		inspectErr = errDuplexClientProtocol
 	}
 	if inspectErr == nil {
-		inspectErr = duplexcontract.AdmitProfileSetup(t.descriptor, setup)
+		inspectErr = duplex.AdmitProfileSetup(t.descriptor, setup)
 	}
 	if inspectErr != nil {
 		return nil, limit, &closeError{fault: fault.InvalidRequest("invalid_duplex_setup", "The native duplex setup is not admitted by the compiled profile.", nil), code: websocket.StatusPolicyViolation, reason: "setup refused"}
@@ -213,7 +213,7 @@ func (t turn) checkExposure(ctx context.Context, _ *websocket.Conn) *closeError 
 	return nil
 }
 
-func (t turn) pinAndDebit(ctx context.Context, route *routing.Route) (*kernel.Pin, *duplexcontract.Template, *closeError) {
+func (t turn) pinAndDebit(ctx context.Context, route *routing.Route) (*kernel.Pin, *duplex.Template, *closeError) {
 	p, e := t.kernel.SelectPinSurface(ctx, t.x, route, "realtime", "native", "realtime", func(provider *routing.Provider, model string) bool {
 		return provider.ProfileID == t.descriptor.ProfileID && provider.Connector().Supports("realtime", "native", "realtime") && provider.Supports(model, "realtime", "native", "realtime")
 	})
@@ -240,7 +240,7 @@ func (t turn) pinAndDebit(ctx context.Context, route *routing.Route) (*kernel.Pi
 	return p, template, nil
 }
 
-func (t turn) dispatchSetup(ctx context.Context, client *websocket.Conn, p *kernel.Pin, template *duplexcontract.Template, initial []byte, limit int64) (kernel.DuplexPeer, *duplexcontract.Observer, *closeError) {
+func (t turn) dispatchSetup(ctx context.Context, client *websocket.Conn, p *kernel.Pin, template *duplex.Template, initial []byte, limit int64) (kernel.DuplexPeer, *duplex.Observer, *closeError) {
 	upstream, e := t.surface.duplexDial(ctx, t.x, p, template)
 	if e != nil {
 		return nil, nil, &closeError{fault: e, code: websocket.StatusInternalError, reason: "provider unavailable"}
@@ -357,7 +357,7 @@ func (t turn) finishRelay(usageRecord *wire.Usage, usageComplete bool, relayErr 
 	t.end.out = &kernel.Outcome{Err: x.Failure, Committed: true, Cancelled: cancelled}
 }
 
-func awaitSetupAck(ctx context.Context, upstream, client kernel.DuplexPeer, observer *duplexcontract.Observer, timeout time.Duration) error {
+func awaitSetupAck(ctx context.Context, upstream, client kernel.DuplexPeer, observer *duplex.Observer, timeout time.Duration) error {
 	ackCtx, stopAck := context.WithTimeout(ctx, timeout)
 	kind, ack, err := upstream.Read(ackCtx)
 	stopAck()

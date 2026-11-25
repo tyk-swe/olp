@@ -10,9 +10,9 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
@@ -106,29 +106,43 @@ func (f *Forwarder) serveCode(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
 	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
-	f.forwardCode(w, r.WithContext(ctx), release, route, observation, inbound, raw, body, nil, refuse)
+	f.forwardCode(w, codeRequest{
+		r: r.WithContext(ctx), release: release, route: route, observation: observation,
+		inbound: inbound, transport: codeadapter.HTTP, raw: raw, body: body,
+	}, nil, refuse)
 }
 
-func (f *Forwarder) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, raw, body []byte, recovery *codesessions.Recovery, refuse func(error)) {
-	ctx := r.Context()
-	attempt, err := f.prepareCode(r, release, route, observation, inbound, codeadapter.HTTP, recovery, body)
+type codeRequest struct {
+	r           *http.Request
+	release     *release.Release
+	route       codemode.Route
+	observation codemode.Request
+	inbound     codeIngress
+	transport   codeadapter.Transport
+	raw         []byte
+	body        []byte
+}
+
+func (f *Forwarder) forwardCode(w http.ResponseWriter, req codeRequest, recovery *codesessions.Recovery, refuse func(error)) {
+	ctx := req.r.Context()
+	attempt, err := f.prepareCode(req, recovery)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer attempt.finish(ctx)
-	payload, err := buildCodePayload(attempt, r, inbound, raw, body)
+	payload, err := buildCodePayload(attempt, req.r, req.inbound, req.raw, req.body)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	client, err := f.codeClient(ctx, release, attempt.config, attempt.providerID())
+	client, err := f.codeClient(ctx, req.release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	request, err := buildCodeHTTPRequest(ctx, r, attempt, payload)
+	request, err := buildCodeHTTPRequest(ctx, req.r, attempt, payload)
 	if err != nil {
 		refuse(err)
 		return
@@ -151,16 +165,16 @@ func (f *Forwarder) forwardCode(w http.ResponseWriter, r *http.Request, release 
 		return
 	}
 	defer response.Body.Close()
-	next, recoveryErr := attempt.recover(ctx, response, route, recovery, payload.translated)
+	next, recoveryErr := attempt.recover(ctx, response, req.route, recovery, payload.translated)
 	if recoveryErr != nil {
 		refuse(recoveryErr)
 		return
 	}
 	if next != nil {
-		f.forwardCode(w, r, release, route, observation, inbound, raw, body, next, refuse)
+		f.forwardCode(w, req, next, refuse)
 		return
 	}
-	deliverCodeResponse(ctx, w, r, attempt, response, observation, inbound, payload)
+	deliverCodeResponse(ctx, w, req.r, attempt, response, req.observation, req.inbound, payload)
 }
 
 func buildCodePayload(attempt *codeAttempt, r *http.Request, inbound codeIngress, raw, body []byte) (codePayload, error) {
@@ -284,7 +298,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 	}
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
-	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })
+	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(ctx, a.observer.Event(data)) })
 	var observed []byte
 	overflow := false
 	buffer := make([]byte, 32<<10)
@@ -319,7 +333,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					if streaming {
 						events.Write(decoded)
 					} else {
-						a.observeUnary(decoded)
+						a.observeUnary(ctx, decoded)
 					}
 				}
 			}

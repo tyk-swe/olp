@@ -9,9 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -39,8 +41,8 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 		return Pool{}, err
 	}
 	keys := e.ApiKeyRefs.GetOrEmpty()
-	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: promotion.NonNil(slices.Clone(keys))}
-	placeholder := codeadmin.PoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
+	pool := Pool{ID: e.Id.String(), Project: e.Project, Name: e.Name, OwnerRef: owner, Accounts: weights, APIKeyRefs: ptr.NonNil(slices.Clone(keys))}
+	placeholder := codeadmin.PoolInput{ProjectID: pool.ID, Name: pool.Name, Kind: string(e.Kind), OwnerUserID: placeholderOf(owner, pool.ID), AccountIDs: ptr.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.Map(keys, func(string) string { return pool.ID })}
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
 	}
@@ -120,7 +122,7 @@ func renderPool(p Pool) (contract.ConfigurationCodePool, error) {
 		}
 	})
 	keys := slices.Sorted(slices.Values(p.APIKeyRefs))
-	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(promotion.NonNil(slices.Clone(keys)))}, nil
+	return contract.ConfigurationCodePool{Id: id, Project: p.Project, Name: p.Name, Kind: contract.ConfigurationCodePoolKind(p.kind()), OwnerRef: promotion.Nullable(p.OwnerRef), Accounts: accounts, ApiKeyRefs: nullable.NewNullableWithValue(ptr.NonNil(slices.Clone(keys)))}, nil
 }
 
 func resolvePool(ctx context.Context, q database.Queryer, p Pool, desired Desired, directory promotion.Directory, accountIDs map[string]string) (resolved[codeadmin.PoolInput], error) {
@@ -155,7 +157,7 @@ func resolvePool(ctx context.Context, q database.Queryer, p Pool, desired Desire
 			}
 		}
 	})
-	input := codeadmin.PoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: promotion.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: promotion.NonNil(slices.Sorted(slices.Values(keys)))}
+	input := codeadmin.PoolInput{ProjectID: projectID, Name: p.Name, Kind: p.kind(), OwnerUserID: ownerID, AccountIDs: ptr.NonNil(slices.Sorted(maps.Keys(weights))), AccountWeights: weights, APIKeyIDs: ptr.NonNil(slices.Sorted(slices.Values(keys)))}
 	return resolved[codeadmin.PoolInput]{ref: p.ID, to: to, input: input}, err
 }
 
@@ -164,7 +166,7 @@ func poolChange(ctx context.Context, q database.Queryer, p resolved[codeadmin.Po
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
-			_, err := codeadmin.SavePool(ctx, tx, principal, p.to.id, httpkit.NewID(), p.input, p.to.existing)
+			_, err := codeadmin.SavePool(ctx, tx, principal, p.to.id, ids.New(), p.input, p.to.existing)
 			return err
 		},
 	}, err

@@ -1,8 +1,8 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import { formatBytes, formatDate } from '#lib/format.js';
+  import { formatBytes, formatDate, shortDigest } from '#lib/format.js';
   import { indexEntryForDigest } from './pluginIndex.js';
-  import { pluginTitle, shortDigest, type Plugin } from './api';
+  import { pluginTitle, type Plugin } from './api';
 
   let {
     plugin,

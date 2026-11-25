@@ -10,8 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -193,7 +194,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (httpkit
 }
 
 func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, strength sessionAuth) (httpkit.Reply, error) {
-	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, httpkit.NewID()); err != nil {
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, ids.New()); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
@@ -228,7 +229,7 @@ func syncFederatedAuthority(r *http.Request, tx pgx.Tx, userID, mapped, source s
 	if !allowed {
 		mapped = role
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$2,oidc_authorized=$3,etag=$4,updated_at=now() WHERE id=$1", userID, mapped, allowed, httpkit.NewID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$2,oidc_authorized=$3,etag=$4,updated_at=now() WHERE id=$1", userID, mapped, allowed, ids.New()); err != nil {
 		return false, false, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {

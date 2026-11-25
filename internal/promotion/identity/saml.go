@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	signin "github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -95,7 +96,7 @@ func canonicalSAML(d signin.SAMLDefinition) signin.SAMLDefinition {
 		GroupsAttribute: d.GroupsAttribute,
 		NameAttribute:   d.NameAttribute,
 		DefaultRole:     d.DefaultRole,
-		EmailMappings:   promotion.NonNil(d.EmailMappings),
-		GroupMappings:   promotion.NonNil(d.GroupMappings),
+		EmailMappings:   ptr.NonNil(d.EmailMappings),
+		GroupMappings:   ptr.NonNil(d.GroupMappings),
 	}
 }

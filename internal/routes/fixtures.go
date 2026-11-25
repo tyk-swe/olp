@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -123,7 +123,7 @@ func (s *Server) checkFixtures(r *http.Request, p authz.Principal) (httpkit.Repl
 	if !ok || !sameProject(d.ProjectID, published.ProjectID) {
 		return httpkit.Reply{}, httpkit.Fail(409, "no_published_fixture_baseline", "Publish a revision for this route in the draft's project before checking fixtures.")
 	}
-	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
+	if err := ValidateFidelity(d.Fidelity); err != nil {
 		return httpkit.Reply{}, err
 	}
 	draftRoute, err := draftSimulationRoute(ctx, tx, d, published.ID)

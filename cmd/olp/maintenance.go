@@ -22,10 +22,10 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
-	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/platform/staging"
+	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/signing"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 type MaintenanceOptions struct {

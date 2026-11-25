@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 var groqAudioCodec = codec{transcription: encodeGroqTranscription, translation: encodeGroqTranslation}
@@ -31,7 +32,7 @@ func encodeGroqTranslation(r *Request, p Translation, cfg connectors.Config, mod
 }
 
 func groqFormat(format *string) (string, *Error) {
-	effective := valueOr(format, "json")
+	effective := ptr.Or(format, "json")
 	if !slices.Contains([]string{"json", "text", "verbose_json"}, effective) {
 		return "", invalidMedia("Groq returns transcripts as json, text or verbose_json.")
 	}

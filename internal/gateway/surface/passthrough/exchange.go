@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -24,7 +24,7 @@ type exchangeEnd struct{ pin *kernel.Pin }
 func (s surface) exchange(w http.ResponseWriter, r *http.Request, x *kernel.Call, path string, query url.Values) {
 	pin, e := s.kernel.SelectPassthrough(r.Context(), x)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout(x.Route, pin.Target))
@@ -33,31 +33,32 @@ func (s surface) exchange(w http.ResponseWriter, r *http.Request, x *kernel.Call
 	_ = http.NewResponseController(w).SetWriteDeadline(deadline)
 	body, e := s.readBody(ctx, w, r, x.Route, deadline)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	upstream, e := s.upstreamURL(pin.Provider, path, query)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	end := &exchangeEnd{}
 	defer func() { s.kernel.SettlePassthrough(r.Context(), x, end.pin) }()
 	gated, e := s.kernel.GatePassthrough(ctx, x, pin, deadline)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	end.pin = &gated
-	resp, e := s.kernel.DispatchPassthrough(ctx, x, gated, r, upstream, body)
+	headers := forwardPassthroughHeaders(r.Header, x.Route.Passthrough.Headers, len(body) > 0)
+	resp, e := s.kernel.DispatchPassthrough(ctx, x, gated, r.Method, upstream, headers, body)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	defer resp.Body.Close()
-	source, limit, e := s.kernel.ReceivePassthrough(ctx, x, r.Method, resp)
+	source, limit, e := s.receiveResponse(ctx, x, r.Method, resp)
 	if e != nil {
-		s.kernel.RefusePassthrough(x, w, e)
+		s.refuse(x, w, e)
 		return
 	}
 	writeHeader(w, r.Method, resp, x.Sensitive())
@@ -67,6 +68,69 @@ func (s surface) exchange(w http.ResponseWriter, r *http.Request, x *kernel.Call
 	if readErr != nil || copyErr != nil {
 		panic(http.ErrAbortHandler)
 	}
+}
+
+func forwardPassthroughHeaders(src http.Header, allowed []string, hasBody bool) http.Header {
+	dst := http.Header{}
+	headers := codewire.ForwardHeaders(src, true)
+	for _, name := range allowed {
+		for _, value := range headers.Values(name) {
+			dst.Add(name, value)
+		}
+	}
+	if ct := headers.Get("Content-Type"); ct != "" && hasBody {
+		dst.Set("Content-Type", ct)
+	}
+	return dst
+}
+
+func (s surface) receiveResponse(ctx context.Context, x *kernel.Call, method string, resp *http.Response) (io.Reader, int64, *fault.Error) {
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		s.kernel.FailPassthrough(x, kernel.ClassProtocol)
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused.")
+	}
+	limit := s.responseLimit()
+	if method != http.MethodHead && resp.ContentLength > limit {
+		s.kernel.FailPassthrough(x, kernel.ClassProtocol)
+		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit.")
+	}
+	body, e := passthroughResponseBody(resp, x.Sensitive(), limit)
+	if e != nil {
+		if ctx.Err() != nil {
+			s.kernel.FailPassthrough(x, kernel.ClassTimeout)
+		} else {
+			s.kernel.FailPassthrough(x, kernel.ClassProtocol)
+		}
+		return nil, 0, e
+	}
+	return body, limit, nil
+}
+
+func (s surface) responseLimit() int64 {
+	if s.kernel.Config.MaxResponseBytes <= 0 {
+		return 1 << 20
+	}
+	return s.kernel.Config.MaxResponseBytes
+}
+
+func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *fault.Error) {
+	if response.StatusCode < 400 || response.Request != nil && response.Request.Method == http.MethodHead {
+		return response.Body, nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be read.")
+	}
+	decoded, err := codewire.Decode(raw, response.Header.Get("Content-Encoding"), limit)
+	if err != nil {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be decoded within the gateway limit.")
+	}
+	redacted := sensitive.Redact(string(decoded))
+	if int64(len(redacted)) > limit {
+		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response exceeded the gateway limit.")
+	}
+	return strings.NewReader(redacted), nil
 }
 
 func timeout(route *routing.Route, target routing.Target) time.Duration {

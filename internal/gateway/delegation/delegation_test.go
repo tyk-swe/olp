@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -69,7 +69,7 @@ func testAuthorities(agentScopes []string) map[string]keyauthority.Authority {
 }
 
 func newTestHandler(keys *delegationKeys, capacity int) *Handler {
-	gate := ingress.NewGate(keys, admission.NewPool(capacity), nil, 0, time.Now)
+	gate := ingress.NewGate(keys, concurrency.NewPool(capacity), nil, 0, time.Now)
 	return New(Dependencies{Gate: gate, Keys: keys})
 }
 
@@ -110,7 +110,7 @@ func wantError(t *testing.T, recorder *httptest.ResponseRecorder, status int, co
 func TestCreateUnavailableWithoutCreator(t *testing.T) {
 	t.Parallel()
 	keys := plainKeys{bySecret: testAuthorities([]string{"inference"})}
-	gate := ingress.NewGate(keys, admission.NewPool(1), nil, 0, time.Now)
+	gate := ingress.NewGate(keys, concurrency.NewPool(1), nil, 0, time.Now)
 	handler := New(Dependencies{
 		Gate: gate,
 		Keys: keys,

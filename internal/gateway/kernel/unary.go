@@ -6,18 +6,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -107,7 +107,7 @@ func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body [
 	// this dialect's operation on its native surface in the terminal envelope.
 	x.unary = &unaryCall{dialect: codec, route: model, surface: surface}
 	x.mode = "unary"
-	source, err := operationplan.Parse(dialect, body, int(s.Config.MaxBodyBytes))
+	source, err := unary.Parse(dialect, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		return true, err
 	}
@@ -117,7 +117,7 @@ func (s *Server) selectUnary(x *Call, family wire.Format, dialect string, body [
 	x.unary.source = source
 	return true, nil
 }
-func (x *Call) unaryPlan(provider *routing.Provider, targetID, model string) (*operationplan.Plan, error) {
+func (x *Call) unaryPlan(provider *routing.Provider, targetID, model string) (*unary.Plan, error) {
 	prepared, err := x.preparation().operation(providerPreparationKey(provider, targetID, model), true, func() (unaryAdmission, error) {
 		return x.buildUnary(targetID)
 	})
@@ -143,14 +143,7 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	if len(clientValues) == 1 {
 		client = clientValues[0]
 	}
-	plan, err := template.Bind(x.unary.source, operationplan.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
-	if err != nil {
-		return unaryAdmission{}, err
-	}
-	decisions, err := plan.CheckInput()
-	for _, decision := range decisions {
-		recordDecision(x, decision)
-	}
+	plan, err := template.Bind(x.unary.source, unary.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
 	if err != nil {
 		return unaryAdmission{}, err
 	}
@@ -164,8 +157,8 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	}, nil
 }
 
-func (x *Call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrails.Evidence, error) {
-	if !x.guard.engine.HasPhase(guardrails.Input) && !x.guard.engine.HasPhase(guardrails.InputParallel) {
+func (x *Call) prepareOperationGuardrails(plan *unary.Plan) ([]guardrailpolicy.Evidence, error) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.Input) && !x.guard.engine.HasPhase(guardrailpolicy.InputParallel) {
 		return nil, nil
 	}
 	texts, err := plan.GuardrailInput()
@@ -174,14 +167,11 @@ func (x *Call) prepareOperationGuardrails(plan *operationplan.Plan) ([]guardrail
 		x.guard.record(evidence)
 		return evidence, failure
 	}
-	result, unavailable := x.guard.engine.Unavailable(guardrails.Input)
+	result, unavailable := x.guard.engine.Unavailable(guardrailpolicy.Input)
 	x.guard.record(result.Decisions)
-	parallel, parallelErr := x.guard.engine.Unavailable(guardrails.InputParallel)
+	parallel, parallelErr := x.guard.engine.Unavailable(guardrailpolicy.InputParallel)
 	x.guard.record(parallel.Decisions)
-	evidence := guardrails.MergeEvidence(result.Decisions, parallel.Decisions)
-	if x.guard.engine.HasLegacyInput() {
-		return evidence, operations.Error("policy_conflict", "/request", "input_policy_coverage", "The input policy cannot inspect this native request.")
-	}
+	evidence := guardrailpolicy.MergeEvidence(result.Decisions, parallel.Decisions)
 	if unavailable != nil {
 		return evidence, unavailable
 	}
@@ -245,7 +235,7 @@ func (s *Server) planUnary(ctx context.Context, x *Call) *fault.Error {
 			session.semantic = err
 			return nil, err
 		}
-		return prepared.candidate, nil
+		return prepared, nil
 	}
 	_, _, failure := session.selectPlan(ctx, options)
 	return failure
@@ -283,12 +273,12 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *Call) (*O
 	if e != nil {
 		return fail(e)
 	}
-	var result attemptOutcome[operationplan.Result]
+	var result attemptOutcome[unary.Result]
 	if x.cacheHit() {
 		s.recordCacheHit(x)
 		result.result.Body = x.cache.entry.Body
 	} else {
-		result = runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+		result = runAttempts(ctx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 	}

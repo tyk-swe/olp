@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -88,7 +87,7 @@ ON CONFLICT DO NOTHING RETURNING event_id::text`, event.EventID, event.RequestID
 	if err := insertRequestRows(ctx, tx, event, validated); err != nil {
 		return Persisted{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE olp.requests SET completed_at=$3,status_code=$4,error_class=$5,total_latency_ms=$6,first_byte_ms=$7,attempt_count=$8,policy_decisions=$9::jsonb,budget_boundary=$10,payload_captured=$11,guardrail_decisions=$12::jsonb,evaluator_guardrail_id=$13::uuid,cache_result=NULLIF($14,'') WHERE id=$1 AND started_at=$2`, event.RequestID, event.RequestStartedAt, event.RequestCompletedAt, validated.StatusCode, event.ErrorClass, validated.LatencyMS, validated.FirstByteMS, validated.AttemptCount, string(contentpolicy.DecisionsJSON(event.PolicyDecisions)), event.BudgetBoundary, event.PayloadCaptured, guardrailJSON(event.GuardrailDecisions), event.EvaluatorGuardrailID, event.CacheResult); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE olp.requests SET completed_at=$3,status_code=$4,error_class=$5,total_latency_ms=$6,first_byte_ms=$7,attempt_count=$8,budget_boundary=$9,payload_captured=$10,guardrail_decisions=$11::jsonb,evaluator_guardrail_id=$12::uuid,cache_result=NULLIF($13,'') WHERE id=$1 AND started_at=$2`, event.RequestID, event.RequestStartedAt, event.RequestCompletedAt, validated.StatusCode, event.ErrorClass, validated.LatencyMS, validated.FirstByteMS, validated.AttemptCount, event.BudgetBoundary, event.PayloadCaptured, guardrailJSON(event.GuardrailDecisions), event.EvaluatorGuardrailID, event.CacheResult); err != nil {
 		return Persisted{}, err
 	}
 	if _, err := tx.Exec(ctx, insertAnchorSQL, event.RequestID, event.RequestStartedAt); err != nil {

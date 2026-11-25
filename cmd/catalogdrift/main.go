@@ -16,33 +16,42 @@ import (
 
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/catalog/drift"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
 // listing is how a vendor lists its models: a GET answered with a JSON
 // object holding an array of objects, each naming a model in a field.
 type listing struct {
-	vendor, key, url string
-	header           func(key string) http.Header
-	array, id        string
-	trimPrefix       string
+	vendor, key, query string
+	header             func(key string) http.Header
+	array, id          string
+	trimPrefix         string
 }
 
 func bearer(key string) http.Header { return http.Header{"Authorization": {"Bearer " + key}} }
 
 var listings = []listing{
-	{vendor: "openai", key: "OPENAI_API_KEY", url: "https://api.openai.com/v1/models", header: bearer, array: "data", id: "id"},
-	{vendor: "anthropic", key: "ANTHROPIC_API_KEY", url: "https://api.anthropic.com/v1/models?limit=1000", header: func(key string) http.Header {
+	{vendor: "openai", key: "OPENAI_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "anthropic", key: "ANTHROPIC_API_KEY", query: "?limit=1000", header: func(key string) http.Header {
 		return http.Header{"X-Api-Key": {key}, "Anthropic-Version": {"2023-06-01"}}
 	}, array: "data", id: "id"},
-	{vendor: "google", key: "GEMINI_API_KEY", url: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", header: func(key string) http.Header {
+	{vendor: "google", key: "GEMINI_API_KEY", query: "?pageSize=1000", header: func(key string) http.Header {
 		return http.Header{"X-Goog-Api-Key": {key}}
 	}, array: "models", id: "name", trimPrefix: "models/"},
-	{vendor: "mistral", key: "MISTRAL_API_KEY", url: "https://api.mistral.ai/v1/models", header: bearer, array: "data", id: "id"},
-	{vendor: "groq", key: "GROQ_API_KEY", url: "https://api.groq.com/openai/v1/models", header: bearer, array: "data", id: "id"},
-	{vendor: "xai", key: "XAI_API_KEY", url: "https://api.x.ai/v1/models", header: bearer, array: "data", id: "id"},
-	{vendor: "deepseek", key: "DEEPSEEK_API_KEY", url: "https://api.deepseek.com/models", header: bearer, array: "data", id: "id"},
-	{vendor: "cerebras", key: "CEREBRAS_API_KEY", url: "https://api.cerebras.ai/v1/models", header: bearer, array: "data", id: "id"},
-	{vendor: "moonshot", key: "MOONSHOT_API_KEY", url: "https://api.moonshot.ai/v1/models", header: bearer, array: "data", id: "id"},
+	{vendor: "mistral", key: "MISTRAL_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "groq", key: "GROQ_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "xai", key: "XAI_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "deepseek", key: "DEEPSEEK_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "cerebras", key: "CEREBRAS_API_KEY", header: bearer, array: "data", id: "id"},
+	{vendor: "moonshot", key: "MOONSHOT_API_KEY", header: bearer, array: "data", id: "id"},
+}
+
+func (l listing) url() (string, error) {
+	contract, ok := vendors.Lookup(l.vendor)
+	if !ok || contract.Endpoint == "" {
+		return "", fmt.Errorf("no reviewed endpoint")
+	}
+	return contract.Endpoint + "/models" + l.query, nil
 }
 
 func main() {
@@ -72,7 +81,11 @@ func main() {
 }
 
 func (l listing) models(ctx context.Context, client *http.Client, key string) ([]string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, l.url, nil)
+	target, err := l.url()
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}

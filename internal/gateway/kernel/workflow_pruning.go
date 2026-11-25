@@ -7,8 +7,9 @@ import (
 	"slices"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/decision"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -18,8 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -145,29 +145,6 @@ func (x *Call) pruningInput(ctx context.Context, request *wire.Request) (*wire.R
 			segments[index].Text = surface.Replacement(index, "[recovered content omitted]")
 		}
 	}
-	compiled, problem := compiledPolicy(x.Route)
-	if problem != nil {
-		return nil, nil, problem
-	}
-	if compiled != nil {
-		for _, rule := range compiled.Input {
-			matched := false
-			for index, segment := range segments {
-				if !rule.Re.MatchString(segment.Text) {
-					continue
-				}
-				matched = true
-				if rule.Action == contentpolicy.ActionBlock {
-					recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
-					return nil, nil, fault.InvalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
-				}
-				segments[index].Text = rule.Re.ReplaceAllLiteralString(segment.Text, rule.Replacement)
-			}
-			if matched {
-				recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
-			}
-		}
-	}
 	document, err = surface.Apply(segments)
 	if err != nil {
 		return nil, nil, guardrailError(err)
@@ -226,7 +203,7 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *Call, policy gua
 }
 
 func pruningSurfaceError(policy guardrails.TypeSafePolicy, err error) ([]int, *fault.Error) {
-	if policy.Revision.OnError == guardrails.FailOpen {
+	if policy.Revision.OnError == guardrailpolicy.FailOpen {
 		return nil, nil
 	}
 	return nil, guardrailError(err)
@@ -263,9 +240,9 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 	if !ok {
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
-	source, err := operationplan.Parse(decision.SystemOne, body, int(s.Config.MaxBodyBytes))
+	source, err := unary.Parse(decision.SystemOne, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
-		if policy.Revision.OnError == guardrails.FailOpen {
+		if policy.Revision.OnError == guardrailpolicy.FailOpen {
 			return nil, nil
 		}
 		return nil, guardrailError(err)
@@ -276,7 +253,7 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 		authority: current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
 		userID: parent.userID, origin: usage.OriginClassifier, parent: parent.request.accountingID(),
 		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
-		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
+		deadline: parent.deadline, callBudget: callBudget{spent: parent.spent}, facts: slices.Clone(parent.facts),
 		routeLeg: routeLeg{Route: route}, workflow: parent.workflow,
 		generation: generationCall{runLimits: parent.generation.runLimits},
 		unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
@@ -294,14 +271,14 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 	if problem != nil {
 		return nil, problem
 	}
-	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	result := runAttempts(stepCtx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
 	quota.SettleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.Log)
 	// Later steps must include this independently routed attempt in the same run.
 	parent.facts, parent.spent = x.facts, x.spent
 	if result.err != nil {
-		if policy.Revision.OnError == guardrails.FailOpen && (x.sessionDebit == nil || !x.sessionDebit.dispatched) && (result.err.Code == "upstream_unavailable" || result.err.Code == "gateway_timeout") {
+		if policy.Revision.OnError == guardrailpolicy.FailOpen && (x.sessionDebit == nil || !x.sessionDebit.dispatched) && (result.err.Code == "upstream_unavailable" || result.err.Code == "gateway_timeout") {
 			return nil, nil
 		}
 		return nil, result.err

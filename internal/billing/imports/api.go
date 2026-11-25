@@ -13,16 +13,18 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
 var (
 	errProviderMissing = httpkit.Fail(http.StatusNotFound, "not_found", "The provider does not exist.")
 	errImportMissing   = httpkit.Fail(http.StatusNotFound, "not_found", "The provider has no billing import.")
+	errImportDisabled  = httpkit.Fail(http.StatusConflict, "billing_import_disabled", "Enable the billing import before scheduling a run.")
 )
 
 type API struct {
@@ -180,13 +182,9 @@ func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, access.Event, error) {
-		etag := httpkit.NewID()
-		found, err := scheduleNow(r.Context(), tx, id, etag)
-		if err != nil {
+		etag := ids.New()
+		if err := scheduleNow(r.Context(), tx, id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
-		}
-		if !found {
-			return httpkit.Reply{}, access.Event{}, errImportMissing
 		}
 		return a.reply(r, tx, id, "provider.billing_import.run", http.StatusAccepted, etag)
 	})
@@ -251,13 +249,13 @@ func document(r record) (contract.BillingImport, error) {
 		Scope:                scope,
 		Source:               r.Source,
 		Status: importStatus{
-			ImportedFrom:    nullableOf(dateOf(r.ImportedFrom)),
-			ImportedThrough: nullableOf(dateOf(r.ImportedThrough)),
-			LastErrorCode:   nullableOf(r.LastErrorCode),
-			LastImportAt:    nullableOf(r.LastImportAt),
-			LastSuccessAt:   nullableOf(r.LastSuccessAt),
-			NextImportAt:    nullableOf(r.NextImportAt),
-			SourceRevision:  nullableOf(r.SourceRevision),
+			ImportedFrom:    valueOrNull(dateOf(r.ImportedFrom)),
+			ImportedThrough: valueOrNull(dateOf(r.ImportedThrough)),
+			LastErrorCode:   valueOrNull(r.LastErrorCode),
+			LastImportAt:    valueOrNull(r.LastImportAt),
+			LastSuccessAt:   valueOrNull(r.LastSuccessAt),
+			NextImportAt:    valueOrNull(r.NextImportAt),
+			SourceRevision:  valueOrNull(r.SourceRevision),
 		},
 	}, nil
 }
@@ -269,7 +267,7 @@ func dateOf(value *time.Time) *openapi_types.Date {
 	return &openapi_types.Date{Time: *value}
 }
 
-func nullableOf[T any](value *T) nullable.Nullable[T] {
+func valueOrNull[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nullable.NewNullNullable[T]()
 	}

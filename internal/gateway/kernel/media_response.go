@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
+	mediacontract "github.com/tyk-swe/olp/internal/contracts/media"
 	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 

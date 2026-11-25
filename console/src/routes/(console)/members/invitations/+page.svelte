@@ -1,5 +1,5 @@
 <script lang="ts">
-  import InvitationsPanel from '#lib/features/access/invitations/InvitationsPanel.svelte';
+  import InvitationsPanel from '#lib/features/identity/invitations/InvitationsPanel.svelte';
 </script>
 
 <InvitationsPanel />

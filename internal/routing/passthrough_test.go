@@ -5,8 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/cache"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 )
 
 func passthroughConfig() *PassthroughConfig {
@@ -150,12 +149,11 @@ func TestPassthroughRouteConflicts(t *testing.T) {
 		mutate func(*Route)
 	}{
 		{"fallback", func(r *Route) { r.Fallbacks = []Fallback{{Route: "other", On: []string{"exhausted"}}} }},
-		{"cache", func(r *Route) { r.Cache = &cache.Policy{Mode: "exact"} }},
-		{"prompt cache", func(r *Route) { r.PromptCache = &cache.PromptPolicy{} }},
+		{"cache", func(r *Route) { r.Cache = &cachepolicy.Policy{Mode: "exact"} }},
+		{"prompt cache", func(r *Route) { r.PromptCache = &cachepolicy.PromptPolicy{} }},
 		{"shadow", func(r *Route) { r.Targets[0].Shadow = &Shadow{SampleRate: 0.5} }},
 		{"two targets", func(r *Route) { r.Targets = append(r.Targets, r.Targets[0]) }},
 		{"transformed", func(r *Route) { r.Fidelity.Mode = FidelityTransformed }},
-		{"content policy", func(r *Route) { r.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "x"}}} }},
 		{"other operation", func(r *Route) { r.Operations = []string{"passthrough", "generation"} }},
 		{"selector", func(r *Route) { r.Selectors = []Selector{{ID: "s", Tags: []string{"a"}}} }},
 		{"retry", func(r *Route) { r.Retry = Retry{"timeout": {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}} }},

@@ -244,7 +244,11 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 		return false, nil
 	}
 	if m.syncSharedQuotas != nil {
-		if err := m.syncSharedQuotas(ctx, current.Snapshot(), candidate.release.Snapshot()); err != nil {
+		retiredGroupIDs, err := m.sharedQuotaRetirements(ctx, current.Sequence, candidate.release.Sequence)
+		if err != nil {
+			return false, err
+		}
+		if err := m.syncSharedQuotas(ctx, current.Snapshot(), candidate.release.Snapshot(), retiredGroupIDs...); err != nil {
 			return false, err
 		}
 	}
@@ -260,4 +264,24 @@ func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidat
 	m.mu.Unlock()
 	m.grantsRefreshed(refreshed)
 	return true, nil
+}
+
+func (m *Manager) sharedQuotaRetirements(ctx context.Context, current, next int64) ([]string, error) {
+	if next-current <= 1 {
+		return nil, nil
+	}
+	rows, err := m.runtimeReadPool().Query(ctx, `
+		SELECT DISTINCT project_id, group_name
+		FROM olp.runtime_shared_quota_retirements
+		WHERE sequence > $1 AND sequence <= $2`, current, next)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (string, error) {
+		var project, group string
+		if err := row.Scan(&project, &group); err != nil {
+			return "", err
+		}
+		return routing.SharedTokenQuotaGroupID(project, group), nil
+	})
 }

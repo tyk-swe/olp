@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -36,7 +37,7 @@ func describeTool(authority keyauthority.Authority, resolved resolvedToolset, to
 	return listedTool{
 		ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
 		Name: tool.Alias, Description: tool.Description, InputSchema: tool.InputSchema,
-		UnitPrice: cloneUnitPrice(tool.UnitPrice), PricingState: accounting.PricingStateFor(tool.UnitPrice),
+		UnitPrice: ptr.Clone(tool.UnitPrice), PricingState: accounting.PricingStateFor(tool.UnitPrice),
 		BudgetRequired: authority.CostBoundaries("").CostBudgeted(),
 		Limits: toolCallLimits{
 			ServerCallsPerMinute: effective.CallsPerMinute, ServerMaxConcurrency: effective.MaxConcurrency,

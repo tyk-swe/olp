@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -41,7 +41,7 @@ type MemberTrail struct {
 
 func (s *Server) MemberGeneration(r *http.Request, member Member) *MemberGeneration {
 	x := &Call{
-		request:     request{id: httpkit.NewID(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+		request:     request{id: ids.New(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
 		preferences: member.Preferences,
 		actor:       "playground",
 		origin:      usage.OriginPlayground,
@@ -90,10 +90,6 @@ func (g *MemberGeneration) Run(ctx context.Context, parsed ParsedRequest, emit f
 	if out.Err != nil {
 		s.Finish(x, out, out.Err.Status)
 		return out
-	}
-	if e := s.enforceCompletionOutput(x, out.Completion); e != nil {
-		s.Finish(x, out, e.Status)
-		return &Outcome{Err: e}
 	}
 	s.Finish(x, out, http.StatusOK)
 	return out

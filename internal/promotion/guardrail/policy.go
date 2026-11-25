@@ -7,14 +7,16 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
-	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
+	policystore "github.com/tyk-swe/olp/internal/guardrails/policy"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -28,8 +30,8 @@ type Policy struct {
 
 type Entry struct {
 	Guardrail string
-	Phase     guardrails.Phase
-	Action    guardrails.Action
+	Phase     guardrailpolicy.Phase
+	Action    guardrailpolicy.Action
 	Monitor   bool
 	Mandatory bool
 }
@@ -60,12 +62,12 @@ func parsePolicies(declared []contract.ConfigurationGuardrailPolicyEntry, defini
 
 func parsePolicy(p contract.ConfigurationGuardrailPolicyEntry) Policy {
 	return Policy{Project: p.Project, Name: p.Name, Entries: promotion.Map(p.Entries, func(e rule) Entry {
-		return Entry{Guardrail: e.Guardrail, Phase: guardrails.Phase(e.Phase), Action: guardrails.Action(e.Action), Monitor: promotion.ValueOf(e.Monitor), Mandatory: promotion.ValueOf(e.Mandatory)}
+		return Entry{Guardrail: e.Guardrail, Phase: guardrailpolicy.Phase(e.Phase), Action: guardrailpolicy.Action(e.Action), Monitor: ptr.Value(e.Monitor), Mandatory: ptr.Value(e.Mandatory)}
 	})}
 }
 
 func compilePolicy(p Policy, duplicate bool, definitions map[portable]Guardrail) (*guardrails.Engine, error) {
-	if duplicate || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrails.MaxEntries {
+	if duplicate || !promotion.ValidLabel(p.Name) || len(p.Entries) > guardrailpolicy.MaxEntries {
 		return nil, httpkit.Invalid("guardrail_policies", "Use unique bounded policy names and ordered entries.")
 	}
 	type resolvedEntry struct {
@@ -211,7 +213,7 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, directory pr
 	if err != nil {
 		return err
 	}
-	current, err := guardrailpolicy.FindLatest(ctx, tx, project, policy.Name)
+	current, err := policystore.FindLatest(ctx, tx, project, policy.Name)
 	if err != nil {
 		return err
 	}
@@ -219,17 +221,17 @@ func applyPolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, directory pr
 		if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
 			return nil
 		}
-		return guardrailpolicy.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
+		return policystore.Activate(ctx, tx, p.UserID(), current.ID, current.RevisionID)
 	}
-	draft, err := guardrailpolicy.NewDraft(ctx, tx, guardrails.ProjectOf(project), retainedName(current, policy.Name), entries)
+	draft, err := policystore.NewDraft(ctx, tx, guardrails.ProjectOf(project), retainedName(current, policy.Name), entries)
 	if err != nil {
 		return err
 	}
-	saved, err := guardrailpolicy.Save(ctx, tx, p.UserID(), current, draft)
+	saved, err := policystore.Save(ctx, tx, p.UserID(), current, draft)
 	if err != nil {
 		return err
 	}
-	return guardrailpolicy.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
+	return policystore.Activate(ctx, tx, p.UserID(), saved.ID, saved.RevisionID)
 }
 
 func pin(ctx context.Context, q database.Queryer, project *string, e Entry) (guardrails.Entry, error) {
@@ -246,7 +248,7 @@ func pin(ctx context.Context, q database.Queryer, project *string, e Entry) (gua
 	return guardrails.Entry{GuardrailID: current.ID, RevisionID: *current.ActiveRevisionID, Phase: e.Phase, Action: e.Action, Monitor: e.Monitor, Mandatory: e.Mandatory}, nil
 }
 
-func retainedName(current *guardrailpolicy.Policy, name string) string {
+func retainedName(current *policystore.Policy, name string) string {
 	if current == nil {
 		return name
 	}

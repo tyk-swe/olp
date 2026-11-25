@@ -1,0 +1,46 @@
+import type { components } from '#lib/management/schema.js';
+import { apiClient } from '#lib/session/client.js';
+import { unwrap, ifMatch } from '#lib/management/http.js';
+
+export type Catalog = components['schemas']['ModelCatalogResponse'];
+export type Exposure = components['schemas']['RouteCatalogExposureResponse'];
+
+export async function listCatalog(signal?: AbortSignal): Promise<Catalog> {
+  return unwrap(await apiClient.GET('/api/v1/catalog', { signal }));
+}
+
+export async function getPublicCatalog(
+  projectId: string,
+  signal?: AbortSignal
+): Promise<Catalog> {
+  return unwrap(
+    await apiClient.GET('/api/v1/catalog/public/{project_id}', {
+      params: { path: { project_id: projectId } },
+      signal
+    })
+  );
+}
+
+export async function getExposure(
+  id: string,
+  signal?: AbortSignal
+): Promise<Exposure> {
+  return unwrap(
+    await apiClient.GET('/api/v1/routes/{route_id}/catalog', {
+      params: { path: { route_id: id } },
+      signal
+    })
+  );
+}
+
+export async function putExposure(
+  id: string,
+  value: Exposure
+): Promise<Exposure> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/routes/{route_id}/catalog', {
+      params: { path: { route_id: id }, header: ifMatch(value.etag) },
+      body: { expose_upstream_models: value.expose_upstream_models }
+    })
+  );
+}

@@ -13,8 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 const maxLogoBytes = 64 << 10
@@ -101,7 +102,7 @@ func (a *API) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		}
 		return struct{}{}, httpkit.Match(r, current)
 	}, func(tx pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		identity := newBrandingIdentity(input.Name, logo, accent, httpkit.NewID())
+		identity := newBrandingIdentity(input.Name, logo, accent, ids.New())
 		_, err := tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag)
 		return httpkit.Detail(identity, identity.ETag), access.Event{Action: "branding.update", Resource: "installation", ID: a.server.Installation}, err
 	})

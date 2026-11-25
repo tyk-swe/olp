@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/panics"
@@ -23,55 +23,9 @@ const SessionExposureWindow = time.Hour
 
 const debitCleanupTimeout = 10 * time.Second
 
-type SessionDebitLedger interface {
-	Prepare(context.Context, debits.Intent, []limits.Owner) (debits.State, error)
-	Admit(context.Context, string, string, []debits.Boundary) error
-	MarkDispatched(context.Context, string, string) error
-	MarkUnknown(context.Context, string, string) error
-	ReleaseUndispatched(context.Context, string, string) error
-	HasUnknownDebit(context.Context, string, time.Duration) (bool, error)
-	Currency(context.Context) (string, error)
-	MarkWorkflowModelDispatched(context.Context, string, string) error
-	RenewWorkflowModelLease(context.Context, string, string) error
-	MarkNotSent(context.Context, string, string) error
-	SettleWorkflow(context.Context, *usage.Event, int) ([]limits.Snapshot, error)
-	SettleRecovery(context.Context, debits.Result) error
-	PreviousRecovery(context.Context, string, string, []string) (bool, bool, error)
-}
-
-type durableSessionDebits struct {
-	*debits.Store
-	*debits.Syncer
-	pool *pgxpool.Pool
-}
-
-func DurableSessionDebits(pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer) SessionDebitLedger {
-	return durableSessionDebits{Store: store, Syncer: syncer, pool: pool}
-}
-
-func (d durableSessionDebits) SettleRecovery(ctx context.Context, result debits.Result) error {
-	tx, err := d.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
-	if err := debits.SettleToolTx(ctx, tx, result); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-func (d durableSessionDebits) PreviousRecovery(ctx context.Context, runID, keyID string, ids []string) (bool, bool, error) {
-	var settled, pending bool
-	err := d.pool.QueryRow(ctx, `SELECT COALESCE(bool_or(state='settled'),false), COALESCE(bool_or(state IN ('prepared','ready','dispatched','outcome_unknown')),false)
-		FROM olp.execution_debits WHERE run_id=$1 AND api_key_id=$2 AND kind='tool' AND id=ANY($3::uuid[])`, runID, keyID, ids).Scan(&settled, &pending)
-	return settled, pending, err
-}
-
-func (d durableSessionDebits) Currency(ctx context.Context) (string, error) {
-	var currency string
-	err := d.pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency)
-	return currency, err
+type SessionDebits struct {
+	*debits.Session
+	SettleWorkflow func(context.Context, *usage.Event, int) ([]limits.Snapshot, error)
 }
 
 type sessionDebit struct {
@@ -154,8 +108,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 }
 
 func canonicalSessionID(id string) string {
-	parsed, err := uuid.Parse(id)
-	if err != nil || parsed == uuid.Nil || parsed.String() != id {
+	if !ids.Canonical(id) {
 		return ""
 	}
 	return id
@@ -173,7 +126,7 @@ func (s *Server) SessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	if s.localExposureHeld(keyID) {
 		return true, nil
 	}
-	if s.Deps.Debits == nil {
+	if s.Deps.Debits == nil || s.Deps.Debits.Session == nil {
 		return false, nil
 	}
 	held, err := s.Deps.Debits.HasUnknownDebit(ctx, keyID, SessionExposureWindow)
@@ -184,14 +137,14 @@ func (s *Server) SessionExposureHeld(ctx context.Context, keyID string) (bool, *
 }
 
 func (s *Server) ReservePinSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, p *Pin, supply []quota.CappedOwner) *fault.Error {
-	return s.ReserveSessionDebit(ctx, x, authority, p.attempt, supply)
+	return s.reserveSessionDebit(ctx, x, authority, p.attempt, supply)
 }
 
-func (s *Server) ReserveSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority keyauthority.Authority, attempt routing.Attempt, supply []quota.CappedOwner) *fault.Error {
 	if e := x.workflowModelCost(attempt); e != nil {
 		return e
 	}
-	if s.Deps.Debits == nil || x.callerCostExempt() && x.workflow == nil {
+	if s.Deps.Debits == nil || s.Deps.Debits.Session == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
 	snapshot := x.Snapshot()
@@ -260,7 +213,7 @@ func (s *Server) ReserveSessionDebit(ctx context.Context, x *Call, authority key
 	for _, owner := range capped {
 		cap := quota.CapRequest(owner, time.Hour).Cost
 		owners = append(owners, cap.Owner)
-		admissions = append(admissions, debits.Boundary{Owner: cap.Owner, Budget: cap})
+		admissions = append(admissions, limits.Boundary{Owner: cap.Owner, Budget: cap})
 	}
 	var state debits.State
 	if x.workflow != nil {
@@ -291,7 +244,7 @@ func (s *Server) ReserveSessionDebit(ctx context.Context, x *Call, authority key
 }
 
 func (s *Server) MarkSessionDispatched(ctx context.Context, x *Call) *fault.Error {
-	if x.sessionDebit == nil || s.Deps.Debits == nil {
+	if x.sessionDebit == nil || s.Deps.Debits == nil || s.Deps.Debits.Session == nil {
 		return nil
 	}
 	err := func() error {
@@ -311,7 +264,7 @@ func (s *Server) MarkSessionDispatched(ctx context.Context, x *Call) *fault.Erro
 }
 
 func (s *Server) AbandonSessionDebit(ctx context.Context, x *Call) {
-	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Deps.Debits == nil {
+	if x.sessionDebit == nil || x.sessionDebit.dispatched || s.Deps.Debits == nil || s.Deps.Debits.Session == nil {
 		return
 	}
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), debitCleanupTimeout)
@@ -326,7 +279,7 @@ func (s *Server) AbandonSessionDebit(ctx context.Context, x *Call) {
 }
 
 func (s *Server) markSessionUnknown(ctx context.Context, x *Call) {
-	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Deps.Debits == nil {
+	if x.sessionDebit == nil || !x.sessionDebit.dispatched || s.Deps.Debits == nil || s.Deps.Debits.Session == nil {
 		return
 	}
 	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), debitCleanupTimeout)

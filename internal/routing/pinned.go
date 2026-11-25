@@ -3,7 +3,7 @@ package routing
 import (
 	"reflect"
 
-	"github.com/tyk-swe/olp/internal/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
 )
 
 // PinnedCurrent reuses templates from an already-validated installed release

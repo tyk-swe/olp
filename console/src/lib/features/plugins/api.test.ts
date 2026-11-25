@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import { ApiProblem } from '#lib/management/http.js';
 import * as api from './api';
 
@@ -201,7 +201,6 @@ describe('plugin HTTP contracts', () => {
     expect(api.pluginTitle(plugin)).toBe(
       `${plugin.manifest.name} ${plugin.manifest.version}`
     );
-    expect(api.shortDigest(plugin.digest)).toBe(plugin.digest.substring(0, 12));
   });
 
   it.each([

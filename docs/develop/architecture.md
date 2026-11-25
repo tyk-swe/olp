@@ -11,18 +11,18 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Area | Backend and console owner |
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
-| Routes, publication and selection | `internal/routes/`, `internal/routing/` (with `durablecontract/` and `realtimecontract/` beneath it), `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/authz/` (callers, roles and operations), `internal/auditlog/`; console `access/` |
-| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
-| Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/` |
-| Notifications | `internal/notifications/`; console `access/notifications/` |
-| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/` (with `mediacontract/` beneath it); console inference/media |
-| Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/codesessions/`, with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
-| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/interaction/`, `internal/operationplan/`, `internal/domain/operationregistry/` |
+| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
+| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/keyauthority/` (the key authority policy a release publishes), `internal/access/authz/` (callers, roles and operations), `internal/auditlog/`; console `identity/`, `access/` |
+| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/httpkit/` (problems, replies, decoding and pagination) |
+| Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/`, `settings/`, `budgets/` |
+| Notifications | `internal/notifications/`; console `notifications/` |
+| Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
+| Code mode | `internal/codemode/` (vocabulary, with `codeadapter/`, `codeclient/`, `codewire/`, `codeadmin/`, the plan profiles and plugins in `codeplans/`, and the subscription auth plugins in `claudeauth/`, `codexauth/` and `antigravityauth/` beneath it), `internal/codesessions/` (account selection and bindings, with allowance observation in `codeallowance/` and account management in `codeaccounts/`), with research and Codex wire handling under `internal/gateway/codeforward/`; console code mode |
+| Source and operation contracts | `internal/domain/oif/`, `internal/domain/operations/`, `internal/contracts/` (the strict contract compilers `interaction/`, `unary/`, `duplex/` and `media/`), `internal/domain/operationregistry/` |
 | Protocol and lifecycle contracts | `internal/domain/protocols/`, `internal/domain/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
-| Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/domain/contentpolicy/`; matching console features |
+| Accounting, pricing, billing and exports | `internal/usage/` (event contract, with `rates/`, `routinginputs/`, `pricebook/`, `completeness/`, `delivery/`, `ingest/`, `reports/` and `retention/` beneath it), `internal/billing/`, `internal/export/`; console usage/exports |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, `internal/platform/database/` |
 | Egress, secrets and telemetry | `internal/platform/egress/`, `internal/platform/secrets/`, `internal/observability/`, `internal/platform/telemetry/` |
@@ -67,7 +67,7 @@ are refused before any planner runs.
 activation and grant enrollment changes. Promotion writes drafts through the
 narrower `provider.Drafts` interface it declares. The stored configuration
 document and the kind registry live in `providers/connection`, upstream probes
-in `providers/probe`, and code accounts in `providers/codeaccounts`. Network
+in `providers/probe`, and code accounts in `codesessions/codeaccounts`. Network
 steps run outside mutation locks, with authority and slot identity checked again
 before commit. Personal grant enrollment remains a separate protocol.
 
@@ -77,7 +77,7 @@ retained definitions without revalidating changed dependencies. Revision
 retention, labels, final selection, authority and runtime publication remain in
 one transaction.
 
-Provider configuration identity and connector projection live in `providerconfig`.
+Provider configuration identity and connector projection live in `connectors/providerconfig`.
 Provider mutations accept a prepared configuration whose constructor owns
 normalization, plugin resolution and validation. Stored management and serving
 representations retain their original serialization.
@@ -99,7 +99,8 @@ administrative dispatch.
 
 `grants/personal` owns personal OAuth, Entra exchange, renewal, and delegated
 signing for MCP and agent calls. Configure-time validation remains with
-registration over the shared types in `grants/config`.
+registration over the shared types in `domain/grantconfig`. Registration hands
+`grants/personal` its server lookup through the constructor in `cmd/olp`.
 
 ## Runtime and immutable sources
 
@@ -110,7 +111,7 @@ refresh progresses independently with monotonic freshness and generation fences.
 Historical remote-secret lookup occurs outside short authorized database
 transactions, followed by revocation revalidation.
 
-Worker health belongs to `observability/workerhealth`. Reporters receive their
+Worker health belongs to `platform/workerhealth`. Reporters receive their
 task and region explicitly and can write through a caller-owned transaction.
 Application shutdown waits for every registered worker, including workflow
 recovery, before closing its dependencies.
@@ -121,7 +122,7 @@ a complete set of derived contracts only after every target succeeds. Runtime
 owns installation and live credentials. Management boundaries translate routing
 validation failures to HTTP problems.
 
-`Snapshot.Clone`, `connectors.Config.Clone` and `contentpolicy.Policy.Clone` give
+`Snapshot.Clone` and `connectors.Config.Clone` give
 new owners independent mutable configuration. Immutable plugin profiles may be
 shared. Connector configuration constructs serving identities for every operation;
 provider management reads health statistics from observability, which the gateway
@@ -171,15 +172,18 @@ packages hold what the kernel uses and never import it back.
 | `gateway/realtimeresponses` | which responses a realtime session still owes usage for, and the usage each terminal frame reports | `ingress` |
 | `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
 | `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
+| `gateway/anthropicbeta` | validating and forwarding `Anthropic-Beta` headers across compatible route targets | `fault` |
+| `gateway/duplexrelay` | shared bidirectional WebSocket relay loop, bounded upstream writer, delegation reauth and abnormal teardown | `fault`, `ingress` |
+| `gateway/managedbatch` | managed batch JSONL line translation, manifest metadata and Gemini batch record/result codecs | `fault` |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, the native and generation dispatch, and the retained steps that read call or pin state, such as retained dispatch, page admission and result projection | every package above |
 | `gateway/healthprobes` | The health probe worker. It picks the opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/bedrock` | Bedrock Converse and Invoke under `/bedrock/model/{model}` | `fault`, `kernel` |
-| `gateway/surface/geminilive` | Gemini Live sessions under `/gemini/ws/` and `/ws/` | `fault`, `ingress`, `kernel`, `quota` |
+| `gateway/surface/geminilive` | Gemini Live sessions under `/gemini/ws/` and `/ws/` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota` |
 | `gateway/surface/media` | OpenAI images, audio and video jobs under `/v1/images`, `/v1/audio` and `/v1/videos` | `fault`, `kernel` |
-| `gateway/surface/nativeduplex` | Native duplex sessions under `/native/{dialect}/sessions` | `fault`, `ingress`, `kernel` |
+| `gateway/surface/nativeduplex` | Native duplex sessions under `/native/{dialect}/sessions` | `duplexrelay`, `fault`, `ingress`, `kernel` |
 | `gateway/surface/openaistate` | OpenAI files, batches, stored responses and continuations | `fault`, `generationrefs`, `ingress`, `kernel` |
-| `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |
+| `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |
 | `gateway/surface/retrieval` | Cloud retrieval queries under `/v1/retrieval/{binding_id}/query` | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
@@ -198,8 +202,11 @@ unexported `surface` type that holds the kernel, and is added to `Register` in
 owns takes that handler as an argument, as `retained.Register` takes the
 retrieval query for vector store search. The kernel never names a surface or a vendor
 flag for one. A surface that needs something from a shared step sets a general
-field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. The
-refusal matrix in `internal/gateway/surfaces_test.go` registers the same
+field on the `Call`, as `PinnedHeaders` carries the Anthropic file header. A
+kernel step that differs by provider asks the provider's `connectors.Config` or
+its `domain/vendors` contract, as `ResponsesPath` and `BatchWindowFor` do, and
+`scripts/check-lint.sh` refuses a kernel comparison of a provider kind or vendor
+with a literal. The refusal matrix in `internal/gateway/surfaces_test.go` registers the same
 assembly, so it covers a surface's routes after it moves.
 
 The kernel owns the `/gemini/{version}/models/{model}:{action}` route because
@@ -247,7 +254,7 @@ its own package under `internal/gateway/`. Each declares its allowed imports in
 where each plane is assembled by one constructor and `Run` owns mode
 selection, listeners and shutdown ordering. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
-vocabulary, as `internal/domain/routeidentity` and `internal/access/authority` do. A
+vocabulary, as `internal/domain/routeidentity` and `internal/keyauthority` do. A
 wrapper whose only job is forwarding to another package belongs in that
 package instead.
 
@@ -272,6 +279,11 @@ package instead.
   behavior, including its SQL, validation and routes. A new package goes in
   `internal/domain` when it does no I/O, in `internal/platform` when it is
   infrastructure no single module owns, and next to its module otherwise.
+- Modules under `internal` never import each other in a cycle, counting each
+  top-level directory as one module. The one allowed pair is
+  `internal/domain` and the signed reference catalog. When two modules need
+  each other, move the shared vocabulary into `internal/domain` or inject the
+  collaborator from `cmd/olp`.
 - `internal/access` is the management kit and holds no feature. It
   authenticates callers, registers routes, runs write transactions and records
   audit rows. A new resource gets its own package that imports the kit.
@@ -689,7 +701,7 @@ unreadable target quotas skip dispatch.
 
 ### Durable provisional exposure
 
-Finite asynchronous and agent work shares `limits.DebitStore`; feature owners
+Finite asynchronous and agent work shares `debits.Store` in `limits/debits`; feature owners
 retain their lifecycle and provider evidence. Each intent records every
 applicable accounting boundary, including currently uncapped boundaries, in
 both cost and charge bases. Dispatch is fenced once after admission. Ordinary
@@ -708,7 +720,7 @@ stale versions cannot reduce holds. `internal/usage/ingest` joins existing
 observed-fact persistence with idempotent result settlement. Run totals and
 reservations are never additional usage charges.
 
-Pure `agentcontract` and `prompts` definitions are distinct from execution and
+Pure `domain/agentcontract` and `prompts` definitions are distinct from execution and
 management. Published contracts join immutable runtime snapshots. Snapshot copies
 own their OAuth configuration and task bounds. Live authority independently checks
 keys, project/resource allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
@@ -730,9 +742,9 @@ types. Card validation and dispatch use the same resolved credential. Protocol
 adapters map execution failures to client responses and replace upstream task
 identifiers with public identifiers.
 
-`agents/tasks` owns task admission, persistence, settlement, callback capabilities
-and cancellation claims. `release` authenticates live owners and authorizes pinned
-callback resources through that capability API, without owning task SQL. Consumer
+`agents/tasks` owns task admission, persistence, settlement and cancellation
+claims. `release` reads and counts callback capabilities, authenticates live
+owners and authorizes pinned callback resources. Consumer
 requests, operator requests and the bounded background monitor share remote task
 operations while retaining their own authorization rules.
 

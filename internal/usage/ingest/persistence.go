@@ -9,11 +9,10 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -97,9 +96,9 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id,cache_result,cache_lookup_reason)
+         attempt_count, created_at, attribution, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id,cache_result,cache_lookup_reason)
     VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($8, now()),
-            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid,NULLIF($24,''),NULLIF($25,''))
+            $15::jsonb, $16, $17::uuid, $18, $19, $20, $21::jsonb, $22::uuid, NULLIF($23, ''), NULLIF($24, ''))
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
@@ -315,7 +314,7 @@ func rejectExpiredReceipt(ctx context.Context, tx pgx.Tx, ev *usage.Event, diges
 		Scan(&rejected)
 	switch {
 	case err == nil:
-		if _, err = tx.Exec(ctx, rejectedGapSQL, uuid.Must(uuid.NewV7()).String(), ev.ObservedAt); err != nil {
+		if _, err = tx.Exec(ctx, rejectedGapSQL, ids.New(), ev.ObservedAt); err != nil {
 			return 0, fmt.Errorf("record expired request metadata receipt: %w", err)
 		}
 		return receiptRejected, nil
@@ -350,7 +349,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *usage.Event, validate
 		ev.RouteSlug, ev.Operation, ev.Surface, ev.RequestStartedAt, completedAt,
 		validated.StatusCode, ev.ErrorClass, latency, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(attribution.JSON(ev.Attribution)),
-		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, usage.OriginCaller),
+		cmp.Or(ev.Origin, usage.OriginCaller),
 		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID, ev.CacheResult, ev.CacheLookupReason); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}

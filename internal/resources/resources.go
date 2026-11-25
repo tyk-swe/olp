@@ -178,16 +178,20 @@ func (s *Store) put(ctx context.Context, query resourceRowQuerier, r *Resource) 
 	if r.UUID == uuid.Nil {
 		r.UUID = uuid.Must(uuid.NewV7())
 	}
-	out, err := scan(query.QueryRow(ctx, `INSERT INTO olp.provider_resources
+	out, err := insertResource(ctx, query, r)
+	if err != nil {
+		return nil, fmt.Errorf("provider resource put: %w", err)
+	}
+	return out, nil
+}
+
+func insertResource(ctx context.Context, query resourceRowQuerier, r *Resource) (*Resource, error) {
+	return scan(query.QueryRow(ctx, `INSERT INTO olp.provider_resources
 		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id,parent_id,contract_version)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING `+columns,
 		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID,
 		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID, r.ParentID, r.ContractVersion))
-	if err != nil {
-		return nil, fmt.Errorf("provider resource put: %w", err)
-	}
-	return out, nil
 }
 
 func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resource, error) {

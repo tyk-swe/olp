@@ -9,38 +9,36 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Definition struct {
-	Configuration    json.RawMessage       `json:"configuration"`
-	TimeoutMS        int64                 `json:"timeout_ms"`
-	OnError          guardrails.OnError    `json:"on_error"`
-	ActiveRevisionID *string               `json:"active_revision_id"`
-	ID               string                `json:"id"`
-	ProjectID        string                `json:"project_id"`
-	Name             string                `json:"name"`
-	Type             guardrails.Kind       `json:"type"`
-	ETag             string                `json:"etag"`
-	RevisionID       string                `json:"revision_id"`
-	Revision         int64                 `json:"revision"`
-	Policy           *contentpolicy.Policy `json:"policy"`
-	RetiredAt        *time.Time            `json:"retired_at"`
+	Configuration    json.RawMessage         `json:"configuration"`
+	TimeoutMS        int64                   `json:"timeout_ms"`
+	OnError          guardrailpolicy.OnError `json:"on_error"`
+	ActiveRevisionID *string                 `json:"active_revision_id"`
+	ID               string                  `json:"id"`
+	ProjectID        string                  `json:"project_id"`
+	Name             string                  `json:"name"`
+	Type             guardrails.Kind         `json:"type"`
+	ETag             string                  `json:"etag"`
+	RevisionID       string                  `json:"revision_id"`
+	Revision         int64                   `json:"revision"`
+	RetiredAt        *time.Time              `json:"retired_at"`
 }
 
 type Saved struct{ ID, RevisionID string }
 
-const selected = "SELECT g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,g.etag::text,v.id::text,v.revision,v.policy,g.retired_at,v.configuration,v.timeout_ms,v.on_error,g.active_revision_id::text FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.latest_revision_id"
+const selected = "SELECT g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,g.etag::text,v.id::text,v.revision,g.retired_at,v.configuration,v.timeout_ms,v.on_error,g.active_revision_id::text FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.latest_revision_id"
 
 func scan(row pgx.Row) (Definition, error) {
 	var value Definition
-	var policy []byte
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &policy, &value.RetiredAt, &value.Configuration, &value.TimeoutMS, &value.OnError, &value.ActiveRevisionID); err != nil {
-		return Definition{}, err
-	}
-	return value, json.Unmarshal(policy, &value.Policy)
+	err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &value.RetiredAt, &value.Configuration, &value.TimeoutMS, &value.OnError, &value.ActiveRevisionID)
+	return value, err
 }
 
 func load(ctx context.Context, q database.Queryer, id string) (Definition, error) {
@@ -67,52 +65,38 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d D
 	if err != nil {
 		return Saved{}, err
 	}
-	policy, err := json.Marshal(storedPolicy(d.legacy))
-	if err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.RevisionID, saved.ID, revision, actor, d.configuration, d.timeout, d.onError); err != nil {
 		return Saved{}, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revisions(id,guardrail_id,revision,policy,created_by,configuration,timeout_ms,on_error) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", saved.RevisionID, saved.ID, revision, policy, actor, d.configuration, d.timeout, d.onError); err != nil {
-		return Saved{}, err
-	}
-	if d.legacy == nil {
-		return saved, nil
-	}
-	return saved, Activate(ctx, tx, actor, saved.ID, saved.RevisionID)
-}
-
-func storedPolicy(legacy *contentpolicy.Policy) *contentpolicy.Policy {
-	if legacy == nil {
-		return &contentpolicy.Policy{Rules: []contentpolicy.Rule{}}
-	}
-	return legacy
+	return saved, nil
 }
 
 func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d Draft) (Saved, int64, error) {
-	saved := Saved{ID: httpkit.NewID(), RevisionID: httpkit.NewID()}
+	saved := Saved{ID: ids.New(), RevisionID: ids.New()}
 	if current == nil {
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrails(id,project_id,name,type,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.ID, guardrails.ProjectPointer(d.project), d.name, d.kind, saved.RevisionID, httpkit.NewID(), actor)
+		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrails(id,project_id,name,type,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.ID, guardrails.ProjectPointer(d.project), d.name, d.kind, saved.RevisionID, ids.New(), actor)
 		return saved, 1, err
 	}
 	if current.ProjectID != d.project || current.Type != d.kind {
 		return Saved{}, 0, httpkit.Invalid("guardrail", "The owning boundary and type are immutable.")
 	}
 	saved.ID = current.ID
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, httpkit.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, ids.New())
 	return saved, current.Revision + 1, err
 }
 
 func retire(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET retired_at=now(),etag=$2 WHERE id=$1", id, ids.New())
 	return err
 }
 
 func Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error {
-	tag, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_revisions WHERE id=$2 AND guardrail_id=$1)", id, revisionID, httpkit.NewID())
+	tag, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_revisions WHERE id=$2 AND guardrail_id=$1)", id, revisionID, ids.New())
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return guardrails.ActivationRefused()
+		return activation.Refused()
 	}
 	_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", revisionID, actor)
 	return err
@@ -120,8 +104,8 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) erro
 
 type lineage struct{}
 
-func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (guardrails.Head, error) {
-	var head guardrails.Head
+func (lineage) Lock(ctx context.Context, tx pgx.Tx, id string) (activation.Head, error) {
+	var head activation.Head
 	err := tx.QueryRow(ctx, "SELECT COALESCE(project_id::text,'installation'),etag::text,retired_at IS NOT NULL FROM olp.guardrails WHERE id=$1 FOR UPDATE", id).Scan(&head.Project, &head.ETag, &head.Retired)
 	return head, err
 }

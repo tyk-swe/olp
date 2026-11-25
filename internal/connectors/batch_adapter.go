@@ -1,6 +1,10 @@
 package connectors
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tyk-swe/olp/internal/domain/vendors"
+)
 
 type BatchAdapter string
 
@@ -35,10 +39,19 @@ func (c Config) FilesBatchesAdapter() (BatchAdapter, bool) {
 	if c.Kind == KindGemini {
 		return BatchGeminiManaged, true
 	}
-	if service, ok := c.filesBatchesService(); ok {
-		return service.adapter, true
+	if adapter, ok := c.vendorBatchAdapter(); ok {
+		return adapter, true
 	}
 	return BatchOpenAI, true
+}
+
+func (c Config) vendorBatchAdapter() (BatchAdapter, bool) {
+	api, served := vendors.BatchAPIFor(c.VendorID)
+	if !served || c.Kind != KindOpenAICompatible || c.ProfileID != filesBatchesProfileID(c.VendorID) || c.ProfileRevision != ProfileRevision {
+		return "", false
+	}
+	adapter, err := ParseBatchAdapter(api)
+	return adapter, err == nil
 }
 
 const (

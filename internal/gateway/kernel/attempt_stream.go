@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/guardstream"
-	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -80,7 +80,7 @@ func (run attemptRun) stream(sent attemptSent, clock attemptClock) (attemptReply
 
 func (run attemptRun) guardedStream() (*guardstream.Stream, error) {
 	x := run.x
-	if !x.guard.engine.HasPhase(guardrails.OutputStream) && !x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.OutputStream) && !x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		return nil, nil
 	}
 	return x.guardrailStream()
@@ -158,7 +158,7 @@ func (stream attemptStream) deliver(provided []byte, seen attemptStreamed) (atte
 	}
 	stream.heard(seen.committed)
 	if len(frame) > int(s.Config.MaxEventBytes) {
-		return attemptStreamed{fact: fact, committed: true, actionable: seen.actionable, incomplete: seen.incomplete}, wire.ErrEventTooLarge
+		return seen.with(fact), wire.ErrEventTooLarge
 	}
 	err = x.generation.emit(frame)
 	if err == nil && x.capture != nil {

@@ -11,7 +11,7 @@
     type AuthenticationCapabilities
   } from '#lib/session/api.js';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { getSetupStatus } from '#lib/features/access/setup/api.js';
+  import { getSetupStatus } from '#lib/features/identity/setup/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { sessionKeys } from '#lib/session/sessionKeys.js';
   import type { AuthenticationSnapshot } from '#lib/session/state.js';

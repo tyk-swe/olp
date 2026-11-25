@@ -4,8 +4,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { resolve } from '$app/paths';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { formatDate } from '#lib/format.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
@@ -222,7 +222,7 @@
   }
 
   async function runNow() {
-    if (!canManage || busy) return;
+    if (!canManage || busy || !detail?.enabled) return;
     await runMutation.submit(
       provider.id,
       (id, requestId) => runBillingImport(id, requestId),
@@ -336,6 +336,7 @@
           {kind}
           {azure}
           {editing}
+          savedEnabled={detail?.enabled ?? false}
           {scopeLabel}
           {busy}
           onSubmit={(event) => {

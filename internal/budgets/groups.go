@@ -9,9 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -117,7 +118,7 @@ func (a *API) createGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, er
 		if err := access.CheckLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		_, err := tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by,limit_template,requests_per_minute,tokens_per_minute,max_concurrency,weekly_cost_limit,cost_basis) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID(), input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis)
 		reply := httpkit.Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
 		return reply, access.Event{Action: "budget_group.create", Resource: "budget_group", ID: id}, err
@@ -163,7 +164,7 @@ func (a *API) updateGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, er
 		if err := access.CheckLimitTemplates(r.Context(), tx, current.projectID, input.LimitTemplate); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now(),limit_template=$6,requests_per_minute=$7,tokens_per_minute=$8,max_concurrency=$9,weekly_cost_limit=$10,cost_basis=$11 WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id, input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit, input.CostBasis); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

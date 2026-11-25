@@ -8,7 +8,6 @@
   } from '#lib/features/code-mode/api.js';
   import {
     allowanceChargeSummary,
-    allowanceEvidenceLabel,
     decisionReasonLabel,
     refusalAdvice,
     reservationLabel,
@@ -118,12 +117,6 @@
           {#if result?.status === 'success' && result.decision}
             {@const decision = result.decision}
             {decisionReasonLabel(decision.reason)} · chosen {decision.chosen_account_id}
-            {#if decision.evidence}
-              · {allowanceEvidenceLabel(decision.evidence)} observed {decision.evidence_observed_at
-                ? formatDate(decision.evidence_observed_at)
-                : 'Unknown'}
-            {/if}
-            {#if decision.band}· band {decision.band}{/if}
             {#if decision.recovery_envelope}
               · recovery {decision.recovery_envelope} #{decision.recovery_ordinal}
             {/if}

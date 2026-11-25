@@ -3,43 +3,42 @@ package media
 import (
 	"errors"
 
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
-func ContractInput(request *Request, call *UpstreamCall, effective *Request, budget func(int) error) (mediacontract.Input, error) {
+func ContractInput(request *Request, call *UpstreamCall, effective *Request) (media.Input, error) {
 	owned := map[staging.Handle]bool{}
 	for _, handle := range request.Uploads() {
 		owned[handle] = true
 	}
 	parts, err := contractParts(call.fields(), owned)
 	if err != nil {
-		return mediacontract.Input{}, err
+		return media.Input{}, err
 	}
 	source, _ := request.origin.(FormSource)
 	callerParts, err := contractParts(source.Parts, owned)
 	if err != nil {
-		return mediacontract.Input{}, err
+		return media.Input{}, err
 	}
 	document, _ := request.origin.(JSONSource)
-	return mediacontract.Input{
-		Route:        request.route,
-		Mode:         effective.Mode(),
-		Source:       document.Document,
-		JSON:         call.json(),
-		Parts:        parts,
-		CallerParts:  callerParts,
-		PolicyBudget: budget,
+	return media.Input{
+		Route:       request.route,
+		Mode:        effective.Mode(),
+		Source:      document.Document,
+		JSON:        call.json(),
+		Parts:       parts,
+		CallerParts: callerParts,
 	}, nil
 }
 
-func contractParts(fields []staging.Field, owned map[staging.Handle]bool) ([]mediacontract.Part, error) {
-	parts := make([]mediacontract.Part, len(fields))
+func contractParts(fields []staging.Field, owned map[staging.Handle]bool) ([]media.Part, error) {
+	parts := make([]media.Part, len(fields))
 	for i, field := range fields {
 		switch value := field.Value.(type) {
 		case staging.Text:
 			text := string(value)
-			parts[i] = mediacontract.Part{Name: field.Name, Text: &text}
+			parts[i] = media.Part{Name: field.Name, Text: &text}
 		case staging.Part:
 			if !owned[value.Handle] {
 				return nil, errors.New("media part is not owned by this request")
@@ -48,7 +47,7 @@ func contractParts(fields []staging.Field, owned map[staging.Handle]bool) ([]med
 			if err != nil {
 				return nil, err
 			}
-			parts[i] = mediacontract.Part{Name: field.Name, Blob: blob, Filename: value.Filename, ContentType: value.ContentType}
+			parts[i] = media.Part{Name: field.Name, Blob: blob, Filename: value.Filename, ContentType: value.ContentType}
 		}
 	}
 	return parts, nil

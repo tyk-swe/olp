@@ -50,7 +50,9 @@ func (q retainedRequest) change() {
 		return
 	}
 	defer s.kernel.SettleFence(ctx, mutation.Close)
-	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), q.x, pin, q.endpoint, resource, q.parent, endpoint, body, q.input.contentType, mutation, q.reply.fail)
+	end.status = s.kernel.RetainedDispatch(q.reply.w, q.r.WithContext(ctx), kernel.RetainedDispatchRequest{
+		Call: q.x, Pin: pin, Endpoint: q.endpoint, Resource: resource, Parent: q.parent, URL: endpoint, Body: body, ContentType: q.input.contentType, Lifecycle: mutation, Fail: q.reply.fail,
+	})
 }
 
 func addressing(ancestors map[string]string, upstreamID string) map[string]string {

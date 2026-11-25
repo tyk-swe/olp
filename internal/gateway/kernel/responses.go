@@ -7,20 +7,12 @@ import (
 	"errors"
 	"net/http"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
-
-func ResponsePath(cfg connectors.Config, suffix string) string {
-	if cfg.Kind == "azure_openai" && cfg.Hosting() != "azure-v1" && cfg.Hosting() != "azure-responses-legacy" {
-		return "deployments/responses" + suffix
-	}
-	return "responses" + suffix
-}
 
 func ProviderStateForbidden() *fault.Error {
 	return fault.PermissionError("provider_state_forbidden", "This API key does not allow provider state; provider-retained content requires the allow_provider_state policy.")

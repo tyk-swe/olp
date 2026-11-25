@@ -76,6 +76,16 @@ semantic versioning and take their source from root `package.json`. The
   AWS line item gets a new key on its next import. S3 errors other than 401,
   403 and 404 record `status` instead of `network`.
 
+- Route `content_policy` is gone in favor of guardrails. Route drafts and
+  revisions no longer carry it, requests no longer fail with
+  `content_policy_blocked`, usage records drop `policy_decisions`, and
+  configuration import accepts only `openllmproxy.dev/config/v2`. Express each
+  former rule as a `builtin.regex` guardrail with a policy and attachment.
+- The migration history is squashed into one `0001_schema.sql` baseline that
+  also drops the retired content policy columns and the route guardrail
+  migration trigger. `olp migrate` and startup refuse a database migrated by an
+  earlier build, so start a fresh installation in a new empty database.
+
 ### Fixed
 
 - Model discovery that records new facts for a model, such as its context

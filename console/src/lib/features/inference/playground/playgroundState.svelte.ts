@@ -5,7 +5,6 @@ import {
   listRoutes,
   selectActiveRoutes,
   simulateRouting,
-  hasOutputRules,
   inspectionDialects
 } from '#lib/features/routes/index.js';
 import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
@@ -93,6 +92,13 @@ export function resolvePlaygroundPlan(
         (inspectOptions as readonly string[]).includes(input.inspectDialect)
       ? input.inspectDialect
       : undefined;
+  const inspectionSurface = !registeredNative
+    ? input.surface
+    : publicNativeOperations.has(operation)
+      ? ((['openai', 'gemini'] as const).find((surface) =>
+          inspectionDialects(operation, surface).includes(nativeDialect)
+        ) ?? 'native')
+      : 'native';
   const client: PlaygroundClient =
     operation === 'realtime'
       ? { kind: 'realtime' }
@@ -134,14 +140,7 @@ export function resolvePlaygroundPlan(
     activeOperation: operation,
     submissionError,
     inspection: {
-      surface:
-        dialect === 'gemini-decisions'
-          ? 'gemini'
-          : publicNativeOperations.has(operation)
-            ? 'openai'
-            : registeredNative
-              ? 'native'
-              : input.surface,
+      surface: inspectionSurface,
       mode:
         operation === 'realtime'
           ? 'realtime'
@@ -219,11 +218,6 @@ export class PlaygroundState {
   strictSelected = $derived(
     this.selectedRoute?.latest_revision?.fidelity?.mode === 'strict'
   );
-  outputPolicyActive = $derived(
-    hasOutputRules(
-      this.selectedRoute?.latest_revision?.content_policy?.rules ?? []
-    )
-  );
   routeOperations = $derived(
     this.selectedRoute?.latest_revision?.operations ?? null
   );
@@ -248,9 +242,7 @@ export class PlaygroundState {
       operationKnown: this.operationKnown
     })
   );
-  streamSelectable = $derived(
-    this.activeOperation === 'generation' && !this.outputPolicyActive
-  );
+  streamSelectable = $derived(this.activeOperation === 'generation');
   simulation = createMutation(() => ({
     // Wrapped so the mutation context is not passed as the abort signal.
     mutationFn: (input: InspectRoutingInput) => inspectRouting(input)

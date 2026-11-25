@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/modelcatalog"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
+	"github.com/tyk-swe/olp/internal/routes/modelcatalog"
 )
 
 func CatalogApplier(desired []Project) promotion.Applier {

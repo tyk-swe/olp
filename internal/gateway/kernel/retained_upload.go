@@ -11,12 +11,12 @@ import (
 	"net/textproto"
 	"slices"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 func RetainedFileOperation(r *resources.Resource) string {
@@ -105,7 +105,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	}
 	var err *fault.Error
 	p, err = s.SelectPinSurface(ctx, x, route, operation, "openai", "unary", func(provider *routing.Provider, model string) bool {
-		return (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
+		return provider.Connector().NativeOpenAI() && provider.CredentialSource != "caller" && provider.Supports(model, operation, "openai", "unary") && provider.Connector().Supports(operation, "openai", "unary")
 	})
 	if err != nil {
 		fail(err)
@@ -143,7 +143,9 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		return
 	}
 	defer s.SettleFence(r.Context(), lifecycle.Close)
-	status = s.RetainedDispatch(w, r.WithContext(ctx), x, p, e, resource, nil, endpoint, body, contentType, lifecycle, fail)
+	status = s.RetainedDispatch(w, r.WithContext(ctx), RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
+	})
 }
 
 func (s *Server) retainedUploadBody(file *staging.Part, purpose string) ([]byte, string, error) {

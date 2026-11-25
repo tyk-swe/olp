@@ -25,23 +25,23 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media/transport"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/operationplan"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -1118,7 +1118,7 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 							t.Fatalf("select operation = %t, error = %v", selected, err)
 						}
 					} else {
-						source, err := operationplan.Parse("openai-embeddings", body, 64<<10)
+						source, err := unary.Parse("openai-embeddings", body, 64<<10)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -1167,9 +1167,9 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 		{"normal", "normal", "", "normal"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			pool := admission.NewPool(1).Queue(2, 2*time.Second)
-			management := admission.NewPool(1)
-			outer := &admission.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
+			pool := concurrency.NewPool(1).Queue(2, 2*time.Second)
+			management := concurrency.NewPool(1)
+			outer := &concurrency.Public{Inference: pool, Management: management, InferenceEnabled: true, Reject: func(w http.ResponseWriter, _ *http.Request, _ string) { w.WriteHeader(503) }}
 			h := newHarnessWrapped(t, Config{}, outer.Wrap)
 			critical := "critical"
 			authority := h.rt.keys[fullKey]
@@ -1177,7 +1177,7 @@ func TestRealtimeCallAdmissionHonorsRequestedPriority(t *testing.T) {
 			authority.Policy.Priority = &test.defaultPriority
 			h.rt.keys[fullKey] = authority
 			registry := prometheus.NewRegistry()
-			registry.MustRegister(admission.Metrics(pool, management))
+			registry.MustRegister(concurrency.Metrics(pool, management))
 			depth := func() map[string]float64 {
 				families, e := registry.Gather()
 				if e != nil {
@@ -1488,8 +1488,11 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/v1/resources/"+resource.ID, nil)
 			w := httptest.NewRecorder()
 			endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/resources/resource-native"
-			status := h.gateway.RetainedDispatch(w, r, x, p, retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, resource, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-				h.gateway.Refuse(x, w, e)
+			status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+				Call: x, Pin: p, Endpoint: retainedapi.Endpoint{Family: tc.family, Method: http.MethodDelete, Action: "delete"}, Resource: resource, Parent: parent, URL: endpoint,
+				Fail: func(e *fault.Error) {
+					h.gateway.Refuse(x, w, e)
+				},
 			})
 			h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 			env := h.sink.last(t)
@@ -1538,8 +1541,11 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+resource.ID, nil)
 	w := httptest.NewRecorder()
 	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native"
-	status := h.gateway.RetainedDispatch(w, r, x, p, e, resource, nil, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.Refuse(x, w, e)
+	status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint,
+		Fail: func(e *fault.Error) {
+			h.gateway.Refuse(x, w, e)
+		},
 	})
 	h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)
@@ -1588,8 +1594,11 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/vector_stores/"+parent.ID+"/files", nil)
 	w := httptest.NewRecorder()
 	endpoint := strings.TrimRight(p.Provider.Endpoint, "/") + "/vector_stores/store-native/files"
-	status := h.gateway.RetainedDispatch(w, r, x, p, e, parent, parent, endpoint, nil, "", nil, func(e *fault.Error) {
-		h.gateway.Refuse(x, w, e)
+	status := h.gateway.RetainedDispatch(w, r, RetainedDispatchRequest{
+		Call: x, Pin: p, Endpoint: e, Resource: parent, Parent: parent, URL: endpoint,
+		Fail: func(e *fault.Error) {
+			h.gateway.Refuse(x, w, e)
+		},
 	})
 	h.gateway.SettlePinnedHold(t.Context(), p.Hold)
 	env := h.sink.last(t)
@@ -2428,6 +2437,24 @@ func TestEachKindOfProviderFailureIsClassifiedAndFallsBackOnlyWhileTheReplyIsUnc
 }
 
 type providerCalls struct{ a, b atomic.Int64 }
+
+func TestOversizedProjectedFirstFrameDoesNotCommitStream(t *testing.T) {
+	t.Parallel()
+	const frame = `{"model":"x","choices":[{"index":0,"delta":{"content":"first frame"}}]}`
+	h := newHarness(t, Config{MaxEventBytes: int64(len("data: "+frame+"\n\n") + 1)})
+	h.mock.set("a", providerStream(frame))
+	body := strings.TrimSuffix(entryChat, "}") + `,"stream":true}`
+	resp := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(body), nil)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusBadGateway || strings.Contains(string(raw), "first frame") {
+		t.Fatalf("opening frame rejection = %d %s, read error = %v", resp.StatusCode, raw, err)
+	}
+	env := h.sink.last(t)
+	if env.Committed || len(env.Attempts) != 1 || env.Attempts[0].Committed {
+		t.Fatalf("rejected frame recorded a committed stream: request=%t attempts=%+v", env.Committed, env.Attempts)
+	}
+}
 
 func refusing(calls *atomic.Int64, refusals int64, status int, retryAfter string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

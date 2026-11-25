@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -19,9 +19,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
@@ -63,7 +64,6 @@ type CodeRouteInput struct {
 	Aliases                 map[string]string              `json:"aliases"`
 	ChatToCodex             bool                           `json:"chat_to_codex,omitempty"`
 	MessagesToCodex         bool                           `json:"messages_to_codex"`
-	AllowanceOrdering       bool                           `json:"allowance_ordering,omitempty"`
 	Tools                   *codemode.ResearchTools        `json:"tools"`
 	MaxBodyBytes            *int64                         `json:"max_body_bytes,omitempty"`
 	ProjectID               string                         `json:"project_id"`
@@ -203,7 +203,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag s
 	if err := p.Project(&in.ProjectID, authz.Change); err != nil {
 		return nil, err
 	}
-	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 	adapters := []codemode.Adapter{}
 	var matches bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
@@ -287,8 +287,8 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id s
 	if err != nil {
 		return nil, err
 	}
-	route.RevisionID = httpkit.NewID()
-	route.ETag = httpkit.NewID()
+	route.RevisionID = ids.New()
+	route.ETag = ids.New()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	route.PublishedAt = &now
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {
@@ -390,7 +390,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 	if fallbackError != nil {
 		return CodeRouteInput{}, fallbackError
 	}
-	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, AllowanceOrdering: in.AllowanceOrdering, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
+	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
 	return canonical, canonical.validate()
 }
 

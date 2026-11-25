@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -400,7 +400,6 @@ func restrictRetainedWork(current *routing.View, keyID string, provider *routing
 			Supply:                tighterRetainedSupply(prior.Supply, live.Limits.Supply),
 		}
 	}
-	route.ContentPolicy = liveRoute.ContentPolicy
 	route.Policy = liveRoute.Policy
 	route.Budget = tighterRetainedCosts(route.Budget, liveRoute.Budget)
 	route.MaxBodyBytes = tighterRetainedLimit(route.MaxBodyBytes, liveRoute.MaxBodyBytes)

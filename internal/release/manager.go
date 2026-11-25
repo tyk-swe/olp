@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -148,7 +148,7 @@ type ManagerConfig struct {
 	ExternalSecrets        ExternalSecrets
 	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
-	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View) error
+	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
 }
 
 type Manager struct {
@@ -172,10 +172,10 @@ type Manager struct {
 
 	grantRefreshed func(providerID, credentialID string)
 
-	syncSharedQuotas func(ctx context.Context, previous, next *routing.View) error
+	syncSharedQuotas func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
 
 	mu        sync.RWMutex
-	taskStore taskCapabilityStore
+	taskStore taskCapabilityDatabase
 	authority authorityState
 	release   *Release
 	failed    int64
@@ -328,7 +328,7 @@ func (m *Manager) Release() *Release {
 
 // EndUserDigest derives a project-scoped identity without retaining the identifier.
 func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
-	return keyauthority.DigestEndUser(m.auth, projectID, identifier)
+	return secrets.DigestEndUser(m.auth, projectID, identifier)
 }
 
 func (m *Manager) Digest(purpose secrets.DigestPurpose, value string) []byte {

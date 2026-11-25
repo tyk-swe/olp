@@ -7,17 +7,18 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
 
 type API struct {
 	server  *access.Server
-	publish guardrails.Publisher
+	publish activation.Publisher
 }
 
-func NewAPI(server *access.Server, publish guardrails.Publisher) *API {
+func NewAPI(server *access.Server, publish activation.Publisher) *API {
 	return &API{server: server, publish: publish}
 }
 

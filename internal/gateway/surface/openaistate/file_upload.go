@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 type uploadFields struct {
@@ -231,12 +231,12 @@ func readStrictUploadSource(x *kernel.Call, r *http.Request, form *staging.Form,
 func (s surface) batchUploadPin(ctx context.Context, x *kernel.Call, route *routing.Route) (*kernel.Pin, *fault.Error) {
 	p, e := s.kernel.SelectPin(ctx, x, route, "batch", "unary")
 	if e != nil {
-		return nil, cmp.Or(kernel.FireworksBatchRefusal(x, route), e)
+		return nil, cmp.Or(vendorBatchRefusal(x, route), e)
 	}
 	if !x.Strict() {
 		return p, nil
 	}
-	if refusal := kernel.StrictBatchTargetRefusal(p); refusal != nil {
+	if refusal := strictBatchTargetRefusal(p); refusal != nil {
 		s.kernel.ReleaseHold(ctx, p.Hold)
 		return nil, refusal
 	}

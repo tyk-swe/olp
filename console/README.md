@@ -32,11 +32,13 @@ repository-wide commands.
 
 ## API wiring
 
-- `apiClient` is imported only by feature api modules (plus `#lib/management/**` and
-  tests). A slice with one API module uses `api.ts`; a slice with several uses
-  an `api/` folder with one file per domain (`api/<domain>.ts`). Api modules
-  hold the API-call functions and the schema-derived types they return; pure
-  helpers stay in the slice's domain modules.
+- `apiClient` lives in `#lib/session/client.ts`, which gives the management
+  transport its session authentication, and is imported only by feature api
+  modules (plus the session and branding api modules and tests). A slice with
+  one API module uses `api.ts`; a slice with several uses an `api/` folder with
+  one file per domain (`api/<domain>.ts`). Api modules hold the API-call
+  functions and the schema-derived types they return; pure helpers stay in the
+  slice's domain modules.
 - Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
   `ensureOk(fetched)` from `#lib/management/http.js`.
 - Every query key comes from the slice's `*Keys.ts` module.
@@ -44,26 +46,80 @@ repository-wide commands.
   `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
 - Writes build their `Idempotency-Key` and `If-Match` headers with `ifMatch`,
   `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
-- ESLint enforces the `apiClient`, `fetch` and header restrictions.
+- ESLint enforces the `apiClient`, `fetch` and header restrictions. The
+  `apiClient` one is part of `eslint/feature-boundary.mjs`, so it holds for any
+  spelling of the path.
 
 ## Feature ownership
 
 `src/lib/features/` owns product workflows; shared UI lives in
-`src/lib/components/` and pages in `src/routes/`. Keep route components thin.
+`src/lib/components/`, the application frame in `src/lib/shell/` and pages in
+`src/routes/`. Keep route components thin.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
+A feature is one management resource family and the pages that read and edit
+it, so a feature can own several top-level routes. The folders under
+`src/lib/features/` and the routes they render are:
+
+| Feature         | Routes                                                                           | Owns                                                                                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `access`        | `/organizations`, `/projects`, `/keys`, `/audit`                                 | Organizations, projects with their members and policies (limit templates, attribution budgets, catalog publication), API keys, attribution, end users, route groups and the audit log. |
+| `agents`        | `/agents`, `/mcp-servers`, `/activity`, `/investigations`, `/budgets/exposure`   | Agent publications, grants and delegations, MCP servers, runs, tasks, tool calls, investigations and provisional exposure.                                                             |
+| `budgets`       | `/budgets`                                                                       | The installation budget, budget groups, budget increases, aggregate budgets and the limit fields other features embed.                                                                 |
+| `code-mode`     | `/code-mode`                                                                     | Code mode accounts, pools, routes, bindings, budgets and diagnostics.                                                                                                                  |
+| `exports`       | `/exports`                                                                       | Capture and telemetry export settings at the root and signed export sinks in `signed/`.                                                                                                |
+| `guardrails`    | `/guardrails`                                                                    | Guardrail definitions, policies, credentials and attachments.                                                                                                                          |
+| `health`        | `/health`                                                                        | Readiness, provider health, gateway epochs and runtime generations.                                                                                                                    |
+| `identity`      | `/login`, `/setup`, `/invitations`, `/members`, `/identity`, `/settings/profile` | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.                                               |
+| `inference`     | `/playground`                                                                    | The playground and its request templates.                                                                                                                                              |
+| `media`         | `/media-jobs`                                                                    | Media job metadata.                                                                                                                                                                    |
+| `notifications` | `/notifications`                                                                 | Notification rules, destinations and deliveries.                                                                                                                                       |
+| `overview`      | `/`                                                                              | The landing page and its summaries.                                                                                                                                                    |
+| `plugins`       | `/plugins`                                                                       | The plugin index, installed plugins and the unconfined plugin and MCP executable reviews.                                                                                              |
+| `providers`     | `/providers`, `/models`, `/catalog`                                              | Provider connections, credentials, grants and models, with the published model catalog in `model-catalog/`.                                                                            |
+| `resources`     | `/provider-resources`                                                            | Retained provider resources and retrieval bindings.                                                                                                                                    |
+| `routes`        | `/routes`                                                                        | Route drafts, activation, routing policy and inspection, with the route cache editor in `cache/`.                                                                                      |
+| `settings`      | `/settings`                                                                      | Installation settings and the branding write, with declarative configuration in `configuration/`.                                                                                      |
+| `usage`         | `/usage`, `/requests`, `/pricing`                                                | Usage reports, request records, pricing, rate cards and reconciliation.                                                                                                                |
+
+Two pages sit under another feature's route section. `agents` renders
+`/budgets/exposure`, because the page lists agent exposure, and `identity`
+renders `/settings/profile`, because the page edits the signed-in user. The
+root layouts also mount the MFA confirmation host and read the setup status
+from `identity`.
+
+New code goes in the feature that owns the resource it reads or writes. A new
+resource in an existing family gets its own subfolder in that feature, and a
+new feature folder is for a resource family that no feature owns yet. A
+component with one consumer lives next to that consumer, even when its name
+suggests another feature. Code that two features need stays in the feature
+that owns its resource and is exported from that feature's `index.ts`. A pure
+helper that belongs to no resource, such as `shortDigest` in
+`src/lib/format.ts`, goes into a shared layer. The shell reads branding itself
+because a shared layer cannot import a feature, which is why `settings` owns
+only the branding write. An `index.ts` lists only what other features import,
+so a feature that no other feature imports has none.
+
 ## Boundaries
 
-ESLint enforces five structural rules. `eslint.config.mjs` is their source, and
-`eslint/feature-boundary.mjs` resolves alias and relative imports for the first
-two:
+ESLint enforces eight structural rules. `eslint.config.mjs` is their source,
+and `eslint/feature-boundary.mjs` resolves alias and relative imports for the
+first five, in `import` and `export` statements, dynamic imports and inline
+`import('...')` types:
 
-- The shared layers (`src/lib/*.ts`, `components/`, `editing/`, `listing/`,
-  `management/`, `session/` and `shell/`) never import from `src/lib/features/`. When two
-  features need the same thing, move it into a shared layer.
+- The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
+  `listing/`, `components/` and `shell/`) never import from
+  `src/lib/features/`. "Feature ownership" above says where code that two
+  features need goes.
+- A shared layer imports only itself and the layers below it. See "Shared
+  layers" below.
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.
+- Nothing under `src/lib` imports from `src/routes`.
+- Only a test file imports a `*.test.ts` file, a `test/` folder or
+  `console/tests/`. Test files are exempt from these rules, so code that
+  production needs moves out of them.
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into
   parts beside it.
 - The `Idempotency-Key` and `If-Match` header names appear only in
@@ -71,11 +127,37 @@ two:
 - A `.svelte` file has no `try` block. See "Writes" below.
 
 Components that broke the size rule or the `try` rule before those rules
-existed are listed in `eslint-legacy.json`, and the other three rules have no
+existed are listed in `eslint-legacy.json`, and the other six rules have no
 exemptions. The lists only shrink: `scripts/check-exemptions.sh` fails
 `make check-console` when a list has an entry the default branch does not. Fix
 a new violation instead of listing it, and remove a file from its list in the
 change that fixes it.
+
+### Shared layers
+
+The shared layers form one strict order, so no two of them import each other.
+The list runs from the lowest layer to the highest, and a layer imports only
+itself and the layers listed before it:
+
+1. `src/lib/*.ts` holds pure helpers such as formatting and imports no other
+   layer.
+2. `management/` is the management API transport, its generated schema and its
+   query and header helpers. It imports `src/lib/*.ts`.
+3. `session/` is the signed-in principal, its permissions and the authenticated
+   `apiClient`. It imports `management/` and below.
+4. `editing/` is the write and concurrent-edit machinery. It imports `session/`
+   and below.
+5. `listing/` is the list filter and page state. It imports `editing/` and
+   below.
+6. `components/` is the generic UI that knows nothing about the application
+   frame. It imports `listing/` and below.
+7. `shell/` is the application frame, which is the sidebar, navigation and
+   section layout. It imports `components/` and below.
+
+Features and routes sit above all seven and import any of them. The order is
+the `sharedLayers` list in `eslint.config.mjs`. A new folder under `src/lib`
+ranks above `shell/` until it is added to that list, so no listed layer can
+import it.
 
 ## Writes
 
@@ -105,7 +187,7 @@ also drops the saved retry intent. Reads that can fail return the problem as
 a value through `captureResult`/`readResult` in `src/lib/editing/result.ts`
 rather than throwing through the component.
 
-`src/lib/features/sinks/SinkEditor.svelte` is the example to copy for a form
+`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a form
 that creates and updates. Other logic that can fail, such as parsing what the
 user typed, belongs in a `.ts` module that returns the problem as a value, like
 `src/lib/editing/json.ts`.

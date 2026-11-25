@@ -7,7 +7,8 @@
   import Tabs from '#lib/components/Tabs.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import { activeTab, owningItem, visibleItem } from '#lib/shell/navigation.js';
+  import { activeTab } from '#lib/components/tabLinks.js';
+  import { owningItem, visibleItem } from '#lib/shell/navigation.js';
 
   let { children, actions }: { children: Snippet; actions?: Snippet } =
     $props();

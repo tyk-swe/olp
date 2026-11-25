@@ -7,12 +7,13 @@ import (
 	"errors"
 	"net/http"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -298,6 +299,30 @@ func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 	}
 	if _, _, err = s.kernel.Deps.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
 		return kernel.DurableError(err)
+	}
+	return nil
+}
+
+func vendorBatchRefusal(x *kernel.Call, route *routing.Route) *fault.Error {
+	if x == nil || route == nil {
+		return nil
+	}
+	for _, target := range route.Targets {
+		provider, ok := x.Snapshot().FindProvider(target.ProviderID)
+		if !ok {
+			continue
+		}
+		if reason, refused := vendors.BatchRefusalFor(provider.VendorID); refused {
+			return kernel.PolicyUnavailable("target_capability", reason)
+		}
+	}
+	return nil
+}
+
+func strictBatchTargetRefusal(p *kernel.Pin) *fault.Error {
+	if p != nil && !p.Provider.Connector().NativeOpenAI() {
+		return kernel.PolicyUnavailable("target_capability",
+			"Strict routes serve files and batches only for OpenAI and Azure.")
 	}
 	return nil
 }

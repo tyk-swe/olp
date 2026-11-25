@@ -24,7 +24,12 @@ import (
 
 func newRunner(t *testing.T) scripts.Runner {
 	t.Helper()
-	runner, err := scripts.NewRunner(harness.Valkey(t), "olp:"+uuid.NewString()+":")
+	return runnerOver(t, harness.Valkey(t))
+}
+
+func runnerOver(t *testing.T, client scripts.Commander) scripts.Runner {
+	t.Helper()
+	runner, err := scripts.NewRunner(client, "olp:"+uuid.NewString()+":")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +336,7 @@ func TestBudgetExposureSurvivesLosingValkey(t *testing.T) {
 	fixture := newUsageFixture(t, pool)
 	store := debits.NewStore(pool)
 	owner := limits.Owner{ID: fixture.keyID, Kind: limits.OwnerKey, Basis: limits.BasisCost}
-	boundaries := []debits.Boundary{{Owner: owner, Budget: admission.Budget(owner, new("1.00"), nil, nil, "")}}
+	boundaries := []limits.Boundary{{Owner: owner, Budget: limits.Budget(owner, new("1.00"), nil, nil, "")}}
 	admit := func(syncer *debits.Syncer, bound string) (debits.Intent, error) {
 		intent := debits.Intent{
 			ID: uuid.NewString(), APIKeyID: fixture.keyID, ProjectID: fixture.projectID, Kind: debits.KindAPI, ClaimID: uuid.NewString(),
@@ -388,7 +393,7 @@ func TestCostBudgetCountsHeldEstimatesAndSettledActuals(t *testing.T) {
 	}
 	runner := newRunner(t)
 	limiter := admission.NewDurable(runner, debits.NewSyncer(debits.NewStore(pool), runner))
-	budget := admission.Budget(owner, new("1.00"), nil, nil, "")
+	budget := limits.Budget(owner, new("1.00"), nil, nil, "")
 	holding := func(amount string) (*admission.Lease, error) {
 		return limiter.Reserve(t.Context(), admission.Request{
 			Lookup: limits.RouteLookup(uuid.NewString()), LeaseTTL: time.Minute, Cost: budget.Holding(amount, uuid.NewString()),

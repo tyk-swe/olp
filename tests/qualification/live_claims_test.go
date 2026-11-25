@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/codemode/codeplans"
+	"github.com/tyk-swe/olp/internal/codemode/codexauth"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -101,12 +101,11 @@ func (l liveLane) record(result, detail, version string, checks []runCheck) runR
 }
 
 type claimsSummary struct {
-	Type               string   `json:"type"`
-	Evidence           string   `json:"evidence"`
-	ResetAwareOrdering []string `json:"reset_aware_ordering"`
-	LiveInference      []string `json:"live_inference"`
-	CooldownEvidence   []string `json:"cooldown_evidence"`
-	FailoverEvidence   []string `json:"failover_evidence"`
+	Type             string   `json:"type"`
+	Evidence         string   `json:"evidence"`
+	LiveInference    []string `json:"live_inference"`
+	CooldownEvidence []string `json:"cooldown_evidence"`
+	FailoverEvidence []string `json:"failover_evidence"`
 }
 
 func checkPassed(record runRecord, name string) bool {
@@ -123,21 +122,18 @@ func liveReliability(records []runRecord) bool {
 				record.Model != "" && record.Model == strings.TrimSpace(os.Getenv(spec.modelEnv)) &&
 				record.Protocol == spec.protocol && record.Transport == "http" &&
 				record.Evidence == "live" && record.Result == "pass" && record.ClientExecuted &&
-				checkPassed(record, "inference") && checkPassed(record, "bands") && checkPassed(record, "cooldown") &&
+				checkPassed(record, "inference") && checkPassed(record, "cooldown") &&
 				checkPassed(record, "failover") && (spec.adapter != "codex" || checkPassed(record, "allowance"))
 		})
 	})
 }
 
 func deriveClaims(records []runRecord) claimsSummary {
-	claims := claimsSummary{Type: "claims", Evidence: "live", ResetAwareOrdering: []string{}, LiveInference: []string{}, CooldownEvidence: []string{}, FailoverEvidence: []string{}}
+	claims := claimsSummary{Type: "claims", Evidence: "live", LiveInference: []string{}, CooldownEvidence: []string{}, FailoverEvidence: []string{}}
 	for _, record := range records {
 		id := record.Adapter + "/" + record.Profile
 		if record.Result == "pass" {
 			claims.LiveInference = append(claims.LiveInference, id)
-		}
-		if record.Result == "pass" && checkPassed(record, "allowance") && checkPassed(record, "bands") {
-			claims.ResetAwareOrdering = append(claims.ResetAwareOrdering, id)
 		}
 		if record.Result == "pass" && checkPassed(record, "cooldown") {
 			claims.CooldownEvidence = append(claims.CooldownEvidence, id)
@@ -225,7 +221,7 @@ func TestLiveClaimsDerivation(t *testing.T) {
 	}
 	ok := func(name string) runCheck { return runCheck{Name: name, Result: "pass"} }
 	none := deriveClaims([]runRecord{{Adapter: "codex", Profile: "codex-subscription", Result: "no_signal", Evidence: "live"}})
-	if len(none.ResetAwareOrdering) != 0 || len(none.LiveInference) != 0 {
+	if len(none.LiveInference) != 0 {
 		t.Fatalf("missing lanes must claim nothing, got %+v", none)
 	}
 	notPassing := deriveClaims([]runRecord{
@@ -235,17 +231,10 @@ func TestLiveClaimsDerivation(t *testing.T) {
 	if len(notPassing.CooldownEvidence) != 0 || len(notPassing.FailoverEvidence) != 0 {
 		t.Fatalf("non-passing lanes must claim no cooldown or failover evidence, got %+v", notPassing)
 	}
-	inferenceOnly := deriveClaims([]runRecord{pass("codex", "codex-subscription", ok("inference"), ok("allowance"))})
-	if len(inferenceOnly.LiveInference) != 1 || len(inferenceOnly.ResetAwareOrdering) != 0 {
-		t.Fatalf("codex without bands must not claim ordering, got %+v", inferenceOnly)
-	}
 	full := deriveClaims([]runRecord{
-		pass("codex", "codex-subscription", ok("inference"), ok("allowance"), ok("bands"), ok("cooldown")),
+		pass("codex", "codex-subscription", ok("inference"), ok("allowance"), ok("cooldown")),
 		pass("zai_coding", "zai-coding-plan", ok("inference"), ok("failover")),
 	})
-	if !slices.Equal(full.ResetAwareOrdering, []string{"codex/codex-subscription"}) {
-		t.Fatalf("ordering claims = %+v", full)
-	}
 	if !slices.Equal(full.LiveInference, []string{"codex/codex-subscription", "zai_coding/zai-coding-plan"}) {
 		t.Fatalf("inference claims = %+v", full)
 	}
@@ -292,7 +281,7 @@ func TestLiveReliabilityRequiresClientAndBehaviorEvidence(t *testing.T) {
 					Profile: scope("profile", spec.profile), Model: scope("model", "synthetic-model"),
 					Protocol: scope("protocol", spec.protocol), Transport: scope("transport", "http"),
 					Result: "pass", Evidence: evidence, ClientExecuted: spec.id() != missingLane || missing != "client",
-					Checks: []runCheck{check("inference"), check("allowance"), check("bands"), check("cooldown"), check("failover")},
+					Checks: []runCheck{check("inference"), check("allowance"), check("cooldown"), check("failover")},
 				}) {
 					return
 				}
@@ -302,14 +291,14 @@ func TestLiveReliabilityRequiresClientAndBehaviorEvidence(t *testing.T) {
 	if !liveReliability(records("", "")) {
 		t.Fatal("qualified live client journeys must pass the reliability gate")
 	}
-	for _, missing := range []string{"lane", "client", "live", "inference", "allowance", "bands", "cooldown", "failover"} {
+	for _, missing := range []string{"lane", "client", "live", "inference", "allowance", "cooldown", "failover"} {
 		t.Run(missing, func(t *testing.T) {
 			if liveReliability(records(specs[0].id(), missing)) {
 				t.Fatalf("missing %s must not pass the reliability gate", missing)
 			}
 		})
 	}
-	for _, missing := range []string{"client", "bands", "cooldown", "failover", "version", "platform", "wrong platform", "adapter", "wrong adapter", "profile", "wrong profile", "client name", "wrong client name", "model", "wrong model", "protocol", "wrong protocol", "transport", "wrong transport"} {
+	for _, missing := range []string{"client", "cooldown", "failover", "version", "platform", "wrong platform", "adapter", "wrong adapter", "profile", "wrong profile", "client name", "wrong client name", "model", "wrong model", "protocol", "wrong protocol", "transport", "wrong transport"} {
 		t.Run("other lane "+missing, func(t *testing.T) {
 			if liveReliability(records(specs[1].id(), missing)) {
 				t.Fatalf("missing %s in another lane must not pass the reliability gate", missing)

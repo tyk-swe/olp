@@ -2106,7 +2106,8 @@
                 "type": "string"
               },
               {
-                "type": "number"
+                "type": "number",
+                "x-go-type": "A2ANumericID"
               }
             ]
           },
@@ -2151,7 +2152,8 @@
                 "type": "string"
               },
               {
-                "type": "number"
+                "type": "number",
+                "x-go-type": "A2ANumericID"
               }
             ],
             "nullable": true

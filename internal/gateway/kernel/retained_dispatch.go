@@ -33,7 +33,21 @@ type retainedAnswer struct {
 	referenceErr error
 }
 
-func (s *Server) RetainedDispatch(w http.ResponseWriter, r *http.Request, x *Call, p *Pin, e retainedapi.Endpoint, resource, parent *resources.Resource, endpoint string, body []byte, contentType string, lifecycle *resources.Lifecycle, fail func(*fault.Error)) int {
+type RetainedDispatchRequest struct {
+	Call        *Call
+	Pin         *Pin
+	Endpoint    retainedapi.Endpoint
+	Resource    *resources.Resource
+	Parent      *resources.Resource
+	URL         string
+	Body        []byte
+	ContentType string
+	Lifecycle   *resources.Lifecycle
+	Fail        func(*fault.Error)
+}
+
+func (s *Server) RetainedDispatch(w http.ResponseWriter, r *http.Request, req RetainedDispatchRequest) int {
+	x, p, e, resource, parent, endpoint, body, contentType, lifecycle, fail := req.Call, req.Pin, req.Endpoint, req.Resource, req.Parent, req.URL, req.Body, req.ContentType, req.Lifecycle, req.Fail
 	deletion := e.Action == "delete" && resource.Kind == "context_cache"
 	fence, err := s.dispatchFence(r.Context(), resource, lifecycle, deletion)
 	if err != nil {

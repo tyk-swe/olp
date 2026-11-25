@@ -13,7 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/platform/panics"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*PinnedResponse, *AttemptFailure) {

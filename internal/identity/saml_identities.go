@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -144,7 +145,7 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, httpkit.NewID()); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, ids.New()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		// Removing an identity is no sign-in, so the rotated session keeps the

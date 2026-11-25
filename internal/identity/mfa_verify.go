@@ -14,8 +14,9 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/hotp"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -267,7 +268,7 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 	if count >= 10 {
 		return nil, httpkit.Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	kind := "webauthn"
 	var credentialID []byte
 	if credential != nil {

@@ -5,8 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/release"
@@ -24,7 +23,7 @@ type ProbeAttempt struct {
 
 func (s *Server) ProbeGeneration(ctx context.Context, release *release.Release, route routing.Route, parsed *wire.Request) ProbeAttempt {
 	x := &Call{
-		request:            request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: release},
+		request:            request{id: ids.New(), minted: true, startedAt: s.Now(), release: release},
 		family:             parsed.Family,
 		historicalSnapshot: release.Snapshot().WithRoute(route),
 		actor:              "system",

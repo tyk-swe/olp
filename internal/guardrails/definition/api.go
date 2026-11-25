@@ -11,17 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
 
 type API struct {
 	server  *access.Server
-	publish guardrails.Publisher
+	publish activation.Publisher
 }
 
-func NewAPI(server *access.Server, publish guardrails.Publisher) *API {
+func NewAPI(server *access.Server, publish activation.Publisher) *API {
 	return &API{server: server, publish: publish}
 }
 
@@ -32,14 +33,13 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.server.Route(mux, "GET /api/v1/guardrails/{guardrail_id}/revisions/{revision_id}", a.revision)
 	a.server.Route(mux, "PUT /api/v1/guardrails/{guardrail_id}", a.update, access.MaxBody(128<<10))
 	a.server.Route(mux, "DELETE /api/v1/guardrails/{guardrail_id}", a.retire)
-	a.server.Route(mux, "POST /api/v1/guardrails/{guardrail_id}/activate", guardrails.Activation(a.server, a.publish, lineage{}, "guardrail_id", "guardrails"))
+	a.server.Route(mux, "POST /api/v1/guardrails/{guardrail_id}/activate", activation.Handler(a.server, a.publish, lineage{}, "guardrail_id", "guardrails"))
 }
 
 type revision struct {
 	ID            string          `json:"id"`
 	GuardrailID   string          `json:"guardrail_id"`
 	Revision      int64           `json:"revision"`
-	Policy        json.RawMessage `json:"policy"`
 	CreatedAt     time.Time       `json:"created_at"`
 	Configuration json.RawMessage `json:"configuration"`
 	TimeoutMS     int64           `json:"timeout_ms"`
@@ -98,7 +98,7 @@ func (a *API) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error
 		return httpkit.Reply{}, err
 	}
 	value := revision{ID: revisionID, GuardrailID: id}
-	if err = a.server.Pool.QueryRow(r.Context(), "SELECT revision,policy,created_at,configuration,timeout_ms,on_error FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&value.Revision, &value.Policy, &value.CreatedAt, &value.Configuration, &value.TimeoutMS, &value.OnError); err != nil {
+	if err = a.server.Pool.QueryRow(r.Context(), "SELECT revision,created_at,configuration,timeout_ms,on_error FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&value.Revision, &value.CreatedAt, &value.Configuration, &value.TimeoutMS, &value.OnError); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return httpkit.Detail(value, revisionID), nil

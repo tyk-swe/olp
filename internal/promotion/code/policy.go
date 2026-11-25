@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -27,7 +28,6 @@ type Policy struct {
 	ChatToCodex             bool
 	MessagesToCodex         bool
 	ChatToAntigravity       bool
-	AllowanceOrdering       bool
 	PaidParticipation       bool
 	PaidTargets             map[string]PaidTarget
 	PaidFallbackTargets     map[string]PaidTarget
@@ -37,11 +37,11 @@ type Policy struct {
 
 func policyOf(e contract.ConfigurationCodeRoutePolicy) Policy {
 	return Policy{
-		Pool: e.Pool.String(), Models: promotion.NonNil(slices.Clone(e.Models)), Enabled: e.Enabled,
-		ModelPools: maps.Collect(maps.All(promotion.ValueOf(e.ModelPools))), Aliases: maps.Collect(maps.All(promotion.ValueOf(e.Aliases))), InitialRecoveryAttempts: promotion.ValueOf(e.InitialRecoveryAttempts),
-		ModelRewriting: promotion.ValueOf(e.ModelRewriting), CodexCLIIdentity: promotion.ValueOf(e.CodexCliIdentity), ChatToCodex: promotion.ValueOf(e.ChatToCodex), MessagesToCodex: promotion.ValueOf(e.MessagesToCodex),
-		ChatToAntigravity: promotion.ValueOf(e.ChatToAntigravity), AllowanceOrdering: promotion.ValueOf(e.AllowanceOrdering), PaidParticipation: promotion.ValueOf(e.PaidParticipation),
-		PaidTargets: promotion.MapValues(promotion.ValueOf(e.PaidTargets), targetOf), PaidFallbackTargets: promotion.MapValues(promotion.ValueOf(e.PaidFallbackTargets), targetOf),
+		Pool: e.Pool.String(), Models: ptr.NonNil(slices.Clone(e.Models)), Enabled: e.Enabled,
+		ModelPools: maps.Collect(maps.All(ptr.Value(e.ModelPools))), Aliases: maps.Collect(maps.All(ptr.Value(e.Aliases))), InitialRecoveryAttempts: ptr.Value(e.InitialRecoveryAttempts),
+		ModelRewriting: ptr.Value(e.ModelRewriting), CodexCLIIdentity: ptr.Value(e.CodexCliIdentity), ChatToCodex: ptr.Value(e.ChatToCodex), MessagesToCodex: ptr.Value(e.MessagesToCodex),
+		ChatToAntigravity: ptr.Value(e.ChatToAntigravity), PaidParticipation: ptr.Value(e.PaidParticipation),
+		PaidTargets: promotion.MapValues(ptr.Value(e.PaidTargets), targetOf), PaidFallbackTargets: promotion.MapValues(ptr.Value(e.PaidFallbackTargets), targetOf),
 		Tools: toolsOf(promotion.Pointer(e.Tools)), MaxBodyBytes: widened(promotion.Pointer(e.MaxBodyBytes)),
 	}
 }
@@ -62,10 +62,10 @@ func widened(limit *int) *int64 {
 
 func (p Policy) input(project, slug, pool string, tools *codemode.ResearchTools, targets, fallback map[string]codemode.PaidTarget) routes.CodeRouteInput {
 	return routes.CodeRouteInput{
-		ProjectID: project, Slug: slug, PoolID: pool, Models: promotion.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
+		ProjectID: project, Slug: slug, PoolID: pool, Models: ptr.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
 		ModelPools: maps.Collect(maps.All(p.ModelPools)), Aliases: maps.Collect(maps.All(p.Aliases)), InitialRecoveryAttempts: p.InitialRecoveryAttempts,
 		ModelRewriting: p.ModelRewriting, CodexCLIIdentity: p.CodexCLIIdentity, ChatToCodex: p.ChatToCodex, MessagesToCodex: p.MessagesToCodex,
-		ChatToAntigravity: p.ChatToAntigravity, AllowanceOrdering: p.AllowanceOrdering, PaidParticipation: p.PaidParticipation,
+		ChatToAntigravity: p.ChatToAntigravity, PaidParticipation: p.PaidParticipation,
 		PaidTargets: maps.Collect(maps.All(targets)), PaidFallbackTargets: maps.Collect(maps.All(fallback)), Tools: cloned(tools), MaxBodyBytes: p.MaxBodyBytes,
 	}
 }
@@ -78,7 +78,7 @@ func stored(route codemode.Route, targets, fallback map[string]PaidTarget) Polic
 	return Policy{
 		Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, Aliases: route.Aliases, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
 		ModelRewriting: route.ModelRewriting, CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex,
-		ChatToAntigravity: route.ChatToAntigravity, AllowanceOrdering: route.AllowanceOrdering, PaidParticipation: route.PaidParticipation,
+		ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation,
 		PaidTargets: targets, PaidFallbackTargets: fallback, Tools: cloned(route.Tools), MaxBodyBytes: route.MaxBodyBytes,
 	}
 }
@@ -115,7 +115,7 @@ func cloned(tools *codemode.ResearchTools) *codemode.ResearchTools {
 	if tools == nil {
 		return nil
 	}
-	return &codemode.ResearchTools{AccountID: tools.AccountID, Services: promotion.NonNil(slices.Clone(tools.Services))}
+	return &codemode.ResearchTools{AccountID: tools.AccountID, Services: ptr.NonNil(slices.Clone(tools.Services))}
 }
 
 func (p Policy) paidTargets() iter.Seq2[string, PaidTarget] {
@@ -149,10 +149,10 @@ func renderPolicy(p Policy) (contract.ConfigurationCodeRoutePolicy, error) {
 		return contract.ConfigurationCodeRoutePolicy{}, err
 	}
 	return contract.ConfigurationCodeRoutePolicy{
-		Pool: pool, Models: promotion.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
+		Pool: pool, Models: ptr.NonNil(slices.Clone(p.Models)), Enabled: p.Enabled,
 		ModelPools: new(maps.Collect(maps.All(p.ModelPools))), Aliases: new(maps.Collect(maps.All(p.Aliases))), InitialRecoveryAttempts: new(p.InitialRecoveryAttempts),
 		ModelRewriting: new(p.ModelRewriting), CodexCliIdentity: new(p.CodexCLIIdentity), ChatToCodex: new(p.ChatToCodex), MessagesToCodex: new(p.MessagesToCodex),
-		ChatToAntigravity: new(p.ChatToAntigravity), AllowanceOrdering: new(p.AllowanceOrdering), PaidParticipation: new(p.PaidParticipation),
+		ChatToAntigravity: new(p.ChatToAntigravity), PaidParticipation: new(p.PaidParticipation),
 		PaidTargets: new(promotion.MapValues(p.PaidTargets, PaidTarget.render)), PaidFallbackTargets: new(promotion.MapValues(p.PaidFallbackTargets, PaidTarget.render)),
 		Tools: tools, MaxBodyBytes: narrowed(p.MaxBodyBytes),
 	}, nil

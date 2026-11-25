@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codesessions"
-	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -78,29 +78,29 @@ type paidCodePricing struct {
 	charge   rates.Cost
 }
 
-func (f *Forwarder) resolvePaidCodeTarget(release *release.Release, route codemode.Route, operation codemode.Operation, inbound codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, fallback bool) (paidCodePricing, error) {
-	if !route.PaidParticipation {
+func (f *Forwarder) resolvePaidCodeTarget(req codeRequest, operation codemode.Operation, verified keyauthority.Authority, fallback bool) (paidCodePricing, error) {
+	if !req.route.PaidParticipation {
 		return paidCodePricing{}, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
-	if transport != codeadapter.HTTP || operation.Name == "compact" || operation.Name == "prewarm" {
+	if req.transport != codeadapter.HTTP || operation.Name == "compact" || operation.Name == "prewarm" {
 		return paidCodePricing{}, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
-	target := route.PaidTarget(operation.Model, fallback)
-	provider, exists := release.Snapshot().FindCodePaidConnection(route.RevisionID + ":" + target.ProviderID)
+	target := req.route.PaidTarget(operation.Model, fallback)
+	provider, exists := req.release.Snapshot().FindCodePaidConnection(req.route.RevisionID + ":" + target.ProviderID)
 	slotIndex := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
-	if !exists || !provider.Enabled || provider.ProjectID == nil || *provider.ProjectID != route.ProjectID || slotIndex < 0 {
+	if !exists || !provider.Enabled || provider.ProjectID == nil || *provider.ProjectID != req.route.ProjectID || slotIndex < 0 {
 		return paidCodePricing{}, codemode.Refuse(503, "code_paid_target_unavailable")
 	}
 	slot := provider.Slots[slotIndex]
-	if !slot.Enabled || slot.CredentialID == nil || slot.CredentialVersion == nil || !slot.Allows(operation.Model, route.Slug, verified.ID) || f.runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
+	if !slot.Enabled || slot.CredentialID == nil || slot.CredentialVersion == nil || !slot.Allows(operation.Model, req.route.Slug, verified.ID) || f.runtime.Eligibility(*slot.CredentialID) != routing.Eligible {
 		return paidCodePricing{}, codemode.Refuse(403, "code_paid_target_denied")
 	}
-	family := codeFamily(inbound.protocol)
+	family := codeFamily(req.inbound.protocol)
 	native, nativeOK := routing.CodePaidProtocol(provider, operation.Model)
-	if !nativeOK || native != inbound.protocol {
+	if !nativeOK || native != req.inbound.protocol {
 		return paidCodePricing{}, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
-	parsed, parseErr := protocols.ParseForModel(family, body, operation.PublicModel())
+	parsed, parseErr := protocols.ParseForModel(family, req.body, operation.PublicModel())
 	if parseErr != nil {
 		return paidCodePricing{}, codemode.Refuse(400, "code_body_invalid")
 	}
@@ -123,7 +123,7 @@ func (f *Forwarder) resolvePaidCodeTarget(release *release.Release, route codemo
 	if !priced {
 		return paidCodePricing{}, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
-	card, cardKnown := inputs.RateCardRevision(&route.ProjectID, now)
+	card, cardKnown := inputs.RateCardRevision(&req.route.ProjectID, now)
 	if !cardKnown {
 		return paidCodePricing{}, codemode.Refuse(503, "code_paid_pricing_unavailable")
 	}
@@ -137,27 +137,27 @@ func (f *Forwarder) resolvePaidCodeTarget(release *release.Release, route codemo
 	return paidCodePricing{provider: provider, slot: slot, family: family, stream: parsed.Stream, demand: demand, now: now, price: price, discount: discount, card: card, cost: cost, charge: charge}, nil
 }
 
-func (f *Forwarder) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, inbound codeIngress, transport codeadapter.Transport, verified keyauthority.Authority, body []byte, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
-	priced, err := f.resolvePaidCodeTarget(release, route, operation, inbound, transport, verified, body, fallback)
+func (f *Forwarder) preparePaidCode(req codeRequest, operation codemode.Operation, verified keyauthority.Authority, recovery *codesessions.Recovery, fallback bool) (*codeAttempt, error) {
+	priced, err := f.resolvePaidCodeTarget(req, operation, verified, fallback)
 	if err != nil {
 		return nil, err
 	}
-	labels, labelErr := ingress.ParseAttribution(r, verified)
+	labels, labelErr := ingress.ParseAttribution(req.r, verified)
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := f.ledger.AdmitPaid(r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot(), ModelPath: inbound.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: priced.provider, Slot: priced.slot})
+	permit, err := f.ledger.AdmitPaid(req.r.Context(), codesessions.PaidAdmission{Admission: codesessions.Admission{Route: req.route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: req.observation.PreviousResponse, InitialRecovery: req.observation.Recoverable, Recovery: recovery, ModelSource: req.release.Snapshot(), ModelPath: req.inbound.path, ModelTransport: req.transport}, Fallback: fallback, Authority: verified, Provider: priced.provider, Slot: priced.slot})
 	if err != nil {
 		return nil, err
 	}
-	a := &codeAttempt{forwarder: f, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: inbound.protocol, ClientPath: inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: inbound.protocol}, observation.ChatChoices), paid: &paidCodeAttempt{provider: priced.provider, slot: priced.slot, connector: priced.provider.Connector(), family: priced.family, route: route, release: release, authority: permit.Authority, price: priced.price, discount: priced.discount, card: priced.card, started: priced.now, stream: priced.stream}, config: paidCodeConfiguration(priced.provider)}
+	a := &codeAttempt{forwarder: f, model: operation.Model, publicModel: operation.PublicModel(), permit: codesessions.Permit{Authority: permit.Authority, Attempt: permit.Attempt}, endpoint: codeadapter.Endpoint{Protocol: req.inbound.protocol, ClientPath: req.inbound.path}, observer: codeObserver(codeadapter.Endpoint{Protocol: req.inbound.protocol}, req.observation.ChatChoices), paid: &paidCodeAttempt{provider: priced.provider, slot: priced.slot, connector: priced.provider.Connector(), family: priced.family, route: req.route, release: req.release, authority: permit.Authority, price: priced.price, discount: priced.discount, card: priced.card, started: priced.now, stream: priced.stream}, config: paidCodeConfiguration(priced.provider)}
 	ready := false
 	defer func() {
 		if !ready {
-			a.finish(r.Context())
+			a.finish(req.r.Context())
 		}
 	}()
-	if err := f.reservePaidCodeAttempt(r, a, verified, labels, route, priced, permit.Attempt.ID); err != nil {
+	if err := f.reservePaidCodeAttempt(req.r, a, verified, labels, req.route, priced, permit.Attempt.ID); err != nil {
 		return nil, err
 	}
 	ready = true

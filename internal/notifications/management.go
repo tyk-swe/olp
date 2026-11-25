@@ -10,8 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
@@ -109,7 +110,7 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (htt
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if err := c.insert(tx, p, projectID, target, id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -138,7 +139,7 @@ func (s *Server) update(r *http.Request, res resource, replayPatch map[string]js
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err := apply(tx, current, httpkit.NewID()); err != nil {
+		if err := apply(tx, current, ids.New()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		updated, err := res.find(r.Context(), tx, id)

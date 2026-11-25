@@ -4,8 +4,9 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -72,7 +73,7 @@ func (s *Server) writePublished(r *http.Request, id string) (httpkit.Reply, erro
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		draftID, draftETag := httpkit.NewID(), httpkit.NewID()
+		draftID, draftETag := ids.New(), ids.New()
 		if err = StageDraft(r.Context(), tx, NewDraft{ID: draftID, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, draftETag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

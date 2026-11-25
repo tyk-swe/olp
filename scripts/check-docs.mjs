@@ -7,7 +7,7 @@ const docDirectories = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'doc
 export const liveProvenClaimPatterns = [
   /\blive-proven only\b/i,
   /\b(?:is|are) live[- ]proven\b/i,
-  /\blive[- ]proven (?:ordering|bands?|signal)\b/i
+  /\blive[- ]proven (?:ordering|signal)\b/i
 ];
 
 export function findLiveProvenClaims(text) {

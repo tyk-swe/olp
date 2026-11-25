@@ -1,4 +1,4 @@
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import type { components } from '#lib/management/schema.js';
 import {
   ensureOk,
@@ -85,14 +85,6 @@ export const getRevision = async (kind: Kind, id: string, revision: string) =>
     await apiClient.GET(revisions[kind], {
       params: { path: { publication_id: id, revision_id: revision } }
     })
-  );
-export const listProjects = () =>
-  collectCursorPages(async (cursor) =>
-    unwrapPage(
-      await apiClient.GET('/api/v1/projects', {
-        params: { query: { cursor, limit: 200 } }
-      })
-    )
   );
 export const listServers = () =>
   collectCursorPages(async (cursor) =>

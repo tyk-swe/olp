@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
@@ -39,15 +40,15 @@ func TestNamedVendorFailurePoliciesAndCircuitIsolation(t *testing.T) {
 		_, _ = io.WriteString(w, `{"content":"sensitive","results":[{}]}`)
 	})
 	config := vendorConfiguration(endpoint, "")
-	for _, policy := range []OnError{FailOpen, FailClosed} {
+	for _, policy := range []guardrailpolicy.OnError{guardrailpolicy.FailOpen, guardrailpolicy.FailClosed} {
 		d := Revision{ID: string(policy), GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 1000, OnError: policy}
-		engine, err := compileBound([]Entry{{GuardrailID: "g", RevisionID: d.ID, Phase: Input, Action: Block}}, map[string]Revision{d.ID: d}, runner.For(testCaller))
+		engine, err := compileBound([]Entry{{GuardrailID: "g", RevisionID: d.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block}}, map[string]Revision{d.ID: d}, runner.For(testCaller))
 		if err != nil {
 			t.Fatal(err)
 		}
 		for range 6 {
-			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "secret"}}}, nil)
-			if (policy == FailClosed) != (err != nil) || len(result.Decisions) != 1 {
+			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: guardrailpolicy.Input, Segments: []Segment{{ID: "s", Text: "secret"}}}, nil)
+			if (policy == guardrailpolicy.FailClosed) != (err != nil) || len(result.Decisions) != 1 {
 				t.Fatalf("failure policy %s: %+v, %v", policy, result, err)
 			}
 			encoded, _ := json.Marshal(result.Decisions)
@@ -71,13 +72,13 @@ func TestExternalDeadlineIncludesCredentialResolution(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	config := vendorConfiguration(endpoint, "")
-	d := Revision{ID: "timeout", GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 5, OnError: FailClosed}
+	d := Revision{ID: "timeout", GuardrailID: "g", Type: "openai_moderation", Configuration: config, TimeoutMS: 5, OnError: guardrailpolicy.FailClosed}
 	spec, err := ParseRevision(d)
 	if err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	_, err = runner.For(caller).Evaluate(t.Context(), d, spec, Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "secret"}}})
+	_, err = runner.For(caller).Evaluate(t.Context(), d, spec, Evaluation{Phase: guardrailpolicy.Input, Segments: []Segment{{ID: "s", Text: "secret"}}})
 	if !errors.Is(err, errEvaluation) || time.Since(started) > time.Second {
 		t.Fatalf("deadline was not enforced: %v", err)
 	}
@@ -94,8 +95,8 @@ func TestModelGuardrailAliases(t *testing.T) {
 				calls++
 				return flagIf(true, "policy.test"), nil
 			}})
-			engine := testEngine(t, Kind(tc.kind), tc.config, Input, Block, false, runner)
-			evaluation := Evaluation{Phase: Input, Segments: []Segment{{ID: "s", Text: "text"}}, InternalModel: true}
+			engine := testEngine(t, Kind(tc.kind), tc.config, guardrailpolicy.Input, guardrailpolicy.Block, false, runner)
+			evaluation := Evaluation{Phase: guardrailpolicy.Input, Segments: []Segment{{ID: "s", Text: "text"}}, InternalModel: true}
 			result, err := engine.Evaluate(t.Context(), evaluation, nil)
 			if err != nil || calls != 0 || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
 				t.Fatalf("recursive model was not skipped: %+v %v", result, err)
@@ -110,7 +111,7 @@ func TestModelGuardrailAliases(t *testing.T) {
 }
 
 func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
-	for _, failurePolicy := range []OnError{FailClosed, FailOpen} {
+	for _, failurePolicy := range []guardrailpolicy.OnError{guardrailpolicy.FailClosed, guardrailpolicy.FailOpen} {
 		t.Run(string(failurePolicy), func(t *testing.T) {
 			runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 				var request struct {
@@ -129,12 +130,12 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 			})
 			config := vendorConfiguration(endpoint, "")
 			definition := Revision{ID: "mixed", GuardrailID: "guard", Type: "generic_guardrail_api", Configuration: config, TimeoutMS: 1000, OnError: failurePolicy}
-			engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "mixed", Phase: Input, Action: Redact}}, map[string]Revision{"mixed": definition}, runner.For(testCaller))
+			engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "mixed", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact}}, map[string]Revision{"mixed": definition}, runner.For(testCaller))
 			if err != nil {
 				t.Fatal(err)
 			}
 			input := []Segment{{ID: "first", Text: "private first"}, {ID: "second", Text: "unsafe second"}}
-			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: input}, nil)
+			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: guardrailpolicy.Input, Segments: input}, nil)
 			if err != ErrBlocked || result.Changed {
 				t.Fatalf("partially sanitized unsafe content escaped: %+v error=%v", result, err)
 			}
@@ -147,8 +148,8 @@ func TestVendorTransformationRequiresEveryFlaggedSegment(t *testing.T) {
 
 func TestVendorInterventionWithoutReplacement(t *testing.T) {
 	for _, kind := range []string{"generic_guardrail_api", "deepkeep", "qostodian_nexus", "noma_v2", "straiker", "ovalix"} {
-		for _, action := range []Action{Block, Redact} {
-			for _, policy := range []OnError{FailClosed, FailOpen} {
+		for _, action := range []guardrailpolicy.Action{guardrailpolicy.Block, guardrailpolicy.Redact} {
+			for _, policy := range []guardrailpolicy.OnError{guardrailpolicy.FailClosed, guardrailpolicy.FailOpen} {
 				t.Run(kind+"/"+string(action)+"/"+string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 						if kind == "ovalix" {
@@ -165,11 +166,11 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 					}
 					config := vendorConfiguration(endpoint, string(parameters))
 					definition := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(kind), Configuration: config, TimeoutMS: 1000, OnError: policy}
-					engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: action}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
+					engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: action}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
 					if err != nil {
 						t.Fatal(err)
 					}
-					result, err := evaluateText(t, engine, "unchanged", Input, nil)
+					result, err := evaluateText(t, engine, "unchanged", guardrailpolicy.Input, nil)
 					if err != ErrBlocked || result.Changed || len(result.Decisions) != 1 || len(result.Decisions[0].Categories) == 0 {
 						t.Fatalf("explicit intervention lost: %+v error=%v", result, err)
 					}
@@ -181,7 +182,7 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 
 func TestConductIdentityFailuresRemainPolicyBlocks(t *testing.T) {
 	for _, reply := range []string{"error", "structured", "unavailable"} {
-		for _, policy := range []OnError{FailOpen, FailClosed} {
+		for _, policy := range []guardrailpolicy.OnError{guardrailpolicy.FailOpen, guardrailpolicy.FailClosed} {
 			t.Run(reply+"/"+string(policy), func(t *testing.T) {
 				runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
 					var request map[string]any
@@ -200,12 +201,12 @@ func TestConductIdentityFailuresRemainPolicyBlocks(t *testing.T) {
 				})
 				config := vendorConfiguration(endpoint, "")
 				definition := Revision{ID: "revision", GuardrailID: "guard", Type: "conduct", Configuration: config, TimeoutMS: 1000, OnError: policy}
-				engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: Block}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
+				engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
 				if err != nil {
 					t.Fatal(err)
 				}
-				result, err := evaluateText(t, engine, "content", Input, nil)
-				wantBlocked := reply != "unavailable" || policy == FailClosed
+				result, err := evaluateText(t, engine, "content", guardrailpolicy.Input, nil)
+				wantBlocked := reply != "unavailable" || policy == guardrailpolicy.FailClosed
 				if (err == ErrBlocked) != wantBlocked || len(result.Decisions) != 1 {
 					t.Fatalf("identity failure result=%+v error=%v", result, err)
 				}
@@ -228,18 +229,18 @@ func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
 		{"block_other_category", `{"pii":[{"action":"AUTO_MASKING"}],"jailbreak":[{"action":"BLOCK"}]}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, policy := range []OnError{FailClosed, FailOpen} {
+			for _, policy := range []guardrailpolicy.OnError{guardrailpolicy.FailClosed, guardrailpolicy.FailOpen} {
 				t.Run(string(policy), func(t *testing.T) {
 					runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, _ *http.Request) {
 						io.WriteString(w, `{"violations_detected":true,"findings":`+tc.findings+`,"messages":[{"content":"masked"}]}`)
 					})
 					config := vendorConfiguration(endpoint, `{"mask":true}`)
 					definition := Revision{ID: "revision", GuardrailID: "guard", Type: "lasso", Configuration: config, TimeoutMS: 1000, OnError: policy}
-					engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: Input, Action: Redact}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
+					engine, err := compileBound([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact}}, map[string]Revision{"revision": definition}, runner.For(testCaller))
 					if err != nil {
 						t.Fatal(err)
 					}
-					result, err := evaluateText(t, engine, "private and unsafe", Input, nil)
+					result, err := evaluateText(t, engine, "private and unsafe", guardrailpolicy.Input, nil)
 					if tc.blocked {
 						if err != ErrBlocked || result.Changed {
 							t.Fatalf("partial repair escaped: %+v error=%v", result, err)
@@ -256,28 +257,28 @@ func TestLassoTransformationRequiresEveryFinding(t *testing.T) {
 func TestNamedVendorPolicyCompilation(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind     string
-		phase          Phase
-		action         Action
+		phase          guardrailpolicy.Phase
+		action         guardrailpolicy.Action
 		monitor, valid bool
 	}{
-		{"moderation_blocks", "openai_moderation", Input, Block, false, true},
-		{"moderation_cannot_rewrite", "openai_moderation", Input, Redact, false, false},
-		{"legacy_lakera_no_output", "lakera_v1", Output, Block, false, false},
-		{"javelin_no_output", "javelin", OutputStream, Annotate, false, false},
-		{"headroom_only_sync_input", "headroom", InputParallel, Block, false, false},
-		{"transformation_sync_input", "guardrails_ai", Input, Mask, false, true},
-		{"transformation_output", "guardrails_ai", OutputStream, Redact, false, true},
-		{"parallel_cannot_rewrite", "guardrails_ai", InputParallel, Redact, false, false},
-		{"parallel_monitors", "guardrails_ai", InputParallel, Redact, true, true},
-		{"tools_block", "builtin.tool_permission", Input, Block, false, true},
-		{"tools_no_rewrite", "builtin.tool_permission", Output, Redact, false, false},
+		{"moderation_blocks", "openai_moderation", guardrailpolicy.Input, guardrailpolicy.Block, false, true},
+		{"moderation_cannot_rewrite", "openai_moderation", guardrailpolicy.Input, guardrailpolicy.Redact, false, false},
+		{"legacy_lakera_no_output", "lakera_v1", guardrailpolicy.Output, guardrailpolicy.Block, false, false},
+		{"javelin_no_output", "javelin", guardrailpolicy.OutputStream, guardrailpolicy.Annotate, false, false},
+		{"headroom_only_sync_input", "headroom", guardrailpolicy.InputParallel, guardrailpolicy.Block, false, false},
+		{"transformation_sync_input", "guardrails_ai", guardrailpolicy.Input, guardrailpolicy.Mask, false, true},
+		{"transformation_output", "guardrails_ai", guardrailpolicy.OutputStream, guardrailpolicy.Redact, false, true},
+		{"parallel_cannot_rewrite", "guardrails_ai", guardrailpolicy.InputParallel, guardrailpolicy.Redact, false, false},
+		{"parallel_monitors", "guardrails_ai", guardrailpolicy.InputParallel, guardrailpolicy.Redact, true, true},
+		{"tools_block", "builtin.tool_permission", guardrailpolicy.Input, guardrailpolicy.Block, false, true},
+		{"tools_no_rewrite", "builtin.tool_permission", guardrailpolicy.Output, guardrailpolicy.Redact, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`)
 			if tc.kind == "builtin.tool_permission" {
 				config = json.RawMessage(`{}`)
 			}
-			definition := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: FailClosed}
+			definition := Revision{ID: "revision", GuardrailID: "guard", Type: Kind(tc.kind), Configuration: config, TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
 			_, err := Compile([]Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: tc.phase, Action: tc.action, Monitor: tc.monitor}}, map[string]Revision{"revision": definition})
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%t error=%v", tc.valid, err)
@@ -288,16 +289,16 @@ func TestNamedVendorPolicyCompilation(t *testing.T) {
 
 func TestVendorRequestsUseCanonicalRoles(t *testing.T) {
 	for _, tc := range []struct {
-		phase Phase
+		phase guardrailpolicy.Phase
 		role  Role
 		want  string
 	}{
-		{Input, Developer, "system"},
-		{Input, System, "system"},
-		{Input, Assistant, "assistant"},
-		{Input, Tool, "user"},
-		{Input, "", "user"},
-		{Output, User, "assistant"},
+		{guardrailpolicy.Input, Developer, "system"},
+		{guardrailpolicy.Input, System, "system"},
+		{guardrailpolicy.Input, Assistant, "assistant"},
+		{guardrailpolicy.Input, Tool, "user"},
+		{guardrailpolicy.Input, "", "user"},
+		{guardrailpolicy.Output, User, "assistant"},
 	} {
 		t.Run(string(tc.phase)+"/"+string(tc.role), func(t *testing.T) {
 			runner, endpoint := fakeRunner(t, func(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +312,7 @@ func TestVendorRequestsUseCanonicalRoles(t *testing.T) {
 				}
 				_, _ = io.WriteString(w, `{"required_action":{},"analysis_result":{}}`)
 			})
-			d := Revision{ID: "revision", GuardrailID: "guard", Type: "aim", Configuration: vendorConfiguration(endpoint, ""), TimeoutMS: 1000, OnError: FailClosed}
+			d := Revision{ID: "revision", GuardrailID: "guard", Type: "aim", Configuration: vendorConfiguration(endpoint, ""), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
 			spec, err := ParseRevision(d)
 			if err != nil {
 				t.Fatal(err)

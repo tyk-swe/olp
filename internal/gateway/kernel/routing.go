@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -76,7 +75,6 @@ type planningSession struct {
 	surface   string
 	mode      string
 	semantic  error
-	decisions []contentpolicy.Decision
 	unbounded bool
 }
 
@@ -109,9 +107,6 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 		return plan, false, nil
 	}
 	if p.semantic != nil {
-		for _, decision := range p.decisions {
-			recordDecision(x, decision)
-		}
 		problem := RequestError(p.semantic)
 		if p.unbounded && problem.Code == "target_capability" {
 			problem.Status = http.StatusUnprocessableEntity

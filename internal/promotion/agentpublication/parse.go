@@ -5,14 +5,15 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Publication, error) {
-	entries := promotion.ValueOf(document.AgentPublications)
+	entries := ptr.Value(document.AgentPublications)
 	if len(entries) > maxPublications {
 		return nil, httpkit.Invalid("agent_publications", "Declare at most 512 publications.")
 	}
@@ -39,7 +40,7 @@ func parseEntry(entry contract.ConfigurationAgentPublication, duplicate bool, po
 	if err != nil {
 		return Publication{}, err
 	}
-	labels, err := promotion.Convert[map[string]agentcontract.Draft](promotion.ValueOf(entry.Labels))
+	labels, err := promotion.Convert[map[string]agentcontract.Draft](ptr.Value(entry.Labels))
 	if err != nil {
 		return Publication{}, err
 	}

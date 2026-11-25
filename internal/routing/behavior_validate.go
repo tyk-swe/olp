@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -32,8 +32,7 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 		return invalidValue("responses_mcp_items", "Responses MCP items require gateway tool execution.")
 	}
 	for index, id := range b.Toolsets {
-		parsed, err := uuid.Parse(id)
-		if err != nil || parsed.String() != id || slices.Index(b.Toolsets, id) != index {
+		if !ids.CanonicalOrNil(id) || slices.Index(b.Toolsets, id) != index {
 			return invalidValue("toolsets", "Use distinct canonical toolset IDs.")
 		}
 	}

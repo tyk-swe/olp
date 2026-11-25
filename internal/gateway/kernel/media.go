@@ -9,18 +9,18 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	mediacontract "github.com/tyk-swe/olp/internal/contracts/media"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
 	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 type MediaDeps struct {
@@ -284,7 +284,7 @@ func (x *Call) encodeMedia(snapshot *routing.View, provider routing.Provider, ta
 	if !ok {
 		return encodedMedia{}, errors.New("compiled strict media contract unavailable")
 	}
-	input, err := media.ContractInput(x.media, call, effective, nil)
+	input, err := media.ContractInput(x.media, call, effective)
 	if err != nil {
 		return encodedMedia{}, err
 	}

@@ -10,9 +10,10 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -102,8 +103,8 @@ func (c Configuration) defaultedEndpoint() *string {
 func (o Options) normalized(kind connectors.Kind) Options {
 	normalized := o
 	normalized.CredentialHeaders = canonicalHeaders(o.CredentialHeaders)
-	normalized.Models = orEmpty(o.Models)
-	normalized.ParameterDefaults = orEmpty(o.ParameterDefaults)
+	normalized.Models = ptr.NonNilMap(o.Models)
+	normalized.ParameterDefaults = ptr.NonNilMap(o.ParameterDefaults)
 	normalized.PluginOptions = setOptions(o.PluginOptions)
 	normalized.VendorID = defaultVendor(kind, o.VendorID)
 	return normalized
@@ -121,13 +122,6 @@ func canonicalHeaders(headers []string) []string {
 		return []string{}
 	}
 	return canonical
-}
-
-func orEmpty[V any](values map[string]V) map[string]V {
-	if values == nil {
-		return map[string]V{}
-	}
-	return values
 }
 
 func setOptions(options map[string]string) map[string]string {
@@ -202,16 +196,39 @@ func when(included bool, parts ...any) []any {
 	return parts
 }
 
+func (o Options) toProviderOptions() providerconfig.Options {
+	return providerconfig.Options{
+		TuningDatasetURIPrefixes: o.TuningDatasetURIPrefixes,
+		DocumentURIPrefixes:      o.DocumentURIPrefixes,
+		Network:                  o.Network,
+		SemanticHeaders:          o.SemanticHeaders,
+		QuerySettings:            o.QuerySettings,
+		OperationDefaults:        o.OperationDefaults,
+		Bindings:                 o.Bindings,
+		CredentialHeaders:        o.CredentialHeaders,
+		Models:                   o.Models,
+		ParameterDefaults:        o.ParameterDefaults,
+		VendorID:                 providerconfig.Value(o.VendorID),
+		PluginOptions:            o.PluginOptions,
+	}
+}
+
 func (c Configuration) Serving() (routing.Configuration, error) {
-	encoded, err := json.Marshal(c)
-	if err != nil {
-		return routing.Configuration{}, err
+	var limits *routing.Limits
+	if c.Options.Limits != nil {
+		limits = new(c.Options.Limits.Serving())
 	}
-	var served routing.Configuration
-	if err := json.Unmarshal(encoded, &served); err != nil {
-		return routing.Configuration{}, err
+	served := routing.Configuration{
+		Identity: c.Identity.StringIdentity(),
+		Options: routing.ConfigurationOptionsFrom(
+			c.Options.toProviderOptions(),
+			limits,
+			c.Options.Commitment,
+			c.Options.HealthProbe,
+			c.Options.SharedTokenQuotas,
+		),
 	}
-	return served, nil
+	return served.Clone(), nil
 }
 
 func FromProvider(p routing.Provider) Configuration {
@@ -257,10 +274,5 @@ func (c Configuration) WithNetworkCredential(credentialID string) Configuration 
 }
 
 func (c Configuration) connector(plugin *connectors.PluginProfile) connectors.Config {
-	return c.Identity.Connector(providerconfig.Options{
-		Network: c.Options.Network, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings,
-		OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, PluginOptions: c.Options.PluginOptions,
-		TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes,
-		VendorID: providerconfig.Value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models,
-	}, plugin, "", "")
+	return c.Identity.Connector(c.Options.toProviderOptions(), plugin, "", "")
 }

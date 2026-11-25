@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/anthropicbeta"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -29,9 +30,6 @@ func (run attemptRun) prepare() (attemptPlan, *attemptEnd) {
 		return attemptPlan{}, ended(ClassProtocol, nil)
 	}
 	x.guard.input = prepared.guardrailSegments
-	for _, decision := range prepared.policyDecisions {
-		recordDecision(x, decision)
-	}
 	reader := providerinvoke.NewResponseReader(prepared.config, prepared.wire, x.generation.parsed.Stream, int(s.Config.MaxEventBytes), s.Config.MaxResponseBytes)
 	responseRequest, err := wire.NewRequest(prepared.wire, x.generation.parsed.Route, reader.Streaming(), prepared.document)
 	if err != nil {
@@ -93,7 +91,7 @@ func (run attemptRun) sendingConfig(plan attemptPlan, header http.Header) connec
 	if plan.contract != nil {
 		return plan.config
 	}
-	return forwardAnthropicBeta(header, run.x, plan.format, plan.config)
+	return anthropicbeta.Forward(header, run.x.generation.parsed.Family, plan.format, run.x.semanticHeaders, plan.config)
 }
 
 func (run attemptRun) authenticate(plan attemptPlan, exchange *boundExchange, req *http.Request) *attemptEnd {
@@ -152,17 +150,11 @@ func (run attemptRun) accept(sent attemptSent, endpoint *url.URL) (attemptSent, 
 }
 
 func (run attemptRun) providerRequestID(sent attemptSent, endpoint *url.URL) string {
-	if sent.config.Kind != connectors.KindAnthropic || sent.plan.format != wire.Anthropic {
+	header := sent.config.RequestIDHeader(endpoint)
+	if header == "" || sent.plan.format != wire.Anthropic {
 		return ""
 	}
-	target := *endpoint
-	if target.Scheme == "https" && target.Port() == "443" {
-		target.Host = target.Hostname()
-	}
-	if target.String() != connectors.DefaultEndpoint(connectors.KindAnthropic, "", "")+"/messages" {
-		return ""
-	}
-	ids := sent.response.Header.Values("Request-Id")
+	ids := sent.response.Header.Values(header)
 	if len(ids) != 1 || !usage.ValidProviderRequestID(ids[0]) || run.x.sensitive.Contains(ids[0]) {
 		return ""
 	}

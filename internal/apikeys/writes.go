@@ -11,9 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -122,7 +123,7 @@ func (a *API) insertKey(r *http.Request, tx pgx.Tx, p authz.Principal, input key
 	if err := checkKeyReferences(r, tx, input.KeyPolicy, input.KeyPolicy, input.ProjectID); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	id, lookup, etag := httpkit.NewID(), secrets.Token(), httpkit.NewID()
+	id, lookup, etag := ids.New(), secrets.Token(), ids.New()
 	secret := "olp_" + lookup + "_" + secrets.Token()
 	policy, err := json.Marshal(input.KeyPolicy)
 	if err != nil {
@@ -222,7 +223,7 @@ func patchKey(r *http.Request, tx pgx.Tx, key storedKey, patch map[string]json.R
 	if err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), policy, input.ExpiresAt, group, etag, key.id); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
@@ -247,7 +248,7 @@ func (a *API) revokeAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 		if err := key.live(r, "This key is already revoked."); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -316,7 +317,7 @@ func (a *API) rotateKey(r *http.Request, tx pgx.Tx, key storedKey, input map[str
 	if err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	etag, lookup := httpkit.NewID(), secrets.Token()
+	etag, lookup := ids.New(), secrets.Token()
 	secret := "olp_" + lookup + "_" + secrets.Token()
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.api_keys SET limit_lookup_id=COALESCE(limit_lookup_id,lookup_id),lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, a.server.Auth.Digest(secrets.APIKeyDigest, secret), etag, policy, group, key.id); err != nil {
 		return httpkit.Reply{}, access.Event{}, err

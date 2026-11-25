@@ -10,8 +10,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -172,7 +172,7 @@ func providerHealthItem(record *ProviderHealthRecord) contract.ProviderHealthIte
 func healthResponse(h *Health) contract.HealthResponse {
 	return contract.HealthResponse{
 		Status:                                 string(h.Status),
-		Generation:                             nullableOf(h.Generation),
+		Generation:                             valueOrOmitted(h.Generation),
 		Database:                               string(h.Database),
 		Limits:                                 string(h.Limits),
 		AsynchronousPlane:                      string(h.AsynchronousPlane),
@@ -186,12 +186,12 @@ func healthResponse(h *Health) contract.HealthResponse {
 		RequestMetadataConsumerPendingEvents:   h.RequestMetadataConsumerPendingEvents,
 		RequestMetadataConsumerLagEvents:       h.RequestMetadataConsumerLagEvents,
 		RequestMetadataConsumerOldestPendingAt: nullableTime(h.RequestMetadataConsumerOldestPendingAt),
-		RequestMetadataConsumerOldestPendingAgeSeconds: nullableOf(h.RequestMetadataConsumerOldestPendingAgeSec),
+		RequestMetadataConsumerOldestPendingAgeSeconds: valueOrOmitted(h.RequestMetadataConsumerOldestPendingAgeSec),
 		RequestMetadataConsumerCheckedAt:               nullableTime(h.RequestMetadataConsumerCheckedAt),
-		RequestMetadataConsumerHeartbeatAgeSeconds:     nullableOf(h.RequestMetadataConsumerHeartbeatAgeSeconds),
-		RequestMetadataReclaimedEventsTotal:            nullableOf(h.RequestMetadataReclaimedEventsTotal),
-		RequestMetadataRecoveredEventsTotal:            nullableOf(h.RequestMetadataRecoveredEventsTotal),
-		RequestMetadataDuplicatePersistenceTotal:       nullableOf(h.RequestMetadataDuplicatePersistenceTotal),
+		RequestMetadataConsumerHeartbeatAgeSeconds:     valueOrOmitted(h.RequestMetadataConsumerHeartbeatAgeSeconds),
+		RequestMetadataReclaimedEventsTotal:            valueOrOmitted(h.RequestMetadataReclaimedEventsTotal),
+		RequestMetadataRecoveredEventsTotal:            valueOrOmitted(h.RequestMetadataRecoveredEventsTotal),
+		RequestMetadataDuplicatePersistenceTotal:       valueOrOmitted(h.RequestMetadataDuplicatePersistenceTotal),
 		RequestMetadataGatewayOpenEpochs:               h.RequestMetadataGatewayOpenEpochs,
 		RequestMetadataGatewayUnresolvedEpochs:         h.RequestMetadataGatewayUnresolvedEpochs,
 		RequestMetadataHistoricalUncertainGaps:         h.RequestMetadataHistoricalUncertainGaps,
@@ -200,12 +200,12 @@ func healthResponse(h *Health) contract.HealthResponse {
 		MediaReconciliationStale:                       h.MediaReconciliationStale,
 		MediaReconciliationFailed:                      h.MediaReconciliationFailed,
 		MediaReconciliationGapsTotal:                   h.MediaReconciliationGapsTotal,
-		MediaSpoolUsedBytes:                            nullableOf(h.MediaSpoolUsedBytes),
-		MediaSpoolCapacityBytes:                        nullableOf(h.MediaSpoolCapacityBytes),
+		MediaSpoolUsedBytes:                            valueOrOmitted(h.MediaSpoolUsedBytes),
+		MediaSpoolCapacityBytes:                        valueOrOmitted(h.MediaSpoolCapacityBytes),
 	}
 }
 
-func nullableOf[T any](value *T) nullable.Nullable[T] {
+func valueOrOmitted[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nil
 	}

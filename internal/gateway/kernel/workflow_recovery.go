@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp"
 )
@@ -111,7 +111,7 @@ func (s *Server) recoverWorkflowContent(ctx context.Context, x *Call, authority 
 	resultDigest := sha256.Sum256([]byte("recovery-result:" + dispatchID))
 	evidenceDigest := sha256.Sum256([]byte("recovery-evidence:" + dispatchID))
 	result := debits.Result{DispatchID: dispatchID, EventID: eventID, ResultDigest: resultDigest[:], EvidenceDigest: evidenceDigest[:], Cost: "0", Charge: "0", Final: true, Complete: true}
-	if err := s.Deps.Debits.SettleRecovery(ctx, result); err != nil {
+	if err := s.Deps.Debits.SettleTool(ctx, result); err != nil {
 		_ = s.Deps.Debits.MarkUnknown(context.WithoutCancel(ctx), dispatchID, claimID)
 		return nil, err
 	}

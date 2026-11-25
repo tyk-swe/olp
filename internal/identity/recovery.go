@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -41,7 +41,7 @@ func RecoverPassword(ctx context.Context, pool *pgxpool.Pool, address, secret st
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, httpkit.NewID(), id); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, ids.New(), id); err != nil {
 		return nil, err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM olp.recent_auth WHERE session_id IN (SELECT id FROM olp.sessions WHERE user_id=$1)", id); err != nil {

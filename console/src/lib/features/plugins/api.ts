@@ -1,5 +1,5 @@
 import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import {
   ApiProblem,
   ensureOk,
@@ -134,11 +134,6 @@ export function pluginTitle(plugin: {
   manifest: { name: string; version: string };
 }): string {
   return `${plugin.manifest.name} ${plugin.manifest.version}`;
-}
-
-/** The first twelve digest characters, enough to tell installs apart. */
-export function shortDigest(digest: string): string {
-  return digest.slice(0, 12);
 }
 
 /** The signed index of reviewed plugins, with each digest's install state. */

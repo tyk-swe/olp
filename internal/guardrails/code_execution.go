@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"regexp"
 	"strings"
 )
@@ -74,7 +75,7 @@ func (d codeExecutionDetector) detect(ctx context.Context, evaluation Evaluation
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
-		input := evaluation.Phase == Input || evaluation.Phase == InputParallel
+		input := evaluation.Phase == guardrailpolicy.Input || evaluation.Phase == guardrailpolicy.InputParallel
 		intent := hasExecutionIntent(segment.Text)
 		if input && d.intent && !intent {
 			continue

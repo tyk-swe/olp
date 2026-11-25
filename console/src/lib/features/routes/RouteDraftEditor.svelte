@@ -7,7 +7,6 @@
   import RouteFidelityEditor from './RouteFidelityEditor.svelte';
   import RouteToolExecutionEditor from './RouteToolExecutionEditor.svelte';
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
-  import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import {
     focusErrorSummary,
@@ -15,13 +14,13 @@
   } from '#lib/editing/focusError.js';
   import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import { RouteCacheEditor } from '#lib/features/caching/index.js';
+  import RouteCacheEditor from './cache/RouteCacheEditor.svelte';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import RouteFixtureChecks from './RouteFixtureChecks.svelte';
   import { errorMessage } from '#lib/management/http.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '#lib/format.js';
   import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   import { ProjectScopeField } from '#lib/features/access/index.js';
@@ -177,7 +176,6 @@
       <RouteToolExecutionEditor {editor} />
       <RoutePassthroughEditor {editor} />
       <RouteTargets {editor} />
-      <ContentPolicyEditor {editor} />
 
       <section class="card editor advanced" aria-labelledby="advanced-heading">
         <p class="eyebrow">Advanced</p>

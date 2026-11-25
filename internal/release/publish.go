@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -39,7 +39,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		return Published{}, err
 	}
 	now := time.Now().UTC()
-	snapshot.Generation = routing.Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
+	snapshot.Generation = routing.Generation{ID: ids.New(), Ordinal: sequence, ActivatedAt: now}
 	if err = snapshot.Compile(); err != nil {
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}
@@ -67,14 +67,14 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	if err := readSnapshotProviders(ctx, tx, snapshot); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity,v.behavior FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err := tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.behavior FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var revision routing.RouteRevision
-		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.ContentPolicy, &revision.Fidelity, &revision.Behavior); err != nil {
+		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.Fidelity, &revision.Behavior); err != nil {
 			return nil, err
 		}
 		route, err := routing.DecodeRouteRevision(revision)

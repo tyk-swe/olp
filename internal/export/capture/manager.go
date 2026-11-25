@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -181,7 +182,7 @@ func (m *Manager) load(ctx context.Context) ([]active, error) {
 		if !ok {
 			return nil, fmt.Errorf("capture policy %s has an unreadable sample ratio", l.policy.ID)
 		}
-		policies[i] = active{Policy: l.policy, ratio: ratio, redaction: compiled(ctx, l.policy, valueOr(l.project, ""), definitions, definitionsErr)}
+		policies[i] = active{Policy: l.policy, ratio: ratio, redaction: compiled(ctx, l.policy, ptr.Value(l.project), definitions, definitionsErr)}
 	}
 	return policies, nil
 }

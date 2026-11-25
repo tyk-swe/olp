@@ -66,12 +66,6 @@
             : 'Set at publication'}
         {/each}
       </dd>
-      <dt>Draft allowance ordering</dt>
-      <dd>
-        {route.allowance_ordering
-          ? 'Configured, requires publication and a qualified model-to-limit mapping'
-          : 'Disabled'}
-      </dd>
       <dt>Paid native models</dt>
       <dd>
         {Object.keys(route.paid_targets ?? {}).join(', ') || 'None'}

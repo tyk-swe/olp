@@ -10,9 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -104,7 +105,7 @@ func (a *API) createIncreaseRequest(r *http.Request, _ authz.Principal) (httpkit
 		if err := tx.QueryRow(r.Context(), `SELECT window_id,end_at FROM olp.budget_window($1,now())`, in.Window).Scan(&window, &end); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		owner := limits.AggregateBudgetID("project", in.ProjectID)
 		if _, err := tx.Exec(r.Context(), `INSERT INTO olp.budget_increase_requests(id,project_id,owner_id,window_kind,window_id,window_ends_at,base_cap,amount,reason,requested_by,etag) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, id, in.ProjectID, owner, in.Window, window, end, *cap, in.Amount, in.Reason, p.UserID(), etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -191,7 +192,7 @@ func applyIncreaseRequestDecision(r *http.Request, tx pgx.Tx, p authz.Principal,
 
 func declinePendingIncreaseRequest(r *http.Request, tx pgx.Tx, p authz.Principal, request increaseRequest) (httpkit.Reply, access.Event, error) {
 	ctx := r.Context()
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err := tx.Exec(ctx, `UPDATE olp.budget_increase_requests SET status='declined',decided_by=$2,decided_at=now(),etag=$3 WHERE id=$1 AND status='pending'`, request.id, p.UserID(), etag); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
@@ -212,7 +213,7 @@ func grantPendingIncreaseRequest(r *http.Request, tx pgx.Tx, p authz.Principal, 
 	if err := checkActiveIncreaseLimit(ctx, tx, request.ownerID, request.windowKind); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	increaseID, increaseETag, requestETag := httpkit.NewID(), httpkit.NewID(), httpkit.NewID()
+	increaseID, increaseETag, requestETag := ids.New(), ids.New(), ids.New()
 	encoded, _ := json.Marshal(BudgetTarget{Kind: "project", ID: request.projectID})
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.budget_increases(id,owner_id,project_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,$10,$11,$12)`, increaseID, request.ownerID, request.projectID, encoded, request.windowKind, request.windowID, request.amount, request.reason, request.windowEndsAt.Truncate(time.Millisecond), request.windowEndsAt, p.UserID(), increaseETag); err != nil {
 		return httpkit.Reply{}, access.Event{}, err

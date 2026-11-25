@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 )
@@ -62,7 +62,7 @@ func NewDelivery(pool *pgxpool.Pool, instance string, capacity int, counters *co
 	d := &Delivery{
 		pool: pool, instance: instance, counters: counters, log: log,
 		events:       make(chan usage.Event, max(capacity, 1)),
-		processEpoch: uuid.Must(uuid.NewV7()).String(),
+		processEpoch: ids.New(),
 		startedAt:    time.Now().UTC(),
 	}
 	d.recordLoss = func(ctx context.Context) error {

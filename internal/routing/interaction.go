@@ -8,15 +8,12 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/routing/durablecontract"
-	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // ValidateRouteContracts validates the complete configured links of a route.
@@ -45,7 +42,7 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 			return err
 		}
 	}
-	_, _, err := s.compileRouteExecution(route)
+	_, err := s.compileRouteExecution(route)
 	if err == nil {
 		_, err = s.compileOperations(route)
 	}
@@ -67,51 +64,40 @@ func (s *Snapshot) ValidateRouteContracts(route Route) error {
 	return err
 }
 
-func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.Template, *contentpolicy.Compiled, error) {
+func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.Template, error) {
 	if route.Cache != nil && route.Cache.Mode == "semantic" {
 		embedding, ok := s.Routes[route.Cache.EmbeddingRoute]
 		if !ok || !slices.Contains(embedding.Operations, "embeddings") {
-			return nil, nil, fmt.Errorf("semantic cache requires a published embeddings route")
+			return nil, fmt.Errorf("semantic cache requires a published embeddings route")
 		}
 	}
 	if err := route.ValidateCaching(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if err := ValidateRouteFidelity(route.Fidelity, route.ContentPolicy); err != nil {
-		return nil, nil, err
+	if err := validateFidelity(route.Fidelity); err != nil {
+		return nil, err
 	}
-	legacy := route.ContentPolicy
-	if route.guardrailMigrated {
-		legacy = nil
-	}
-	policy, err := contentpolicy.Compile(legacy)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !route.Fidelity.Strict() {
-		return nil, policy, nil
-	}
-	if !slices.Contains(route.Operations, "generation") {
-		return nil, policy, nil
+	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "generation") {
+		return nil, nil
 	}
 	templates := make(map[string]*interaction.Template, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
-			return nil, nil, fmt.Errorf("route target references an unavailable provider")
+			return nil, fmt.Errorf("route target references an unavailable provider")
 		}
 		// Interactions has its own step and resource contract. Its public runner
 		// compiles that contract at admission and never uses GenerateContent.
 		if provider.ProfileID == "gemini-interactions" {
 			continue
 		}
-		template, err := interaction.Compile(interaction.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: legacy})
+		template, err := interaction.Compile(interaction.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		templates[target.ID] = template
 	}
-	return templates, policy, nil
+	return templates, nil
 }
 
 // InteractionTemplate is compiled with the pinned release, never cached by a
@@ -120,8 +106,6 @@ func (s *Snapshot) InteractionTemplate(slug, target string) (*interaction.Templa
 	template, ok := s.interactions[slug][target]
 	return template, ok
 }
-
-func (r *Route) CompiledContentPolicy() *contentpolicy.Compiled { return r.compiledContentPolicy }
 
 // Shadowed reports whether any of the route's targets mirrors traffic.
 func (r *Route) Shadowed() bool {
@@ -157,8 +141,8 @@ func EffectiveOutputLimit(request *wire.Request) *int64 {
 	return nil
 }
 
-func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Template, error) {
-	templates := map[string]*operationplan.Template{}
+func (s *Snapshot) compileOperations(route Route) (map[string]*unary.Template, error) {
+	templates := map[string]*unary.Template{}
 	for _, op := range route.Operations {
 		if op == PassthroughOperation {
 			continue
@@ -207,7 +191,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy(), AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
+			template, err := unary.Compile(unary.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 			if err != nil {
 				return nil, err
 			}
@@ -217,11 +201,11 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 	return templates, nil
 }
 
-func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Template, error) {
+func (s *Snapshot) compileRealtime(route Route) (map[string]*RealtimeTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	templates := make(map[string]*RealtimeTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -231,7 +215,7 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if provider.ProfileID == "gemini-live" {
 			continue
 		}
-		if duplexcontract.IsProfile(provider.ProfileID) {
+		if duplex.IsProfile(provider.ProfileID) {
 			continue
 		}
 		if !provider.Supports(target.ProviderModel, "realtime", "openai", "realtime") {
@@ -243,7 +227,7 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
 		}
-		template, err := realtimecontract.Compile(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileRealtimeContract(realtimeContractConfig{Provider: provider.Connector(), Model: target.ProviderModel})
 		if err != nil {
 			return nil, err
 		}
@@ -252,16 +236,16 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 	return templates, nil
 }
 
-func (s *Snapshot) RealtimeTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (s *Snapshot) RealtimeTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := s.realtime[slug][target]
 	return template, ok
 }
 
-func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Template, error) {
+func (s *Snapshot) compileWebRTC(route Route) (map[string]*RealtimeTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*realtimecontract.Template, len(route.Targets))
+	templates := make(map[string]*RealtimeTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -276,7 +260,7 @@ func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Temp
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
 		}
-		template, err := realtimecontract.CompileWebRTC(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileWebRTCContract(realtimeContractConfig{Provider: provider.Connector(), Model: target.ProviderModel})
 		if err != nil {
 			return nil, err
 		}
@@ -285,22 +269,22 @@ func (s *Snapshot) compileWebRTC(route Route) (map[string]*realtimecontract.Temp
 	return templates, nil
 }
 
-func (s *Snapshot) WebRTCTemplate(slug, target string) (*realtimecontract.Template, bool) {
+func (s *Snapshot) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := s.webrtc[slug][target]
 	return template, ok
 }
 
-func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Template, error) {
+func (s *Snapshot) compileDuplex(route Route) (map[string]*duplex.Template, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "realtime") {
 		return nil, nil
 	}
-	templates := make(map[string]*duplexcontract.Template)
+	templates := make(map[string]*duplex.Template)
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
 			return nil, fmt.Errorf("route target references an unavailable provider")
 		}
-		if !duplexcontract.IsProfile(provider.ProfileID) {
+		if !duplex.IsProfile(provider.ProfileID) {
 			continue
 		}
 		if !provider.Supports(target.ProviderModel, "realtime", "native", "realtime") {
@@ -309,7 +293,7 @@ func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Templa
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified duplex parameter defaults", target.ID)
 		}
-		template, err := duplexcontract.Compile(duplexcontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := duplex.Compile(duplex.Config{Provider: provider.Connector(), Model: target.ProviderModel})
 		if err != nil {
 			return nil, err
 		}
@@ -318,16 +302,16 @@ func (s *Snapshot) compileDuplex(route Route) (map[string]*duplexcontract.Templa
 	return templates, nil
 }
 
-func (s *Snapshot) DuplexTemplate(slug, target string) (*duplexcontract.Template, bool) {
+func (s *Snapshot) DuplexTemplate(slug, target string) (*duplex.Template, bool) {
 	template, ok := s.duplex[slug][target]
 	return template, ok
 }
 
-func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template, error) {
+func (s *Snapshot) compileMedia(route Route) (map[string]*media.Template, error) {
 	if !route.Fidelity.Strict() {
 		return nil, nil
 	}
-	templates := map[string]*mediacontract.Template{}
+	templates := map[string]*media.Template{}
 	for _, op := range route.Operations {
 		if !vendors.IsMediaOperation(op) {
 			continue
@@ -337,7 +321,7 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy()})
+			template, err := media.Compile(media.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op})
 			if err != nil {
 				return nil, err
 			}
@@ -347,16 +331,16 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 	return templates, nil
 }
 
-func (s *Snapshot) MediaTemplate(slug, target, operation string) (*mediacontract.Template, bool) {
+func (s *Snapshot) MediaTemplate(slug, target, operation string) (*media.Template, bool) {
 	template, ok := s.media[slug][operation+"/"+target]
 	return template, ok
 }
 
-func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Template, error) {
+func (s *Snapshot) compileDurable(route Route) (map[string]*DurableTemplate, error) {
 	if !route.Fidelity.Strict() || !slices.Contains(route.Operations, "batch") {
 		return nil, nil
 	}
-	templates := make(map[string]*durablecontract.Template, len(route.Targets))
+	templates := make(map[string]*DurableTemplate, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, ok := s.Providers[target.ProviderID]
 		if !ok {
@@ -375,7 +359,7 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 		}) {
 			continue
 		}
-		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
+		template, err := compileDurableContract(durableContractConfig{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel})
 		if err != nil {
 			return nil, err
 		}
@@ -384,18 +368,11 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 	return templates, nil
 }
 
-func (s *Snapshot) DurableTemplate(slug, target string) (*durablecontract.Template, bool) {
+func (s *Snapshot) DurableTemplate(slug, target string) (*DurableTemplate, bool) {
 	template, ok := s.durable[slug][target]
 	return template, ok
 }
-func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
+func (s *Snapshot) OperationTemplate(slug, target, operation string) (*unary.Template, bool) {
 	template, ok := s.operations[slug][operation+"/"+target]
 	return template, ok
-}
-
-func (r *Route) LegacyExecutionPolicy() *contentpolicy.Policy {
-	if r.guardrailMigrated {
-		return nil
-	}
-	return r.ContentPolicy
 }

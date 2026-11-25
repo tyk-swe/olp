@@ -328,10 +328,20 @@ func purge(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time) error {
 	return nil
 }
 
-func scheduleNow(ctx context.Context, tx pgx.Tx, providerID, etag string) (bool, error) {
+func scheduleNow(ctx context.Context, tx pgx.Tx, providerID, etag string) error {
 	tag, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports
-		SET next_import_at=now(),etag=$2,updated_at=now() WHERE provider_id=$1::uuid`, providerID, etag)
-	return tag.RowsAffected() > 0, err
+		SET next_import_at=now(),etag=$2,updated_at=now() WHERE provider_id=$1::uuid AND enabled`, providerID, etag)
+	if err != nil || tag.RowsAffected() > 0 {
+		return err
+	}
+	_, found, err := readRecord(ctx, tx, providerID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errImportMissing
+	}
+	return errImportDisabled
 }
 
 func invoiced(ctx context.Context, q database.Queryer, providerID string, window reconciliation.Range) ([]invoicedCost, error) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SessionsPanel from '#lib/features/access/sessions/SessionsPanel.svelte';
+  import SessionsPanel from '#lib/features/identity/sessions/SessionsPanel.svelte';
 </script>
 
 <SessionsPanel />

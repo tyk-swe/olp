@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )

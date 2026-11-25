@@ -9,18 +9,13 @@
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
+  import { listProjects, projectKeys } from '#lib/features/access/index.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import MCPServerEditor from './MCPServerEditor.svelte';
   import MCPCatalogReview from './MCPCatalogReview.svelte';
-  import {
-    listServers,
-    getServer,
-    listProjects,
-    retireServer,
-    type MCPServer
-  } from './api';
+  import { listServers, getServer, retireServer, type MCPServer } from './api';
   import { agentKeys } from './agentKeys';
 
   const access = useRole();
@@ -30,8 +25,8 @@
     queryFn: listServers
   }));
   const projects = createQuery(() => ({
-    queryKey: agentKeys.projects(),
-    queryFn: listProjects
+    queryKey: projectKeys.all,
+    queryFn: ({ signal }) => listProjects(signal)
   }));
   let selected = $state('');
   let editorVersion = $state(0);

@@ -18,11 +18,12 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -127,7 +128,7 @@ func enableTestCache(t *testing.T, h *harness) (*harness, *cacheMemory) {
 	h.gateway.Deps.Cache = &cache.Store{Client: m, Keys: keys, Auth: secrets.NewAuthKey(bytes.Repeat([]byte{2}, 32), "test"), Installation: "test"}
 	h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		r := s.Routes[routeSlug]
-		r.Cache = &cache.Policy{Mode: "exact"}
+		r.Cache = &cachepolicy.Policy{Mode: "exact"}
 		s.Routes[routeSlug] = r
 	})
 	return h, m
@@ -536,7 +537,7 @@ func TestCachedTransformedBedrockRejectsInvalidUsage(t *testing.T) {
 					route := snapshot.Routes[routeSlug]
 					route.Fidelity.Mode = routing.FidelityTransformed
 					if mode == "prompt" {
-						route.PromptCache = &cache.PromptPolicy{}
+						route.PromptCache = &cachepolicy.PromptPolicy{}
 					}
 					snapshot.Routes[routeSlug] = route
 				})
@@ -617,7 +618,7 @@ func (c cacheCallers) replays(what, key, body string, headers map[string]string,
 	}
 }
 
-func (c cacheCallers) publish(policy cache.Policy, edit func(*routing.Route)) {
+func (c cacheCallers) publish(policy cachepolicy.Policy, edit func(*routing.Route)) {
 	c.t.Helper()
 	c.h.republish(func(s *routing.Snapshot, _, _ routing.Provider) {
 		route := s.Routes[routeSlug]
@@ -653,7 +654,7 @@ func TestACachedReplyAnswersOnlyTheScopeHeadersAndReleaseThatStoredIt(t *testing
 	callers.replays("the same opt-in header", fullKey, hello, beta, optedIn)
 	callers.stores("another message", fullKey, chat("", "goodbye"), nil)
 
-	callers.publish(cache.Policy{Mode: "exact"}, func(route *routing.Route) { route.OverallTimeout = 4000 })
+	callers.publish(cachepolicy.Policy{Mode: "exact"}, func(route *routing.Route) { route.OverallTimeout = 4000 })
 	callers.stores("the same request after the route changed", fullKey, hello, nil)
 
 	h.republish(func(s *routing.Snapshot, a, _ routing.Provider) {
@@ -662,7 +663,7 @@ func TestACachedReplyAnswersOnlyTheScopeHeadersAndReleaseThatStoredIt(t *testing
 	})
 	callers.stores("the same request after the provider changed", fullKey, hello, nil)
 
-	callers.publish(cache.Policy{Mode: "exact", Scope: "route"}, nil)
+	callers.publish(cachepolicy.Policy{Mode: "exact", Scope: "route"}, nil)
 	shared := callers.stores("the first request under route scope", fullKey, hello, nil)
 	callers.replays("another key under route scope", "colleague", hello, nil, shared)
 
@@ -676,10 +677,10 @@ func TestACachedReplyAnswersOnlyTheScopeHeadersAndReleaseThatStoredIt(t *testing
 	h.mock.set("a", completion(modelA, answerText))
 	callers.stores("a request the fallback provider answered", fullKey, chat("", "served elsewhere"), nil)
 
-	callers.publish(cache.Policy{Mode: "exact", Scope: "project"}, func(route *routing.Route) { route.ProjectID = &project })
+	callers.publish(cachepolicy.Policy{Mode: "exact", Scope: "project"}, func(route *routing.Route) { route.ProjectID = &project })
 	owned := callers.stores("the first request under project scope", "member", hello, nil)
 	callers.replays("another key of the project", "teammate", hello, nil, owned)
-	callers.publish(cache.Policy{Mode: "exact"}, nil)
+	callers.publish(cachepolicy.Policy{Mode: "exact"}, nil)
 	callers.stores("a project key under key scope", "member", hello, nil)
 	callers.stores("another project key under key scope", "teammate", hello, nil)
 
@@ -692,7 +693,7 @@ func TestACachedReplyAnswersOnlyTheScopeHeadersAndReleaseThatStoredIt(t *testing
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write(stream)
 	})
-	callers.publish(cache.Policy{Mode: "exact", Streaming: "replay"}, nil)
+	callers.publish(cachepolicy.Policy{Mode: "exact", Streaming: "replay"}, nil)
 	plain := callers.stores("a stream", "member", chat(`"stream":true,`, "hello"), nil)
 	callers.replays("the same stream", "member", chat(`"stream":true,`, "hello"), nil, plain)
 	metered := callers.stores("the same stream asking for usage", "member", chat(`"stream":true,"stream_options":{"include_usage":true},`, "hello"), nil)
@@ -711,7 +712,7 @@ func TestACacheHitReportsTheSpendItAvoidedAndCountsAgainstBudgetsOnlyWhenTheRout
 		*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: kind, Model: modelA, Operation: "generation", InputPerMillion: new("1000000"), OutputPerMillion: new("2000000"), Currency: "USD"}}),
 	}}
 	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}]}`
-	hit := func(policy cache.Policy) *usage.CacheEvidence {
+	hit := func(policy cachepolicy.Policy) *usage.CacheEvidence {
 		t.Helper()
 		callers.publish(policy, nil)
 		stored := callers.stores("the first request", fullKey, body, nil)
@@ -722,11 +723,11 @@ func TestACacheHitReportsTheSpendItAvoidedAndCountsAgainstBudgetsOnlyWhenTheRout
 		}
 		return attempts[0].Cache
 	}
-	free := hit(cache.Policy{Mode: "exact"})
+	free := hit(cachepolicy.Policy{Mode: "exact"})
 	if free.AvoidedCost != "8" || free.Currency != "USD" || free.BudgetCost != "" || free.BudgetCharge != "" {
 		t.Fatalf("a hit that counts against nothing recorded %#v, want 2 input and 3 output tokens avoided at 1 and 2 each", free)
 	}
-	counted := hit(cache.Policy{Mode: "exact", CountHitsAgainst: []string{"requests", "budgets"}})
+	counted := hit(cachepolicy.Policy{Mode: "exact", CountHitsAgainst: []string{"requests", "budgets"}})
 	if counted.AvoidedCost != "8" || counted.BudgetCost != "8" || counted.BudgetCharge != "8" {
 		t.Fatalf("a hit that counts against budgets recorded %#v", counted)
 	}

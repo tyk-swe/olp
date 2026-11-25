@@ -9,8 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type RunView struct {
@@ -77,15 +78,9 @@ func (s *Management) listRuns(r *http.Request, p authz.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	project := r.URL.Query().Get("project_id")
-	if project != "" {
-		id, err := uuid.Parse(project)
-		if err != nil || id == uuid.Nil || id.String() != project {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
-		}
-		if err := p.Project(&project, authz.View); err != nil {
-			return httpkit.Reply{}, err
-		}
+	project, err := p.ProjectFilter(r)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
@@ -158,11 +153,8 @@ func (s *Management) listRunSpans(r *http.Request, p authz.Principal) (httpkit.R
 		return httpkit.Reply{}, err
 	}
 	spanID := r.URL.Query().Get("span_id")
-	if spanID != "" {
-		id, err := uuid.Parse(spanID)
-		if err != nil || id == uuid.Nil || id.String() != spanID {
-			return httpkit.Reply{}, httpkit.Invalid("span_id", "Use a canonical span UUID.")
-		}
+	if spanID != "" && !ids.Canonical(spanID) {
+		return httpkit.Reply{}, httpkit.Invalid("span_id", "Use a canonical span UUID.")
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {

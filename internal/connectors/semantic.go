@@ -90,3 +90,10 @@ func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
 	}
 	return true, nil
 }
+
+func (c Config) TakesAnthropicBeta() bool {
+	if c.ProfileID == "" {
+		return c.Kind == KindAnthropic
+	}
+	return c.DeclaresSemanticHeader("Anthropic-Beta")
+}

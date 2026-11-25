@@ -10,8 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -110,7 +111,7 @@ func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (http
 				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_ids", "Every project must exist.")
 			}
 		}
-		id, lookup, etag := httpkit.NewID(), secrets.Token(), httpkit.NewID()
+		id, lookup, etag := ids.New(), secrets.Token(), ids.New()
 		secret := "olpm_" + lookup + "_" + secrets.Token()
 		scopes, err := json.Marshal(input.Scopes)
 		if err != nil {
@@ -147,7 +148,7 @@ func (s *Server) revokeManagementToken(r *http.Request, _ authz.Principal) (http
 		if revoked != nil {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "management_token_revoked", "This token is already revoked.")
 		}
-		etag = httpkit.NewID()
+		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.management_tokens SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

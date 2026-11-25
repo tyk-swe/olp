@@ -1,8 +1,9 @@
 import { QueryClient } from '@tanstack/svelte-query';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import CodeDiagnosticsProbe from './test/CodeDiagnosticsProbe.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 function attempt(id: string) {
   return {
@@ -67,7 +68,7 @@ it('loads decisions only for attempts on the displayed page', async () => {
     return json({ title: 'Unexpected request', status: 404 }, 404);
   });
   const target = render();
-  await vi.waitFor(() => {
+  await eventually(() => {
     expect(target.textContent).toContain('chosen-first');
     expect(target.textContent).toContain(
       'No decision recorded for this attempt'
@@ -79,7 +80,7 @@ it('loads decisions only for attempts on the displayed page', async () => {
   );
   expect(next).toBeDefined();
   next?.click();
-  await vi.waitFor(() => expect(target.textContent).toContain('chosen-third'));
+  await eventually(() => expect(target.textContent).toContain('chosen-third'));
   expect(requested.toSorted()).toEqual(['first', 'second', 'third']);
 });
 
@@ -98,7 +99,7 @@ it('shows lookup errors without hiding successful decisions', async () => {
     return json({ title: 'Unexpected request', status: 404 }, 404);
   });
   const target = render();
-  await vi.waitFor(() => {
+  await eventually(() => {
     expect(target.textContent).toContain('Decision lookup failed');
     expect(target.textContent).toContain('chosen-second');
   });

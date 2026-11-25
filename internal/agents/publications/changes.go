@@ -8,9 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type draftRequest struct {
@@ -89,7 +90,7 @@ func (s *Server) apply(r *http.Request, tx pgx.Tx, p authz.Principal, current *a
 		}
 		return next, nil
 	case "retire", "label":
-		next := agentcontract.Publication{ID: current.ID, Kind: current.Kind, ProjectID: current.ProjectID, Name: current.Name, ETag: httpkit.NewID(), Draft: current.Draft, RevisionID: current.RevisionID, Retired: action == "retire"}
+		next := agentcontract.Publication{ID: current.ID, Kind: current.Kind, ProjectID: current.ProjectID, Name: current.Name, ETag: ids.New(), Draft: current.Draft, RevisionID: current.RevisionID, Retired: action == "retire"}
 		if action == "label" {
 			if err := SetLabel(r.Context(), tx, next, r.PathValue("label"), input.label.RevisionID, next.ETag); err != nil {
 				return agentcontract.Publication{}, err

@@ -77,3 +77,50 @@ func TestNoCatalogueProfilePublishesADialectForAnOperationItDoesNotServe(t *test
 		}
 	}
 }
+
+func TestASecondSpeakerCannotSilentlyUnpinAVendorOwnedProfile(t *testing.T) {
+	t.Parallel()
+	contracts := vendors.All()
+	for _, p := range Profiles() {
+		spoken := slices.ContainsFunc(contracts, func(c vendors.Contract) bool { return c.Speaks(p.Dialect) })
+		owned := len(p.Operations) == 1 && slices.Contains([]string{"realtime", "decision", "ocr", "search"}, p.Operations[0])
+		if owned && spoken && p.Vendor() == "" {
+			t.Errorf("%s serves %s in a vendor's dialect and requires no vendor", p.ID, p.Operations[0])
+		}
+	}
+}
+
+func TestAPinnedProfileIsSelectedOnlyByItsVendor(t *testing.T) {
+	t.Parallel()
+	candidates := []string{""}
+	for _, contract := range vendors.All() {
+		candidates = append(candidates, contract.ID)
+	}
+	for _, p := range Profiles() {
+		if p.Vendor() == "" {
+			continue
+		}
+		if kind, _ := vendors.Kind(p.Vendor()); Kind(kind) != p.Kind {
+			t.Errorf("%s requires %s, a vendor of kind %q, on kind %q", p.ID, p.Vendor(), kind, p.Kind)
+		}
+		for _, vendor := range candidates {
+			c := Config{Kind: p.Kind, ProfileID: p.ID, ProfileRevision: p.Revision, AuthMode: p.Authentication[0], VendorID: vendor}
+			if selected := c.ValidateProfile() == nil; selected != (vendor == p.Vendor()) {
+				t.Errorf("%s selected by vendor %q = %t, and it requires %q", p.ID, vendor, selected, p.Vendor())
+			}
+		}
+	}
+}
+
+func TestEveryVendorThatSpeaksCompletionsHasACompletionsProfile(t *testing.T) {
+	t.Parallel()
+	profiles := Profiles()
+	for _, contract := range vendors.All() {
+		profiled := slices.ContainsFunc(profiles, func(p Profile) bool {
+			return p.Vendor() == contract.ID && p.Kind == Kind(contract.Connector) && p.OperationDialect("generation") == "openai-completions"
+		})
+		if profiled != contract.Speaks("openai-completions") {
+			t.Errorf("%s speaks completions = %t, and a completions profile requires it = %t", contract.ID, !profiled, profiled)
+		}
+	}
+}

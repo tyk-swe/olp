@@ -5,66 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"regexp"
 	"slices"
-	"time"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/internal/management/contract"
-)
-
-type (
-	Phase   = contract.GuardrailPolicyEntryPhase
-	Action  = contract.GuardrailPolicyEntryAction
-	Outcome = contract.GuardrailEvidenceOutcome
-	Scope   = contract.GuardrailAttachmentScope
-	OnError = contract.CreateGuardrailRequestOnError
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 )
 
 const (
-	Input         = contract.GuardrailPolicyEntryPhaseInput
-	InputParallel = contract.GuardrailPolicyEntryPhaseInputParallel
-	Output        = contract.GuardrailPolicyEntryPhaseOutput
-	OutputStream  = contract.GuardrailPolicyEntryPhaseOutputStream
-
-	Block    = contract.GuardrailPolicyEntryActionBlock
-	Redact   = contract.GuardrailPolicyEntryActionRedact
-	Mask     = contract.GuardrailPolicyEntryActionMask
-	Annotate = contract.GuardrailPolicyEntryActionAnnotate
-
-	FailClosed = contract.CreateGuardrailRequestOnErrorFailClosed
-	FailOpen   = contract.CreateGuardrailRequestOnErrorFailOpen
-
-	Passed       = contract.GuardrailEvidenceOutcomePassed
-	Blocked      = contract.GuardrailEvidenceOutcomeBlocked
-	Redacted     = contract.GuardrailEvidenceOutcomeRedacted
-	Masked       = contract.GuardrailEvidenceOutcomeMasked
-	Annotated    = contract.GuardrailEvidenceOutcomeAnnotated
-	Monitored    = contract.GuardrailEvidenceOutcomeMonitored
-	FailedOpen   = contract.GuardrailEvidenceOutcomeFailedOpen
-	FailedClosed = contract.GuardrailEvidenceOutcomeFailedClosed
-	Skipped      = contract.GuardrailEvidenceOutcomeSkipped
-
-	InstallationScope = contract.GuardrailAttachmentScopeInstallation
-	OrganizationScope = contract.GuardrailAttachmentScopeOrganization
-	ProjectScope      = contract.GuardrailAttachmentScopeProject
-	RouteScope        = contract.GuardrailAttachmentScopeRoute
-	ToolsetScope      = contract.GuardrailAttachmentScopeToolset
-	KeyScope          = contract.GuardrailAttachmentScopeApiKey
-)
-
-const (
-	MaxEntries         = 128
 	MaxSegments        = 2048
 	MaxContentBytes    = 8 << 20
 	MaxFindings        = 4096
-	MaxEvidenceBytes   = 256 << 10
-	MaxCategories      = 32
 	DefaultWindowBytes = 64 << 10
 	MaxWindowBytes     = 1 << 20
 )
-
-func OutputPhase(p Phase) bool { return p == Output || p == OutputStream }
 
 type Role string
 
@@ -87,30 +40,26 @@ const (
 
 type Kind string
 
-var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
-var categoryID = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
-
 // Revision is an immutable, fully resolved definition in a serving release.
 // Credential fields in Configuration are references, never secret values.
 type Revision struct {
-	LegacyRuleID  string          `json:"legacy_rule_id,omitempty"`
-	ID            string          `json:"id"`
-	GuardrailID   string          `json:"guardrail_id"`
-	ProjectID     string          `json:"project_id"`
-	Name          string          `json:"name"`
-	Type          Kind            `json:"type"`
-	Configuration json.RawMessage `json:"configuration"`
-	TimeoutMS     int64           `json:"timeout_ms"`
-	OnError       OnError         `json:"on_error"`
+	ID            string                  `json:"id"`
+	GuardrailID   string                  `json:"guardrail_id"`
+	ProjectID     string                  `json:"project_id"`
+	Name          string                  `json:"name"`
+	Type          Kind                    `json:"type"`
+	Configuration json.RawMessage         `json:"configuration"`
+	TimeoutMS     int64                   `json:"timeout_ms"`
+	OnError       guardrailpolicy.OnError `json:"on_error"`
 }
 
 type Entry struct {
-	GuardrailID string `json:"guardrail_id"`
-	RevisionID  string `json:"revision_id"`
-	Phase       Phase  `json:"phase"`
-	Action      Action `json:"action"`
-	Monitor     bool   `json:"monitor,omitempty"`
-	Mandatory   bool   `json:"mandatory,omitempty"`
+	GuardrailID string                 `json:"guardrail_id"`
+	RevisionID  string                 `json:"revision_id"`
+	Phase       guardrailpolicy.Phase  `json:"phase"`
+	Action      guardrailpolicy.Action `json:"action"`
+	Monitor     bool                   `json:"monitor,omitempty"`
+	Mandatory   bool                   `json:"mandatory,omitempty"`
 }
 
 type PolicyRevision struct {
@@ -123,11 +72,11 @@ type PolicyRevision struct {
 }
 
 type Attachment struct {
-	ID               string `json:"id"`
-	Scope            Scope  `json:"scope"`
-	ScopeID          string `json:"scope_id"`
-	PolicyRevisionID string `json:"policy_revision_id"`
-	Order            int    `json:"order"`
+	ID               string                `json:"id"`
+	Scope            guardrailpolicy.Scope `json:"scope"`
+	ScopeID          string                `json:"scope_id"`
+	PolicyRevisionID string                `json:"policy_revision_id"`
+	Order            int                   `json:"order"`
 }
 
 const InstallationProject = "installation"
@@ -180,13 +129,12 @@ func InputProvenance(input []Segment) []Segment {
 }
 
 type Evaluation struct {
-	RequestID            string    `json:"request_id"`
-	Route                string    `json:"route,omitempty"`
-	Phase                Phase     `json:"phase"`
-	Segments             []Segment `json:"segments"`
-	LegacyInputTexts     []string  `json:"-"`
-	CompressionExemptIDs []string  `json:"-"`
-	WorkflowRecovery     bool      `json:"-"`
+	RequestID            string                `json:"request_id"`
+	Route                string                `json:"route,omitempty"`
+	Phase                guardrailpolicy.Phase `json:"phase"`
+	Segments             []Segment             `json:"segments"`
+	CompressionExemptIDs []string              `json:"-"`
+	WorkflowRecovery     bool                  `json:"-"`
 	// InternalModel prevents recursive evaluator invocations. It is not accepted
 	// from an HTTP caller and is set only by the gateway's evaluator runner.
 	InternalModel bool `json:"-"`
@@ -240,40 +188,29 @@ type WireVerdict struct {
 }
 
 func (w WireVerdict) Verdict() (Verdict, error) {
-	switch Action(w.Action) {
+	switch guardrailpolicy.Action(w.Action) {
 	case "pass":
 		if len(w.Categories) > 0 || len(w.Redactions) > 0 {
 			return Verdict{}, errEvaluation
 		}
 		return Verdict{}, nil
-	case Block, Redact, Mask, Annotate:
+	case guardrailpolicy.Block, guardrailpolicy.Redact, guardrailpolicy.Mask, guardrailpolicy.Annotate:
 		return Verdict{flagged: true, categories: w.Categories, redactions: w.Redactions}, nil
 	}
 	return Verdict{}, errEvaluation
 }
 
-// Evidence deliberately has no content, offsets, patterns, or replacements.
-type Evidence struct {
-	GuardrailID string   `json:"guardrail_id"`
-	Revision    string   `json:"revision"`
-	Phase       Phase    `json:"phase"`
-	Action      Action   `json:"action"`
-	Outcome     Outcome  `json:"outcome"`
-	Categories  []string `json:"categories,omitempty"`
-	LatencyMS   int64    `json:"latency_ms"`
-}
-
 type Result struct {
 	Segments  []Segment
-	Decisions []Evidence
+	Decisions []guardrailpolicy.Evidence
 	Changed   bool
 	Recovery  []Segment
 }
 
 type Application struct {
-	PolicyRevisionID string    `json:"policy_revision_id"`
-	Phase            Phase     `json:"phase"`
-	Segments         []Segment `json:"segments"`
+	PolicyRevisionID string                `json:"policy_revision_id"`
+	Phase            guardrailpolicy.Phase `json:"phase"`
+	Segments         []Segment             `json:"segments"`
 }
 
 type Pinned struct {
@@ -292,9 +229,9 @@ func (p Pinned) Compile() (PolicyRevision, *Engine, error) {
 }
 
 type AppliedResult struct {
-	Segments  []Segment  `json:"segments"`
-	Decisions []Evidence `json:"decisions"`
-	Blocked   bool       `json:"blocked"`
+	Segments  []Segment                  `json:"segments"`
+	Decisions []guardrailpolicy.Evidence `json:"decisions"`
+	Blocked   bool                       `json:"blocked"`
 }
 
 func Applied(result Result, err error) AppliedResult {
@@ -327,63 +264,6 @@ func decodeConfig(raw json.RawMessage, into any) error {
 	return nil
 }
 
-func ValidateEvidence(values []Evidence) error {
-	if len(values) > MaxEntries*4 {
-		return errors.New("too many guardrail decisions")
-	}
-	for _, e := range values {
-		if !identifier.MatchString(e.GuardrailID) || !identifier.MatchString(e.Revision) || !e.Phase.Valid() || !e.Action.Valid() || e.LatencyMS < 0 || e.LatencyMS > int64((24*time.Hour)/time.Millisecond) || len(e.Categories) > MaxCategories {
-			return errors.New("invalid guardrail evidence")
-		}
-		if !e.Outcome.Valid() {
-			return errors.New("invalid guardrail outcome")
-		}
-		for _, c := range e.Categories {
-			if !categoryID.MatchString(c) {
-				return errors.New("invalid guardrail category")
-			}
-		}
-	}
-	if len(values) > 0 {
-		raw, _ := json.Marshal(values)
-		if len(raw) > MaxEvidenceBytes {
-			return errors.New("guardrail evidence exceeds byte bound")
-		}
-	}
-	return nil
-}
-
-// EvidenceSize gives the conservative JSON size, including an array separator.
-func EvidenceSize(value Evidence) int { raw, _ := json.Marshal(value); return len(raw) + 1 }
-
-func MergeEvidence(decisions, values []Evidence) []Evidence {
-	merged := slices.Clone(decisions)
-	size := 2
-	for _, d := range merged {
-		size += EvidenceSize(d)
-	}
-	for _, v := range values {
-		i := slices.IndexFunc(merged, func(d Evidence) bool {
-			return d.GuardrailID == v.GuardrailID && d.Revision == v.Revision && d.Phase == v.Phase && d.Action == v.Action && d.Outcome == v.Outcome
-		})
-		if i < 0 {
-			if len(merged) < MaxEntries*4 && size+EvidenceSize(v) <= MaxEvidenceBytes {
-				merged = append(merged, v)
-				size += EvidenceSize(v)
-			}
-			continue
-		}
-		next := merged[i]
-		next.LatencyMS += v.LatencyMS
-		next.Categories = slices.Compact(slices.Sorted(slices.Values(slices.Concat(next.Categories, v.Categories))))
-		if grown := EvidenceSize(next) - EvidenceSize(merged[i]); len(next.Categories) <= MaxCategories && size+grown <= MaxEvidenceBytes {
-			merged[i] = next
-			size += grown
-		}
-	}
-	return merged
-}
-
 func ValidateSegments(segments []Segment) error {
 	if len(segments) > MaxSegments {
 		return ErrSurface
@@ -392,7 +272,7 @@ func ValidateSegments(segments []Segment) error {
 	total := 0
 	for _, s := range segments {
 		total += len(s.Text)
-		if !identifier.MatchString(s.ID) || seen[s.ID] || !utf8.ValidString(s.Text) || total > MaxContentBytes || len(s.Role) > 32 || len(s.Kind) > 32 || len(s.ToolName) > 128 {
+		if !guardrailpolicy.ValidIdentifier(s.ID) || seen[s.ID] || !utf8.ValidString(s.Text) || total > MaxContentBytes || len(s.Role) > 32 || len(s.Kind) > 32 || len(s.ToolName) > 128 {
 			return ErrSurface
 		}
 		seen[s.ID] = true

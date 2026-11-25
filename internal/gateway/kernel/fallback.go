@@ -5,9 +5,9 @@ import (
 	"slices"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -170,8 +170,7 @@ func (s *Server) fallBack(ctx context.Context, x *Call, conditions []string) boo
 }
 
 // useRoute moves the request to route. Provider preparation depends on the
-// route's fidelity and content policy, and the session seed on its affinity,
-// so both start over.
+// route's fidelity, and the session seed on its affinity, so both start over.
 func (x *Call) useRoute(route *routing.Route, via usage.LegVia) {
 	x.walk = x.walk.Move(route, via == usage.ViaSelector)
 	x.routeLeg = routeLeg{Route: route}

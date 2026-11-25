@@ -39,7 +39,8 @@ fi
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
   [fault]="" [events]="" [traceingest]="" [guardstream]="" [generationrefs]=""
-  [realtimeresponses]="ingress" [publishedprompt]="fault ingress"
+  [realtimeresponses]="ingress" [publishedprompt]="fault ingress" [duplexrelay]="fault ingress"
+  [anthropicbeta]="fault" [managedbatch]="fault"
   [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
   [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
   [codeforward/coderesearch]="" [codeforward/codexwire]=""
@@ -56,10 +57,10 @@ declare -A gateway_imports=(
   [surface/passthrough]="fault ingress kernel"
   [surface/retained]="fault ingress kernel quota"
   [surface/bedrock]="fault kernel"
-  [surface/realtime]="fault ingress kernel quota realtimeresponses"
-  [surface/nativeduplex]="fault ingress kernel"
-  [surface/geminilive]="fault ingress kernel quota"
-  [kernel]="codeforward delegation events fault generationrefs guardstream health ingress models publishedprompt quota realtimeresponses traceingest"
+  [surface/realtime]="duplexrelay fault ingress kernel quota realtimeresponses"
+  [surface/nativeduplex]="duplexrelay fault ingress kernel"
+  [surface/geminilive]="duplexrelay fault ingress kernel quota"
+  [kernel]="anthropicbeta codeforward delegation events fault generationrefs guardstream health ingress managedbatch models publishedprompt quota realtimeresponses traceingest"
 )
 while read -r package imports; do
   [[ $package == "$gateway" ]] && continue
@@ -76,3 +77,31 @@ while read -r package imports; do
     fi
   done
 done < <(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/gateway/...)
+
+module_edges() {
+  go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/... | awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="$1" '
+    function module(path, rest) {
+      if (index(path, root) != 1) return ""
+      rest = substr(path, length(root) + 1)
+      sub(/\/.*/, "", rest)
+      return rest
+    }
+    {
+      from = module($1)
+      for (i = 2; i <= NF; i++) {
+        to = module($i)
+        if (to != "" && to != from && from " " to != allowed) print from, to
+      }
+    }' | sort -u
+}
+if ! loop=$(module_edges "domain catalog" | tsort 2>&1 >/dev/null); then
+  echo "$loop" >&2
+  echo "check-lint: modules under internal/ import each other in a cycle. Move the shared piece into internal/domain or inject it from cmd/olp" >&2
+  exit 1
+fi
+
+if branches=$(git grep -nE '(VendorID|(Provider|provider|cfg|config)\.Kind) *(==|!=) *"|connectors\.Kind[A-Z]' -- 'internal/gateway/kernel/*.go' ':!*_test.go'); then
+  echo "$branches" >&2
+  echo "check-lint: the kernel must not branch on a provider kind or vendor. Declare the fact on connectors.Config or domain/vendors, or move the branch into its surface" >&2
+  exit 1
+fi

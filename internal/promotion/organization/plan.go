@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -96,7 +96,7 @@ func create(ctx context.Context, tx pgx.Tx, p authz.Principal, organization Orga
 	return true, nil
 }
 
-func setBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, current projects.LockedOrganization, desired *authority.BudgetPolicy) (bool, error) {
+func setBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, current projects.LockedOrganization, desired *keyauthority.BudgetPolicy) (bool, error) {
 	if reflect.DeepEqual(current.Budget, desired) {
 		return false, nil
 	}

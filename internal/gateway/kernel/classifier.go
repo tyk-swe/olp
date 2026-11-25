@@ -8,18 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
-	"github.com/google/uuid"
-
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
@@ -133,18 +132,15 @@ func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.Cl
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	x := &Call{
-		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
-		actor:          parent.actor,
-		keyID:          parent.keyID,
-		budgetGroupID:  parent.budgetGroupID,
-		attribution:    parent.attribution,
-		endUserDigest:  parent.endUserDigest,
-		userID:         parent.userID,
-		authority:      parent.authority,
-		cardPinned:     parent.cardPinned,
-		cardRevisionID: parent.cardRevisionID,
-		cardRev:        parent.cardRev,
-		routingInputs:  parent.routingInputs,
+		request:       request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
+		actor:         parent.actor,
+		keyID:         parent.keyID,
+		budgetGroupID: parent.budgetGroupID,
+		attribution:   parent.attribution,
+		endUserDigest: parent.endUserDigest,
+		userID:        parent.userID,
+		authority:     parent.authority,
+		callPricing:   parent.callPricing,
 
 		origin:   usage.OriginClassifier,
 		parent:   parent.request.accountingID(),
@@ -181,7 +177,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	}
 	x.unary = &unaryCall{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
-	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.Config.MaxBodyBytes))
+	source, err := unary.Parse(codec.Identity.ID, body, int(s.Config.MaxBodyBytes))
 	if err != nil {
 		return failed, &Outcome{Err: RequestError(err)}
 	}
@@ -192,7 +188,7 @@ func (s *Server) predict(ctx context.Context, x *Call, slug, text string) (class
 	if e := s.admitClassifier(ctx, x); e != nil {
 		return failed, &Outcome{Err: e}
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {

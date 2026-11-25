@@ -11,8 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -87,14 +88,14 @@ func visibleProvider(ctx context.Context, q database.Queryer, p authz.Principal,
 }
 
 func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := httpkit.NewID()
+	etag := ids.New()
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
 	return etag, err
 }
 
 func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := httpkit.NewID()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, httpkit.NewID())
+	etag := ids.New()
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, ids.New())
 	return etag, err
 }
 
@@ -280,21 +281,6 @@ func unchangedSince(ctx context.Context, read *record, during string) func(pgx.T
 		}
 		return current, nil
 	}
-}
-
-func valueOr[T any](v *T, fallback T) T {
-	if v == nil {
-		return fallback
-	}
-	return *v
-}
-
-func deref[T comparable](v *T) T {
-	var zero T
-	if v == nil {
-		return zero
-	}
-	return *v
 }
 
 func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]string, error) {

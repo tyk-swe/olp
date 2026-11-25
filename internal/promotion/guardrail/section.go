@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -36,14 +37,11 @@ func guardrailKey(g Guardrail) portable { return keyOf(g.Project, g.Name) }
 func policyKey(p Policy) portable { return keyOf(p.Project, p.Name) }
 
 func Parse(document contract.ConfigurationDocument) (Section, error) {
-	if err := refuseLegacy(document); err != nil {
-		return Section{}, err
-	}
-	definitions, err := parseGuardrails(promotion.ValueOf(document.Guardrails))
+	definitions, err := parseGuardrails(ptr.Value(document.Guardrails))
 	if err != nil {
 		return Section{}, err
 	}
-	declared, attached := promotion.ValueOf(document.GuardrailPolicies), promotion.ValueOf(document.GuardrailAttachments)
+	declared, attached := ptr.Value(document.GuardrailPolicies), ptr.Value(document.GuardrailAttachments)
 	if len(declared) > 1000 || len(attached) > 10000 {
 		return Section{}, httpkit.Invalid("guardrail_policies", "Too many policies or attachments.")
 	}
@@ -91,15 +89,7 @@ func Read(ctx context.Context, q database.Queryer) (Section, error) {
 	if err != nil {
 		return Section{}, err
 	}
-	stored, err := readStored(ctx, q, projectName)
-	if err != nil {
-		return Section{}, err
-	}
-	legacy, err := readLegacyRoutes(ctx, q, projectName)
-	if err != nil {
-		return Section{}, err
-	}
-	return merge(append([]Section{stored}, legacy...)), nil
+	return readStored(ctx, q, projectName)
 }
 
 func Render(section Section) (Fragment, error) {
@@ -118,14 +108,6 @@ func Render(section Section) (Fragment, error) {
 		GuardrailPolicies:    promotion.Optional(promotion.Map(policies, renderPolicy)),
 		GuardrailAttachments: promotion.Optional(promotion.Map(attachments, renderAttachment)),
 	}, nil
-}
-
-func merge(sections []Section) Section {
-	return Section{
-		Guardrails:  slices.Concat(promotion.Map(sections, func(s Section) []Guardrail { return s.Guardrails })...),
-		Policies:    slices.Concat(promotion.Map(sections, func(s Section) []Policy { return s.Policies })...),
-		Attachments: slices.Concat(promotion.Map(sections, func(s Section) []Attachment { return s.Attachments })...),
-	}
 }
 
 func projectID(directory promotion.Directory, name string) (*string, error) {

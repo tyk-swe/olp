@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import { gatewayFetch } from '#lib/management/gateway.js';
 import {
   listNativeEndpoints,
@@ -12,7 +12,7 @@ import {
 } from './nativeLifecycle';
 import { ResourceRequestError } from './lifecycle';
 
-vi.mock('#lib/management/client.js', () => ({ apiClient: { GET: vi.fn() } }));
+vi.mock('#lib/session/client.js', () => ({ apiClient: { GET: vi.fn() } }));
 vi.mock('#lib/management/gateway.js', () => ({ gatewayFetch: vi.fn() }));
 
 const local = (kind: string, digit = '1') => `${kind}_${digit.repeat(32)}`;

@@ -11,13 +11,12 @@ import (
 	"github.com/tyk-swe/olp/internal/codesessions"
 
 	"github.com/coder/websocket"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
@@ -52,24 +51,31 @@ type codeAttempt struct {
 	pendingHealth      *codemode.HealthObservation
 }
 
-func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, inbound codeIngress, transport codeadapter.Transport, recovery *codesessions.Recovery, body []byte) (*codeAttempt, error) {
-	authority, operation, paidAttempt, err := f.resolveCodeIngress(r, release, route, observation, inbound, transport, recovery, body)
+func (f *Forwarder) prepareCode(req codeRequest, recovery *codesessions.Recovery) (*codeAttempt, error) {
+	authority, operation, paidAttempt, err := f.resolveCodeIngress(req, recovery)
 	if err != nil || paidAttempt != nil {
 		return paidAttempt, err
 	}
-	providers := release.Snapshot().CodeModelProviders(route, inbound.path, operation.Model, transport)
-	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot().CodeProviders(route, inbound.path, transport)) == 0) {
+	providers := req.release.Snapshot().CodeModelProviders(req.route, req.inbound.path, operation.Model, req.transport)
+	if len(providers) == 0 && len(req.route.PaidFallbackTargets) == 0 && (!req.route.ModelRewriting || len(req.release.Snapshot().CodeProviders(req.route, req.inbound.path, req.transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
-	labels, failure := ingress.ParseAttribution(r, authority)
+	labels, failure := ingress.ParseAttribution(req.r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
 	}
-	lease, failure := f.admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
+	lease, failure := f.admission.ReserveCodeRate(req.r.Context(), authority, req.observation.Estimate, codeGenerationTimeout+time.Minute, req.route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, fallbackAttempt, err := f.admitCodePermit(r, release, route, observation, operation, inbound, transport, authority, labels, providers, lease, recovery, body)
+	permit, fallbackAttempt, err := f.admitCodePermit(req, codePermitInput{
+		operation: operation,
+		authority: authority,
+		labels:    labels,
+		providers: providers,
+		lease:     lease,
+		recovery:  recovery,
+	})
 	if err != nil || fallbackAttempt != nil {
 		return fallbackAttempt, err
 	}
@@ -77,17 +83,17 @@ func (f *Forwarder) prepareCode(r *http.Request, release *release.Release, route
 	if permit.Pin.TargetModel != "" {
 		model = permit.Pin.TargetModel
 	}
-	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), forwarder: f, permit: permit, lease: lease, prewarm: req.observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
-			a.finish(r.Context())
+			a.finish(req.r.Context())
 		}
 	}()
-	if err := f.reconcileCodePermit(r, a, authority, labels, observation, route.Slug); err != nil {
+	if err := f.reconcileCodePermit(req.r, a, authority, labels, req.observation, req.route.Slug); err != nil {
 		return nil, err
 	}
-	if err := f.bindCodeTarget(r, a, release, route, observation, inbound, transport, recovery, model); err != nil {
+	if err := f.bindCodeTarget(req, a, recovery, model); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -102,52 +108,64 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 	return nil
 }
 
-func (a *codeAttempt) observeUnary(body []byte) {
+func (a *codeAttempt) ledgerContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+}
+
+func (a *codeAttempt) warnLedger(msg string, err error) {
+	if err == nil || a.forwarder == nil || a.forwarder.log == nil {
+		return
+	}
+	a.forwarder.log.Warn(msg, "attempt_id", a.permit.Attempt.ID, "error", err.Error())
+}
+
+func (a *codeAttempt) observeUnary(ctx context.Context, body []byte) {
 	observation := a.observer.Unary(body)
 	if a.status >= 400 && len(observation.RejectionBody) == 0 {
-		a.observe(codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
+		a.observe(ctx, codemode.Observation{RejectionBody: codewire.RejectionBody(body)})
 	}
-	a.observe(observation)
+	a.observe(ctx, observation)
 	if a.status >= 400 {
 		a.terminal = true
 	}
 }
 
-func (a *codeAttempt) observeEncodedUnary(body []byte, encoding string) {
+func (a *codeAttempt) observeEncodedUnary(ctx context.Context, body []byte, encoding string) {
 	decoded, err := codewire.Decode(body, encoding, codewire.MaxBody)
 	if err == nil {
-		a.observeUnary(decoded)
+		a.observeUnary(ctx, decoded)
 	}
 }
 
-func (a *codeAttempt) observe(o codemode.Observation) {
+func (a *codeAttempt) observe(ctx context.Context, o codemode.Observation) {
 	if o.ResponseID != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = a.forwarder.ledger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
+		refCtx, cancel := a.ledgerContext(ctx)
+		err := a.forwarder.ledger.ObserveReference(refCtx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
+		a.warnLedger("code reference unavailable", err)
 	}
-	classification, classified := a.observeCooldownClass(o)
+	classification, classified := a.observeCooldownClass(ctx, o)
 	switch {
 	case classified && classification.Scope == codeadapter.ScopeModel:
 		a.pendingHealth = nil
 	case len(o.RejectionBody) > 0:
-		a.flushPendingHealth(context.Background())
+		a.flushPendingHealth(ctx)
 	}
 	if o.Status != 0 && !classified {
-		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
-		a.flushPendingHealth(context.Background())
+		a.response(ctx, o.Status, http.Header{"Retry-After": o.RetryAfter})
+		a.flushPendingHealth(ctx)
 	}
 	if o.Allowance != nil {
-		a.observeAllowance(context.Background(), *o.Allowance)
+		a.observeAllowance(ctx, *o.Allowance)
 	}
 	if o.AllowanceCharge != nil {
-		a.observeAllowanceCharge(context.Background(), o.AllowanceCharge)
+		a.observeAllowanceCharge(ctx, o.AllowanceCharge)
 	}
 	if o.Outcome != nil {
-		a.outcome(context.Background(), *o.Outcome)
+		a.outcome(ctx, *o.Outcome)
 	}
 	if o.Successful && !a.prewarm {
-		a.health(context.Background(), "healthy")
+		a.health(ctx, "healthy")
 	}
 	if !o.Terminal {
 		return
@@ -256,18 +274,18 @@ func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.Ra
 	if a.paid != nil || a.adapter != codemode.AdapterOpenCodeGo || a.permit.Attempt.ID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
+	a.warnLedger("code allowance charge unavailable", a.forwarder.ledger.ObserveAllowanceCharge(writeCtx, a.permit.Attempt.ID, charge))
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
 	if a.paid != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
+	a.warnLedger("code allowance unavailable", a.forwarder.ledger.ObserveAllowance(writeCtx, a.permit.Account.ID, allowance))
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
@@ -278,9 +296,9 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	if a.paid != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	_ = a.forwarder.ledger.ObserveHealth(ctx, a.permit.Account.ID, observation)
+	a.warnLedger("code health unavailable", a.forwarder.ledger.ObserveHealth(writeCtx, a.permit.Account.ID, observation))
 }
 
 func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
@@ -292,7 +310,7 @@ func (a *codeAttempt) flushPendingHealth(ctx context.Context) {
 	a.observeHealth(ctx, pending)
 }
 
-func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.Classification, bool) {
+func (a *codeAttempt) observeCooldownClass(ctx context.Context, o codemode.Observation) (codeadapter.Classification, bool) {
 	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
 		return codeadapter.Classification{}, false
 	}
@@ -318,9 +336,10 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 		return classification, true
 	}
 	classification = codeadapter.WithCycleReset(classification, a.permit.Account.CycleAnchor, now)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	writeCtx, cancel := a.ledgerContext(ctx)
 	defer cancel()
-	err := a.forwarder.ledger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	err := a.forwarder.ledger.ObserveCooldownClass(writeCtx, a.permit.Account.ID, a.model, classification, now)
+	a.warnLedger("code cooldown classification unavailable", err)
 	return classification, err == nil
 }
 

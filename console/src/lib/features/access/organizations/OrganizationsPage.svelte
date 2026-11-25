@@ -15,7 +15,7 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { projectKeys } from '../projects/projectKeys';
   import { organizationKeys } from './organizationKeys';
-  import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
+  import { AggregateBudgetPanel } from '#lib/features/budgets/index.js';
   import * as api from './api';
 
   const write = useAction();

@@ -6,14 +6,6 @@ import (
 	"slices"
 )
 
-func ValueOf[T any](pointer *T) T {
-	if pointer == nil {
-		var zero T
-		return zero
-	}
-	return *pointer
-}
-
 func NonZero[T comparable](value T) *T {
 	var zero T
 	if value == zero {
@@ -27,13 +19,6 @@ func OptionalMap[K comparable, V any](values map[K]V) *map[K]V {
 		return nil
 	}
 	return &values
-}
-
-func NonNil[T any](values []T) []T {
-	if values == nil {
-		return []T{}
-	}
-	return values
 }
 
 func When[T any](condition bool, value T) []T {

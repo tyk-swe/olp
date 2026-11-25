@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )

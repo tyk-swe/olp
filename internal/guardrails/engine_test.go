@@ -7,15 +7,14 @@ import (
 	"fmt"
 	"hash/crc32"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 )
 
-func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {
+func TestRegexRuleIdentifiersAreBounded(t *testing.T) {
 	for _, tc := range []struct {
 		id    string
 		valid bool
@@ -29,55 +28,45 @@ func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {
 		{"rule.name", false},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
-			policy := &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: tc.id, Phase: contentpolicy.PhaseInput, Pattern: "sample", Action: contentpolicy.ActionBlock}}}
-			policyErr := contentpolicy.Validate(policy)
-			_, detectorErr := compilePatterns([]Pattern{{ID: tc.id, Pattern: "sample"}}, "sample", "")
-			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
-				t.Errorf("id %q valid=%t, policy error=%v, detector error=%v", tc.id, tc.valid, policyErr, detectorErr)
+			_, err := compilePatterns([]Pattern{{ID: tc.id, Pattern: "sample"}}, "sample", "")
+			if (err == nil) != tc.valid {
+				t.Errorf("id %q valid=%t, error=%v", tc.id, tc.valid, err)
 			}
 		})
 	}
 }
 
-func TestRuleSizeLimitsAgreeWithContentPolicy(t *testing.T) {
+func TestRegexRuleSizesAreBounded(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		patternBytes int
 		replacement  string
 		valid        bool
 	}{
-		{name: "total at limit", patternBytes: contentpolicy.MaxTotalPatternBytes, valid: true},
-		{name: "total above limit", patternBytes: contentpolicy.MaxTotalPatternBytes + 1},
-		{name: "replacement at limit", patternBytes: 1, replacement: strings.Repeat("é", contentpolicy.MaxReplacementChars), valid: true},
-		{name: "replacement above limit", patternBytes: 1, replacement: strings.Repeat("é", contentpolicy.MaxReplacementChars+1)},
+		{name: "total at limit", patternBytes: maxTotalPatternBytes, valid: true},
+		{name: "total above limit", patternBytes: maxTotalPatternBytes + 1},
+		{name: "replacement at limit", patternBytes: 1, replacement: strings.Repeat("é", maxReplacementChars), valid: true},
+		{name: "replacement above limit", patternBytes: 1, replacement: strings.Repeat("é", maxReplacementChars+1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text := strings.Repeat("a", tc.patternBytes)
-			count := (len(text) + contentpolicy.MaxPatternBytes - 1) / contentpolicy.MaxPatternBytes
+			count := (len(text) + maxPatternBytes - 1) / maxPatternBytes
 			patterns := slices.Collect(func(yield func(Pattern) bool) {
 				for i := range count {
-					start := i * contentpolicy.MaxPatternBytes
-					pattern := text[start:min(start+contentpolicy.MaxPatternBytes, len(text))]
+					start := i * maxPatternBytes
+					pattern := text[start:min(start+maxPatternBytes, len(text))]
 					if !yield(Pattern{ID: fmt.Sprintf("rule%d", i), Pattern: pattern, Replacement: &tc.replacement}) {
 						return
 					}
 				}
 			})
-			policy := &contentpolicy.Policy{Rules: slices.Collect(func(yield func(contentpolicy.Rule) bool) {
-				for _, pattern := range patterns {
-					if !yield(contentpolicy.Rule{ID: pattern.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Pattern: pattern.Pattern, Replacement: tc.replacement}) {
-						return
-					}
-				}
-			})}
-			policyErr := contentpolicy.Validate(policy)
 			config, err := json.Marshal(RegexConfig{Rules: patterns})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, detectorErr := ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: FailClosed})
-			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
-				t.Fatalf("valid=%t, policy error=%v, detector error=%v", tc.valid, policyErr, detectorErr)
+			_, err = ParseRevision(Revision{Type: "builtin.regex", Configuration: config, TimeoutMS: 1, OnError: guardrailpolicy.FailClosed})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
 			}
 		})
 	}
@@ -90,18 +79,18 @@ func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []Phase{Input, Output} {
+	for _, phase := range []guardrailpolicy.Phase{guardrailpolicy.Input, guardrailpolicy.Output} {
 		t.Run(string(phase), func(t *testing.T) {
 			document, err := oif.ParseJSON([]byte(original), oif.Limits{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			surface := ToolJSONSurface(document, "read", phase == Output)
-			_, blockErr := testEngine(t, "builtin.keywords", string(configuration), phase, Block, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
+			surface := ToolJSONSurface(document, "read", phase == guardrailpolicy.Output)
+			_, blockErr := testEngine(t, "builtin.keywords", string(configuration), phase, guardrailpolicy.Block, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
 			if !errors.Is(blockErr, ErrBlocked) {
 				t.Fatalf("escaped blocked text was allowed: %v", blockErr)
 			}
-			redacted, redactErr := testEngine(t, "builtin.keywords", string(configuration), phase, Redact, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
+			redacted, redactErr := testEngine(t, "builtin.keywords", string(configuration), phase, guardrailpolicy.Redact, false, nil).Evaluate(t.Context(), Evaluation{Phase: phase, Segments: surface.Segments()}, nil)
 			if redactErr != nil || !redacted.Changed {
 				t.Fatalf("escaped text was not transformed: %v", redactErr)
 			}
@@ -139,7 +128,7 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 		{"unknown field", `{"route":"relevance-route","extra":true}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			definition := Revision{Type: "typesafe", Configuration: json.RawMessage(tc.configuration), TimeoutMS: 1000, OnError: FailClosed}
+			definition := Revision{Type: "typesafe", Configuration: json.RawMessage(tc.configuration), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
 			if _, err := ParseRevision(definition); (err == nil) != tc.valid {
 				t.Fatalf("valid=%t, error=%v", tc.valid, err)
 			}
@@ -147,36 +136,36 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 	}
 
 	definitions := map[string]Revision{
-		"active":  {ID: "active", GuardrailID: "active", Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance-route"}`), TimeoutMS: 1000, OnError: FailOpen},
-		"monitor": {ID: "monitor", GuardrailID: "monitor", Type: "typesafe", Configuration: json.RawMessage(`{"route":"monitor-route"}`), TimeoutMS: 1000, OnError: FailClosed},
-		"output":  {ID: "output", GuardrailID: "output", Type: "typesafe", Configuration: json.RawMessage(`{"route":"output-route"}`), TimeoutMS: 1000, OnError: FailClosed},
-		"keyword": {ID: "keyword", GuardrailID: "keyword", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["secret"]}`), TimeoutMS: 1000, OnError: FailClosed},
+		"active":  {ID: "active", GuardrailID: "active", Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance-route"}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailOpen},
+		"monitor": {ID: "monitor", GuardrailID: "monitor", Type: "typesafe", Configuration: json.RawMessage(`{"route":"monitor-route"}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
+		"output":  {ID: "output", GuardrailID: "output", Type: "typesafe", Configuration: json.RawMessage(`{"route":"output-route"}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
+		"keyword": {ID: "keyword", GuardrailID: "keyword", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["secret"]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
 	}
 	entries := []Entry{
-		{GuardrailID: "active", RevisionID: "active", Phase: Input, Action: Block},
-		{GuardrailID: "monitor", RevisionID: "monitor", Phase: Input, Action: Block, Monitor: true},
-		{GuardrailID: "output", RevisionID: "output", Phase: Output, Action: Block},
-		{GuardrailID: "keyword", RevisionID: "keyword", Phase: Input, Action: Block},
+		{GuardrailID: "active", RevisionID: "active", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
+		{GuardrailID: "monitor", RevisionID: "monitor", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Monitor: true},
+		{GuardrailID: "output", RevisionID: "output", Phase: guardrailpolicy.Output, Action: guardrailpolicy.Block},
+		{GuardrailID: "keyword", RevisionID: "keyword", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
 	}
 	engine, err := Compile(entries, definitions)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policies := engine.TypeSafePolicies()
-	if len(policies) != 1 || policies[0].Config.Route != "relevance-route" || policies[0].Entry.RevisionID != "active" || policies[0].Revision.OnError != FailOpen {
+	if len(policies) != 1 || policies[0].Config.Route != "relevance-route" || policies[0].Entry.RevisionID != "active" || policies[0].Revision.OnError != guardrailpolicy.FailOpen {
 		t.Fatalf("unexpected effective policies: %+v", policies)
 	}
 	if engine.OnlyTypeSafe() || engine.WithoutModelGuardrails() == nil {
 		t.Fatal("mixed policy lost its local guardrail")
 	}
-	if _, err := evaluateText(t, engine.WithoutModelGuardrails(), "secret", Input, nil); !errors.Is(err, ErrBlocked) {
+	if _, err := evaluateText(t, engine.WithoutModelGuardrails(), "secret", guardrailpolicy.Input, nil); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("local input policy did not remain effective: %v", err)
 	}
-	only := testEngine(t, "typesafe", `{"route":"relevance-route"}`, Input, Block, false, nil)
+	only := testEngine(t, "typesafe", `{"route":"relevance-route"}`, guardrailpolicy.Input, guardrailpolicy.Block, false, nil)
 	if !only.OnlyTypeSafe() || only.WithoutModelGuardrails() != nil {
 		t.Fatal("TypeSafe was not isolated from recursive model evaluations")
 	}
-	result, err := only.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "user", Text: "request"}}, InternalModel: true}, nil)
+	result, err := only.Evaluate(t.Context(), Evaluation{Phase: guardrailpolicy.Input, Segments: []Segment{{ID: "user", Text: "request"}}, InternalModel: true}, nil)
 	if err != nil || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
 		t.Fatalf("internal model unexpectedly evaluated TypeSafe: %+v, %v", result, err)
 	}
@@ -184,14 +173,14 @@ func TestTypeSafeWorkflowPolicies(t *testing.T) {
 
 func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T) {
 	definitions := map[string]Revision{
-		"redact": {ID: "redact", GuardrailID: "redact", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 1000, OnError: FailClosed},
-		"first":  {ID: "first", GuardrailID: "first", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`), TimeoutMS: 1000, OnError: FailClosed},
-		"second": {ID: "second", GuardrailID: "second", Type: "compresr", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true,"parameters":{"query":"task"}}`), TimeoutMS: 1000, OnError: FailClosed},
+		"redact": {ID: "redact", GuardrailID: "redact", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
+		"first":  {ID: "first", GuardrailID: "first", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
+		"second": {ID: "second", GuardrailID: "second", Type: "compresr", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true,"parameters":{"query":"task"}}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
 	}
 	entries := []Entry{
-		{GuardrailID: "redact", RevisionID: "redact", Phase: Input, Action: Redact},
-		{GuardrailID: "first", RevisionID: "first", Phase: Input, Action: Redact},
-		{GuardrailID: "second", RevisionID: "second", Phase: Input, Action: Redact},
+		{GuardrailID: "redact", RevisionID: "redact", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact},
+		{GuardrailID: "first", RevisionID: "first", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact},
+		{GuardrailID: "second", RevisionID: "second", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact},
 	}
 	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, _ Spec, evaluation Evaluation) (Verdict, error) {
 		for _, segment := range evaluation.Segments {
@@ -225,7 +214,7 @@ func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T)
 		{"ordinary request", false, "first summary", "second summary", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: segments, CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: tc.recovery}, nil)
+			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: guardrailpolicy.Input, Segments: segments, CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: tc.recovery}, nil)
 			if err != nil || !result.Changed || len(result.Segments) != 3 {
 				t.Fatalf("evaluation failed: %+v, %v", result, err)
 			}
@@ -255,15 +244,15 @@ func TestCompressionSkipsExemptContent(t *testing.T) {
 		t.Error("exempt content was sent for compression")
 		return Verdict{}, nil
 	})
-	engine := testEngine(t, "headroom", config, Input, Redact, false, evaluator)
+	engine := testEngine(t, "headroom", config, guardrailpolicy.Input, guardrailpolicy.Redact, false, evaluator)
 	result, err := engine.Evaluate(t.Context(), Evaluation{
-		Phase: Input, Segments: []Segment{{ID: "recovered", Text: "original"}},
+		Phase: guardrailpolicy.Input, Segments: []Segment{{ID: "recovered", Text: "original"}},
 		CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: true,
 	}, nil)
 	if err != nil || result.Changed || len(result.Recovery) != 0 || len(result.Segments) != 1 || result.Segments[0].Text != "original" || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
 		t.Fatalf("exempt content was changed: %+v, %v", result, err)
 	}
-	if testEngine(t, "headroom", config, Input, Redact, true, evaluator).HasCompression() {
+	if testEngine(t, "headroom", config, guardrailpolicy.Input, guardrailpolicy.Redact, true, evaluator).HasCompression() {
 		t.Fatal("monitoring compression should not enable recovery")
 	}
 }
@@ -325,9 +314,9 @@ func TestNativeToolArgumentReplacementPreservesSignedContent(t *testing.T) {
 	}
 }
 
-func testEngine(t testing.TB, kind Kind, config string, phase Phase, action Action, monitor bool, external Evaluator) *Engine {
+func testEngine(t testing.TB, kind Kind, config string, phase guardrailpolicy.Phase, action guardrailpolicy.Action, monitor bool, external Evaluator) *Engine {
 	t.Helper()
-	d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: kind, Configuration: json.RawMessage(config), TimeoutMS: 1000, OnError: FailClosed}
+	d := Revision{ID: "revision", GuardrailID: "guard", ProjectID: "project", Type: kind, Configuration: json.RawMessage(config), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
 	e, err := compileBound([]Entry{{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: phase, Action: action, Monitor: monitor}}, map[string]Revision{d.ID: d}, external)
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +331,7 @@ func compileBound(entries []Entry, definitions map[string]Revision, external Eva
 	}
 	return engine.Bind(external), nil
 }
-func evaluateText(t testing.TB, e *Engine, text string, phase Phase, m *Masking) (Result, error) {
+func evaluateText(t testing.TB, e *Engine, text string, phase guardrailpolicy.Phase, m *Masking) (Result, error) {
 	t.Helper()
 	return e.Evaluate(context.Background(), Evaluation{Phase: phase, Segments: []Segment{{ID: "text", Text: text}}}, m)
 }
@@ -370,12 +359,12 @@ func TestDetectorCorpus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.category, func(t *testing.T) {
 			config, _ := json.Marshal(EntityConfig{Categories: []string{tc.category}})
-			e := testEngine(t, Kind(tc.kind), string(config), Input, Block, false, nil)
-			positive, err := evaluateText(t, e, tc.positive, Input, nil)
+			e := testEngine(t, Kind(tc.kind), string(config), guardrailpolicy.Input, guardrailpolicy.Block, false, nil)
+			positive, err := evaluateText(t, e, tc.positive, guardrailpolicy.Input, nil)
 			if !errors.Is(err, ErrBlocked) {
 				t.Fatalf("missed positive: %s %+v", tc.category, positive)
 			}
-			negative, err := evaluateText(t, e, tc.negative, Input, nil)
+			negative, err := evaluateText(t, e, tc.negative, guardrailpolicy.Input, nil)
 			if err != nil {
 				t.Fatalf("false positive: %s %+v", tc.category, negative)
 			}
@@ -384,43 +373,43 @@ func TestDetectorCorpus(t *testing.T) {
 }
 
 func TestSchemaDoesNotFetchRemoteReferences(t *testing.T) {
-	d := Revision{Type: "builtin.schema", Configuration: json.RawMessage(`{"schema":{"$ref":"https://127.0.0.1/private"}}`), TimeoutMS: 100, OnError: FailClosed}
+	d := Revision{Type: "builtin.schema", Configuration: json.RawMessage(`{"schema":{"$ref":"https://127.0.0.1/private"}}`), TimeoutMS: 100, OnError: guardrailpolicy.FailClosed}
 	if _, err := ParseRevision(d); err == nil {
 		t.Fatal("accepted remote schema")
 	}
-	e := testEngine(t, "builtin.schema", `{"schema":{"type":"object","required":["ok"],"properties":{"ok":{"const":true}},"additionalProperties":false}}`, Output, Block, false, nil)
-	if _, err := evaluateText(t, e, `{"ok":true}`, Output, nil); err != nil {
+	e := testEngine(t, "builtin.schema", `{"schema":{"type":"object","required":["ok"],"properties":{"ok":{"const":true}},"additionalProperties":false}}`, guardrailpolicy.Output, guardrailpolicy.Block, false, nil)
+	if _, err := evaluateText(t, e, `{"ok":true}`, guardrailpolicy.Output, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := evaluateText(t, e, `{"ok":false}`, Output, nil); !errors.Is(err, ErrBlocked) {
+	if _, err := evaluateText(t, e, `{"ok":false}`, guardrailpolicy.Output, nil); !errors.Is(err, ErrBlocked) {
 		t.Fatal(err)
 	}
 }
 func TestToolsDenyOverridesAllowAndUntrustedResults(t *testing.T) {
-	e := testEngine(t, "builtin.tools", `{"allow":["*"],"deny":["delete*"],"privileged":["admin*"],"untrusted":["web"],"schemas":{"read":{"type":"object","required":["path"]}}}`, Input, Block, false, nil)
+	e := testEngine(t, "builtin.tools", `{"allow":["*"],"deny":["delete*"],"privileged":["admin*"],"untrusted":["web"],"schemas":{"read":{"type":"object","required":["path"]}}}`, guardrailpolicy.Input, guardrailpolicy.Block, false, nil)
 	for _, segments := range [][]Segment{
 		{{ID: "call", Kind: "tool_call", ToolName: "delete_all", Text: `{}`}},
 		{{ID: "result", Kind: "tool_result", ToolName: "web", Text: "go"}, {ID: "call", Kind: "tool_call", ToolName: "admin_run", Text: `{}`}},
 		{{ID: "call", Kind: "tool_call", ToolName: "read", Text: `{}`}},
 	} {
-		if _, err := e.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: segments}, nil); !errors.Is(err, ErrBlocked) {
+		if _, err := e.Evaluate(t.Context(), Evaluation{Phase: guardrailpolicy.Input, Segments: segments}, nil); !errors.Is(err, ErrBlocked) {
 			t.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkBuiltins100KTokens(b *testing.B) {
-	e := testEngine(b, "builtin.pii", `{}`, Input, Block, false, nil)
+	e := testEngine(b, "builtin.pii", `{}`, guardrailpolicy.Input, guardrailpolicy.Block, false, nil)
 	text := strings.Repeat("ordinary safe prompt words ", 20000)
 	b.SetBytes(int64(len(text)))
 	b.ReportAllocs()
 	for b.Loop() {
-		_, _ = evaluateText(b, e, text, Input, nil)
+		_, _ = evaluateText(b, e, text, guardrailpolicy.Input, nil)
 	}
 }
 func BenchmarkUnconfigured(b *testing.B) {
 	var e *Engine
-	request := Evaluation{Phase: Input}
+	request := Evaluation{Phase: guardrailpolicy.Input}
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = e.Evaluate(context.Background(), request, nil)
@@ -439,7 +428,7 @@ func githubFixture(entropy string) string {
 }
 
 func BenchmarkGuardrailStreaming(b *testing.B) {
-	engine := testEngine(b, "builtin.keywords", `{"words":["forbidden"]}`, OutputStream, Block, false, nil)
+	engine := testEngine(b, "builtin.keywords", `{"words":["forbidden"]}`, guardrailpolicy.OutputStream, guardrailpolicy.Block, false, nil)
 	frame := []byte(strings.Repeat("ordinary safe text ", 256))
 	text := string(frame)
 	b.ReportAllocs()
@@ -457,34 +446,5 @@ func BenchmarkGuardrailStreaming(b *testing.B) {
 		if _, err = stream.Finish(b.Context()); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func TestMergeEvidenceFoldsRepeatsWithinLimits(t *testing.T) {
-	first := []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: []string{"b"}, LatencyMS: 2}}
-	merged := MergeEvidence(first, []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: []string{"a", "b"}, LatencyMS: 3}})
-	if len(merged) != 1 || merged[0].LatencyMS != 5 || !slices.Equal(merged[0].Categories, []string{"a", "b"}) || first[0].LatencyMS != 2 {
-		t.Fatalf("repeated evaluations were not folded into one record: %+v (input %+v)", merged, first)
-	}
-	categories := func(prefix string) []string {
-		values := make([]string, MaxCategories)
-		for i := range values {
-			values[i] = prefix + strconv.Itoa(i)
-		}
-		return values
-	}
-	repeated := MergeEvidence(first, []Evidence{{GuardrailID: "g", Revision: "1", Phase: Output, Action: Block, Outcome: Blocked, Categories: categories("c")}})
-	if err := ValidateEvidence(repeated); err != nil {
-		t.Fatalf("folding repeats produced evidence usage would drop: %v", err)
-	}
-	wide := []string{strings.Repeat("c", 1024)}
-	values := make([]Evidence, MaxEntries*4)
-	for i := range values {
-		values[i] = Evidence{GuardrailID: strconv.Itoa(i), Revision: "1", Phase: Input, Action: Block, Outcome: Blocked, Categories: wide}
-	}
-	bounded := MergeEvidence(nil, values)
-	raw, err := json.Marshal(bounded)
-	if err != nil || len(bounded) == 0 || len(bounded) == len(values) || len(raw) > MaxEvidenceBytes {
-		t.Fatalf("evidence escaped the byte limit: %d records, %d bytes", len(bounded), len(raw))
 	}
 }

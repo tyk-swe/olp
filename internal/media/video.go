@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 type VideoCreate struct {
@@ -25,7 +26,7 @@ func (p VideoCreate) uploads() []staging.Part {
 	return []staging.Part{*p.InputRef}
 }
 
-func (p VideoCreate) Duration() string { return valueOr(p.Seconds, "4") }
+func (p VideoCreate) Duration() string { return ptr.Or(p.Seconds, "4") }
 
 var videoSizes = []string{"720x1280", "1280x720", "1024x1792", "1792x1024"}
 

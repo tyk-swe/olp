@@ -69,10 +69,7 @@ export function budgetWindowState(
   if (budget.enforcement_active === false) return 'policy';
   const window = budget[name];
   if (!window) return 'unknown';
-  const limit =
-    window.effective_limit !== undefined
-      ? window.effective_limit
-      : window.limit;
+  const limit = currentBudgetLimit(window);
   if (limit === null) return 'unlimited';
   const order = compareDecimalStrings(window.accrued, limit);
   if (order === null) return 'unknown';

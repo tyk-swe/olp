@@ -12,8 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pquerna/otp/totp"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -87,7 +88,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 		return httpkit.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	f := mfaFlow{ID: httpkit.NewID(), Purpose: "enroll_" + input.Kind, Data: mfaFlowData{Name: input.Name}}
+	f := mfaFlow{ID: ids.New(), Purpose: "enroll_" + input.Kind, Data: mfaFlowData{Name: input.Name}}
 	if err := s.resolveMFAEnrollmentSubject(r, tx, bootstrap, input.Challenge, &f); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -152,7 +153,7 @@ func (s *Server) buildMFAEnrollmentChallenge(r *http.Request, tx pgx.Tx, kind st
 		if err != nil {
 			return nil, err
 		}
-		id := httpkit.NewID()
+		id := ids.New()
 		f.SecretID = &id
 		expires := time.Now().Add(mfaTTL)
 		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {

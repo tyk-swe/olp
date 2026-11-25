@@ -3,11 +3,12 @@ package kernel
 import (
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -30,7 +31,7 @@ func attemptPreparationKey(attempt routing.Attempt) preparationKey {
 }
 
 type targetPreparation struct {
-	guardrailDecisions []guardrails.Evidence
+	guardrailDecisions []guardrailpolicy.Evidence
 	provider           preparedProvider
 	unary              unaryAdmission
 	encoding           encodedRequest
@@ -39,15 +40,15 @@ type targetPreparation struct {
 }
 
 type unaryAdmission struct {
-	plan               *operationplan.Plan
+	plan               *unary.Plan
 	estimate           int64
 	parameters         routing.Names
 	receipt            oif.Receipt
-	guardrailDecisions []guardrails.Evidence
+	guardrailDecisions []guardrailpolicy.Evidence
 }
 
 type preparationEvidence struct {
-	guardrails []guardrails.Evidence
+	guardrails []guardrailpolicy.Evidence
 	planClass  string
 	output     *int64
 	document   oif.Document
@@ -85,7 +86,7 @@ func (p *requestPreparation) provider(key preparationKey, payload bool, build fu
 		return record.provider, nil
 	}
 	prepared, err := build()
-	evidence := guardrails.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
+	evidence := guardrailpolicy.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
 	if err != nil {
 		p.remember(key, record.withEvidence(evidence))
 		return prepared, err
@@ -103,7 +104,7 @@ func (p *requestPreparation) operation(key preparationKey, payload bool, build f
 		return record.unary, nil
 	}
 	prepared, err := build()
-	evidence := guardrails.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
+	evidence := guardrailpolicy.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
 	if err != nil {
 		p.remember(key, record.withEvidence(evidence))
 		return prepared, err
@@ -162,12 +163,12 @@ func (p *requestPreparation) evidence(key preparationKey) preparationEvidence {
 		planClass = receipt.Class
 	}
 	return preparationEvidence{
-		guardrails: slices.Clone(record.guardrailDecisions), planClass: planClass, output: copiedOutput(output),
+		guardrails: slices.Clone(record.guardrailDecisions), planClass: planClass, output: ptr.Clone(output),
 		document: record.provider.invocation.Prepared.Document(),
 	}
 }
 
-func (r targetPreparation) withEvidence(evidence []guardrails.Evidence) targetPreparation {
+func (r targetPreparation) withEvidence(evidence []guardrailpolicy.Evidence) targetPreparation {
 	return targetPreparation{
 		guardrailDecisions: evidence, provider: r.provider, unary: r.unary,
 		encoding: r.encoding, output: r.output, hasOutput: r.hasOutput,
@@ -183,7 +184,7 @@ func (r targetPreparation) discard(planning bool) targetPreparation {
 		guardrailDecisions: r.guardrailDecisions,
 		provider: preparedProvider{
 			admitted: r.provider.admitted, parameters: retainedParameters(r.provider.parameters, planning),
-			demand: r.provider.demand, receipt: r.provider.receipt, policyDecisions: r.provider.policyDecisions,
+			demand: r.provider.demand, receipt: r.provider.receipt,
 			guardrailSegments: r.provider.guardrailSegments, guardrailDecisions: r.provider.guardrailDecisions,
 		},
 		unary: unaryAdmission{
@@ -199,13 +200,6 @@ func retainedParameters(parameters routing.Names, planning bool) routing.Names {
 		return nil
 	}
 	return routing.Listed(parameters())
-}
-
-func copiedOutput(output *int64) *int64 {
-	if output == nil {
-		return nil
-	}
-	return new(*output)
 }
 
 func (p *requestPreparation) remember(key preparationKey, record targetPreparation) {
@@ -250,15 +244,6 @@ func (p *requestPreparation) activate(attempt routing.Attempt) {
 			p.targets[other] = record.discard(false)
 		}
 	}
-}
-
-func (p *requestPreparation) hasProviders() bool {
-	for _, record := range p.targets {
-		if record.provider.demand != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // requiresParameters is fixed by the policies of this route leg. Only those

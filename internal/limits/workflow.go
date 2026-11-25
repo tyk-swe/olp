@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 type WorkflowBounds struct {
@@ -42,11 +43,7 @@ func validWorkflowInteger(value *int64, minimum, maximum int64) bool {
 }
 
 func MinWorkflowInteger(fallback int64, values ...*int64) int64 {
-	selected := minWorkflowInteger(values)
-	if selected == nil {
-		return fallback
-	}
-	return *selected
+	return ptr.Or(minWorkflowInteger(values), fallback)
 }
 
 func minWorkflowInteger(values []*int64) *int64 {
@@ -80,19 +77,12 @@ func MinWorkflowCost(values ...*string) *string {
 }
 
 func ResolveWorkflowBounds(prior, route, key, caller *WorkflowBounds) WorkflowBounds {
-	previous, operator, principal, requested := workflowBoundsOrZero(prior), workflowBoundsOrZero(route), workflowBoundsOrZero(key), workflowBoundsOrZero(caller)
+	previous, operator, principal, requested := ptr.Value(prior), ptr.Value(route), ptr.Value(key), ptr.Value(caller)
 	iterations := MinWorkflowInteger(8, previous.MaxIterations, operator.MaxIterations, principal.MaxIterations, requested.MaxIterations)
 	tools := MinWorkflowInteger(32, previous.MaxToolCalls, operator.MaxToolCalls, principal.MaxToolCalls, requested.MaxToolCalls)
 	duration := MinWorkflowInteger(120, previous.MaxDurationSeconds, operator.MaxDurationSeconds, principal.MaxDurationSeconds, requested.MaxDurationSeconds)
 	concurrency := MinWorkflowInteger(0, previous.MaxConcurrentRuns, operator.MaxConcurrentRuns, principal.MaxConcurrentRuns, requested.MaxConcurrentRuns)
 	return WorkflowBounds{MaxIterations: &iterations, MaxToolCalls: &tools, MaxDurationSeconds: &duration, MaxConcurrentRuns: workflowConcurrency(concurrency), MaxRunCost: MinWorkflowCost(previous.MaxRunCost, operator.MaxRunCost, principal.MaxRunCost, requested.MaxRunCost)}
-}
-
-func workflowBoundsOrZero(bounds *WorkflowBounds) WorkflowBounds {
-	if bounds == nil {
-		return WorkflowBounds{}
-	}
-	return *bounds
 }
 
 func workflowConcurrency(value int64) *int64 {

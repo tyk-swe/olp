@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
@@ -25,8 +26,8 @@ func (a *Admission) ReserveAggregateBudgets(ctx context.Context, authority *keya
 		policy         *keyauthority.BudgetPolicy
 	}{
 		{"installation", authority.InstallationID, authority.InstallationBudget},
-		{"organization", projectBudgetSubject(authority.OrganizationID), authority.OrganizationBudget},
-		{"project", projectBudgetSubject(authority.ProjectID), authority.ProjectBudget},
+		{"organization", ptr.Value(authority.OrganizationID), authority.OrganizationBudget},
+		{"project", ptr.Value(authority.ProjectID), authority.ProjectBudget},
 	} {
 		if !boundary.policy.Limited() {
 			continue
@@ -93,7 +94,7 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 	}
 	request := hold.On(admission.Request{
 		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
-		Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
+		Cost: limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
 			policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, increases),
 	})
 	decision, cancel := context.WithTimeout(ctx, ReserveTimeout)
@@ -110,13 +111,6 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 		return nil, failure
 	}
 	return nil, a.Outage(keyID, true, err)
-}
-
-func projectBudgetSubject(project *string) string {
-	if project == nil {
-		return ""
-	}
-	return *project
 }
 
 func budgetBoundaryError(e *fault.Error, name, param string) *fault.Error {

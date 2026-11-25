@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   namedLimitRow,
   namedLimitsError
-} from '#lib/features/access/budgets/namedLimits.js';
+} from '#lib/features/budgets/namedLimits.js';
 import {
   policyError,
   policyForm
@@ -12,26 +12,21 @@ import { groupError } from '#lib/features/access/route-groups/policy.js';
 
 import {
   buildCreateRouteDraftInput,
-  buildContentPolicy,
   buildReplaceRouteDraftInput,
   certifiedCapabilities,
   emptyBehavior,
   eligibleTargetTuples,
   fidelityLabel,
-  hasOutputRules,
   missingTargetOperations,
   modesFor,
   parseSelectors,
-  policyRulesFrom,
   routeEligibilityWarnings,
   storedTargetLabel,
   surfacesFor,
   targetUnavailable,
-  validateContentPolicy,
   validateRouteBehavior,
   validateRouteEditor,
   validateTargetRoles,
-  type EditablePolicyRule,
   type EditableTarget,
   type RouteEditorValues,
   type RouteModelOption
@@ -89,74 +84,6 @@ describe('route selector input', () => {
   });
 });
 
-describe('content policy editing', () => {
-  const block: EditablePolicyRule = {
-    id: 'block_secret',
-    phase: 'input',
-    action: 'block',
-    pattern: 'secret',
-    replacement: ''
-  };
-  const redact: EditablePolicyRule = {
-    id: 'redact_email',
-    phase: 'output',
-    action: 'redact',
-    pattern: 'email',
-    replacement: '[redacted]'
-  };
-
-  it('round trips block and output-redaction rules without adding a block replacement', () => {
-    const policy = buildContentPolicy([block, redact]);
-    expect(policy).toEqual({
-      rules: [
-        {
-          id: block.id,
-          phase: block.phase,
-          action: block.action,
-          pattern: block.pattern
-        },
-        {
-          id: redact.id,
-          phase: redact.phase,
-          action: redact.action,
-          pattern: redact.pattern,
-          replacement: redact.replacement
-        }
-      ]
-    });
-    expect(policyRulesFrom(policy)).toEqual([block, redact]);
-    expect(hasOutputRules(policyRulesFrom(policy))).toBe(true);
-    expect(buildContentPolicy([])).toBeNull();
-    expect(hasOutputRules([block])).toBe(false);
-    expect(validateContentPolicy([block, redact])).toBeNull();
-  });
-
-  it.each([
-    { rules: [{ ...block, id: '9invalid' }], problem: /rule id/i },
-    { rules: [block, block], problem: /more than once/i },
-    { rules: [{ ...block, pattern: '' }], problem: /pattern/i },
-    { rules: [{ ...block, pattern: 'é'.repeat(257) }], problem: /pattern/i },
-    {
-      rules: [{ ...redact, replacement: 'x'.repeat(129) }],
-      problem: /replacement/i
-    },
-    {
-      rules: Array.from({ length: 65 }, (_, i) => ({ ...block, id: `r${i}` })),
-      problem: /at most/i
-    },
-    {
-      rules: Array.from({ length: 33 }, (_, i) => ({
-        ...block,
-        id: `r${i}`,
-        pattern: 'x'.repeat(512)
-      })),
-      problem: /combined/i
-    }
-  ])('refuses invalid rule sets', ({ rules, problem }) => {
-    expect(validateContentPolicy(rules)).toMatch(problem);
-  });
-});
-
 describe('route validation and serialization', () => {
   const target: EditableTarget = {
     providerModelId: 'model',
@@ -170,7 +97,6 @@ describe('route validation and serialization', () => {
     overallTimeoutMs: 10000,
     maxAttempts: 2,
     targets: [target],
-    contentPolicyRules: [],
     fidelity: { mode: 'transformed' },
     behavior: emptyBehavior()
   };
@@ -362,20 +288,6 @@ describe('route validation and serialization', () => {
     expect(
       validateRouteEditor({ ...passThrough, fidelity: { mode: 'transformed' } })
     ).toMatch(/cannot declare translation/i);
-    expect(
-      validateRouteEditor({
-        ...passThrough,
-        contentPolicyRules: [
-          {
-            id: 'secret',
-            phase: 'input',
-            action: 'block',
-            pattern: 'secret',
-            replacement: ''
-          }
-        ]
-      })
-    ).toMatch(/cannot carry a content policy/i);
     expect(
       validateRouteEditor({
         ...passThrough,
@@ -640,7 +552,6 @@ describe('gateway tool execution', () => {
     targets: [
       { providerModelId: 'model', priority: 1, weight: 1, timeoutMs: 60000 }
     ],
-    contentPolicyRules: [],
     fidelity: { mode: 'transformed' },
     behavior: {
       ...emptyBehavior(),

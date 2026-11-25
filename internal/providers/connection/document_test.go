@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -330,5 +330,36 @@ func TestStoredConfigurationServesTheConnectorItWasValidatedAs(t *testing.T) {
 		if !populated {
 			t.Errorf("no stored configuration sets %s, so the served and validated copies are never compared on it", field.Name)
 		}
+	}
+}
+
+func TestServingMatchesJSONConversionAndDeepClones(t *testing.T) {
+	t.Parallel()
+	for _, name := range storedNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			doc := readStored(t, name).Document()
+			got, err := doc.Serving()
+			if err != nil {
+				t.Fatalf("Serving: %v", err)
+			}
+			encoded, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want routing.Configuration
+			if err := json.Unmarshal(encoded, &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Serving() =\n%#v\nwant\n%#v", got, want)
+			}
+			if doc.Options.Network != nil && got.Options.Network == doc.Options.Network {
+				t.Fatal("Serving() aliased Network pointer")
+			}
+			if doc.BatchStorage != nil && got.BatchStorage == doc.BatchStorage {
+				t.Fatal("Serving() aliased BatchStorage pointer")
+			}
+		})
 	}
 }

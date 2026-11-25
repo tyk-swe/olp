@@ -1,5 +1,5 @@
 import { overviewKeys } from '#lib/features/overview/index.js';
-import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import { refreshProviderReceipt } from './providerChanges';
 import { providerKeys } from '#lib/features/providers/providerKeys.js';
@@ -7,7 +7,6 @@ import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 import {
-  ApiProblem,
   errorMessage,
   fieldIssues,
   isEtagMismatch,
@@ -16,12 +15,10 @@ import {
 import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
 import {
   getProvider,
-  activateProvider,
-  createProvider,
   probeProvider,
-  updateProvider,
   type Provider,
-  type ProviderProbe
+  type ProviderProbe,
+  type ProviderVendor
 } from '#lib/features/providers/providers.js';
 import {
   certifyProviderModel,
@@ -34,13 +31,8 @@ import {
   type CapabilityDeclaration,
   type CapabilityCertification
 } from '#lib/features/providers/models.js';
-import {
-  listProviderCredentials,
-  rotateProviderCredential,
-  type ProviderCredential
-} from '#lib/features/providers/credentials.js';
+import { listProviderCredentials } from '#lib/features/providers/credentials.js';
 import type { ProviderProfile } from '#lib/features/providers/providerProfiles.js';
-import type { ProviderVendor } from '#lib/features/providers/providers.js';
 import type { GrantEnrollment } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
 import {
@@ -57,53 +49,30 @@ import {
 } from '#lib/features/providers/providerEditor.js';
 import { useRole } from '#lib/session/useRole.svelte.js';
 import {
-  useMutationIntent,
-  usePrincipalLifetime
-} from '#lib/editing/mutationIntent.svelte.js';
-
-function isLiveGrant(
-  credentials: ProviderCredential[] | undefined,
-  id: string | null | undefined,
-  pluginDigest: string | undefined
-): boolean {
-  const credential = credentials?.find((candidate) => candidate.id === id);
-  return Boolean(
-    credential?.grant &&
-    !credential.revoked_at &&
-    !credential.grant.lapsed_at &&
-    credential.grant.plugin_digest === pluginDigest
-  );
-}
-
-type ConnectionInput = Parameters<typeof createProvider>[0];
-type ConnectionProgress = { input: ConnectionInput } & (
-  | { phase: 'create'; uncertain: boolean }
-  | {
-      phase: 'update';
-      provider: Pick<Provider, 'id' | 'etag'>;
-      uncertain: boolean;
-    }
-  | {
-      phase: 'credential';
-      provider: Pick<Provider, 'id' | 'etag'>;
-      status: 'ready' | 'refused' | 'uncertain';
-    }
-  | { phase: 'saved'; id: string }
-);
-
-type ActivationProgress = { input: Pick<Provider, 'id' | 'etag'> } & (
-  | { phase: 'pending'; uncertain: boolean }
-  | { phase: 'committed'; generation: number }
-);
+  EditorSession,
+  useMutationIntentGroup
+} from '#lib/editing/editorSession.svelte.js';
+import {
+  commitProviderActivation,
+  isLiveGrant,
+  isRefusedProblem,
+  resolveConnectionProgress,
+  saveProviderConnection,
+  type ActivationProgress,
+  type ConnectionProgress
+} from './providerWizardConnection';
 
 export class ProviderWizardState {
   private connectionProgress?: ConnectionProgress;
   private activationProgress?: ActivationProgress;
-  private ownerEpoch = 0;
-  rotateProviderCredentialIntent = useMutationIntent();
-  activateProviderIntent = useMutationIntent();
-
-  createIntent = useMutationIntent();
+  private readonly intents = useMutationIntentGroup([
+    'create',
+    'rotateCredential',
+    'activate'
+  ]);
+  readonly createIntent = this.intents.create;
+  readonly rotateProviderCredentialIntent = this.intents.rotateCredential;
+  readonly activateProviderIntent = this.intents.activate;
 
   stepLabels = ['Connection', 'Models and capabilities', 'Activation'] as const;
   access = useRole();
@@ -118,7 +87,6 @@ export class ProviderWizardState {
   wizardModelPagination = $state(emptyCursorHistory());
   wizardModels;
   capabilityOptions;
-
   draftCredentials;
   probe = $state<ProviderProbe | null>(null);
 
@@ -143,7 +111,6 @@ export class ProviderWizardState {
   get grantEnrollment(): GrantEnrollment | null {
     return this.grant.enrollment;
   }
-
   get grantInput() {
     return this.grant.input;
   }
@@ -186,7 +153,6 @@ export class ProviderWizardState {
       requiresGrant(this.selectedSpec, this.draft.authMode)
     )
   );
-
   grantEnrolled = $derived.by(() =>
     isLiveGrant(
       this.draftCredentials.data,
@@ -194,23 +160,14 @@ export class ProviderWizardState {
       this.draft?.profileRevision
     )
   );
-  private refused(error: unknown) {
-    return (
-      error instanceof ApiProblem &&
-      error.problem.status >= 400 &&
-      error.problem.status < 500 &&
-      ![408, 429].includes(error.problem.status)
-    );
-  }
+
   private retireProgress() {
     this.connectionProgress = undefined;
     this.activationProgress = undefined;
-    this.createIntent.reset();
-    this.rotateProviderCredentialIntent.reset();
-    this.activateProviderIntent.reset();
+    this.intents.resetAll();
   }
-  private capturePrincipal = usePrincipalLifetime(() => {
-    this.ownerEpoch += 1;
+
+  private readonly session = new EditorSession(() => {
     this.retireProgress();
     if (this.draft) {
       this.draft.credential = '';
@@ -220,17 +177,13 @@ export class ProviderWizardState {
     this.busy = this.errorMessage = this.notice = '';
     this.validationIssues = [];
   });
-  private captureOwner = () => {
-    const principalCurrent = this.capturePrincipal();
-    const epoch = this.ownerEpoch;
-    return () => principalCurrent() && epoch === this.ownerEpoch;
-  };
+
   run = async (
     label: string,
     action: (isCurrent: () => boolean) => Promise<void>
   ): Promise<boolean> => {
     if (this.busy || !this.canManage) return false;
-    const isCurrent = this.captureOwner();
+    const { isCurrent } = this.session.capture();
     this.busy = label;
     this.errorMessage = '';
     this.validationIssues = [];
@@ -242,11 +195,12 @@ export class ProviderWizardState {
       if (!isCurrent()) return false;
       const progress = this.connectionProgress;
       if (progress?.phase === 'create' || progress?.phase === 'update') {
-        if (this.refused(error) && !progress.uncertain) {
+        if (isRefusedProblem(error) && !progress.uncertain) {
           this.connectionProgress = undefined;
-          this.createIntent.reset();
-        } else if (!this.refused(error))
+          this.intents.create.reset();
+        } else if (!isRefusedProblem(error)) {
           this.connectionProgress = { ...progress, uncertain: true };
+        }
       }
       if (this.wizardProvider && isEtagMismatch(error))
         this.wizardConflict = true;
@@ -259,11 +213,13 @@ export class ProviderWizardState {
       if (isCurrent()) this.busy = '';
     }
   };
+
   clearCertificationResults = () => {
     this.activationProgress = undefined;
-    this.activateProviderIntent.reset();
+    this.intents.activate.reset();
     this.certificationResults = {};
   };
+
   refetchWizardModels = async () => {
     const id = this.providerId;
     const cursor = this.wizardModelPagination.cursor;
@@ -273,6 +229,7 @@ export class ProviderWizardState {
       staleTime: 0
     });
   };
+
   reloadWizard = async () => {
     if (!this.wizardProvider) return;
     await this.run('reload', async (isCurrent) => {
@@ -282,9 +239,10 @@ export class ProviderWizardState {
       this.wizardConflict = false;
     });
   };
+
   goBack = () => {
     if (this.busy || this.wizardStep <= 1) return;
-    if (this.activateProviderIntent.unresolved) {
+    if (this.intents.activate.unresolved) {
       this.errorMessage =
         'Activation may already have committed. Retry activation before changing this connection, or leave the wizard.';
       return;
@@ -306,7 +264,7 @@ export class ProviderWizardState {
   };
 
   startAnother = () => {
-    this.ownerEpoch += 1;
+    this.session.advance();
     this.retireProgress();
     if (this.draft) {
       this.draft.credential = '';
@@ -327,19 +285,18 @@ export class ProviderWizardState {
     this.wizardConflict = false;
     resetCursor(this.wizardModelPagination);
   };
+
   createDraft = async (event: SubmitEvent) => {
     event.preventDefault();
     if (!this.canManage || this.busy || !this.draft || !this.selectedSpec)
       return;
     const current = this.draft;
     const spec = this.selectedSpec;
-
     const existing = this.wizardProvider;
     const issue = validateProviderDraft(current, spec, {
       credentialAlreadyStored: Boolean(
         existing || this.connectionProgress?.phase === 'saved'
       ),
-
       profiles: this.queryClient.getQueryData<ProviderProfile[]>(
         providerKeys.profiles()
       ),
@@ -352,53 +309,34 @@ export class ProviderWizardState {
       this.validationIssues = [];
       return;
     }
-    const input = buildCreateProviderInput(current, spec);
-    const previous = this.connectionProgress;
-    const changed =
-      previous &&
-      stringifyNativeJSON(previous.input) !== stringifyNativeJSON(input);
-    const credentialCorrection =
-      previous?.phase === 'credential' &&
-      previous.status === 'refused' &&
-      stringifyNativeJSON({
-        ...previous.input,
-        credential: undefined,
-        credential_reference: undefined
-      }) ===
-        stringifyNativeJSON({
-          ...input,
-          credential: undefined,
-          credential_reference: undefined
-        });
-    if (changed && !credentialCorrection) {
-      this.errorMessage =
-        previous.phase === 'saved'
-          ? 'Connection saved. Retry the original fields to refresh and test it before editing, or leave this wizard.'
-          : 'The previous submission may already have saved. Retry its original fields before editing, or leave this wizard.';
+    const resolved = resolveConnectionProgress(
+      buildCreateProviderInput(current, spec),
+      this.connectionProgress,
+      existing
+    );
+    if (resolved.error || !resolved.progress) {
+      this.errorMessage = resolved.error ?? '';
       return;
     }
-    const progress: ConnectionProgress = credentialCorrection
-      ? { ...previous, input: snapshotNativeJSON(input), status: 'ready' }
-      : (previous ??
-        (existing
-          ? {
-              phase: 'update',
-              input: snapshotNativeJSON(input),
-              provider: { id: existing.id, etag: existing.etag },
-              uncertain: false
-            }
-          : {
-              phase: 'create',
-              input: snapshotNativeJSON(input),
-              uncertain: false
-            }));
+    const hadPrevious = Boolean(this.connectionProgress);
+    const progress = resolved.progress;
     this.connectionProgress = progress;
-    if (!previous) {
+    if (!hadPrevious) {
       this.activationProgress = undefined;
-      this.activateProviderIntent.reset();
+      this.intents.activate.reset();
     }
     await this.run('create', async (isCurrent) => {
-      const submission = await this.saveConnection(progress, isCurrent);
+      const submission = await saveProviderConnection(progress, {
+        createIntent: this.intents.create,
+        rotateIntent: this.intents.rotateCredential,
+        isCurrent,
+        setProgress: (next) => {
+          this.connectionProgress = next;
+        },
+        setNotice: (notice) => {
+          this.notice = notice;
+        }
+      });
       if (!submission || !isCurrent()) return;
       current.credential = '';
       this.providerId = submission.id;
@@ -406,10 +344,7 @@ export class ProviderWizardState {
         'Provider saved. Connection testing remains a separate step.';
       const refreshed = await refreshProviderReceipt(
         this.queryClient,
-        {
-          change: { kind: 'connection' },
-          notice: this.notice
-        },
+        { change: { kind: 'connection' }, notice: this.notice },
         this.refetchWizardModels,
         isCurrent
       );
@@ -433,77 +368,6 @@ export class ProviderWizardState {
       if (isCurrent()) this.connectionProgress = undefined;
     });
   };
-  private saveConnection = async (
-    progress: ConnectionProgress,
-    isCurrent: () => boolean
-  ): Promise<Extract<ConnectionProgress, { phase: 'saved' }> | undefined> => {
-    if (progress.phase === 'saved') return progress;
-    if (progress.phase === 'update') {
-      const updated = await updateProvider(
-        progress.provider.id,
-        progress.provider.etag,
-        {
-          name: progress.input.name,
-          configuration: progress.input.configuration
-        }
-      );
-      if (!isCurrent()) return;
-      const next: ConnectionProgress = {
-        phase: 'credential',
-        input: progress.input,
-        provider: { id: updated.id, etag: updated.etag },
-        status: 'ready'
-      };
-      this.connectionProgress = next;
-      this.notice = 'Connection configuration saved.';
-      return this.saveConnection(next, isCurrent);
-    }
-    if (progress.phase === 'credential') {
-      const credential =
-        progress.input.credential_reference ?? progress.input.credential;
-      if (credential) {
-        try {
-          await this.rotateProviderCredentialIntent.submit(
-            [progress.provider, credential] as const,
-            (input, requestId) => rotateProviderCredential(...input, requestId)
-          );
-        } catch (error) {
-          if (isCurrent()) {
-            const refused =
-              this.refused(error) && progress.status !== 'uncertain';
-            this.connectionProgress = {
-              ...progress,
-              status: refused ? 'refused' : 'uncertain'
-            };
-            if (refused) this.rotateProviderCredentialIntent.reset();
-          }
-          throw error;
-        }
-      }
-      if (!isCurrent()) return;
-      return this.connectionSaved(progress.input, progress.provider.id);
-    }
-    const request = this.createIntent.prepare(progress.input);
-    const id = await createProvider(request.input, request.requestId);
-    if (!isCurrent()) return;
-    this.createIntent.reset();
-    return this.connectionSaved(progress.input, id);
-  };
-  private connectionSaved(
-    input: ConnectionInput,
-    id: string
-  ): Extract<ConnectionProgress, { phase: 'saved' }> {
-    const progress = {
-      phase: 'saved' as const,
-      id,
-      input: snapshotNativeJSON({
-        ...input,
-        credential: input.credential === undefined ? undefined : ''
-      })
-    };
-    this.connectionProgress = progress;
-    return progress;
-  }
 
   private holdsLiveGrant = async (provider: Provider) => {
     if (!provider.draft_credential_id) return false;
@@ -521,15 +385,14 @@ export class ProviderWizardState {
 
   private testEnrolledGrant = async (isCurrent: () => boolean) => {
     await this.queryClient.invalidateQueries(
-      {
-        queryKey: providerKeys.credentials(this.providerId)
-      },
+      { queryKey: providerKeys.credentials(this.providerId) },
       { throwOnError: true }
     );
     if (!isCurrent()) return;
     const snapshot = await this.refetchWizardModels();
     if (isCurrent()) await this.testConnection(snapshot.provider, isCurrent);
   };
+
   private testConnection = async (
     provider: Provider,
     isCurrent: () => boolean
@@ -540,9 +403,11 @@ export class ProviderWizardState {
     if (!this.probe.succeeded) throw new Error(this.probe.detail);
     this.wizardStep = 2;
   };
+
   continueGrantEnrollment = () => this.grant.continue();
   pollGrantEnrollment = () => this.grant.poll();
   cancelGrantEnrollment = () => this.grant.cancel();
+
   discoverWizardProvider = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
@@ -566,6 +431,7 @@ export class ProviderWizardState {
       });
     });
   };
+
   declareWizardModels = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
@@ -588,6 +454,7 @@ export class ProviderWizardState {
       });
     });
   };
+
   reviewWizardModel = async (
     modelId: string,
     enabled: boolean,
@@ -616,6 +483,7 @@ export class ProviderWizardState {
       this.notice = 'Capability review saved with declared provenance.';
     });
   };
+
   certifyWizardModel = async (modelId: string) => {
     const current = this.wizardProvider;
     if (!current) return;
@@ -626,7 +494,6 @@ export class ProviderWizardState {
         if (!isCurrent()) return;
         this.probe = probe;
         if (!this.probe.succeeded) throw new Error(this.probe.detail);
-
         provider = (await this.refetchWizardModels()).provider;
         if (!isCurrent()) return;
       }
@@ -646,6 +513,7 @@ export class ProviderWizardState {
       this.notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
     });
   };
+
   testWizardDraftForActivation = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
@@ -659,6 +527,7 @@ export class ProviderWizardState {
       this.notice = `Final draft test passed: ${probeSummary(this.probe)}`;
     });
   };
+
   activateWizardProvider = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
@@ -669,35 +538,13 @@ export class ProviderWizardState {
     };
     this.activationProgress = progress;
     await this.run('activate', async (isCurrent) => {
-      const activate = async (): Promise<
-        Extract<ActivationProgress, { phase: 'committed' }> | undefined
-      > => {
-        if (progress.phase === 'committed') return progress;
-        try {
-          const generation = await this.activateProviderIntent.submit(
-            progress.input,
-            (input, requestId) => activateProvider(input, requestId)
-          );
-          if (!isCurrent()) return;
-          const committed = {
-            phase: 'committed' as const,
-            input: progress.input,
-            generation
-          };
-          this.activationProgress = committed;
-          return committed;
-        } catch (error) {
-          if (isCurrent()) {
-            if (this.refused(error) && !progress.uncertain) {
-              this.activationProgress = undefined;
-              this.activateProviderIntent.reset();
-            } else if (!this.refused(error))
-              this.activationProgress = { ...progress, uncertain: true };
-          }
-          throw error;
+      const committed = await commitProviderActivation(progress, {
+        activateIntent: this.intents.activate,
+        isCurrent,
+        setProgress: (next) => {
+          this.activationProgress = next;
         }
-      };
-      const committed = await activate();
+      });
       if (!committed || !isCurrent()) return;
       this.notice = `Provider activated in runtime generation ${committed.generation}.`;
       const refreshed = await refreshProviderReceipt(
@@ -716,10 +563,65 @@ export class ProviderWizardState {
       if (refreshed.kind === 'stale') return;
       if (refreshed.kind === 'refresh-failed') {
         this.errorMessage = `The provider change succeeded, but refreshing failed. ${refreshed.message}`;
-        return;
       }
     });
   };
+
+  private loadCopiedProvider() {
+    const copy = globalThis.location
+      ? new SvelteURLSearchParams(globalThis.location.search).get('copy')
+      : null;
+    if (!copy || this.copyLoaded || !this.draft || !this.selectedSpec) return;
+    this.copyLoaded = true;
+    const { isCurrent } = this.session.capture();
+    const initialDraft = this.draft;
+    const initialInput = stringifyNativeJSON(
+      buildCreateProviderInput(initialDraft, this.selectedSpec)
+    );
+    const canApplyCopy = () => {
+      if (
+        !isCurrent() ||
+        this.providerId ||
+        this.connectionProgress ||
+        this.draft !== initialDraft ||
+        !this.selectedSpec
+      )
+        return false;
+      try {
+        return (
+          initialInput ===
+          stringifyNativeJSON(
+            buildCreateProviderInput(this.draft, this.selectedSpec)
+          )
+        );
+      } catch {
+        return false;
+      }
+    };
+    void getProvider(copy)
+      .then((source) => {
+        if (!canApplyCopy()) return;
+        const spec = this.providerKinds.data?.find(
+          (kind) => kind.kind === source.configuration.kind
+        );
+        if (!spec) return;
+        const duplicate = createProviderDraft(spec, source.configuration);
+        duplicate.name = `${source.name} copy`;
+        duplicate.credential = '';
+        // Network credentials are provider-owned and cannot be reused by a copy.
+        if (duplicate.document?.at(networkCredentialPath) !== undefined) {
+          duplicate.document.set(networkCredentialPath, undefined);
+          this.notice =
+            'The copied connection needs its own network credential. The source credential reference was removed.';
+        }
+        this.draft = duplicate;
+      })
+      .catch((error) => {
+        if (!canApplyCopy()) return;
+        this.errorMessage = errorMessage(error);
+      });
+  }
+
   constructor() {
     this.providerKinds = createQuery(() => ({
       queryKey: providerKeys.kinds(),
@@ -763,62 +665,7 @@ export class ProviderWizardState {
       if (!this.credentialRequired) current.credential = '';
     });
     $effect(() => {
-      const copy = globalThis.location
-        ? new SvelteURLSearchParams(globalThis.location.search).get('copy')
-        : null;
-      if (!copy || this.copyLoaded || !this.draft || !this.selectedSpec) return;
-      this.copyLoaded = true;
-      const isCurrent = this.captureOwner();
-      const initialDraft = this.draft;
-      const initialInput =
-        initialDraft && this.selectedSpec
-          ? stringifyNativeJSON(
-              buildCreateProviderInput(initialDraft, this.selectedSpec)
-            )
-          : null;
-      const canApplyCopy = () => {
-        if (
-          !isCurrent() ||
-          this.providerId ||
-          this.connectionProgress ||
-          this.draft !== initialDraft
-        )
-          return false;
-        try {
-          return (
-            initialInput ===
-            (this.draft && this.selectedSpec
-              ? stringifyNativeJSON(
-                  buildCreateProviderInput(this.draft, this.selectedSpec)
-                )
-              : null)
-          );
-        } catch {
-          return false;
-        }
-      };
-      void getProvider(copy)
-        .then((source) => {
-          if (!canApplyCopy()) return;
-          const spec = this.providerKinds.data?.find(
-            (kind) => kind.kind === source.configuration.kind
-          );
-          if (!spec) return;
-          const duplicate = createProviderDraft(spec, source.configuration);
-          duplicate.name = `${source.name} copy`;
-          duplicate.credential = '';
-          // Network credentials are provider-owned and cannot be reused by a copy.
-          if (duplicate.document?.at(networkCredentialPath) !== undefined) {
-            duplicate.document.set(networkCredentialPath, undefined);
-            this.notice =
-              'The copied connection needs its own network credential. The source credential reference was removed.';
-          }
-          this.draft = duplicate;
-        })
-        .catch((error) => {
-          if (!canApplyCopy()) return;
-          this.errorMessage = errorMessage(error);
-        });
+      this.loadCopiedProvider();
     });
     onDestroy(() => {
       void this.queryClient.cancelQueries({

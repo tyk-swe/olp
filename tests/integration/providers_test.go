@@ -21,6 +21,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -30,6 +33,86 @@ import (
 )
 
 const providerEndpoint = `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:9/v1"}`
+
+func TestProviderCredentialSlotsShowSharedQuotaFromActiveRevision(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configuration := func(assignment routing.SharedTokenQuota) []byte {
+		cfg, err := connection.Decode([]byte(providerEndpoint))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Options.SharedTokenQuotas = []routing.SharedTokenQuota{assignment}
+		return encoded(t, cfg)
+	}
+	active := routing.SharedTokenQuota{Model: "model-a", Group: "shared", TokensPerMinute: 1000}
+	revision := uuid.NewString()
+	exec(`INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,source_etag,activated_by)
+		VALUES($1,$2,1,'quota-fixture',$3,'[]','[]',$1,$4)`, revision, f.providerID, configuration(active), f.ownerID)
+	exec(`UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, f.providerID, revision)
+	const token = "credential-slots-session"
+	exec(`INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`,
+		uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token))
+
+	awayFromMinuteRollover()
+	runner := newRunner(t)
+	const used int64 = 700
+	lookup := limits.SharedQuotaLookup(routing.SharedTokenQuotaGroupID(f.projectID, active.Group))
+	if _, err := runner.ReserveRate(ctx, scripts.RateReservation{Lookup: lookup, LeaseID: uuid.NewString(), Tokens: used, TokensPerMinute: active.TokensPerMinute, TTL: time.Minute, Stated: true}); err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.DiscardHandler)
+	api := access.New(access.Config{Pool: pool, Installation: installation, Auth: auth, Keys: keys, Log: quiet})
+	mux := http.NewServeMux()
+	providers.New(providers.Deps{Access: api, Egress: &egress.Policy{}, Getenv: func(string) string { return "" }, Quotas: fleet.New(runner), Log: quiet}).Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	type usage struct {
+		Used    int64 `json:"tokens_this_minute"`
+		Ceiling int64 `json:"tokens_per_minute"`
+	}
+	for _, draftGroup := range []string{active.Group, "renamed"} {
+		draft := routing.SharedTokenQuota{Model: active.Model, Group: draftGroup, TokensPerMinute: 2000}
+		exec(`UPDATE olp.providers SET configuration=$2 WHERE id=$1`, f.providerID, configuration(draft))
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/providers/"+f.providerID+"/credential-slots", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.AddCookie(&http.Cookie{Name: access.SessionCookie, Value: token})
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Groups map[string]usage `json:"shared_group_usage"`
+		}
+		if response.StatusCode != 200 || json.Unmarshal(raw, &body) != nil {
+			t.Fatalf("credential slots returned HTTP %d %s", response.StatusCode, raw)
+		}
+		if got := body.Groups[active.Group]; len(body.Groups) != 1 || got != (usage{Used: used, Ceiling: active.TokensPerMinute}) {
+			t.Fatalf("credential slots with draft group %q returned %+v, want active group %q with %d used of %d", draftGroup, body.Groups, active.Group, used, active.TokensPerMinute)
+		}
+		t.Logf("GET credential-slots with draft group %q: HTTP %d shared_group_usage=%+v", draftGroup, response.StatusCode, body.Groups)
+	}
+}
 
 type providerFixture struct {
 	pool   *pgxpool.Pool

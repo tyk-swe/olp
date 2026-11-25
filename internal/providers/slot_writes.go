@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -151,19 +152,19 @@ func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, 
 	if existing == nil && slotCount >= maxSlots {
 		return httpkit.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
 	}
-	enabled, priority, weight := valueOr(slot.Enabled, true), valueOr(slot.Priority, 0), valueOr(slot.Weight, 1)
+	enabled, priority, weight := ptr.Or(slot.Enabled, true), ptr.Value(slot.Priority), ptr.Or(slot.Weight, 1)
 	credentialID, err := s.slotCredential(ctx, tx, current, slot, source, existing)
 	if err != nil {
 		return err
 	}
-	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: orEmpty(slot.AllowedAPIKeys), AllowedModels: orEmpty(slot.AllowedModels), AllowedRoutes: orEmpty(slot.AllowedRoutes)})
+	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: ptr.NonNil(slot.AllowedAPIKeys), AllowedModels: ptr.NonNil(slot.AllowedModels), AllowedRoutes: ptr.NonNil(slot.AllowedRoutes)})
 	limits, _ := json.Marshal(slot.limits())
 	if existing == nil {
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
 			return err
 		}
 	} else {
-		keepValidation := deref(existing.CredentialID) == deref(credentialID)
+		keepValidation := ptr.Value(existing.CredentialID) == ptr.Value(credentialID)
 		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET name=$3,enabled=$4,priority=$5,weight=$6,credential_id=$7,restrictions=$8,limits=$9,validated_at=CASE WHEN $10 THEN validated_at END,validated_fingerprint=CASE WHEN $10 THEN validated_fingerprint END WHERE id=$1 AND provider_id=$2", slotID, id, slot.Name, enabled, priority, weight, credentialID, restrictions, limits, keepValidation); err != nil {
 			return err
 		}

@@ -6,7 +6,7 @@
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
   import { ProjectScopeField } from '#lib/features/access/index.js';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import { stateLabel } from '#lib/format.js';
   import type { FieldIssue } from '#lib/management/http.js';
   import { listProviderVendors } from '#lib/features/providers/providers.js';

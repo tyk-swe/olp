@@ -8,26 +8,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/interaction"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/providerconfig"
-	"github.com/tyk-swe/olp/internal/routing/durablecontract"
-	"github.com/tyk-swe/olp/internal/routing/realtimecontract"
 )
 
 // Generation identifies one published runtime configuration.
@@ -180,23 +176,19 @@ type Target struct {
 
 // Route is the latest published revision of one slug.
 type Route struct {
-	guardrailMigrated     bool
-	compiledContentPolicy *contentpolicy.Compiled
-	ID                    string    `json:"id"`
-	Slug                  string    `json:"slug"`
-	Operations            []string  `json:"operations"`
-	OverallTimeout        int64     `json:"overall_timeout"`
-	MaxAttempts           int       `json:"max_attempts"`
-	Targets               []Target  `json:"targets"`
-	RoutingID             string    `json:"routing_id"`
-	RevisionID            string    `json:"revision_id,omitempty"`
-	Revision              int       `json:"revision,omitempty"`
-	PublishedAt           time.Time `json:"published_at,omitempty"`
-	Policy                *Policy   `json:"policy,omitempty"`
-	ProjectID             *string   `json:"project_id,omitempty"`
-
-	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
-	Fidelity      RouteFidelity         `json:"fidelity"`
+	ID             string        `json:"id"`
+	Slug           string        `json:"slug"`
+	Operations     []string      `json:"operations"`
+	OverallTimeout int64         `json:"overall_timeout"`
+	MaxAttempts    int           `json:"max_attempts"`
+	Targets        []Target      `json:"targets"`
+	RoutingID      string        `json:"routing_id"`
+	RevisionID     string        `json:"revision_id,omitempty"`
+	Revision       int           `json:"revision,omitempty"`
+	PublishedAt    time.Time     `json:"published_at,omitempty"`
+	Policy         *Policy       `json:"policy,omitempty"`
+	ProjectID      *string       `json:"project_id,omitempty"`
+	Fidelity       RouteFidelity `json:"fidelity"`
 	Behavior
 }
 
@@ -215,12 +207,12 @@ type Snapshot struct {
 	CodeConnections      map[string]Configuration  `json:"code_connections,omitempty"`
 	codeRevisions        map[string]codeRevision
 	interactions         map[string]map[string]*interaction.Template
-	operations           map[string]map[string]*operationplan.Template
-	media                map[string]map[string]*mediacontract.Template
-	durable              map[string]map[string]*durablecontract.Template
-	realtime             map[string]map[string]*realtimecontract.Template
-	webrtc               map[string]map[string]*realtimecontract.Template
-	duplex               map[string]map[string]*duplexcontract.Template
+	operations           map[string]map[string]*unary.Template
+	media                map[string]map[string]*media.Template
+	durable              map[string]map[string]*DurableTemplate
+	realtime             map[string]map[string]*RealtimeTemplate
+	webrtc               map[string]map[string]*RealtimeTemplate
+	duplex               map[string]map[string]*duplex.Template
 	Generation           Generation          `json:"generation"`
 	Providers            map[string]Provider `json:"providers"`
 	Routes               map[string]Route    `json:"routes"`
@@ -323,7 +315,7 @@ func (s *Snapshot) validate() error {
 		if r.OverallTimeout < 1 || r.MaxAttempts < 1 || len(r.Operations) == 0 || len(r.Targets) == 0 {
 			return fmt.Errorf("route %q has no serving budget or targets", slug)
 		}
-		if err := ValidateRouteFidelity(r.Fidelity, r.ContentPolicy); err != nil {
+		if err := validateFidelity(r.Fidelity); err != nil {
 			return fmt.Errorf("route %q fidelity: %w", slug, err)
 		}
 		if err := r.ValidatePassthrough(); err != nil {
@@ -369,7 +361,6 @@ func (s *Snapshot) Compile() error {
 	next := *s
 	next.Providers = compileProviderMetadata(s.Providers)
 	next.CodePaidConnections = compileProviderMetadata(s.CodePaidConnections)
-	next.Routes = maps.Clone(s.Routes)
 	next.Guardrails = s.Guardrails.Clone()
 	if err := next.compileGuardrails(); err != nil {
 		return err
@@ -386,15 +377,14 @@ func (s *Snapshot) Compile() error {
 		}
 	}
 	next.interactions = make(map[string]map[string]*interaction.Template)
-	next.operations = make(map[string]map[string]*operationplan.Template)
-	next.media = make(map[string]map[string]*mediacontract.Template)
-	next.durable = make(map[string]map[string]*durablecontract.Template)
-	next.realtime = make(map[string]map[string]*realtimecontract.Template)
-	next.webrtc = make(map[string]map[string]*realtimecontract.Template)
-	next.duplex = make(map[string]map[string]*duplexcontract.Template)
+	next.operations = make(map[string]map[string]*unary.Template)
+	next.media = make(map[string]map[string]*media.Template)
+	next.durable = make(map[string]map[string]*DurableTemplate)
+	next.realtime = make(map[string]map[string]*RealtimeTemplate)
+	next.webrtc = make(map[string]map[string]*RealtimeTemplate)
+	next.duplex = make(map[string]map[string]*duplex.Template)
 	for slug, r := range next.Routes {
-		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]
-		templates, policy, err := next.compileRouteExecution(r)
+		templates, err := next.compileRouteExecution(r)
 		if err != nil {
 			return fmt.Errorf("route %q interaction: %w", slug, err)
 		}
@@ -429,8 +419,6 @@ func (s *Snapshot) Compile() error {
 			return fmt.Errorf("route %q duplex: %w", slug, err)
 		}
 		next.duplex[slug] = duplex
-		r.compiledContentPolicy = policy
-		next.Routes[slug] = r
 	}
 	*s = next
 	return nil
@@ -439,6 +427,30 @@ func (s *Snapshot) Compile() error {
 func validUUID(value string) bool {
 	_, err := uuid.Parse(value)
 	return err == nil && len(value) == 36
+}
+
+func (p *Provider) providerOptions() providerconfig.Options {
+	return providerconfig.Options{
+		Network: p.Network, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings,
+		OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, PluginOptions: p.PluginOptions,
+		TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes,
+		VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models, ParameterDefaults: p.ParameterDefaults,
+	}
+}
+
+func (p *Provider) applyProviderOptions(opts providerconfig.Options) {
+	p.Network = opts.Network
+	p.SemanticHeaders = opts.SemanticHeaders
+	p.QuerySettings = opts.QuerySettings
+	p.OperationDefaults = opts.OperationDefaults
+	p.Bindings = opts.Bindings
+	p.PluginOptions = opts.PluginOptions
+	p.TuningDatasetURIPrefixes = opts.TuningDatasetURIPrefixes
+	p.DocumentURIPrefixes = opts.DocumentURIPrefixes
+	p.VendorID = opts.VendorID
+	p.CredentialHeaders = opts.CredentialHeaders
+	p.Models = opts.Models
+	p.ParameterDefaults = opts.ParameterDefaults
 }
 
 func (p *Provider) Connector() connectors.Config {
@@ -451,13 +463,7 @@ func (p *Provider) Connector() connectors.Config {
 		Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion,
 		CloudProject: p.CloudProject, BatchStorage: p.BatchStorage, Deployment: p.Deployment, APIVersion: p.APIVersion,
 	}
-	options := providerconfig.Options{
-		Network: p.Network, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings,
-		OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, PluginOptions: p.PluginOptions,
-		TuningDatasetURIPrefixes: p.TuningDatasetURIPrefixes, DocumentURIPrefixes: p.DocumentURIPrefixes,
-		VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models, ParameterDefaults: p.ParameterDefaults,
-	}
-	return identity.Connector(options, p.Plugin, p.CredentialSource, p.ObservedPrincipal)
+	return identity.Connector(p.providerOptions(), p.Plugin, p.CredentialSource, p.ObservedPrincipal)
 }
 
 // HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.

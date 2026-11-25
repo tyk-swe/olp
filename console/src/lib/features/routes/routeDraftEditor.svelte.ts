@@ -1,38 +1,25 @@
-import { confirmAction } from '#lib/components/confirm.js';
-import { overviewKeys } from '#lib/features/overview/index.js';
 import {
   providerKeys,
   listProviderModelInventory
 } from '#lib/features/providers/index.js';
 import { routeKeys } from '#lib/features/routes/routeKeys.js';
-import { onDestroy, untrack } from 'svelte';
+import { untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
-import { goto } from '$app/navigation';
 import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
-import type { components } from '#lib/management/schema.js';
-import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 import {
+  acceptRemote,
   beginReload,
   conflictNotice,
   initialConcurrentEdit,
   markConflict,
   markDirty,
-  markSaved,
-  reconcile,
-  acceptRemote
+  reconcile
 } from '#lib/editing/concurrentEdit.js';
 import {
-  listOperationDialects,
-  activateRoute,
-  createRouteDraft,
-  deleteRouteDraft,
   getRouteDraft,
-  replaceRouteDraft,
-  simulateRoute,
-  validateRoute,
+  listOperationDialects,
   type RouteActivation,
   type RouteDraft,
   type RouteSimulation
@@ -44,33 +31,35 @@ import {
   inspectionDialects
 } from '#lib/features/routes/inspectionDialects.js';
 import { useRole } from '#lib/session/useRole.svelte.js';
-import { authLifecycle } from '#lib/session/lifecycle.js';
 import {
-  buildCreateRouteDraftInput,
-  buildReplaceRouteDraftInput,
   emptyBehavior,
-  hasOutputRules,
   modesFor,
   parseSelectors,
-  policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   routeLifecycleWarnings as findRouteLifecycleWarnings,
   toRouteModelOptions,
-  validateRouteEditor,
-  type EditablePolicyRule,
   type EditableTarget,
   type RouteBehavior
 } from '#lib/features/routes/routeEditor.js';
-import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-
-const simulationNotice =
-  'Deterministic attempt order calculated from the saved draft.';
+import {
+  EditorSession,
+  useMutationIntentGroup
+} from '#lib/editing/editorSession.svelte.js';
+import {
+  createRouteDraftActions,
+  hydrateRouteBehavior,
+  hydrateRouteTargets,
+  simulationNotice
+} from './routeDraftActions';
 
 export class RouteDraftEditorState {
-  activateRouteIntent = useMutationIntent();
-
-  createIntent = useMutationIntent();
+  private readonly intents = useMutationIntentGroup(['activate', 'create']);
+  readonly activateRouteIntent = this.intents.activate;
+  readonly createIntent = this.intents.create;
   private createdDraftId = '';
+  private readonly session = new EditorSession(() => {
+    this.intents.resetAll();
+  });
 
   readRouteId: () => string | undefined;
   get routeId() {
@@ -118,20 +107,11 @@ export class RouteDraftEditorState {
   /** The route's selectors as the operator types them, in JSON. */
   selectorsText = $state('[]');
   selectors = $derived(parseSelectors(this.selectorsText));
-  policyRules = $state<EditablePolicyRule[]>([]);
-  outputPolicyActive = $derived(hasOutputRules(this.policyRules));
   sync = $state(initialConcurrentEdit());
   policyDirty = $state(false);
   policyBusy = $state(false);
   hasUnsavedChanges = $derived(this.sync.dirty || this.policyDirty);
   private editVersion = 0;
-  /**
-   * Ownership generation for asynchronous actions. It advances whenever the
-   * editor's resource identity changes, so a completion from another draft's
-   * lifetime is dropped instead of being applied to the resource on screen.
-   */
-  private ownerEpoch = 0;
-  private disposed = false;
   private activeResource = '';
   busy = $state('');
   publicationBlocked = $derived(
@@ -170,7 +150,6 @@ export class RouteDraftEditorState {
     overallTimeoutMs: this.overallTimeoutMs,
     maxAttempts: this.maxAttempts,
     targets: this.targets,
-    contentPolicyRules: this.policyRules,
     projectId: this.projectId,
     fidelity: this.fidelity,
     behavior: {
@@ -190,21 +169,11 @@ export class RouteDraftEditorState {
   routeLifecycleWarnings = $derived(
     findRouteLifecycleWarnings(this.targets, this.modelOptions)
   );
-  /**
-   * True while the captured epoch still owns this editor: the component is
-   * mounted and the resource identity has not moved on.
-   */
-  private current(epoch: number): boolean {
-    return !this.disposed && epoch === this.ownerEpoch;
-  }
-  /**
-   * Returns every form field, flag, and result to its initial value and
-   * invalidates every in-flight action captured under the previous resource.
-   */
+
   private resetResource() {
     this.createdDraftId = '';
-    this.createIntent.reset();
-    this.ownerEpoch += 1;
+    this.intents.resetAll();
+    this.session.advance();
     this.slug = 'default';
     this.projectId = '';
     this.operations = ['generation'];
@@ -214,7 +183,6 @@ export class RouteDraftEditorState {
     this.targets = [];
     this.behavior = emptyBehavior();
     this.selectorsText = '[]';
-    this.policyRules = [];
     this.sync = initialConcurrentEdit();
     this.policyDirty = false;
     this.policyBusy = false;
@@ -232,6 +200,7 @@ export class RouteDraftEditorState {
     this.simulationVersion += 1;
     this.activation = null;
   }
+
   run = async (
     label: string,
     action: (
@@ -240,17 +209,7 @@ export class RouteDraftEditorState {
     ) => Promise<void>
   ) => {
     if (this.busy) return;
-    const epoch = this.ownerEpoch;
-    const user = authLifecycle.snapshot().user;
-    const partition = user ? authLifecycle.principalPartition(user) : '';
-    const samePrincipal = () => {
-      const current = authLifecycle.snapshot().user;
-
-      return (
-        partition === (current ? authLifecycle.principalPartition(current) : '')
-      );
-    };
-    const isCurrent = () => samePrincipal() && this.current(epoch);
+    const { isCurrent, samePrincipal } = this.session.capture();
     this.busy = label;
     this.errorMessage = '';
     this.notice = '';
@@ -261,20 +220,22 @@ export class RouteDraftEditorState {
       if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
       else this.errorMessage = errorMessage(error);
     } finally {
-      // A stale action must not release a newer operation's busy state.
       if (isCurrent()) this.busy = '';
     }
   };
+
   invalidateSimulation = () => {
     this.simulationVersion += 1;
     this.simulation = null;
     if (this.notice === simulationNotice) this.notice = '';
   };
+
   touch = () => {
     this.editVersion += 1;
     this.invalidateSimulation();
     this.sync = markDirty(this.sync);
   };
+
   reload = async () => {
     await this.run('reload', async (isCurrent) => {
       const result = await this.draft.refetch();
@@ -284,22 +245,23 @@ export class RouteDraftEditorState {
       this.sync = beginReload(this.sync);
     });
   };
+
   policySaved = async (etag: string, previousEtag: string) => {
-    // The routing-policy child only invokes this while it still owns its
-    // resource, but keep the disposal guard so a late callback is inert.
-    if (this.disposed) return;
+    if (this.session.isDisposed) return;
     if (this.sync.snapshotEtag === previousEtag) {
       this.sync = acceptRemote(this.sync, etag);
     }
     this.invalidateSimulation();
     await this.draft.refetch();
   };
+
   toggleOperation = (operation: string, checked: boolean) => {
     this.operations = checked
       ? [...new SvelteSet([...this.operations, operation])]
       : this.operations.filter((item) => item !== operation);
     this.touch();
   };
+
   addTarget = () => {
     const firstUnused =
       this.modelOptions.find(
@@ -318,220 +280,69 @@ export class RouteDraftEditorState {
     ];
     this.touch();
   };
+
   removeTarget = (index: number) => {
     this.targets = this.targets.filter(
       (_, targetIndex) => targetIndex !== index
     );
     this.touch();
   };
-  addPolicyRule = () => {
-    const usedIds = this.policyRules.map((rule) => rule.id);
-    const id =
-      this.policyRules
-        .map((_, index) => `rule-${index + 1}`)
-        .find((candidate) => !usedIds.includes(candidate)) ??
-      `rule-${this.policyRules.length + 1}`;
-    this.policyRules = [
-      ...this.policyRules,
-      {
-        id,
-        phase: 'input',
-        action: this.fidelity.mode === 'strict' ? 'block' : 'redact',
-        pattern: '',
-        replacement: ''
-      }
-    ];
-    this.touch();
-  };
-  removePolicyRule = (index: number) => {
-    this.policyRules = this.policyRules.filter(
-      (_, ruleIndex) => ruleIndex !== index
-    );
-    this.touch();
-  };
-  create = async (event: SubmitEvent) => {
-    event.preventDefault();
-    if (!this.canManage || this.busy) return;
-    if (this.createdDraftId) {
-      await this.run('open', async (isCurrent) => {
-        if (isCurrent()) await goto(resolve(`routes/${this.createdDraftId}`));
-      });
-      return;
-    }
-    const issue = validateRouteEditor(this.editorValues);
-    if (issue) {
-      this.errorMessage = issue;
-      return;
-    }
-    await this.run('save', async (isCurrent, samePrincipal) => {
-      const { id } = await this.createIntent.submit(
-        buildCreateRouteDraftInput(this.editorValues, this.modelOptions),
-        (input, requestId) => createRouteDraft(input, requestId)
-      );
-      if (!samePrincipal()) return;
-      // The create already committed, so the list invalidation stays valid
-      // even if this editor has since been replaced or destroyed.
-      if (isCurrent()) {
-        this.createdDraftId = id;
-        this.sync = initialConcurrentEdit();
-        this.notice = 'Draft saved.';
-      }
-      try {
-        await this.queryClient.invalidateQueries(
-          { queryKey: routeKeys.lists },
-          { throwOnError: true }
-        );
-      } catch (cause) {
-        if (isCurrent())
-          this.errorMessage = `Draft saved, but refreshing failed. ${errorMessage(cause)}`;
-      }
-      if (isCurrent()) await goto(resolve(`routes/${id}`));
-    });
-  };
-  save = async (current: RouteDraft) => {
-    if (!this.canManage || this.busy) return;
-    // Replacing an unchanged draft would only reset its validation state.
-    if (!this.sync.dirty) {
-      this.errorMessage = '';
-      this.notice = 'No unsaved changes.';
-      return;
-    }
-    const issue = validateRouteEditor(this.editorValues);
-    if (issue) {
-      this.errorMessage = issue;
-      return;
-    }
-    this.invalidateSimulation();
-    await this.run('save', async (isCurrent, samePrincipal) => {
-      if (!this.sync.snapshotEtag)
-        throw new Error('Reload the draft before saving.');
-      const submittedVersion = this.editVersion;
-      const updated = await replaceRouteDraft(
-        current.id,
-        this.sync.snapshotEtag,
-        buildReplaceRouteDraftInput(this.editorValues)
-      );
-      // A committed write may update its originating resource after disposal,
-      // while its original principal still owns the query partition.
-      if (!samePrincipal()) return;
-      this.queryClient.setQueryData(routeKeys.draft(current.id), updated);
-      if (!isCurrent()) return;
-      this.sync = markSaved(
-        updated.etag,
-        this.editVersion !== submittedVersion
-      );
-      this.notice = this.sync.dirty
-        ? 'Draft saved. You have additional unsaved changes.'
-        : 'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.';
-    });
-  };
-  simulate = async (current: RouteDraft) => {
-    if (!this.canManage || this.publicationBlocked) return;
-    this.invalidateSimulation();
-    const version = this.simulationVersion;
-    await this.run('simulate', async (isCurrent) => {
-      let simulation: RouteSimulation;
-      try {
-        const source = this.simulationRequestJson.trim();
-        let nativeRequest: Record<string, unknown> | undefined;
-        if (source) {
-          const parsed = parseNativeJSON(source);
-          if (!nativeObject(parsed))
-            throw new Error('The native request must be a JSON object.');
-          nativeRequest = parsed;
-        }
-        simulation = await simulateRoute(current.id, {
-          operation: this.simulationOperation,
-          surface: this.simulationSurface,
-          mode: this.simulationMode,
-          seed: this.seed || 'preview',
-          preferences: JSON.parse(this.routingPreferences),
-          request: nativeRequest,
-          dialect: (this.simulationDialect || undefined) as
-            components['schemas']['SimulationDialect'] | undefined
-        });
-      } catch (error) {
-        if (isCurrent() && version === this.simulationVersion) throw error;
-        return;
-      }
-      if (!isCurrent() || version !== this.simulationVersion) return;
-      this.simulation = simulation;
-      this.notice = simulationNotice;
-    });
-  };
-  validate = async (current: RouteDraft) => {
-    if (!this.canManage || this.publicationBlocked) return;
-    await this.run('validate', async (isCurrent, samePrincipal) => {
-      const validation = await validateRoute(current);
-      if (!samePrincipal()) return;
-      this.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
-        ...current,
-        state: validation.state,
-        etag: validation.etag
-      });
-      if (!isCurrent()) return;
-      this.sync = acceptRemote(this.sync, validation.etag);
-      this.notice = 'Validation passed. The saved draft is ready to activate.';
-    });
-  };
-  activate = async (current: RouteDraft) => {
-    if (!this.canManage || this.publicationBlocked) return;
-    await this.run('activate', async (isCurrent, samePrincipal) => {
-      const activation = await this.activateRouteIntent.submit(
-        { id: current.id, etag: current.etag },
-        (input, requestId) => activateRoute(input, requestId)
-      );
-      if (!samePrincipal()) return;
-      // Adopt our activation's ETag before cache reconciliation can treat it
-      // as a remote change to edits made while activation was in flight.
-      if (isCurrent()) {
-        this.sync = acceptRemote(this.sync, activation.draft_etag);
-      }
-      this.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
-        ...current,
-        state: 'draft',
-        etag: activation.draft_etag
-      });
-      await Promise.all([
-        this.queryClient.invalidateQueries({
-          queryKey: routeKeys.draft(current.id)
-        }),
-        this.queryClient.invalidateQueries({ queryKey: routeKeys.lists }),
-        this.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
-      ]);
-      if (!isCurrent()) return;
-      this.activation = activation;
-      this.notice = `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`;
-    });
-  };
-  remove = async (current: RouteDraft) => {
-    if (!this.canManage || this.busy) return;
-    if (
-      !(await confirmAction({
-        title: `Delete draft ${current.slug}?`,
-        body: 'The draft is removed. Live revisions are not affected.',
-        confirmLabel: 'Delete draft',
-        danger: true
-      }))
-    )
-      return;
-    await this.run('delete', async (isCurrent) => {
-      await deleteRouteDraft(current.id, current.etag);
-      await this.queryClient.invalidateQueries({
-        queryKey: routeKeys.lists
-      });
-      if (!isCurrent()) return;
-      this.sync = initialConcurrentEdit();
-      await goto(resolve('routes'));
-    });
-  };
+
+  private readonly actions = createRouteDraftActions({
+    queryClient: this.queryClient,
+    createIntent: this.intents.create,
+    activateRouteIntent: this.intents.activate,
+    canManage: () => this.canManage,
+    busy: () => this.busy,
+    publicationBlocked: () => this.publicationBlocked,
+    createdDraftId: () => this.createdDraftId,
+    setCreatedDraftId: (id) => {
+      this.createdDraftId = id;
+    },
+    editorValues: () => this.editorValues,
+    modelOptions: () => this.modelOptions,
+    sync: () => this.sync,
+    setSync: (next) => {
+      this.sync = next;
+    },
+    editVersion: () => this.editVersion,
+    setError: (message) => {
+      this.errorMessage = message;
+    },
+    setNotice: (message) => {
+      this.notice = message;
+    },
+    setSimulation: (value) => {
+      this.simulation = value;
+    },
+    setActivation: (value) => {
+      this.activation = value;
+    },
+    invalidateSimulation: this.invalidateSimulation,
+    simulationVersion: () => this.simulationVersion,
+    simulationParams: () => ({
+      operation: this.simulationOperation,
+      surface: this.simulationSurface,
+      mode: this.simulationMode,
+      dialect: this.simulationDialect,
+      requestJson: this.simulationRequestJson,
+      seed: this.seed,
+      preferencesJson: this.routingPreferences
+    }),
+    run: this.run
+  });
+
+  create = this.actions.create;
+  save = this.actions.save;
+  simulate = this.actions.simulate;
+  validate = this.actions.validate;
+  activate = this.actions.activate;
+  remove = this.actions.remove;
+
   constructor(readRouteId: () => string | undefined) {
     this.readRouteId = readRouteId;
     this.draft = createQuery(() => ({
       queryKey: routeKeys.draft(this.resourceId),
-      // Bind the fetch to the resolved key so a resource change cannot write
-      // one draft's payload under another draft's cache entry, and so a
-      // superseded observer's request is actually aborted.
       queryFn: ({ queryKey, signal }) =>
         getRouteDraft(queryKey[2] as string, signal),
       enabled: Boolean(this.resourceId)
@@ -545,23 +356,13 @@ export class RouteDraftEditorState {
       queryFn: () => listPublications('toolsets'),
       enabled: this.behavior.tool_execution === 'gateway'
     }));
-    onDestroy(() => {
-      this.disposed = true;
-      this.ownerEpoch += 1;
-    });
     $effect(() => {
       const resource = this.resourceId;
       const current = this.draft.data;
       if (resource !== this.activeResource) {
-        // The editor moved to a different draft: nothing from the previous
-        // resource may carry over, and any action it still has in flight loses
-        // ownership here rather than at some later completion.
         this.activeResource = resource;
         untrack(() => this.resetResource());
       }
-      // Only hydrate from a payload that belongs to the resource this editor
-      // currently owns; a lagging observer can briefly hold the previous
-      // draft's data while the key change propagates.
       if (!current || current.id !== resource) return;
       const next = reconcile(this.sync, current.etag);
       if (next.state !== this.sync) this.sync = next.state;
@@ -571,40 +372,9 @@ export class RouteDraftEditorState {
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
       this.fidelity = current.fidelity;
-      this.behavior = {
-        fallbacks: current.fallbacks,
-        selectors: current.selectors,
-        retry: current.retry,
-        affinity: current.affinity,
-        budget: current.budget,
-        max_body_bytes: current.max_body_bytes,
-        caller_cost_exempt: current.caller_cost_exempt,
-        provider_fetched_documents: current.provider_fetched_documents,
-        cache: current.cache,
-        prompt_cache: current.prompt_cache,
-        passthrough: current.passthrough,
-        certification: current.certification,
-        tool_execution: current.tool_execution,
-        toolsets: current.toolsets ?? [],
-        responses_mcp_items: current.responses_mcp_items ?? false,
-        run_limits: current.run_limits ?? null
-      };
+      this.behavior = hydrateRouteBehavior(current);
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
-      this.policyRules = policyRulesFrom(current.content_policy);
-      this.targets = current.targets.map((target) => ({
-        providerModelId: target.provider_model_id,
-        priority: target.priority,
-        weight: target.weight,
-        timeoutMs: target.timeout_ms,
-        tags: [...target.tags],
-        shadowSampleRate: target.shadow?.sample_rate ?? null,
-        stored: {
-          providerModelId: target.provider_model_id,
-          available: target.available,
-          providerName: target.provider_name,
-          providerModel: target.provider_model
-        }
-      }));
+      this.targets = hydrateRouteTargets(current);
     });
     $effect(() => {
       if (!this.operations.includes(this.simulationOperation)) {
@@ -616,8 +386,6 @@ export class RouteDraftEditorState {
       const modes = modesFor(this.simulationOperation);
       if (!modes.includes(this.simulationMode))
         this.simulationMode = modes[0] ?? 'unary';
-      if (this.outputPolicyActive && this.simulationMode === 'streaming')
-        this.simulationMode = 'unary';
       if (
         this.simulationDialect &&
         !(this.inspectionDialects as string[]).includes(this.simulationDialect)

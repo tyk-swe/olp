@@ -209,9 +209,8 @@ retirement does not change an existing pin. Unrelated PATCH requests must omit
 removes redaction. `null` is invalid. The console supports ordered selection,
 pin visibility and **Refresh pinned revisions on save**.
 
-Migration `0074_capture_redactors.sql` replaces the empty-list constraint and
-adds ordered bindings with foreign keys to immutable revisions. Existing empty
-policies retain their settings. Detector compilation happens when the policy
+Redactor bindings are ordered and reference immutable revisions through
+foreign keys. Detector compilation happens when the policy
 cache reloads, outside inference processing. Invalid or unavailable bindings
 suppress capture; they never fall through to an unredacted policy.
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/platform/egress"

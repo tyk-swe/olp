@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -100,7 +100,7 @@ func (s *Store) replaceGrant(ctx context.Context, conn *pgx.Conn, bound Binding,
 		return nil, clientErr
 	}
 	defer client.client.CloseIdleConnections()
-	attempt := httpkit.NewID()
+	attempt := ids.New()
 	tag, claimErr := conn.Exec(ctx, `UPDATE olp.mcp_user_grants SET refresh_attempt_id=$2 WHERE id=$1 AND refresh_attempt_id IS NULL AND revoked_at IS NULL`, current.ID, attempt)
 	if claimErr != nil {
 		return nil, claimErr
@@ -139,7 +139,7 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 	if err := refreshBinding(record, tx, bound, revisionID); err != nil {
 		return err
 	}
-	accessID := httpkit.NewID()
+	accessID := ids.New()
 	if err := s.keys.Store(record, tx, s.installation, accessID, bound.accessPurpose(), []byte(token.AccessToken), nil); err != nil {
 		return err
 	}

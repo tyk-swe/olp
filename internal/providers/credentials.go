@@ -12,8 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -254,8 +255,8 @@ func (s *Server) revokeCredential(ctx context.Context, tx pgx.Tx, current *recor
 	if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.provider_slots WHERE provider_id=$1 AND credential_id=$2)", current.ID, credentialID).Scan(&referenced); err != nil {
 		return revokedCredential{}, err
 	}
-	etag := httpkit.NewID()
-	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, httpkit.NewID(), referenced); err != nil {
+	etag := ids.New()
+	if _, err = tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=draft_dirty OR $4,updated_at=now() WHERE id=$1", current.ID, etag, ids.New(), referenced); err != nil {
 		return revokedCredential{}, err
 	}
 	return revokedCredential{Version: version, Generation: generation, ETag: etag}, nil
@@ -351,7 +352,7 @@ func (s *Server) StoreExternalCredential(ctx context.Context, tx pgx.Tx, provide
 }
 
 func insertCredentialVersion(ctx context.Context, tx pgx.Tx, providerID string, externalReference []byte) (string, int, error) {
-	id := httpkit.NewID()
+	id := ids.New()
 	var version int
 	err := tx.QueryRow(ctx, "INSERT INTO olp.provider_credentials(id,provider_id,version,external_reference) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3) RETURNING version", id, providerID, externalReference).Scan(&version)
 	return id, version, err

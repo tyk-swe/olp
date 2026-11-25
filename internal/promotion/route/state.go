@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -60,7 +60,7 @@ func Read(ctx context.Context, q database.Queryer) (State, error) {
 func routeOf(d routes.OpenDraft, project *string, retired bool) Route {
 	return Route{
 		Behavior: d.Behavior, Slug: d.Slug, Project: project, Operations: d.Operations, OverallTimeoutMS: d.OverallTimeoutMS, MaxAttempts: d.MaxAttempts,
-		RoutingPolicy: d.RoutingPolicy, ContentPolicy: d.ContentPolicy, Fidelity: d.Fidelity, ExposeUpstreamModels: d.ExposeUpstreamModels, Retired: retired,
+		RoutingPolicy: d.RoutingPolicy, Fidelity: d.Fidelity, ExposeUpstreamModels: d.ExposeUpstreamModels, Retired: retired,
 		Targets: promotion.Map(d.Targets, func(t routing.PublishedTarget) Target {
 			return Target{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
 		}),
@@ -90,7 +90,7 @@ func projectName(directory promotion.Directory, id *string) *string {
 }
 
 func draftKey(slug string, project *string) string {
-	return slug + "\x00" + strings.ToLower(promotion.ValueOf(project))
+	return slug + "\x00" + strings.ToLower(ptr.Value(project))
 }
 
 func projectIDOf(directory promotion.Directory, name *string) (*string, error) {
@@ -137,18 +137,10 @@ func canonical(r Route) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	policy, err := decodeContentPolicy(r.ContentPolicy)
-	if err != nil {
-		return nil, err
-	}
-	encodedPolicy, err := encodeContentPolicy(policy)
-	if err != nil {
-		return nil, err
-	}
 	return json.Marshal(Route{
 		Behavior: r.Behavior, Slug: r.Slug, Operations: slices.Sorted(slices.Values(r.Operations)),
 		OverallTimeoutMS: r.OverallTimeoutMS, MaxAttempts: r.MaxAttempts,
-		ContentPolicy: encodedPolicy, Fidelity: encodedFidelity, ExposeUpstreamModels: r.ExposeUpstreamModels,
+		Fidelity: encodedFidelity, ExposeUpstreamModels: r.ExposeUpstreamModels,
 		Targets: slices.SortedFunc(slices.Values(promotion.Map(r.Targets, canonicalTarget)), func(a, b Target) int {
 			return cmp.Or(strings.Compare(strings.ToLower(a.Provider), strings.ToLower(b.Provider)), strings.Compare(a.ProviderModel, b.ProviderModel), cmp.Compare(a.Priority, b.Priority))
 		}),
@@ -157,11 +149,4 @@ func canonical(r Route) ([]byte, error) {
 
 func canonicalTarget(t Target) Target {
 	return Target{Provider: t.Provider, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: slices.Sorted(slices.Values(t.Tags)), Shadow: t.Shadow}
-}
-
-func encodeContentPolicy(policy *contentpolicy.Policy) (json.RawMessage, error) {
-	if policy == nil {
-		return nil, nil
-	}
-	return json.Marshal(policy)
 }

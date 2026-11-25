@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -26,7 +27,7 @@ type Result struct {
 }
 
 func ResultReplayTx(ctx context.Context, tx pgx.Tx, r Result) (bool, error) {
-	if !canonicalID(r.DispatchID) || !canonicalID(r.EventID) || len(r.ResultDigest) != 32 || len(r.EvidenceDigest) != 32 || !validAmount(r.Cost) || !validAmount(r.Charge) {
+	if !ids.Canonical(r.DispatchID) || !ids.Canonical(r.EventID) || len(r.ResultDigest) != 32 || len(r.EvidenceDigest) != 32 || !validAmount(r.Cost) || !validAmount(r.Charge) {
 		return false, ErrConflict
 	}
 	resolution, err := resolutionDigest(r.ResolvesResultDigests)

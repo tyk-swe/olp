@@ -16,8 +16,9 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -128,7 +129,7 @@ func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p authz.Principal, requ
 	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, httpkit.NewID(), p.UserID())
+	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='auth.mfa_required'", desired, ids.New(), p.UserID())
 	return err
 }
 
@@ -206,7 +207,7 @@ func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string
 	if purpose != "bootstrap" && len(methods) == 0 {
 		return httpkit.Reply{}, httpkit.Fail(403, "mfa_recovery_required", "No enrolled factor is available at this public origin. Restore the WebAuthn origin or use offline account recovery.")
 	}
-	token, until, err := s.storeMFAFlow(r, tx, mfaFlow{ID: httpkit.NewID(), UserID: userID, SessionID: session, Purpose: purpose, Data: data})
+	token, until, err := s.storeMFAFlow(r, tx, mfaFlow{ID: ids.New(), UserID: userID, SessionID: session, Purpose: purpose, Data: data})
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

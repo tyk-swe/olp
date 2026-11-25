@@ -15,8 +15,7 @@
         revisionDiff.timeout_changed && 'deadline',
         revisionDiff.max_attempts_changed && 'attempts',
         revisionDiff.fidelity_changed && 'fidelity',
-        revisionDiff.routing_policy_changed && 'routing policy',
-        revisionDiff.content_policy_changed && 'content policy'
+        revisionDiff.routing_policy_changed && 'routing policy'
       ]
         .filter(Boolean)
         .join(', ') || 'unchanged'}</strong

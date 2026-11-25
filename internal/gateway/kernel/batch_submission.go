@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,11 +17,11 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -91,8 +92,8 @@ func BatchCompletionWindow(source oif.Document, vendor string) (BatchWindow, *fa
 	if !ok {
 		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window must use whole hours or days.", new("completion_window"))
 	}
-	minimum, maximum := completionWindowRange(vendor)
-	if hours < minimum || hours > maximum {
+	served, _ := vendors.BatchWindowFor(vendor)
+	if hours < served.MinHours || hours > served.MaxHours {
 		return BatchWindow{}, fault.InvalidRequest("invalid_value", "completion_window is outside the provider's supported range.", new("completion_window"))
 	}
 	return BatchWindow{Label: raw, Length: time.Duration(hours) * time.Hour}, nil
@@ -116,15 +117,12 @@ func windowHours(raw string) (int, bool) {
 	}
 }
 
-func completionWindowRange(vendor string) (int, int) {
-	switch vendor {
-	case "groq":
-		return 24, 168
-	case "mistral":
-		return 1, 168
-	default:
-		return 24, 24
+func BatchEndpointRefusal(p *Pin, endpoint, pointer string) *fault.Error {
+	served := vendors.BatchEndpointsFor(p.Provider.VendorID)
+	if len(served) == 0 || slices.Contains(served, endpoint) {
+		return nil
 	}
+	return fault.InvalidRequest("unsupported_parameter", "This provider's batches support only "+strings.Join(served, ", ")+".", new(pointer))
 }
 
 func (s *Server) BeginBatch(ctx context.Context, x *Call, authorityID string, p *Pin, intent BatchIntent) (batchSubmission, *fault.Error) {
@@ -265,30 +263,11 @@ func (s *Server) commitAcceptedBatch(ctx context.Context, submission batchSubmis
 	if accepted.Metadata != nil {
 		resource.Metadata = accepted.Metadata
 	}
-	tx, err := s.Deps.Resources.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	stored, err := s.putAcceptedBatch(ctx, tx, &resource, accepted.Contract)
-	if err != nil {
-		return nil, err
-	}
 	expected := submission.expected
 	if expected == nil {
 		expected = accepted.Expected
 	}
-	if err = s.Deps.Batches.ActivateTx(ctx, tx, resource.UUID, accepted.UpstreamID, expected); err != nil {
-		return nil, err
-	}
-	return stored, tx.Commit(ctx)
-}
-
-func (s *Server) putAcceptedBatch(ctx context.Context, tx pgx.Tx, resource *resources.Resource, contract []byte) (*resources.Resource, error) {
-	if contract != nil {
-		return s.Deps.Resources.PutDurableContractTx(ctx, tx, resource, contract)
-	}
-	return s.Deps.Resources.PutTx(ctx, tx, resource)
+	return s.Deps.Batches.ActivateResource(ctx, s.Deps.Resources, &resource, accepted.Contract, expected)
 }
 
 func (s *Server) RequireBatchEvidenceSettled(ctx context.Context, resourceID uuid.UUID) *fault.Error {
@@ -321,8 +300,8 @@ func (s *Server) settlementTemplate(x *Call, p *Pin, surface, lineOperation stri
 	x.attemptCount, x.attemptVendor, x.routingInputs = attemptCount, attemptVendor, routingInputs
 	pricingCall := Call{
 		request: request{release: x.request.release}, authority: x.authority,
-		cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs,
-		routeLeg: routeLeg{Route: x.Route},
+		callPricing: callPricing{cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs},
+		routeLeg:    routeLeg{Route: x.Route},
 	}
 	fact.CardRev = pricingCall.attemptCardRevision(p.Provider.ID, now)
 	fact.StartedAt = now
@@ -349,7 +328,7 @@ func (s *Server) settlementTemplate(x *Call, p *Pin, surface, lineOperation stri
 		EndUserDigest: x.endUserDigest, Origin: usage.OriginBatchSettlement, ParentRequestID: accountingID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
 		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guard.evidence(),
-		PolicyDecisions: x.policyDecisions, Route: x.Route.Slug, RouteRevisionID: x.Route.RevisionID,
+		Route: x.Route.Slug, RouteRevisionID: x.Route.RevisionID,
 		Operation: lineOperation, Surface: surface, RuntimeGenerationID: x.request.release.Snapshot().Generation().ID,
 		StartedAt: now, CompletedAt: now, Attempts: []events.AttemptFact{fact},
 	})

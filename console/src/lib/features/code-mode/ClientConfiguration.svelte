@@ -2,7 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { untrack } from 'svelte';
   import { copyText } from '#lib/clipboard.js';
-  import SegmentedRadioGroup from '#lib/shell/SegmentedRadioGroup.svelte';
+  import SegmentedRadioGroup from '#lib/components/SegmentedRadioGroup.svelte';
   import LoadError from './LoadError.svelte';
   import {
     getCodeClientConfiguration,

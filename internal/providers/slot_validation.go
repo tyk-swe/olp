@@ -11,8 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -118,7 +119,7 @@ func (row slotRow) allowsModel(model storedModel) bool {
 func (row slotRow) credentialFingerprint(cfg connection.Configuration) string {
 	credential := ""
 	if cfg.CredentialRequired() {
-		credential = deref(row.CredentialID)
+		credential = ptr.Value(row.CredentialID)
 	}
 	return cfg.Fingerprint() + ":" + credential
 }
@@ -152,7 +153,7 @@ func (row slotRow) withCredential(id string) slotRow {
 
 func (row slotRow) validationTime(cfg connection.Configuration, models []storedModel) *time.Time {
 	fingerprint := row.validationFingerprint(cfg, models)
-	if fingerprint != "" && deref(row.ValidatedFingerprint) == fingerprint {
+	if fingerprint != "" && ptr.Value(row.ValidatedFingerprint) == fingerprint {
 		return row.ValidatedAt
 	}
 	return nil

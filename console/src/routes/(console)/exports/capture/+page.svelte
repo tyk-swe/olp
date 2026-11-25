@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ObservabilityPanel from '#lib/features/observability/ObservabilityPanel.svelte';
+  import ObservabilityPanel from '#lib/features/exports/ObservabilityPanel.svelte';
 </script>
 
 <ObservabilityPanel view="capture" />

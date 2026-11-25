@@ -5,9 +5,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func (s *Server) projectRouteGroups(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -18,7 +18,7 @@ func (s *Server) projectRouteGroups(r *http.Request, p authz.Principal) (httpkit
 	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
-	var groups authority.RouteGroups
+	var groups keyauthority.RouteGroups
 	var etag string
 	if err = s.access.Pool.QueryRow(r.Context(), "SELECT route_groups,etag::text FROM olp.projects WHERE id=$1", id).Scan(&groups, &etag); err != nil {
 		return httpkit.Reply{}, err
@@ -32,7 +32,7 @@ func (s *Server) putProjectRouteGroups(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	var input struct {
-		Groups authority.RouteGroups `json:"groups"`
+		Groups keyauthority.RouteGroups `json:"groups"`
 	}
 	if err = httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err

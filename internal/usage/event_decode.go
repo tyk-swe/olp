@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
-	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 var knownSurfaces = map[string]struct{}{
@@ -118,7 +116,7 @@ func (w wireAttempt) decode() (*Attempt, error) {
 	if err := attempt.Execution.Validate(); err != nil {
 		return nil, err
 	}
-	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(w.GuardrailDecisions); err != nil {
 		return nil, err
 	}
 	var err error
@@ -342,7 +340,7 @@ func (w wireEvent) decodeAuthority(event *Event) error {
 	}
 	if w.EndUserDigest != nil {
 		event.EndUserDigest = *w.EndUserDigest
-		if event.EndUserDigest != "" && (!authority.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
+		if event.EndUserDigest != "" && (!attribution.ValidEndUserDigest(event.EndUserDigest) || event.Origin.Keyless()) {
 			return errors.New("request metadata field end_user_digest is invalid")
 		}
 	}
@@ -352,22 +350,9 @@ func (w wireEvent) decodeAuthority(event *Event) error {
 			return fmt.Errorf("request metadata field attribution is invalid: %w", err)
 		}
 	}
-	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+	if err := guardrailpolicy.ValidateEvidence(w.GuardrailDecisions); err != nil {
 		return err
 	}
 	event.GuardrailDecisions = w.GuardrailDecisions
-	if w.PolicyDecisions != nil {
-		for i, d := range *w.PolicyDecisions {
-			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
-				return fmt.Errorf("request metadata field policy_decisions %d is incomplete", i)
-			}
-			event.PolicyDecisions = append(event.PolicyDecisions, contentpolicy.Decision{
-				RuleID: *d.RuleID, Phase: *d.Phase, Action: *d.Action, Outcome: *d.Outcome,
-			})
-		}
-		if err := contentpolicy.ValidateDecisions(event.PolicyDecisions); err != nil {
-			return fmt.Errorf("request metadata field policy_decisions is invalid: %w", err)
-		}
-	}
 	return nil
 }

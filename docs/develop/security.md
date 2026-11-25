@@ -42,7 +42,7 @@ contract does not declare cannot be mounted. Handlers may demand more with
 less. Mutations call `Reauthorize` inside their transaction, after the
 installation lock, so they commit only under authority that is still current.
 
-`internal/authz/policy.go` decides who holds each operation:
+`internal/access/authz/policy.go` decides who holds each operation:
 
 <!-- operations -->
 | Operation | Owner | Operator | Developer | Viewer | Installation-wide | Management tokens |
@@ -242,8 +242,8 @@ user-agent family, never request bodies, credentials, or content. See
 - OLP serves plain HTTP. Terminate TLS at the edge, and route only the prefixes
   in [edge routing](../operate/deployment.md#edge-routing) to it.
 - The private listener is unauthenticated. Never expose it publicly.
-- [Content policy](../use/guardrails.md#legacy-route-content-policy) shapes prompts and outputs; it is not a security
-  control.
+- [`builtin.regex` guardrails](../use/guardrails.md) are bounded text filters and
+  not a security control.
 - Administrators of one installation are trusted. Project boundaries separate
   members' access within the installation; installation-wide principals see
   every project.

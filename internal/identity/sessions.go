@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -43,7 +44,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...s
 		strength = auth[0]
 	}
 	token := secrets.Token()
-	id := httpkit.NewID()
+	id := ids.New()
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -258,7 +259,7 @@ func (s *Server) updateProfile(r *http.Request, _ authz.Principal) (httpkit.Repl
 		if err := httpkit.Match(r, p.ETag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), httpkit.NewID(), p.ID); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET display_name=$1,etag=$2,updated_at=now() WHERE id=$3", strings.TrimSpace(input.Name), ids.New(), p.ID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
@@ -328,7 +329,7 @@ func (s *Server) writePassword(r *http.Request, p authz.Principal, enroll bool) 
 				return httpkit.Reply{}, access.Event{}, err
 			}
 		}
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, httpkit.NewID(), p.ID); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, ids.New(), p.ID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		strength, err := sessionStrength(r, tx, p.SessionID)

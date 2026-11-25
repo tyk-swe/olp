@@ -1,9 +1,10 @@
 import { afterEach, assert, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
 import ProjectRouteGroupsPanel from './ProjectRouteGroupsPanel.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -77,7 +78,7 @@ it('keeps a conflicting edit until reload and saves with the refreshed etag', as
   const saveLabel = 'Save route groups';
   const alert = () => target.querySelector('[role="alert"]');
   const waitForSuccessfulSave = () =>
-    vi.waitFor(() => {
+    eventually(() => {
       expect(findButton(saveLabel)?.disabled).toBe(false);
       expect(alert()).toBeNull();
     });
@@ -90,13 +91,13 @@ it('keeps a conflicting edit until reload and saves with the refreshed etag', as
     clickButton(saveLabel);
   };
 
-  await vi.waitFor(() => expect(memberRoutes().value).toBe('alpha'));
+  await eventually(() => expect(memberRoutes().value).toBe('alpha'));
   editAndSave('beta');
-  await vi.waitFor(() => expect(alert()?.textContent).toBe(conflict));
+  await eventually(() => expect(alert()?.textContent).toBe(conflict));
   expect(memberRoutes().value).toBe('beta');
 
   clickButton('Reload saved policy');
-  await vi.waitFor(() => expect(memberRoutes().value).toBe('alpha, gamma'));
+  await eventually(() => expect(memberRoutes().value).toBe('alpha, gamma'));
   expect(alert()).toBeNull();
 
   editAndSave('alpha gamma beta');
@@ -154,7 +155,7 @@ it('saves edits to the remaining limit template with the loaded etag', async () 
     field.dispatchEvent(new Event('input', { bubbles: true }));
   }
   target.querySelector('form')?.requestSubmit();
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
   const [request] = saved.mock.calls[0];
   expect(request.headers.get('If-Match')).toBe('"loaded"');
   expect(await request.json()).toEqual({

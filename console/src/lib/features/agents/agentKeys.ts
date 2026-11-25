@@ -1,7 +1,7 @@
 import type { Kind } from './api';
 
 const publications = ['agent-publications'] as const;
-const publication = <T extends Kind | 'projects' | 'servers'>(kind: T) =>
+const publication = <T extends Kind | 'servers'>(kind: T) =>
   [...publications, kind] as const;
 
 export const agentKeys = {
@@ -10,7 +10,6 @@ export const agentKeys = {
   grants: () => ['mcp-grants'] as const,
   publications,
   publication,
-  projects: () => publication('projects'),
   servers: () => publication('servers'),
   agents: () => publication('agents'),
   toolsets: () => publication('toolsets'),

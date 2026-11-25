@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { useQueryClient } from '@tanstack/svelte-query';
 import { ApiProblem } from '#lib/management/http.js';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
 import { confirmAction } from '#lib/components/confirm.js';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('#lib/components/confirm.js', () => ({ confirmAction: vi.fn() }));
 
@@ -96,7 +97,7 @@ describe('resource submissions', () => {
     });
     flushSync();
     const provider = target.querySelector<HTMLSelectElement>('#code-provider');
-    await vi.waitFor(() => expect(provider?.options.length).toBe(2));
+    await eventually(() => expect(provider?.options.length).toBe(2));
     if (!provider) throw new Error('Provider selection is missing');
     provider.value = 'provider';
     provider.dispatchEvent(new Event('change', { bubbles: true }));
@@ -106,7 +107,7 @@ describe('resource submissions', () => {
     ).toBe(true);
 
     lookup.resolve(json({ title: 'Provider lookup failed', status: 503 }, 503));
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.textContent).toMatch(/Cancel\s+and reopen to retry\./)
     );
     expect(
@@ -184,6 +185,23 @@ describe('resource submissions', () => {
     expect(state.error).toBe('Invalid resource');
     expect(state.submitted).toBe(false);
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('keeps a create saved when the follow-up after the write fails', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    const onSaved = vi
+      .fn<Options['onSaved']>(async () => undefined)
+      .mockRejectedValueOnce(new TypeError('Refresh failed'));
+    const { state, onDraftChange } = renderSubmission({ persist, onSaved });
+    state.markDirty();
+
+    await state.save(submit());
+    flushSync();
+
+    expect(state.submitted).toBe(false);
+    expect(state.busy).toBe(false);
+    expect(state.error).toMatch(/^Changes saved/);
+    expect(onDraftChange).toHaveBeenLastCalledWith(false);
   });
 
   it('asks before discarding edits and keeps them when the user declines', () => {

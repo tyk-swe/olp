@@ -16,8 +16,8 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
 )
 
 func GeminiUploadOrigin(cfg connectors.Config, model string, egressPolicy interface {

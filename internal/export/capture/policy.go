@@ -12,9 +12,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -85,7 +85,7 @@ func (p Settings) validate() error {
 	if !distinct(p.Include, func(i Include) (Include, bool) { return i, i.Valid() }) {
 		return invalid("include must contain distinct input, output or tool_calls values")
 	}
-	if len(p.Redact) > guardrails.MaxEntries {
+	if len(p.Redact) > guardrailpolicy.MaxEntries {
 		return invalid("redact supports at most 128 local detectors")
 	}
 	if !distinct(p.Redact, func(name string) (string, bool) { return strings.ToLower(name), detectorName(name) }) {
@@ -94,7 +94,7 @@ func (p Settings) validate() error {
 	if len(p.KeyIDs) > maxSelectors || len(p.EndUsers) > maxSelectors {
 		return invalid("key_ids and end_user_digests support at most 256 values")
 	}
-	if slices.ContainsFunc(p.KeyIDs, func(id string) bool { return !canonicalUUID(id) }) {
+	if slices.ContainsFunc(p.KeyIDs, func(id string) bool { return !ids.CanonicalOrNil(id) }) {
 		return invalid("key_ids must contain canonical UUIDs")
 	}
 	if slices.ContainsFunc(p.EndUsers, func(digest string) bool { return len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" }) {
@@ -121,11 +121,6 @@ func distinct[T any, K comparable](values []T, key func(T) (K, bool)) bool {
 func detectorName(name string) bool {
 	return name != "" && strings.TrimSpace(name) == name && utf8.ValidString(name) &&
 		utf8.RuneCountInString(name) <= 100 && !strings.ContainsFunc(name, unicode.IsControl)
-}
-
-func canonicalUUID(id string) bool {
-	parsed, err := uuid.Parse(id)
-	return err == nil && parsed.String() == id
 }
 
 func (p Settings) matches(project, route, key, endUser string) bool {

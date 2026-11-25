@@ -9,6 +9,15 @@ const tsFiles = ['**/*.{ts,tsx}'];
 const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 const sourceFiles = ['src/**/*.{ts,svelte}'];
 const testFiles = ['src/**/*.test.ts', 'src/**/test/**'];
+const sharedLayers = [
+  '.',
+  'management',
+  'session',
+  'editing',
+  'listing',
+  'components',
+  'shell'
+];
 const apiModules = [
   'src/lib/management/**',
   'src/lib/features/**/api.ts',
@@ -92,22 +101,20 @@ export default [
     }
   },
   {
+    files: sourceFiles,
+    ignores: testFiles,
+    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
+    rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
+  },
+  {
     // Feature api modules (and shared transport) own every apiClient call;
     // browser code reaches the inference gateway only through gatewayFetch.
     files: sourceFiles,
     ignores: [...apiModules, ...testFiles],
     rules: {
-      'no-restricted-imports': [
+      'console/feature-boundary': [
         'error',
-        {
-          paths: [
-            {
-              name: '#lib/management/client.js',
-              message:
-                'Call the management API from the feature api module, not a component.'
-            }
-          ]
-        }
+        { layers: sharedLayers, apiClient: 'session/client' }
       ],
       'no-restricted-globals': [
         'error',
@@ -118,12 +125,6 @@ export default [
         }
       ]
     }
-  },
-  {
-    files: sourceFiles,
-    ignores: testFiles,
-    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
-    rules: { 'console/feature-boundary': 'error' }
   },
   {
     files: ['src/**/*.svelte'],
@@ -151,6 +152,20 @@ export default [
           selector: 'TryStatement',
           message:
             'Components do not catch errors. Run a write through useAction or useMutation from #lib/editing/action.svelte.js, and move other fallible logic into a .ts module.'
+        }
+      ]
+    }
+  },
+  {
+    files: testFiles,
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'vi',
+          property: 'waitFor',
+          message:
+            'Use eventually from tests/unit/support/eventually.ts. vi.waitFor polls every 50ms, which dominates the console unit budget.'
         }
       ]
     }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
 import AgentResources from '#lib/features/resources/AgentResources.svelte';
@@ -12,6 +12,7 @@ import {
   resolvePlaygroundPlan
 } from './playgroundState.svelte';
 import { playgroundTemplates } from './templates';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 vi.mock(import('#lib/features/routes/api.js'), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -126,7 +127,7 @@ describe('playground composer', () => {
         (option) => option.value
       );
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(values('#playground-routes option')).toEqual(['route-a']);
       expect(
         values('select option').filter((value) => value === 'route-a')
@@ -215,6 +216,58 @@ describe('playground composer', () => {
     expect(JSON.parse(state.rawJson)).toEqual(template.request);
   });
 
+  it.each([
+    ['search', 'tavily-search', 'native'],
+    ['search', 'exa-search', 'native'],
+    ['search', 'parallel-search', 'native'],
+    ['search', 'brave-search', 'native'],
+    ['search', 'perplexity-search', 'openai'],
+    ['ocr', 'azure-document-intelligence-ocr', 'native'],
+    ['ocr', 'vertex-document-processing-ocr', 'native'],
+    ['ocr', 'mistral-ocr', 'openai']
+  ])('inspects %s with %s on %s', async (operation, dialect, surface) => {
+    const handler = vi.fn(async (request: Request) => {
+      route(request, 'POST', '/api/v1/routing/simulate');
+      expect(await request.json()).toMatchObject({
+        operation: { operation, route: 'route-a', request: expect.any(Object) },
+        dialect,
+        surface,
+        mode: 'unary'
+      });
+      return json([]);
+    });
+    serve(handler);
+    const state = playground();
+    state.model = 'route-a';
+    state.composer = 'advanced';
+    state.applyTemplate(dialect);
+
+    await state.explain();
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(state.simulationError).toBe('');
+  });
+
+  it('discloses request metadata and encrypted tool recovery retention', () => {
+    serve(() => json({}));
+    const target = document.createElement('div');
+    const setup = vi.fn(() =>
+      mount(PlaygroundPage, { target, context: getAllContexts() })
+    );
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+    });
+    flushSync();
+
+    const content = target.textContent?.replaceAll(/\s+/g, ' ');
+    expect(content).toMatch(/metadata retention is enabled.*Request Explorer/s);
+    expect(content).toMatch(
+      /Negotiated tool recovery.*encrypted for up to 24 hours/s
+    );
+  });
+
   it('rejects a submission without a route or prompt before dispatch', async () => {
     const handler = vi.fn(() => json({}));
     serve(handler);
@@ -261,7 +314,7 @@ describe('playground composer', () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(state.completedRequest?.model).toBe('route-a');
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.mutation.data?.output_text).toBe('Hello back')
     );
   });
@@ -298,7 +351,7 @@ describe('playground composer', () => {
     await state.submit(submitEvent());
     expect(state.validationError).toBe('');
     expect(handler).toHaveBeenCalledOnce();
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.mutation.data?.output_text).toBe('Done')
     );
   });
@@ -377,20 +430,20 @@ describe('playground composer', () => {
     const state = playground();
     state.model = publishedRoute.slug;
     state.input = 'Hello';
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(state.selectedRoute?.slug).toBe(publishedRoute.slug)
     );
     flushSync();
     state.toggleStream(true);
-    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+    await eventually(() => expect(state.streamCheck).toBe('ok'));
 
     state.routing = '{"ignore":["provider-a"]}';
     await state.submit(submitEvent());
     expect(handler).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(state.streamCheck).toBe('unsupported'));
+    await eventually(() => expect(state.streamCheck).toBe('unsupported'));
 
     state.routing = '{"ignore":[]}';
-    await vi.waitFor(() => expect(state.streamCheck).toBe('ok'));
+    await eventually(() => expect(state.streamCheck).toBe('ok'));
     await state.submit(submitEvent());
     expect(handler).toHaveBeenCalledOnce();
   });

@@ -204,8 +204,11 @@ func parseRates(p *Price) *priceRates {
 // with more fractional digits than the column holds is refused rather than
 // rounded: no stored value has them.
 func scaledDecimal(text string, digits int) (*big.Int, bool) {
-	text = strings.TrimPrefix(text, "+")
-	integer, fraction, hasPoint := strings.Cut(text, ".")
+	unsigned := strings.TrimLeft(text, "+-")
+	if len(text)-len(unsigned) > 1 {
+		return nil, false
+	}
+	integer, fraction, hasPoint := strings.Cut(unsigned, ".")
 	if integer == "" || hasPoint && fraction == "" || len(fraction) > digits {
 		return nil, false
 	}
@@ -216,5 +219,8 @@ func scaledDecimal(text string, digits int) (*big.Int, bool) {
 		}
 	}
 	scaled, ok := new(big.Int).SetString(whole, 10)
-	return scaled, ok
+	if !ok || strings.HasPrefix(text, "-") && scaled.Sign() != 0 {
+		return nil, false
+	}
+	return scaled, true
 }

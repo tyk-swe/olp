@@ -15,8 +15,9 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -248,8 +249,8 @@ func (m *Management) page(ctx context.Context, filters manageFilters, cursor *ma
 		}
 		if settlementID != nil && settlementState != nil && closeAfter != nil {
 			record.settlement = &manageSettlementRecord{
-				state: *settlementState, expectedResults: expectedResults, settledResults: valueOrZero(settledResults),
-				uncertainResults: valueOrZero(uncertainResults), lastErrorClass: lastErrorClass,
+				state: *settlementState, expectedResults: expectedResults, settledResults: ptr.Value(settledResults),
+				uncertainResults: ptr.Value(uncertainResults), lastErrorClass: lastErrorClass,
 				closeAfter: *closeAfter, closedAt: closedAt,
 			}
 		}
@@ -331,11 +332,4 @@ func managePageQuery(filters manageFilters, cursor *manageCursor, limit int) (st
 	args = append(args, limit+1)
 	query += fmt.Sprintf(" ORDER BY e.created_at DESC, e.id DESC LIMIT $%d", len(args))
 	return query, args
-}
-
-func valueOrZero(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
 }

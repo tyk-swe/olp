@@ -3,7 +3,7 @@ package release
 import (
 	"context"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 

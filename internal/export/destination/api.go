@@ -18,8 +18,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -148,7 +150,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if count >= maxSinks {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", fmt.Sprintf("This installation already has %d export sinks.", maxSinks))
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if _, err := tx.Exec(ctx, createSinkSQL, id, name, projectID, input.Type, input.Destination, input.Streams, input.Format, filter, settings, enabled, etag, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -202,9 +204,9 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		name := strings.TrimSpace(valueOr(input.Name, current.Name))
-		destination := valueOr(input.Destination, current.Destination)
-		enabled := valueOr(input.Enabled, current.Enabled)
+		name := strings.TrimSpace(ptr.Or(input.Name, current.Name))
+		destination := ptr.Or(input.Destination, current.Destination)
+		enabled := ptr.Or(input.Enabled, current.Enabled)
 		spec, err := a.updatedSpec(ctx, tx, k, input.Settings, previous, current)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -226,7 +228,7 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err := tx.Exec(ctx, updateSinkSQL, current.ID, name, destination, filter, enabled, etag, settings); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -491,17 +493,10 @@ func (a *API) storeCredential(ctx context.Context, tx pgx.Tx, raw json.RawMessag
 	if !present(raw) {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	return &id, a.server.Keys.Store(ctx, tx, a.server.Installation, id, secrets.SinkCredential, raw, nil)
 }
 
 func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
-}
-
-func valueOr[T any](value *T, fallback T) T {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }

@@ -7,10 +7,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codesessions"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codeadapter"
-	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeclient"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 
 	"github.com/tyk-swe/olp/internal/routing"
 )

@@ -12,9 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -27,35 +28,35 @@ type Management struct {
 func NewManagement(a *access.Server) *Management { return &Management{access: a} }
 
 type ToolCall struct {
-	IdentityDecisions  []IdentityDecision    `json:"identity_decisions"`
-	ID                 string                `json:"id"`
-	DispatchID         string                `json:"dispatch_id"`
-	APIKeyID           string                `json:"api_key_id"`
-	ProjectID          string                `json:"project_id"`
-	ToolsetID          string                `json:"toolset_id"`
-	ToolsetRevisionID  string                `json:"toolset_revision_id"`
-	ServerID           string                `json:"server_id"`
-	ServerRevisionID   string                `json:"server_revision_id"`
-	ToolAlias          string                `json:"tool_alias"`
-	InputDigest        string                `json:"input_digest"`
-	ResultDigest       *string               `json:"result_digest"`
-	Status             Status                `json:"status"`
-	IsError            bool                  `json:"is_error"`
-	StartedAt          time.Time             `json:"started_at"`
-	CompletedAt        *time.Time            `json:"completed_at"`
-	CreatedAt          time.Time             `json:"created_at"`
-	CallDigest         *string               `json:"call_digest"`
-	DebitState         debits.State          `json:"debit_state"`
-	CostBound          string                `json:"cost_bound"`
-	ChargeBound        string                `json:"charge_bound"`
-	ObservedCost       string                `json:"observed_cost"`
-	ObservedCharge     string                `json:"observed_charge"`
-	RemainingCost      string                `json:"remaining_cost"`
-	RemainingCharge    string                `json:"remaining_charge"`
-	UnitPrice          *string               `json:"unit_price"`
-	PricingState       PricingState          `json:"pricing_state"`
-	Currency           *string               `json:"currency"`
-	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions"`
+	IdentityDecisions  []IdentityDecision         `json:"identity_decisions"`
+	ID                 string                     `json:"id"`
+	DispatchID         string                     `json:"dispatch_id"`
+	APIKeyID           string                     `json:"api_key_id"`
+	ProjectID          string                     `json:"project_id"`
+	ToolsetID          string                     `json:"toolset_id"`
+	ToolsetRevisionID  string                     `json:"toolset_revision_id"`
+	ServerID           string                     `json:"server_id"`
+	ServerRevisionID   string                     `json:"server_revision_id"`
+	ToolAlias          string                     `json:"tool_alias"`
+	InputDigest        string                     `json:"input_digest"`
+	ResultDigest       *string                    `json:"result_digest"`
+	Status             Status                     `json:"status"`
+	IsError            bool                       `json:"is_error"`
+	StartedAt          time.Time                  `json:"started_at"`
+	CompletedAt        *time.Time                 `json:"completed_at"`
+	CreatedAt          time.Time                  `json:"created_at"`
+	CallDigest         *string                    `json:"call_digest"`
+	DebitState         debits.State               `json:"debit_state"`
+	CostBound          string                     `json:"cost_bound"`
+	ChargeBound        string                     `json:"charge_bound"`
+	ObservedCost       string                     `json:"observed_cost"`
+	ObservedCharge     string                     `json:"observed_charge"`
+	RemainingCost      string                     `json:"remaining_cost"`
+	RemainingCharge    string                     `json:"remaining_charge"`
+	UnitPrice          *string                    `json:"unit_price"`
+	PricingState       PricingState               `json:"pricing_state"`
+	Currency           *string                    `json:"currency"`
+	GuardrailDecisions []guardrailpolicy.Evidence `json:"guardrail_decisions"`
 }
 
 const toolCallColumns = "c.id::text,c.dispatch_id::text,c.api_key_id::text,c.project_id::text,c.toolset_id::text,c.toolset_revision_id::text,c.server_id::text,c.server_revision_id::text,c.tool_alias,c.input_digest,c.result_digest,c.status,c.is_error,c.started_at,c.completed_at,c.created_at,c.call_digest,d.state,d.cost_bound::text,d.charge_bound::text,d.observed_cost::text,d.observed_charge::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text,(CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text,c.unit_price::text,c.pricing_state,c.currency,c.guardrail_decisions,c.identity_decisions"
@@ -70,7 +71,7 @@ func scanToolCall(row toolCallRow) (ToolCall, error) {
 	var call ToolCall
 	err := row.Scan(&call.ID, &call.DispatchID, &call.APIKeyID, &call.ProjectID, &call.ToolsetID, &call.ToolsetRevisionID, &call.ServerID, &call.ServerRevisionID, &call.ToolAlias, &call.InputDigest, &call.ResultDigest, &call.Status, &call.IsError, &call.StartedAt, &call.CompletedAt, &call.CreatedAt, &call.CallDigest, &call.DebitState, &call.CostBound, &call.ChargeBound, &call.ObservedCost, &call.ObservedCharge, &call.RemainingCost, &call.RemainingCharge, &call.UnitPrice, &call.PricingState, &call.Currency, &call.GuardrailDecisions, &call.IdentityDecisions)
 	if call.GuardrailDecisions == nil {
-		call.GuardrailDecisions = []guardrails.Evidence{}
+		call.GuardrailDecisions = []guardrailpolicy.Evidence{}
 	}
 	return call, err
 }
@@ -80,10 +81,10 @@ func loadToolCall(ctx context.Context, q database.Queryer, id string) (ToolCall,
 }
 
 func validateToolCallFilters(apiKeyID, toolsetID string) error {
-	if apiKeyID != "" && !canonicalUUID(apiKeyID) {
+	if apiKeyID != "" && !ids.Canonical(apiKeyID) {
 		return httpkit.Invalid("api_key_id", "Use a canonical UUID.")
 	}
-	if toolsetID != "" && !canonicalUUID(toolsetID) {
+	if toolsetID != "" && !ids.Canonical(toolsetID) {
 		return httpkit.Invalid("toolset_id", "Use a canonical UUID.")
 	}
 	return nil
@@ -258,17 +259,12 @@ func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	}
 	key := r.URL.Query().Get("api_key_id")
 	toolset := r.URL.Query().Get("toolset_id")
-	project := r.URL.Query().Get("project_id")
 	if err := validateToolCallFilters(key, toolset); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if project != "" {
-		if !canonicalUUID(project) {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
-		}
-		if err := p.Project(&project, authz.View); err != nil {
-			return httpkit.Reply{}, err
-		}
+	project, err := p.ProjectFilter(r)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := m.access.Pool.Query(r.Context(), "SELECT "+toolCallColumns+toolCallFrom+" WHERE c.id<$1 AND ($2 OR c.project_id=ANY($3::uuid[])) AND ($4='' OR c.api_key_id=$4::uuid) AND ($5='' OR c.toolset_id=$5::uuid) AND ($6='' OR c.project_id=$6::uuid) ORDER BY c.id DESC LIMIT $7", page.Before, p.AllProjects, p.ProjectIDs(), key, toolset, project, page.Limit+1)
 	if err != nil {

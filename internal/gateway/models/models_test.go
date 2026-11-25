@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -59,7 +59,7 @@ func testHandler(t *testing.T) *Handler {
 	keys := plainKeys{bySecret: map[string]keyauthority.Authority{
 		readSecret: {ID: uuid.NewString(), Policy: keyauthority.KeyPolicy{Scopes: []string{"models_read"}}},
 	}}
-	gate := ingress.NewGate(keys, admission.NewPool(1), nil, 0, time.Now)
+	gate := ingress.NewGate(keys, concurrency.NewPool(1), nil, 0, time.Now)
 	return New(Dependencies{
 		Gate:  gate,
 		Begin: func(http.ResponseWriter, *http.Request) *release.Release { return rel },

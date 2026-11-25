@@ -7,10 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 )
@@ -18,17 +19,17 @@ import (
 const maxProjects = 100
 
 type Project struct {
-	Name                string                       `json:"name"`
-	Organization        *string                      `json:"organization,omitempty"`
-	EndUserDefaults     *authority.AdmissionLimits   `json:"end_user_defaults,omitempty"`
-	EndUserTemplate     *string                      `json:"end_user_limit_template,omitempty"`
-	Attribution         *attribution.Policy          `json:"attribution_policy,omitempty"`
-	RouteGroups         authority.RouteGroups        `json:"route_groups,omitempty"`
-	Budget              *authority.BudgetPolicy      `json:"budget,omitempty"`
-	Templates           *authority.LimitTemplates    `json:"limit_templates,omitempty"`
-	AttributionBudgets  authority.AttributionBudgets `json:"attribution_budgets,omitempty"`
-	PublicCatalog       bool                         `json:"public_catalog,omitempty"`
-	PublicCatalogPrices bool                         `json:"public_catalog_prices,omitempty"`
+	Name                string                          `json:"name"`
+	Organization        *string                         `json:"organization,omitempty"`
+	EndUserDefaults     *keyauthority.AdmissionLimits   `json:"end_user_defaults,omitempty"`
+	EndUserTemplate     *string                         `json:"end_user_limit_template,omitempty"`
+	Attribution         *attribution.Policy             `json:"attribution_policy,omitempty"`
+	RouteGroups         keyauthority.RouteGroups        `json:"route_groups,omitempty"`
+	Budget              *keyauthority.BudgetPolicy      `json:"budget,omitempty"`
+	Templates           *keyauthority.LimitTemplates    `json:"limit_templates,omitempty"`
+	AttributionBudgets  keyauthority.AttributionBudgets `json:"attribution_budgets,omitempty"`
+	PublicCatalog       bool                            `json:"public_catalog,omitempty"`
+	PublicCatalogPrices bool                            `json:"public_catalog_prices,omitempty"`
 }
 
 func Parse(document contract.ConfigurationDocument) ([]Project, error) {
@@ -47,7 +48,7 @@ func Parse(document contract.ConfigurationDocument) ([]Project, error) {
 }
 
 func Render(projects []Project) ([]contract.ConfigurationProjectEntry, error) {
-	return promotion.Convert[[]contract.ConfigurationProjectEntry](promotion.NonNil(slices.SortedFunc(slices.Values(projects), byName)))
+	return promotion.Convert[[]contract.ConfigurationProjectEntry](ptr.NonNil(slices.SortedFunc(slices.Values(projects), byName)))
 }
 
 func (p Project) normalized() Project {
@@ -58,7 +59,7 @@ func (p Project) normalized() Project {
 		EndUserTemplate:     p.EndUserTemplate,
 		Attribution:         p.Attribution,
 		RouteGroups:         sortedGroups(p.RouteGroups),
-		Budget:              authority.NormalizedBudget(p.Budget),
+		Budget:              keyauthority.NormalizedBudget(p.Budget),
 		Templates:           p.Templates,
 		AttributionBudgets:  p.AttributionBudgets,
 		PublicCatalog:       p.PublicCatalog,
@@ -127,7 +128,7 @@ func (p Project) groups(slug string) bool {
 	return false
 }
 
-func sortedGroups(groups authority.RouteGroups) authority.RouteGroups {
+func sortedGroups(groups keyauthority.RouteGroups) keyauthority.RouteGroups {
 	if groups == nil {
 		return nil
 	}
@@ -144,7 +145,7 @@ func sortedMembers(members []string) []string {
 	if members == nil {
 		return nil
 	}
-	return promotion.NonNil(slices.Sorted(slices.Values(members)))
+	return ptr.NonNil(slices.Sorted(slices.Values(members)))
 }
 
 func byName(a, b Project) int {

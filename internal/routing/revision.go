@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 )
 
 // RevisionModel is the published shape of one enabled model inside a provider
@@ -49,27 +49,69 @@ type RevisionSlot struct {
 	ObservedPrincipal string `json:"observed_principal,omitempty"`
 }
 
+// ConfigurationOptions holds the options block of a serving provider
+// configuration. Field declaration order matches the published snapshot schema.
+type ConfigurationOptions struct {
+	TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
+	DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
+	Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
+	SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
+	QuerySettings            map[string]string                `json:"query_settings,omitempty"`
+	OperationDefaults        map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
+	Bindings                 map[string]connectors.Binding    `json:"bindings,omitempty"`
+	Models                   map[string]json.RawMessage       `json:"models"`
+	CredentialHeaders        []string                         `json:"credential_headers"`
+	Limits                   *Limits                          `json:"limits"`
+	ParameterDefaults        map[string]json.RawMessage       `json:"parameter_defaults"`
+	VendorID                 string                           `json:"vendor_id"`
+	PluginOptions            map[string]string                `json:"plugin_options,omitempty"`
+	Commitment               *Commitment                      `json:"commitment,omitempty"`
+	HealthProbe              *HealthProbe                     `json:"health_probe,omitempty"`
+	SharedTokenQuotas        []SharedTokenQuota               `json:"shared_token_quotas,omitempty"`
+}
+
+func (o ConfigurationOptions) ProviderOptions() providerconfig.Options {
+	return providerconfig.Options{
+		TuningDatasetURIPrefixes: o.TuningDatasetURIPrefixes,
+		DocumentURIPrefixes:      o.DocumentURIPrefixes,
+		Network:                  o.Network,
+		SemanticHeaders:          o.SemanticHeaders,
+		QuerySettings:            o.QuerySettings,
+		OperationDefaults:        o.OperationDefaults,
+		Bindings:                 o.Bindings,
+		CredentialHeaders:        o.CredentialHeaders,
+		Models:                   o.Models,
+		ParameterDefaults:        o.ParameterDefaults,
+		VendorID:                 o.VendorID,
+		PluginOptions:            o.PluginOptions,
+	}
+}
+
+func ConfigurationOptionsFrom(opts providerconfig.Options, limits *Limits, commitment *Commitment, healthProbe *HealthProbe, quotas []SharedTokenQuota) ConfigurationOptions {
+	return ConfigurationOptions{
+		TuningDatasetURIPrefixes: opts.TuningDatasetURIPrefixes,
+		DocumentURIPrefixes:      opts.DocumentURIPrefixes,
+		Network:                  opts.Network,
+		SemanticHeaders:          opts.SemanticHeaders,
+		QuerySettings:            opts.QuerySettings,
+		OperationDefaults:        opts.OperationDefaults,
+		Bindings:                 opts.Bindings,
+		Models:                   opts.Models,
+		CredentialHeaders:        opts.CredentialHeaders,
+		Limits:                   limits,
+		ParameterDefaults:        opts.ParameterDefaults,
+		VendorID:                 opts.VendorID,
+		PluginOptions:            opts.PluginOptions,
+		Commitment:               commitment,
+		HealthProbe:              healthProbe,
+		SharedTokenQuotas:        quotas,
+	}
+}
+
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
 	providerconfig.Identity[string]
-	Options struct {
-		TuningDatasetURIPrefixes []string                         `json:"tuning_dataset_uri_prefixes,omitempty"`
-		DocumentURIPrefixes      []string                         `json:"document_uri_prefixes,omitempty"`
-		Network                  *egress.ConnectionOptions        `json:"network,omitempty"`
-		SemanticHeaders          map[string]string                `json:"semantic_headers,omitempty"`
-		QuerySettings            map[string]string                `json:"query_settings,omitempty"`
-		OperationDefaults        map[string]connectors.DefaultSet `json:"operation_defaults,omitempty"`
-		Bindings                 map[string]connectors.Binding    `json:"bindings,omitempty"`
-		Models                   map[string]json.RawMessage       `json:"models"`
-		CredentialHeaders        []string                         `json:"credential_headers"`
-		Limits                   *Limits                          `json:"limits"`
-		ParameterDefaults        map[string]json.RawMessage       `json:"parameter_defaults"`
-		VendorID                 string                           `json:"vendor_id"`
-		PluginOptions            map[string]string                `json:"plugin_options,omitempty"`
-		Commitment               *Commitment                      `json:"commitment,omitempty"`
-		HealthProbe              *HealthProbe                     `json:"health_probe,omitempty"`
-		SharedTokenQuotas        []SharedTokenQuota               `json:"shared_token_quotas,omitempty"`
-	} `json:"options"`
+	Options ConfigurationOptions `json:"options"`
 }
 
 // PublishedTarget is the stored shape of one route revision target. The
@@ -168,14 +210,14 @@ func ObservedPrincipal(slots []RevisionSlot) string {
 // route revision. Target array order is retained; the position field does not
 // reorder it.
 type RouteRevision struct {
-	ID, Slug, RevisionID                                 string
-	Revision                                             int
-	OverallTimeout                                       int64
-	MaxAttempts                                          int
-	PublishedAt                                          time.Time
-	ProjectID                                            *string
-	Operations, Targets, Policy, ContentPolicy, Fidelity []byte
-	Behavior                                             []byte
+	ID, Slug, RevisionID                  string
+	Revision                              int
+	OverallTimeout                        int64
+	MaxAttempts                           int
+	PublishedAt                           time.Time
+	ProjectID                             *string
+	Operations, Targets, Policy, Fidelity []byte
+	Behavior                              []byte
 }
 
 // DecodeRouteRevision reconstructs a route without checking ownership,
@@ -198,11 +240,6 @@ func DecodeRouteRevision(revision RouteRevision) (Route, error) {
 	if len(revision.Policy) > 0 {
 		if err = json.Unmarshal(revision.Policy, &route.Policy); err != nil {
 			return Route{}, fmt.Errorf("route %s policy: %w", revision.Slug, err)
-		}
-	}
-	if len(revision.ContentPolicy) > 0 {
-		if err = json.Unmarshal(revision.ContentPolicy, &route.ContentPolicy); err != nil {
-			return Route{}, fmt.Errorf("route %s content policy: %w", revision.Slug, err)
 		}
 	}
 	route.Fidelity, err = DecodeFidelity(revision.Fidelity)

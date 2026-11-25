@@ -9,12 +9,12 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/contracts/duplex"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
-	"github.com/tyk-swe/olp/internal/duplexcontract"
-	"github.com/tyk-swe/olp/internal/providerconfig"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -33,7 +33,7 @@ func (p *Prober) Certify(ctx context.Context, t Target, model string, tuple conn
 	if t.Connection.Document().ProfileID == "gemini-live" && tuple.Operation == "realtime" && tuple.Surface == "gemini" {
 		return p.certifyGeminiLive(ctx, t, model)
 	}
-	if duplexcontract.IsProfile(t.Connection.Document().ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
+	if duplex.IsProfile(t.Connection.Document().ProfileID) && tuple.Operation == "realtime" && tuple.Surface == "native" {
 		return p.certifyNativeDuplex(ctx, t, model)
 	}
 	if codec, ok := configuredOperation(t.Connection.Transport(), tuple.Operation); ok {

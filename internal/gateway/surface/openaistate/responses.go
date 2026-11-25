@@ -6,14 +6,16 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/generationrefs"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -57,7 +59,7 @@ func (s surface) responseCall(w http.ResponseWriter, r *http.Request, use kernel
 }
 
 func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *resources.Resource, p *kernel.Pin, method, suffix string, body []byte, w http.ResponseWriter, query url.Values) *fault.Error {
-	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), suffix), query)
+	endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath(suffix), query)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 	}
@@ -157,7 +159,7 @@ func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *reso
 
 func (s surface) getResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
-		query, stream, e := kernel.ResponseRetrievalQuery(r.URL.RawQuery)
+		query, stream, e := responseRetrievalQuery(r.URL.RawQuery)
 		if e != nil {
 			return e
 		}
@@ -176,7 +178,7 @@ func (s surface) cancelResponse(w http.ResponseWriter, r *http.Request) {
 
 func (s surface) deleteResponse(w http.ResponseWriter, r *http.Request) {
 	s.responseCall(w, r, kernel.RetainedHousekeeping, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, route *routing.Route) *fault.Error {
-		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)), nil)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath("/"+url.PathEscape(res.UpstreamID)), nil)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
@@ -221,7 +223,7 @@ func (s surface) responseInputItems(w http.ResponseWriter, r *http.Request) {
 				query.Set(name, value)
 			}
 		}
-		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, kernel.ResponsePath(p.Provider.Connector(), "/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
+		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, p.Provider.Connector().ResponsesPath("/"+url.PathEscape(res.UpstreamID)+"/input_items"), query)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved.")
 		}
@@ -251,4 +253,56 @@ func (s surface) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		s.kernel.WriteStateJSON(w, x, projected.Bytes(), resp.Exchange)
 		return nil
 	})
+}
+
+func responseRetrievalQuery(raw string) (url.Values, bool, *fault.Error) {
+	query, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, false, fault.InvalidRequest("invalid_request", "The response retrieval query is malformed.", nil)
+	}
+	stream := false
+	includes := []string{
+		"file_search_call.results", "web_search_call.results", "web_search_call.action.sources",
+		"message.input_image.image_url", "computer_call_output.output.image_url",
+		"code_interpreter_call.outputs", "reasoning.encrypted_content", "message.output_text.logprobs",
+	}
+	for name, values := range query {
+		if len(values) == 0 || len(values) > 16 || name != "include" && name != "include[]" && len(values) != 1 {
+			return nil, false, fault.InvalidRequest("invalid_request", "Response retrieval query controls must occur once.", nil)
+		}
+		switch name {
+		case "stream":
+			if values[0] != "true" && values[0] != "false" {
+				return nil, false, fault.InvalidRequest("invalid_request", "stream must be true or false.", nil)
+			}
+			stream = values[0] == "true"
+		case "starting_after":
+			if _, err := strconv.ParseUint(values[0], 10, 63); err != nil {
+				return nil, false, fault.InvalidRequest("invalid_request", "starting_after must be a non-negative event sequence.", nil)
+			}
+		case "include_obfuscation":
+			if values[0] != "true" && values[0] != "false" {
+				return nil, false, fault.InvalidRequest("invalid_request", "include_obfuscation must be true or false.", nil)
+			}
+		case "include", "include[]":
+			for _, value := range values {
+				if !slices.Contains(includes, value) {
+					return nil, false, fault.InvalidRequest("invalid_request", "The response include selector is not qualified.", nil)
+				}
+			}
+		default:
+			return nil, false, fault.InvalidRequest("invalid_request", "The response retrieval query has an unsupported control.", nil)
+		}
+	}
+	if query.Has("include") && query.Has("include[]") {
+		return nil, false, fault.InvalidRequest("invalid_request", "Use one include selector spelling for response retrieval.", nil)
+	}
+	if !stream && query.Has("starting_after") {
+		return nil, false, fault.InvalidRequest("invalid_request", "starting_after requires stream=true.", nil)
+	}
+	if !stream {
+		return query, false, nil
+	}
+	query.Set("stream", "true")
+	return query, true, nil
 }

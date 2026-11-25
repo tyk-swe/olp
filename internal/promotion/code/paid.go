@@ -9,12 +9,13 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/provider"
 	"github.com/tyk-swe/olp/internal/providers"
-	"github.com/tyk-swe/olp/internal/providers/codeaccounts"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -97,7 +98,7 @@ func (c PaidConnection) render() (contract.ConfigurationCodePaidConnection, erro
 	if err != nil {
 		return contract.ConfigurationCodePaidConnection{}, err
 	}
-	refs := promotion.MapValues(c.SlotKeyRefs, func(refs []string) []string { return promotion.NonNil(slices.Clone(refs)) })
+	refs := promotion.MapValues(c.SlotKeyRefs, func(refs []string) []string { return ptr.NonNil(slices.Clone(refs)) })
 	return contract.ConfigurationCodePaidConnection{Provider: entries[0], SlotKeyRefs: refs}, nil
 }
 

@@ -137,7 +137,7 @@ func generationCacheInput(resource *resources.Resource, p *Pin) (int64, bool) {
 		Tokens        *int64 `json:"total_token_count"`
 		NoCachedTools bool   `json:"no_cached_tools"`
 	}
-	if json.Unmarshal(resource.Metadata, &metadata) != nil || p.Provider.Kind != "gemini" || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.Provider.Connector().Model(p.Model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
+	if json.Unmarshal(resource.Metadata, &metadata) != nil || !p.Provider.Connector().CountsCachedContents() || resource.ExpiresAt == nil || !metadata.NoCachedTools || metadata.Model == "" || metadata.Tokens == nil || *metadata.Tokens < 0 || *metadata.Tokens > estimate.MaxTokens || strings.TrimPrefix(metadata.Model, "models/") != p.Provider.Connector().Model(p.Model) || !strings.HasPrefix(resource.UpstreamID, "cachedContents/") {
 		return 0, false
 	}
 	return *metadata.Tokens, true
@@ -158,10 +158,7 @@ func (s *Server) generationReferenceBudget(x *Call, p *Pin, route *routing.Route
 	}
 	authority := x.authority
 	authority.Attribution = x.attribution
-	if s.Deps.Runtime == nil {
-		return UnboundedWorkLimits(authority, &p.Provider, &p.Slot, route)
-	}
-	return s.UnboundedPinLimits(authority, p, route)
+	return s.unboundedPinLimits(authority, p, route, p.Model)
 }
 
 // A connection pin can also belong to a file, conversation or vector store.

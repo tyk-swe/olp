@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -36,10 +36,10 @@ func resolveSimulationAttribution(input simulationInput, key *inspectionKeyConte
 }
 
 func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKeyContext, eligibility func(string) routing.Eligibility, input simulationInput, semantic interaction.Context, inspectionRequest *wire.Request, unary *oif.Request, mediaRequest *media.Request, counted *simulatedDemand, workflow bool, workflowCapability *routing.WorkflowCapability) (routing.PrepareCandidate, map[string]*interactionInspection) {
-	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
+	inspected, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, workflow)
 	prepare := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
 	if unary != nil {
-		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, route.Slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, route.Slug), *unary, semantic, input.ClientContract, m.demand)
 	}
 	if !operationregistry.PolicyFor(input.Operation).BoundedWork {
 		prior := prepare
@@ -63,7 +63,7 @@ func buildLegPrepare(m *simulation, named, route routing.Route, key inspectionKe
 		}
 	}
 	if mediaRequest != nil {
-		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
+		prepare, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand)
 	}
 	return prepare, inspections
 }

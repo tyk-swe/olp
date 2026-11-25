@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
@@ -94,9 +94,9 @@ func (a *codeAttempt) antigravityResponse(ctx context.Context, w http.ResponseWr
 		return completion, stateErr
 	}()
 	if unsupported, ok := errors.AsType[*antigravityStateError](err); ok {
-		a.observe(antigravityObservation(unsupported.completion, true))
+		a.observe(ctx, antigravityObservation(unsupported.completion, true))
 	}
-	a.observe(antigravityObservation(completion, err == nil || !payload.stream && completion != nil))
+	a.observe(ctx, antigravityObservation(completion, err == nil || !payload.stream && completion != nil))
 	if err != nil {
 		code := func() string {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_upstream_unsupported_state" {

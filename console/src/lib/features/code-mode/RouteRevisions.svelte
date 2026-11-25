@@ -5,7 +5,7 @@
     emptyCursorHistory,
     cursorPaginationProps
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
   import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
@@ -41,11 +41,6 @@
             Codex CLI identity compatibility {revision.route.codex_cli_identity
               ? 'enabled. Codex subscription requests with no nonblank Originator receive Originator=codex_cli_rs. Explicit identity headers and prompts are preserved. This may violate provider terms and risk account suspension.'
               : 'disabled. Identity headers and prompts are preserved.'}
-          </p>
-          <p>
-            Allowance ordering {revision.route.allowance_ordering
-              ? 'enabled in this revision, but has no effect until a model has a qualified limit mapping. Legacy eligibility remains in force for new roots, pins and model offers.'
-              : 'disabled. Legacy eligibility remains in force for new roots, pins and model offers.'}
           </p>
           <code>{revision.id}</code>
         </li>{:else}<li>No published revisions.</li>{/each}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/platform/database"
 
@@ -35,7 +36,7 @@ type slot struct {
 type namer func(string) (string, error)
 
 func readStored(ctx context.Context, q database.Queryer, projectName namer) (Section, error) {
-	active, err := guardrails.ReadUnmanagedActiveRevisions(ctx, q)
+	active, err := guardrails.ReadActiveRevisions(ctx, q)
 	if err != nil {
 		return Section{}, err
 	}
@@ -67,7 +68,7 @@ func readPlatform(ctx context.Context, q database.Queryer, registry *guardrails.
 	if registry == nil {
 		return Section{}, nil
 	}
-	revisions, err := guardrails.ReadUnmanagedPolicyRevisions(ctx, q)
+	revisions, err := guardrails.ReadNamedPolicyRevisions(ctx, q)
 	if err != nil {
 		return Section{}, err
 	}
@@ -129,9 +130,9 @@ func policyName(registry *guardrails.Registry, r guardrails.NamedPolicyRevision)
 		Type      guardrails.Kind
 		Config    json.RawMessage
 		Timeout   int64
-		OnError   guardrails.OnError
-		Phase     guardrails.Phase
-		Action    guardrails.Action
+		OnError   guardrailpolicy.OnError
+		Phase     guardrailpolicy.Phase
+		Action    guardrailpolicy.Action
 		Monitor   bool
 		Mandatory bool
 	}
@@ -236,20 +237,10 @@ func routeSlot(a Attachment) slot {
 	return slot{route.Slug, a.Order}
 }
 
-func readLegacyRoutes(ctx context.Context, q database.Queryer, projectName namer) ([]Section, error) {
-	legacy, err := routes.ReadLegacyContentPolicies(ctx, q)
-	if err != nil {
-		return nil, err
+func bounded(name string) string {
+	if len(name) <= 85 {
+		return name
 	}
-	return promotion.TryMap(legacy, func(r routes.LegacyContentPolicy) (Section, error) {
-		owner, err := projectName(guardrails.ProjectOf(r.ProjectID))
-		if err != nil {
-			return Section{}, err
-		}
-		c, err := legacyRoute(r.Slug, owner, r.ContentPolicy, int64(r.OverallTimeoutMS))
-		if err != nil {
-			return Section{}, err
-		}
-		return parseConverted(c)
-	})
+	sum := sha256.Sum256([]byte(name))
+	return name[:64] + "-" + hex.EncodeToString(sum[:8])
 }

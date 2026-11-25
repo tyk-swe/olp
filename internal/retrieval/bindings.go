@@ -14,8 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
@@ -64,7 +65,7 @@ func normalizeInput(in Input) (Input, error) {
 		return Input{}, httpkit.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
 	}
 	for _, key := range in.KeyGrants {
-		if parsed, err := uuid.Parse(key); err != nil || parsed.String() != key {
+		if !ids.CanonicalOrNil(key) {
 			return Input{}, httpkit.Invalid("key_grants", "Use canonical API-key UUIDs.")
 		}
 	}
@@ -188,9 +189,9 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Binding, in Inp
 		Input:      normalized,
 		ProviderID: provider,
 		ID:         id,
-		RevisionID: httpkit.NewID(),
+		RevisionID: ids.New(),
 		Revision:   revision,
-		ETag:       httpkit.NewID(),
+		ETag:       ids.New(),
 	}
 	raw, err := json.Marshal(struct {
 		Input
@@ -218,7 +219,7 @@ func nextBindingIdentity(current *Binding) (string, int64) {
 	if current != nil {
 		return current.ID, current.Revision + 1
 	}
-	return httpkit.NewID(), 1
+	return ids.New(), 1
 }
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/retrieval-bindings", s.list)
@@ -353,7 +354,7 @@ func (s *Server) target(r *http.Request, in Input) func(pgx.Tx, authz.Principal)
 
 func change(r *http.Request, tx pgx.Tx, p authz.Principal, current *Binding, in Input) (httpkit.Reply, access.Event, error) {
 	if r.Method == http.MethodDelete {
-		_, err := tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", current.ID, httpkit.NewID())
+		_, err := tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", current.ID, ids.New())
 		return httpkit.Reply{Status: http.StatusNoContent}, bindingEvent("retire", current.ID), err
 	}
 	next, err := Save(r.Context(), tx, p.UserID(), current, in)

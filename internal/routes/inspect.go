@@ -17,9 +17,9 @@ import (
 	"golang.org/x/net/http/httpguts"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 )
 
@@ -202,23 +202,7 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
-// Bound actual regexp input across every target and route leg in one inspection.
-// Each match costs at least one byte so empty strings cannot evade the budget.
-const maxInspectionPolicyBytes = 8 << 20
-
-type inspectionBudget struct{ used int }
-
-func (b *inspectionBudget) reserve(size int) error {
-	size = max(1, size)
-	if size > maxInspectionPolicyBytes-b.used {
-		b.used = maxInspectionPolicyBytes
-		return &inspectionDiagnostic{"inspection_limit", "/request", "policy_work_limit", "Reduce the request size, input policy rules or inspected targets."}
-	}
-	b.used += size
-	return nil
-}
-
-func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget, workflow bool) (routing.PrepareCandidate, map[string]*interactionInspection, map[string]*wire.Request) {
+func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, workflow bool) (routing.PrepareCandidate, map[string]*interactionInspection, map[string]*wire.Request) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
 		return nil, inspections, nil
@@ -236,7 +220,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			}
 			return inspectionEffectivePrep(route, parsed, demand, effectiveRequests[target.ID], target), nil
 		}
-		effectiveRequest, err := inspectStrictCandidate(route, parsed, context, provider, target, budget, result)
+		effectiveRequest, err := inspectStrictCandidate(parsed, context, provider, target, result)
 		if err != nil {
 			return nil, err
 		}
@@ -300,9 +284,9 @@ func inspectTransformedCandidate(route routing.Route, parsed *wire.Request, cont
 	return nil
 }
 
-func inspectStrictCandidate(route routing.Route, parsed *wire.Request, context interaction.Context, provider routing.Provider, target routing.Target, budget *inspectionBudget, result *interactionInspection) (*wire.Request, error) {
+func inspectStrictCandidate(parsed *wire.Request, context interaction.Context, provider routing.Provider, target routing.Target, result *interactionInspection) (*wire.Request, error) {
 	config := provider.Connector()
-	template, err := interaction.Compile(interaction.Config{Provider: config, ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+	template, err := interaction.Compile(interaction.Config{Provider: config, ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel})
 	if err != nil {
 		return nil, safeInspectionError(err)
 	}
@@ -353,13 +337,6 @@ func inspectStrictCandidate(route routing.Route, parsed *wire.Request, context i
 		result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/query/" + name, Kind: "string", Origin: origin, Redacted: true})
 	}
 	slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
-	if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
-		safe := safeInspectionError(err)
-		if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
-			result.Status = "blocked"
-		}
-		return nil, safe
-	}
 	result.Status = "admitted"
 	return effectiveRequest, nil
 }

@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -23,12 +22,12 @@ import (
 func (s *Server) EnterPassthrough(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
 	x := &Call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
 	if !s.Gate.Admit(r.Context()) {
-		s.RefusePassthrough(x, w, fault.Overloaded)
+		s.RefuseOn(x, w, fault.Overloaded, "openai")
 		return nil, keyauthority.Authority{}, false
 	}
 	authority, e := s.authorizePassthrough(r, x)
 	if e != nil {
-		s.RefusePassthrough(x, w, e)
+		s.RefuseOn(x, w, e, "openai")
 		s.Gate.Release(r.Context())
 		return nil, keyauthority.Authority{}, false
 	}
@@ -45,10 +44,6 @@ func (s *Server) authorizePassthrough(r *http.Request, x *Call) (keyauthority.Au
 		return authority, e
 	}
 	return authority, x.NoteAttribution(r, authority)
-}
-
-func (s *Server) RefusePassthrough(x *Call, w http.ResponseWriter, e *fault.Error) {
-	s.RefuseOn(x, w, e, "openai")
 }
 
 func (s *Server) SelectPassthrough(ctx context.Context, x *Call) (Pin, *fault.Error) {
@@ -112,16 +107,16 @@ func (s *Server) SettlePassthrough(ctx context.Context, x *Call, p *Pin) {
 	s.SettleCaps(ctx, x)
 }
 
-func (s *Server) DispatchPassthrough(ctx context.Context, x *Call, p Pin, r *http.Request, upstream string, body []byte) (*http.Response, *fault.Error) {
+func (s *Server) DispatchPassthrough(ctx context.Context, x *Call, p Pin, method, upstream string, headers http.Header, body []byte) (*http.Response, *fault.Error) {
 	deadline, _ := ctx.Deadline()
 	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, time.Until(deadline)); e != nil {
 		return nil, e
 	}
-	req, err := http.NewRequestWithContext(ctx, r.Method, upstream, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, upstream, bytes.NewReader(body))
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider request could not be built.")
 	}
-	forwardPassthroughHeaders(req.Header, r.Header, x.Route.Passthrough.Headers, len(body) > 0)
+	maps.Copy(req.Header, headers)
 	fact := s.recordPassthroughFact(x, p)
 	if err := s.applySlotCredential(ctx, x, req, p.Provider.Connector(), p.Slot, body, &p.Provider, p.Target.ProviderModel); err != nil {
 		s.closePassthroughFact(fact, ClassCredential, false)
@@ -142,16 +137,8 @@ func (s *Server) DispatchPassthrough(ctx context.Context, x *Call, p Pin, r *htt
 	return resp, nil
 }
 
-func forwardPassthroughHeaders(dst, src http.Header, allowed []string, hasBody bool) {
-	headers := codewire.ForwardHeaders(src, true)
-	for _, name := range allowed {
-		for _, value := range headers.Values(name) {
-			dst.Add(name, value)
-		}
-	}
-	if ct := headers.Get("Content-Type"); ct != "" && hasBody {
-		dst.Set("Content-Type", ct)
-	}
+func (s *Server) FailPassthrough(x *Call, class string) {
+	s.closePassthroughFact(x.LastAttemptFact(), class, true)
 }
 
 func (s *Server) recordPassthroughFact(x *Call, p Pin) *events.AttemptFact {
@@ -191,52 +178,6 @@ func (s *Server) passthroughTransportFailure(ctx context.Context, fact *events.A
 
 func passthroughRedirectRefused() *fault.Error {
 	return fault.ServerError(http.StatusBadGateway, "passthrough_redirect_refused", "The provider redirect was refused.")
-}
-
-func (s *Server) ReceivePassthrough(ctx context.Context, x *Call, method string, resp *http.Response) (io.Reader, int64, *fault.Error) {
-	fact := x.LastAttemptFact()
-	switch resp.StatusCode {
-	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		s.closePassthroughFact(fact, ClassProtocol, true)
-		return nil, 0, passthroughRedirectRefused()
-	}
-	limit := s.passthroughResponseLimit()
-	if method != http.MethodHead && resp.ContentLength > limit {
-		s.closePassthroughFact(fact, ClassProtocol, true)
-		return nil, 0, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response exceeded the gateway limit.")
-	}
-	body, e := passthroughResponseBody(resp, x.sensitive, limit)
-	if e != nil {
-		s.closePassthroughFact(fact, timeoutOr(ctx, ClassProtocol), true)
-		return nil, 0, e
-	}
-	return body, limit, nil
-}
-
-func (s *Server) passthroughResponseLimit() int64 {
-	if s.Config.MaxResponseBytes <= 0 {
-		return 1 << 20
-	}
-	return s.Config.MaxResponseBytes
-}
-
-func passthroughResponseBody(response *http.Response, sensitive egress.Sensitive, limit int64) (io.Reader, *fault.Error) {
-	if response.StatusCode < 400 || response.Request != nil && response.Request.Method == http.MethodHead {
-		return response.Body, nil
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
-	if err != nil {
-		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be read.")
-	}
-	decoded, err := codewire.Decode(raw, response.Header.Get("Content-Encoding"), limit)
-	if err != nil {
-		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response could not be decoded within the gateway limit.")
-	}
-	redacted := sensitive.Redact(string(decoded))
-	if int64(len(redacted)) > limit {
-		return nil, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider error response exceeded the gateway limit.")
-	}
-	return strings.NewReader(redacted), nil
 }
 
 func (s *Server) FinishPassthrough(ctx context.Context, x *Call, status int, readErr, copyErr error) {

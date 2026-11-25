@@ -31,32 +31,35 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 	"github.com/tyk-swe/olp/tests/harness"
@@ -349,6 +352,7 @@ func (r *listedRuntime) NetworkSecret(_ context.Context, _ *release.Release, _, 
 type storedPlan struct {
 	slug, model string
 	kind        string
+	vendor      string
 	surface     string
 	profile     string
 	version     string
@@ -364,6 +368,16 @@ type storedPlan struct {
 	operations  []string
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
+	valkey      scripts.Commander
+	sessions    bool
+	front       func(http.Handler) http.Handler
+}
+
+func (p storedPlan) served(mux http.Handler) http.Handler {
+	if p.front == nil {
+		return mux
+	}
+	return p.front(mux)
 }
 
 type storedGateway struct {
@@ -446,7 +460,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
 		Providers: map[string]routing.Provider{fixture.providerID: {
-			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
+			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), VendorID: plan.vendor, Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
 			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe, Limits: plan.limits, OperationDefaults: plan.defaults,
 		}},
@@ -473,14 +487,26 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = spool.Close() })
-	runner := newRunner(t)
+	runner := runnerOver(t, cmp.Or(plan.valkey, scripts.Commander(harness.Valkey(t))))
 	debitStore := debits.NewStore(pool)
 	syncer := debits.NewSyncer(debitStore, runner)
 	limiter := admission.NewDurable(runner, syncer)
 	g.limiter = limiter
 	workflow := kernel.Dependencies{}
+	if plan.sessions {
+		workflow = kernel.Dependencies{Debits: &kernel.SessionDebits{Session: debits.NewSession(debitStore, syncer)}}
+	}
 	if plan.tools != nil {
-		workflow = kernel.Dependencies{WorkflowTools: plan.tools, WorkflowRuns: runs.NewWorkflowStore(pool, auth, keys, installation), Debits: kernel.DurableSessionDebits(pool, debitStore, syncer)}
+		workflow = kernel.Dependencies{
+			WorkflowTools: plan.tools,
+			WorkflowRuns:  runs.NewWorkflowStore(pool, auth, keys, installation),
+			Debits: &kernel.SessionDebits{
+				Session: debits.NewSession(debitStore, syncer),
+				SettleWorkflow: func(ctx context.Context, event *usage.Event, attempt int) ([]limits.Snapshot, error) {
+					return ingest.PersistWorkflowAttempt(ctx, pool, event, attempt)
+				},
+			},
+		}
 	}
 	g.fleet = fleet.New(runner)
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
@@ -519,7 +545,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	g.kernel = server
 	g.mux = http.NewServeMux()
 	gateway.Register(server, g.mux)
-	g.server = httptest.NewServer(g.mux)
+	g.server = httptest.NewServer(plan.served(g.mux))
 	t.Cleanup(g.server.Close)
 	return g
 }
@@ -545,8 +571,8 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 		VALUES ($1,$2,$3,1,$4,$5,$6)`, routeID, slug, fixture.ownerID, revisionID, uuid.NewString(), fixture.projectID); err != nil {
 		g.t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior)
-		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',NULL,$8,'{}')`,
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.route_revisions (id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity,behavior)
+		VALUES ($1,$2,1,$3,$4,5000,1,$5,$6,$7,'{}',$8,'{}')`,
 		revisionID, routeID, slug, encoded(g.t, g.plan.operations), targets, uuid.NewString(), fixture.ownerID,
 		encoded(g.t, routing.RouteFidelity{Mode: cmp.Or(g.plan.fidelity, routing.FidelityTransformed)})); err != nil {
 		g.t.Fatal(err)
@@ -557,6 +583,9 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 func operationModes(operation string, modes []string) []string {
 	if operation == "video_create" {
 		return []string{"async"}
+	}
+	if operation == "realtime" {
+		return []string{"realtime"}
 	}
 	return modes
 }
@@ -1052,6 +1081,32 @@ func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body 
 	return decoded
 }
 
+func TestABatchUploadToAVendorThatRefusesBatchesAnswersWithTheVendorsOwnReason(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const form = "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n{}\n\r\n--b--\r\n"
+	for _, vendor := range vendors.All() {
+		if vendor.BatchRefusal == "" {
+			continue
+		}
+		upstream := &retainedUpstream{replies: openAIReplies}
+		g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+			slug: "refused-" + vendor.ID, model: "batch-model", kind: vendor.Connector, vendor: vendor.ID, operations: []string{"generation", "batch"}, upstream: upstream,
+		})
+		g.key(t, "owner")
+		_, raw := g.send(t, "POST", "/v1/files", map[string]string{"Authorization": "Bearer owner", "Content-Type": "multipart/form-data; boundary=b"}, form, 422)
+		var refusal struct {
+			Error struct{ Code, Message string }
+		}
+		if err := json.Unmarshal(raw, &refusal); err != nil || refusal.Error.Code != "target_capability" || refusal.Error.Message != vendor.BatchRefusal {
+			t.Fatalf("%s refused a batch upload with %s, want its contract's reason %q", vendor.ID, raw, vendor.BatchRefusal)
+		}
+		if sent := upstream.sent("POST /files"); len(sent) != 0 {
+			t.Fatalf("%s received %d uploads, want none", vendor.ID, len(sent))
+		}
+	}
+}
+
 func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCredential(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
@@ -1389,6 +1444,17 @@ func TestStoredResponsesHideProviderIdentifiersContinueOnTheirProviderAndIsolate
 	if kept := storedResponses(t, pool, g, "owner"); answered.StatusCode != 200 || len(kept) != 2 {
 		t.Fatalf("a response the caller asked not to store answered %d and left %d stored, want 200 and the two stored before", answered.StatusCode, len(kept))
 	}
+
+	provider := g.snapshot.Providers[g.fixture.providerID]
+	provider.ProjectID = &g.fixture.projectID
+	provider.SharedTokenQuotas = []routing.SharedTokenQuota{{Model: model, Group: "responses", TokensPerMinute: 100000}}
+	g.snapshot.Providers[g.fixture.providerID] = provider
+	g.republish(t, func(*routing.Route) {})
+	_, refused := g.send(t, "POST", "/v1/responses", map[string]string{"Authorization": "Bearer owner", "Content-Type": json}, continuation, 400)
+	if !strings.Contains(string(refused), `"unbounded_work_budget"`) || len(upstream.sent("POST /responses")) != 3 {
+		t.Fatalf("continuation with a shared quota answered %s, want a budget refusal before the provider", refused)
+	}
+	t.Logf("POST /v1/responses with previous_response_id and a shared token quota: HTTP 400 %s", refused)
 
 	if got := g.call(t, "owner", "DELETE", "/v1/responses/"+first.ID, "", "", 200); !got.Deleted || got.ID != first.ID {
 		t.Fatalf("response delete = %+v", got)

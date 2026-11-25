@@ -1,5 +1,5 @@
 <script lang="ts">
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { Overview } from './api.js';
 

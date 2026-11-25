@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/identity/scim"
 	"github.com/tyk-swe/olp/internal/platform/database"
-	"github.com/tyk-swe/olp/internal/scim"
 )
 
 type SCIMProjectGrant struct {

@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/domain/contentpolicy"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -109,16 +108,15 @@ type Event struct {
 	Origin          Origin  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
-	GuardrailDecisions []guardrails.Evidence    `json:"guardrail_decisions,omitempty"`
-	PolicyDecisions    []contentpolicy.Decision `json:"policy_decisions,omitempty"`
-	BudgetGroupID      *string                  `json:"budget_group_id"`
-	ProviderID         *string                  `json:"provider_id"`
-	RouteSlug          string                   `json:"route_slug"`
-	UpstreamModel      *string                  `json:"upstream_model"`
-	Operation          string                   `json:"operation"`
-	Surface            string                   `json:"surface"`
-	RequestStartedAt   time.Time                `json:"request_started_at"`
-	RequestCompletedAt time.Time                `json:"request_completed_at"`
+	GuardrailDecisions []guardrailpolicy.Evidence `json:"guardrail_decisions,omitempty"`
+	BudgetGroupID      *string                    `json:"budget_group_id"`
+	ProviderID         *string                    `json:"provider_id"`
+	RouteSlug          string                     `json:"route_slug"`
+	UpstreamModel      *string                    `json:"upstream_model"`
+	Operation          string                     `json:"operation"`
+	Surface            string                     `json:"surface"`
+	RequestStartedAt   time.Time                  `json:"request_started_at"`
+	RequestCompletedAt time.Time                  `json:"request_completed_at"`
 	// HTTPOutcomePending is used only by retained generation templates. Their
 	// financial evidence may settle before the original HTTP exchange ends.
 	// Snapshot timestamps remain valid, but persistence leaves its final HTTP
@@ -155,22 +153,22 @@ type Event struct {
 // usage are omitted entirely when absent: a pre-attempt event carries neither,
 // and the event contract does not require routing.
 type Attempt struct {
-	Execution          *ExecutionReference   `json:"execution,omitempty"`
-	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
-	Routing            *Routing              `json:"routing,omitempty"`
-	ID                 string                `json:"id"`
-	Ordinal            int                   `json:"ordinal"`
-	ProviderID         string                `json:"provider_id"`
-	ProviderRequestID  string                `json:"provider_request_id,omitempty"`
-	UpstreamModel      string                `json:"upstream_model"`
-	StartedAt          time.Time             `json:"started_at"`
-	CompletedAt        time.Time             `json:"completed_at"`
-	StatusCode         *int                  `json:"status_code"`
-	ErrorClass         *string               `json:"error_class"`
-	Committed          bool                  `json:"committed"`
-	LatencyMS          int64                 `json:"latency_ms"`
-	FirstByteMS        *int64                `json:"first_byte_ms"`
-	Usage              *AttemptUsage         `json:"usage,omitempty"`
+	Execution          *ExecutionReference        `json:"execution,omitempty"`
+	GuardrailDecisions []guardrailpolicy.Evidence `json:"guardrail_decisions,omitempty"`
+	Routing            *Routing                   `json:"routing,omitempty"`
+	ID                 string                     `json:"id"`
+	Ordinal            int                        `json:"ordinal"`
+	ProviderID         string                     `json:"provider_id"`
+	ProviderRequestID  string                     `json:"provider_request_id,omitempty"`
+	UpstreamModel      string                     `json:"upstream_model"`
+	StartedAt          time.Time                  `json:"started_at"`
+	CompletedAt        time.Time                  `json:"completed_at"`
+	StatusCode         *int                       `json:"status_code"`
+	ErrorClass         *string                    `json:"error_class"`
+	Committed          bool                       `json:"committed"`
+	LatencyMS          int64                      `json:"latency_ms"`
+	FirstByteMS        *int64                     `json:"first_byte_ms"`
+	Usage              *AttemptUsage              `json:"usage,omitempty"`
 	// InputEstimate is what admission estimated this attempt's input to be
 	// before the provider reported it, absent when no estimate was made, as for
 	// a stored-response call, a realtime session or a job poll. ModelFamily

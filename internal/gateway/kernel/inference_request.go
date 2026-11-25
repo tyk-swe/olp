@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -76,7 +76,7 @@ func (s *Server) newInferenceRequest(w http.ResponseWriter, r *http.Request, fam
 }
 
 func (q inferenceRequest) finish() {
-	q.server.Finish(q.x, q.end.out, q.end.status)
+	q.server.finishContext(q.r.Context(), q.x, q.end.out, q.end.status)
 	// The budgets this request reserved are settled even when the
 	// client is gone: a concurrency slot nobody releases is a slot
 	// every replica keeps counting.
@@ -252,7 +252,6 @@ func (q inferenceRequest) plan(caller inferenceCaller, parsed *wire.Request) *fa
 		return e
 	}
 	if s.Deps.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.OperationName() == "generation" {
-		x.captureContext = ctx
 		x.capture = s.Deps.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 	}
 	return nil
@@ -437,11 +436,7 @@ func (q inferenceRequest) project(authority keyauthority.Authority, body []byte)
 	if e != nil {
 		return stored, e
 	}
-	enforced, e := q.server.enforceContentOutput(q.x, referenced)
-	if e != nil {
-		return referenced, e
-	}
-	return enforced, nil
+	return referenced, nil
 }
 
 func (q inferenceRequest) stored(authority keyauthority.Authority, body []byte) ([]byte, *fault.Error) {

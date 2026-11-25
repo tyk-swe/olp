@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -42,11 +43,11 @@ func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if err != nil {
 		return Desired{}, err
 	}
-	discounts, discountErr := parseDiscounts(promotion.ValueOf(document.Discounts))
+	discounts, discountErr := parseDiscounts(ptr.Value(document.Discounts))
 	if discountErr != nil {
 		return Desired{}, discountErr
 	}
-	cards, cardErr := parseCards(promotion.ValueOf(document.RateCards))
+	cards, cardErr := parseCards(ptr.Value(document.RateCards))
 	if cardErr != nil {
 		return Desired{}, cardErr
 	}

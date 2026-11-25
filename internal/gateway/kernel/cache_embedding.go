@@ -6,14 +6,14 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
-	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -27,7 +27,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 	// The parent owns the shared caller concurrency slot. The distinct
 	// embeddings route still enforces its own per-route request/concurrency caps.
 	authority.Policy.RouteLimits = parent.authority.Policy.RouteLimits
-	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{Route: &route}}
+	x := &Call{request: request{id: ids.New(), minted: true, startedAt: s.Now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{Route: &route}}
 	var out *Outcome
 	defer func() {
 		parent.cache.embeddingDispatched = parent.cache.embeddingDispatched || x.dispatched
@@ -45,7 +45,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 	var raw []byte
 	if route.Fidelity.Strict() {
 		codec, _ := operationregistry.Lookup("openai-embeddings")
-		source, err := operationplan.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
+		source, err := unary.Parse("openai-embeddings", body, int(s.Config.MaxBodyBytes))
 		if err != nil {
 			return nil, "", err
 		}
@@ -60,7 +60,7 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 			out = &Outcome{Err: e}
 			return nil, "", e
 		}
-		result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, operationplan.Result, *AttemptFailure) {
+		result := runAttempts(ctx, s, x, attemptAdapter[unary.Result]{demand: x.attemptDemand, dispatch: func(ctx context.Context, a routing.Attempt, p *routing.Provider, slot routing.Slot, fact events.AttemptFact) (events.AttemptFact, unary.Result, *AttemptFailure) {
 			return s.unaryAttempt(ctx, x, a, p, slot, fact)
 		}})
 		out = &Outcome{Err: result.err, Committed: result.committed, Cancelled: result.cancelled}

@@ -12,14 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -34,15 +31,17 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
@@ -61,7 +60,7 @@ type Config struct {
 	// the server falls back to for direct handler calls; process composition
 	// shares it with the public admission middleware so both bound the same
 	// capacity and the metrics endpoint reads one truth.
-	AdmissionPool *admission.Pool
+	AdmissionPool *concurrency.Pool
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
 	// Predicates runs the route_predicate hooks of confined plugins that
@@ -81,38 +80,22 @@ type Config struct {
 	MaxShadowInFlight int
 }
 
-type ReleaseSource interface {
+// Runtime is the pinned authority, release and credential source.
+// *release.Manager implements it; fixtures and tests supply static releases.
+type Runtime interface {
 	Release() *release.Release
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *routinginputs.Inputs
-}
-
-type KeyAuthenticator interface {
 	Authenticate(secret string) (*keyauthority.Authority, error)
-}
-
-type FidelityChecker interface {
 	// CheckRouteFidelity confirms a strict admission against current publication.
 	CheckRouteFidelity(context.Context, routing.Route) error
-}
-
-type GrantLifecycle interface {
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64
 	// CredentialRefused reports that the upstream refused a credential
 	// version's secret, so that a grant beneath the version is refreshed
 	// early.
 	CredentialRefused(credentialID string, generation int64)
-}
-
-// Runtime is the pinned authority, release and credential source.
-// *release.Manager implements it; fixtures and tests supply static releases.
-type Runtime interface {
-	ReleaseSource
-	KeyAuthenticator
-	FidelityChecker
-	GrantLifecycle
 	release.Credentials
 }
 
@@ -135,10 +118,7 @@ type Dependencies struct {
 	Log                         *slog.Logger
 	Cache                       *cache.Store
 	Guardrails                  func(guardrails.Caller) guardrails.Evaluator
-	CodeLedger                  codeforward.Ledger
-	CodeAuthorizer              codeforward.Authorizer
-	CodeResearch                codeforward.ResearchLedger
-	ResearchAuth                codeforward.ResearchAuthorizer
+	Code                        *codeforward.Services
 	Runtime                     Runtime
 	Digester                    Digester
 	BudgetAuthority             BudgetAuthority
@@ -147,7 +127,7 @@ type Dependencies struct {
 	DelegationReauthenticator   DelegationReauthenticator
 	Sink                        events.Sink
 	Admission                   *quota.Admission
-	Debits                      SessionDebitLedger
+	Debits                      *SessionDebits
 	WorkflowRuns                WorkflowRunStore
 	WorkflowTools               WorkflowToolRunner
 	Traces                      *traceingest.Store
@@ -231,19 +211,9 @@ func New(deps Dependencies, cfg Config) *Server {
 	}
 }
 
-func (s *Server) WithWorkflow(runs WorkflowRunStore, tools WorkflowToolRunner) *Server {
-	if s == nil {
-		return nil
-	}
-	next := *s
-	next.Deps.WorkflowRuns = runs
-	next.Deps.WorkflowTools = tools
-	return &next
-}
-
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
-func (s *Server) AdmissionPool() *admission.Pool { return s.Gate.Pool() }
+func (s *Server) AdmissionPool() *concurrency.Pool { return s.Gate.Pool() }
 
 // RunFleetHealth shares this gateway's circuit transitions with the fleet
 // and follows the fleet's, until ctx ends. Without shared state it returns at
@@ -320,7 +290,7 @@ func (r *request) accountingID() string {
 		return r.id
 	}
 	if r.durableID == "" {
-		r.durableID = uuid.Must(uuid.NewV7()).String()
+		r.durableID = ids.New()
 	}
 	return r.durableID
 }
@@ -331,7 +301,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	id := r.Header.Get("X-Request-Id")
 	minted := !requestIDPattern.MatchString(id)
 	if minted {
-		id = uuid.Must(uuid.NewV7()).String()
+		id = ids.New()
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)
@@ -411,16 +381,6 @@ func (s *Server) GatewayOrigin(r *http.Request) string {
 		}
 	}
 	return scheme + "://" + r.Host
-}
-
-// CatalogAuthority shares the gateway's pinned authority, revocation, scope
-// and client-address checks with the management catalog's consumer-key reads.
-func (s *Server) CatalogAuthority(r *http.Request) (keyauthority.Authority, error) {
-	authority, failure := s.Gate.Authenticate(r, "models_read")
-	if failure != nil {
-		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
-	}
-	return authority, nil
 }
 
 func (s *Server) LimiterCounts() (failOpen, daily, weekly, monthly int64) {

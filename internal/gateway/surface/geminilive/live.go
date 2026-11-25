@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -18,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 	acceptance "github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"

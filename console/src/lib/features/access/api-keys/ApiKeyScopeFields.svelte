@@ -1,6 +1,6 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
-  import NamedLimitFields from '../budgets/NamedLimitFields.svelte';
+  import { NamedLimitFields } from '#lib/features/budgets/index.js';
   import AttributionFields from '../attribution/AttributionFields.svelte';
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';

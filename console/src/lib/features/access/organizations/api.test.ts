@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { components } from '#lib/management/schema.js';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import type {
   Project,
   ProjectMember

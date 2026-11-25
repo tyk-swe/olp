@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -152,7 +152,7 @@ type AttemptFailure struct {
 	quota        string              // a quota this gateway enforces rejected the attempt
 	dimension    limits.Dimension    // the exhausted dimension of that quota, when it named one
 	contractCode string              // safe runtime interaction guard violation
-	policyCode   string              // local output policy refusal after upstream completion
+	policyCode   string              // local output guardrail refusal after upstream completion
 	noRetry      bool                // outcome uncertainty must not suggest client retries
 	// credentialRefused survives ambiguity so a grant can refresh without
 	// allowing this attempt to fail over.
@@ -215,9 +215,9 @@ func (f *AttemptFailure) Fault() (result *fault.Error) {
 		return guardrailError(guardrails.ErrSurface)
 	}
 	if f.policyCode != "" {
-		message := "The provider result was blocked by the route's content policy."
+		message := "The provider result was blocked by the route's guardrails."
 		if f.policyCode == "policy_conflict" {
-			message = "The route's content policy cannot inspect this provider result."
+			message = "The route's guardrails cannot inspect this provider result."
 		}
 		return fault.InvalidRequest(f.policyCode, message, nil)
 	}

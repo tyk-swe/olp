@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 

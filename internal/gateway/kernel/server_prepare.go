@@ -8,17 +8,19 @@ import (
 	"slices"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/priority"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/anthropicbeta"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -180,9 +182,8 @@ func (s *Server) prepare(ctx context.Context, x *Call, authorize func(*routing.R
 	return s.planNamed(ctx, x)
 }
 
-// planCanonical plans x.route for a canonical request and applies the route's
-// content policy to it. A selector that delegates moves the request on to its
-// route, which is planned in turn.
+// planCanonical plans x.route for a canonical request. A selector that
+// delegates moves the request on to its route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	if x.named().ToolExecution == "gateway" && x.Route.Fidelity.Strict() {
 		return fault.InvalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
@@ -210,7 +211,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 			return e
 		}
 	}
-	if e := x.checkAnthropicBeta(); e != nil {
+	if e := checkAnthropicBeta(x); e != nil {
 		return e
 	}
 	session := s.planning(x, canonicalPlanning, x.Route, x.family.Operation(), x.family.Surface(), x.mode)
@@ -220,7 +221,7 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
 	options.Demand = func(_ routing.Provider, t routing.Target) *routing.TokenDemand {
-		if x.guard.engine.HasAction(guardrails.Input, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+		if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Redact) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 			return nil
 		}
 		return x.sourceDemand(t.ProviderModel)
@@ -249,17 +250,27 @@ func (s *Server) planCanonical(ctx context.Context, x *Call) *fault.Error {
 		}
 		prepared, err := x.prepareCandidate(&p, t.ID, t.ProviderModel)
 		if err != nil {
-			session.semantic, session.decisions = err, prepared.policyDecisions
+			session.semantic = err
 			return nil, err
 		}
-		return prepared.candidate, nil
+		return prepared, nil
 	}
 	options.Preferences = x.legPreferences()
-	_, delegated, failure := session.selectPlan(ctx, options)
-	if failure != nil || delegated {
-		return failure
+	_, _, failure := session.selectPlan(ctx, options)
+	return failure
+}
+
+func checkAnthropicBeta(x *Call) *fault.Error {
+	if x.Strict() || len(x.semanticHeaders.Values("Anthropic-Beta")) == 0 {
+		return nil
 	}
-	return s.enforceContentPolicy(x)
+	snapshot := x.Snapshot()
+	targets := make([]connectors.Config, 0, len(x.Route.Targets))
+	for _, target := range x.Route.Targets {
+		provider := snapshot.Provider(target.ProviderID)
+		targets = append(targets, provider.Connector())
+	}
+	return anthropicbeta.Check(false, x.generation.parsed.Family, x.semanticHeaders, targets)
 }
 
 // WriteAdmissionOverload renders the surface's 503 rejection. The public
@@ -347,20 +358,20 @@ func normalizedInlineMedia(value protocols.InlineMediaLimits) protocols.InlineMe
 	return protocols.InlineMediaLimits{Items: 4, ItemBytes: 1 << 20, TotalBytes: 2 << 20}
 }
 
-func inferencePool(cfg Config) *admission.Pool {
+func inferencePool(cfg Config) *concurrency.Pool {
 	if cfg.AdmissionPool != nil {
 		return cfg.AdmissionPool
 	}
-	return admission.NewPool(max(cfg.MaxInFlight, 1))
+	return concurrency.NewPool(max(cfg.MaxInFlight, 1))
 }
 
 func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *connectors.Auth) *codeforward.Forwarder {
-	if deps.CodeLedger == nil || deps.CodeAuthorizer == nil {
+	if deps.Code == nil || deps.Code.Ledger == nil || deps.Code.Authorizer == nil {
 		return nil
 	}
 	return codeforward.New(codeforward.Dependencies{
-		Ledger: deps.CodeLedger, Authorizer: deps.CodeAuthorizer, Research: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
-		Runtime: deps.Runtime, Sink: deps.Sink, Admission: deps.Admission, Gate: gate, Egress: deps.Egress, Auth: auth,
+		Services: *deps.Code,
+		Runtime:  deps.Runtime, Sink: deps.Sink, Admission: deps.Admission, Gate: gate, Egress: deps.Egress, Auth: auth,
 		Log: deps.Log, Now: time.Now, MaxBodyBytes: cfg.MaxBodyBytes, HeaderTimeout: UpstreamHeaderTimeout,
 	})
 }
@@ -368,7 +379,7 @@ func codeForwarder(deps Dependencies, cfg Config, gate *ingress.Gate, auth *conn
 func normalizedDependencies(deps Dependencies) Dependencies {
 	return Dependencies{
 		Egress: deps.Egress, Log: deps.Log, Cache: deps.Cache, Guardrails: guardrailRunner(deps),
-		CodeLedger: deps.CodeLedger, CodeAuthorizer: deps.CodeAuthorizer, CodeResearch: deps.CodeResearch, ResearchAuth: deps.ResearchAuth,
+		Code:    deps.Code,
 		Runtime: deps.Runtime, Digester: deps.Digester, BudgetAuthority: deps.BudgetAuthority, TaskAttemptAdmitter: deps.TaskAttemptAdmitter,
 		TaskCapabilityAuthenticator: deps.TaskCapabilityAuthenticator, DelegationReauthenticator: deps.DelegationReauthenticator,
 		ObserveOverlap: deps.ObserveOverlap,

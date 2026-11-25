@@ -5,7 +5,7 @@
   import { retryQuery } from '#lib/management/http.js';
   import '../app.css';
   import Toaster from '#lib/components/Toaster.svelte';
-  import MFAConfirmationHost from '#lib/features/access/mfa/MFAConfirmationHost.svelte';
+  import MFAConfirmationHost from '#lib/features/identity/mfa/MFAConfirmationHost.svelte';
 
   let { children } = $props();
   const queryClient = new QueryClient({

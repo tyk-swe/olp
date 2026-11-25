@@ -1,4 +1,4 @@
-import { apiClient } from '#lib/management/client.js';
+import { apiClient } from '#lib/session/client.js';
 import type { components, operations } from '#lib/management/schema.js';
 import {
   createHeaders,
@@ -26,15 +26,15 @@ export const getGuardrailPreview = async (
       signal
     })
   );
-export const listDefinitions = async () => ({
-  items: await collectCursorPages(async (cursor) =>
+export const listDefinitions = (signal?: AbortSignal): Promise<Definition[]> =>
+  collectCursorPages(async (cursor) =>
     unwrapPage(
       await apiClient.GET('/api/v1/guardrails', {
-        params: { query: { cursor } }
+        params: { query: { cursor } },
+        signal
       })
     )
-  )
-});
+  );
 export const listPolicies = async () => ({
   items: await collectCursorPages(async (cursor) =>
     unwrapPage(
@@ -46,15 +46,6 @@ export const listPolicies = async () => ({
 });
 export const listAttachments = async () =>
   unwrap(await apiClient.GET('/api/v1/guardrail-attachments'));
-export const listProjects = async () => ({
-  items: await collectCursorPages(async (cursor) =>
-    unwrapPage(
-      await apiClient.GET('/api/v1/projects', {
-        params: { query: { cursor } }
-      })
-    )
-  )
-});
 export async function saveDefinition(
   current: Definition | null,
   project: string,

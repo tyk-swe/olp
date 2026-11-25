@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
 )
 
 func TestManagementAuthorizationGoldenMatrix(t *testing.T) {

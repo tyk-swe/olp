@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/evidence"
+	"github.com/tyk-swe/olp/internal/export/eligibility"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -177,7 +177,7 @@ func (w *Worker) claim(ctx context.Context) (*delivery, error) {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	d := &delivery{lease: httpkit.NewID()}
+	d := &delivery{lease: ids.New()}
 	err = tx.QueryRow(ctx, `SELECT d.id::text,d.sink_id::text,d.event_id::text,d.stream,d.payload,d.created_at,d.attempts,
 	 s.destination,s.credential_id::text,d.evidence_source_id::text,d.evidence_project_id::text,s.created_by::text FROM olp.managed_export_deliveries d JOIN olp.managed_export_sinks s ON s.id=d.sink_id
 	 WHERE d.status='pending' AND d.next_attempt_at<=now() AND d.expires_at>now() AND s.enabled AND s.retired_at IS NULL
@@ -231,7 +231,7 @@ func (w *Worker) send(ctx context.Context, d *delivery) string {
 		egress.SignBody(req.Header, secret, body)
 		clear(secret)
 	}
-	admitted, err := evidence.Admit(bounded, w.Pool, d.stream, d.sourceID, d.projectID, d.creatorID)
+	admitted, err := eligibility.Admit(bounded, w.Pool, d.stream, d.sourceID, d.projectID, d.creatorID)
 	if err != nil {
 		return "evidence_unavailable"
 	}

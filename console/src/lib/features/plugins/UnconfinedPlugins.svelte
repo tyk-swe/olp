@@ -9,14 +9,14 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { formatBytes } from '#lib/format.js';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '#lib/shell/ReauthenticateDialog.svelte';
+  import { formatBytes, shortDigest } from '#lib/format.js';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
     listOidcIdentities,
+    ReauthenticateDialog,
     reauthenticateWithPassword
-  } from '#lib/features/access/index.js';
+  } from '#lib/features/identity/index.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import {
     listUnconfinedExecutables,
@@ -25,7 +25,6 @@
     pluginProblem,
     pluginTitle,
     reviewUnconfinedExecutable,
-    shortDigest,
     type UnconfinedExecutableReview
   } from '#lib/features/plugins/api.js';
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -49,7 +50,7 @@ func (HTTP) transport()  {}
 type key [2]string
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Server, error) {
-	entries := promotion.ValueOf(document.McpServers)
+	entries := ptr.Value(document.McpServers)
 	if len(entries) > maxServers {
 		return nil, httpkit.Invalid("mcp_servers", "Declare at most 128 MCP servers.")
 	}
@@ -71,8 +72,8 @@ func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.Configur
 	}
 	prepared, err := registration.Prepare(registration.Input{
 		Delegation: delegationOf(entry.Delegation), OAuth: oauthOf(entry.Oauth), Stdio: stdioOf(entry.Stdio),
-		Name: strings.TrimSpace(entry.Name), Transport: string(entry.Transport), Endpoint: promotion.ValueOf(entry.Endpoint), Enabled: &entry.Enabled,
-		UnitPrice: promotion.Pointer(entry.UnitPrice), ToolPrices: promotion.ValueOf(entry.ToolPrices),
+		Name: strings.TrimSpace(entry.Name), Transport: string(entry.Transport), Endpoint: ptr.Value(entry.Endpoint), Enabled: &entry.Enabled,
+		UnitPrice: promotion.Pointer(entry.UnitPrice), ToolPrices: ptr.Value(entry.ToolPrices),
 		CallsPerMinute: widen(entry.CallsPerMinute), MaxConcurrency: widen(entry.MaxConcurrency),
 		PerKeyCallsPerMinute: widen(entry.PerKeyCallsPerMinute), PerKeyMaxConcurrency: widen(entry.PerKeyMaxConcurrency),
 	}, policy)
@@ -92,12 +93,12 @@ func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.Configur
 			transport: routing.MCPTransport(prepared.Transport), endpoint: prepared.Endpoint, stdio: prepared.Stdio,
 			oauth: prepared.OAuth, delegation: prepared.Delegation, bearer: bearerOf(entry.CredentialRef != nil, ref),
 		}),
-		UnitPrice: prepared.UnitPrice, ToolPrices: nonNil(prepared.ToolPrices),
+		UnitPrice: prepared.UnitPrice, ToolPrices: ptr.NonNilMap(prepared.ToolPrices),
 		Limits: routing.ToolLimits{
-			CallsPerMinute:       routing.ToolLimitOr(prepared.CallsPerMinute, routing.DefaultToolCallsPerMinute),
-			MaxConcurrency:       routing.ToolLimitOr(prepared.MaxConcurrency, routing.DefaultToolMaxConcurrency),
-			PerKeyCallsPerMinute: routing.ToolLimitOr(prepared.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
-			PerKeyMaxConcurrency: routing.ToolLimitOr(prepared.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
+			CallsPerMinute:       ptr.Or(prepared.CallsPerMinute, routing.DefaultToolCallsPerMinute),
+			MaxConcurrency:       ptr.Or(prepared.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+			PerKeyCallsPerMinute: ptr.Or(prepared.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
+			PerKeyMaxConcurrency: ptr.Or(prepared.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
 		},
 	}, nil
 }

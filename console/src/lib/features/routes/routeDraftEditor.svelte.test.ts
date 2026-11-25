@@ -3,11 +3,12 @@ import type { OperationDialect } from './inspectionDialects';
 import RoutePublishPanel from './RoutePublishPanel.svelte';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';
 import { RouteDraftEditorState } from './routeDraftEditor.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));
 
@@ -22,7 +23,6 @@ const draft: RouteDraft = {
   overall_timeout_ms: 30000,
   max_attempts: 2,
   fidelity: { mode: 'strict' },
-  content_policy: null,
   targets: [
     {
       id: 'target-id',
@@ -134,7 +134,7 @@ async function editor(): Promise<RouteDraftEditorState> {
   onTestFinished(() => unmount(component));
   flushSync();
   const state = ready.mock.results[0].value;
-  await vi.waitFor(() => expect(state.slug).toBe(draft.slug));
+  await eventually(() => expect(state.slug).toBe(draft.slug));
   return state;
 }
 
@@ -143,7 +143,7 @@ afterEach(() => {
 });
 
 describe('route draft editor', () => {
-  it('hydrates a draft and maintains operation and policy choices', async () => {
+  it('hydrates a draft and maintains operation choices', async () => {
     serveEditor();
     const state = await editor();
     expect(state.targets).toMatchObject([{ providerModelId: 'model-id' }]);
@@ -151,17 +151,11 @@ describe('route draft editor', () => {
 
     state.toggleOperation('embeddings', true);
     state.toggleOperation('embeddings', true);
-    state.addPolicyRule();
     flushSync();
 
     expect(state.operations).toEqual(['generation', 'embeddings']);
-    expect(state.policyRules).toMatchObject([
-      { phase: 'input', action: 'block' }
-    ]);
     expect(state.hasUnsavedChanges).toBe(true);
-    state.removePolicyRule(0);
     state.toggleOperation('embeddings', false);
-    expect(state.policyRules).toEqual([]);
     expect(state.operations).toEqual(['generation']);
   });
 
@@ -183,39 +177,6 @@ describe('route draft editor', () => {
     expect(state.notice).toContain('Draft saved');
   });
 
-  it('saves new content policy rules after removing a middle rule', async () => {
-    const { replace } = serveEditor();
-    const saved = vi.fn<(body: unknown) => void>();
-    replace.mockImplementationOnce(async (request) => {
-      saved(await request.json());
-      return json({ ...draft, etag: 'version-2' });
-    });
-    const state = await editor();
-    const addRule = (pattern: string) => {
-      state.addPolicyRule();
-      state.policyRules = state.policyRules.map((rule) =>
-        rule.pattern ? rule : { ...rule, pattern }
-      );
-    };
-    addRule('first');
-    addRule('removed');
-    addRule('third');
-    state.removePolicyRule(1);
-    addRule('replacement');
-
-    await state.save(draft);
-
-    expect(saved).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        content_policy: {
-          rules: ['first', 'third', 'replacement'].map((pattern) =>
-            expect.objectContaining({ pattern })
-          )
-        }
-      })
-    );
-  });
-
   it('preserves edits made while a save is in flight', async () => {
     const { replace } = serveEditor();
     const state = await editor();
@@ -224,7 +185,7 @@ describe('route draft editor', () => {
     state.slug = 'first-edit';
     state.touch();
     const saving = state.save(draft);
-    await vi.waitFor(() => expect(replace).toHaveBeenCalledOnce());
+    await eventually(() => expect(replace).toHaveBeenCalledOnce());
 
     state.slug = 'later-edit';
     state.touch();
@@ -308,7 +269,7 @@ describe('route draft editor', () => {
     load.mockImplementation(() => json(remote));
     await state.reload();
     flushSync();
-    await vi.waitFor(() => expect(state.slug).toBe('remote'));
+    await eventually(() => expect(state.slug).toBe('remote'));
     expect(state.hasUnsavedChanges).toBe(false);
     expect(state.concurrentNotice).toBeNull();
   });
@@ -363,7 +324,7 @@ it.each([
     const current = { ...draft, operations: [template.operation] };
     load.mockImplementation(() => json(current));
     const state = await editor();
-    await vi.waitFor(() => expect(state.dialects.isSuccess).toBe(true));
+    await eventually(() => expect(state.dialects.isSuccess).toBe(true));
     state.simulationSurface = template.surface ?? 'openai';
     state.simulationMode = mode;
     const target = document.createElement('div');

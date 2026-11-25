@@ -2,7 +2,6 @@ package routes
 
 import (
 	"encoding/json"
-	"errors"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -10,12 +9,12 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	mediacontract "github.com/tyk-swe/olp/internal/contracts/media"
+	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/media/mediacontract"
-	"github.com/tyk-swe/olp/internal/operationplan"
 )
 
 func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect, slug string, strict bool) (*wire.Request, *oif.Request, *media.Request, error) {
@@ -61,7 +60,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	if !ok || codec.Operation.ID != operation || mode != "unary" || surface != "native" && surface != codec.Surface {
 		return nil, nil, nil, httpkit.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
 	}
-	request, err := operationplan.Parse(dialect, raw, 1<<20)
+	request, err := unary.Parse(dialect, raw, 1<<20)
 	if err != nil {
 		return nil, nil, nil, httpkit.Invalid("request", "Use a valid native operation source.")
 	}
@@ -70,16 +69,16 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (routing.PrepareCandidate, map[string]*interactionInspection) {
+func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.Request, context interaction.Context, client string, demand *routing.TokenDemand) (routing.PrepareCandidate, map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
 		details[target.ID] = result
-		template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, Policy: route.ContentPolicy, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
+		template, err := unary.Compile(unary.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: source.Descriptor().Operation.ID, AllowProviderFetchedDocuments: route.ProviderFetchedDocuments})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
-		plan, err := template.Bind(source, operationplan.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
+		plan, err := template.Bind(source, unary.Context{Route: sourceRoute, Headers: context.Headers, Query: context.Query, ClientContract: client})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
@@ -101,20 +100,13 @@ func inspectionUnaryAccept(route routing.Route, sourceRoute string, source oif.R
 		}
 		summary := inspectRequest(plan.Prepared().Document(), plan.Prepared().Provenance())
 		result.EffectiveRequest = &summary
-		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
-			safe := safeInspectionError(err)
-			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
-				result.Status = "blocked"
-			}
-			return nil, safe
-		}
 		result.Status = "admitted"
 		return &routing.CandidatePreparation{Parameters: routing.Listed(plan.Parameters()), Demand: demand}, nil
 	}
 	return prepare, details
 }
 
-func inspectionMediaAccept(route routing.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *routing.TokenDemand, budget *inspectionBudget) (routing.PrepareCandidate, map[string]*interactionInspection) {
+func inspectionMediaAccept(route routing.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *routing.TokenDemand) (routing.PrepareCandidate, map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	prepare := func(provider routing.Provider, target routing.Target) (*routing.CandidatePreparation, error) {
 		result := &interactionInspection{Status: "incompatible", Fidelity: routing.FidelityStrict, Evidence: []string{}}
@@ -122,7 +114,7 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		if client != "" || len(context.Headers) != 0 || len(context.Query) != 0 {
 			return nil, safeInspectionError(&oif.Incompatibility{Code: "target_capability", Field: "/semantic_context", Requirement: "media_context", Message: "This media profile has no qualified caller semantic context."})
 		}
-		template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: string(source.Op()), Policy: route.ContentPolicy})
+		template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: string(source.Op())})
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
@@ -130,17 +122,13 @@ func inspectionMediaAccept(route routing.Route, source *media.Request, dialect s
 		if failure != nil {
 			return nil, safeInspectionError(failure)
 		}
-		input, err := media.ContractInput(source, call, effective, budget.reserve)
+		input, err := media.ContractInput(source, call, effective)
 		if err != nil {
 			return nil, safeInspectionError(err)
 		}
 		bound, err := template.Bind(input)
 		if err != nil {
-			safe := safeInspectionError(err)
-			if diagnostic, ok := errors.AsType[*inspectionDiagnostic](safe); ok && diagnostic.code == "content_policy_blocked" {
-				result.Status = "blocked"
-			}
-			return nil, safe
+			return nil, safeInspectionError(err)
 		}
 		receipt := bound.Receipt
 		if dialect != "" && dialect != receipt.SourceDialect {

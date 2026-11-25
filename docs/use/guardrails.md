@@ -138,13 +138,11 @@ Stored or background Responses requests are refused when an output policy or
 input masking is configured, because later retrieval cannot replay that
 inspection or restore the request's masking map. Input-only policies remain
 active on requests that use a previous response or continuation, including
-when its provider or route revision is historical. Migrated strict input rules
-continue matching individual schema keys and scalar values.
+when its provider or route revision is historical.
 
 Refusals use `400 guardrail_blocked`; refusals after stream commitment use the
 native in-band error. The gateway joins parallel evaluators before sending a
-successful terminal marker. Historical route content-policy error codes remain
-decodable for compatibility.
+successful terminal marker.
 
 ## Bounds and failure policy
 
@@ -273,8 +271,7 @@ A successful evaluation returns `{blocked, segments, decisions}`, including
 `blocked: true` for a policy refusal. The operation is recorded as `guardrail`.
 The [OpenAPI contract](../../guardrails/guardrails.json) and generated Go and TypeScript
 clients live under [guardrails](../../guardrails). The Go client imports as
-`github.com/tyk-swe/olp/guardrails`, which replaces the old
-`github.com/tyk-swe/olp/sdk/guardrails` path with no alias left behind.
+`github.com/tyk-swe/olp/guardrails`.
 
 Evidence contains only identifiers, revisions, phase, action, outcome,
 categories and latency. Request and attempt history, telemetry and the
@@ -339,17 +336,13 @@ as a fixture with more than 4096 findings, makes the whole run unevaluable
 whatever the entry's `on_error`, so a `failed_closed` result never counts as an
 expected block.
 
-## Migration and qualification
+## Promotion and qualification
 
-Configuration export writes `openllmproxy.dev/config/v2`. Version 1 import is
-explicitly normalized into regex definitions, ordered policies and attachments.
-Mixing old and new forms is rejected. Promotion resolves portable project,
-policy and definition names plus credential references; local revision IDs and
-secret values are not exported. Repeated unchanged promotion reuses revisions.
-
-Migration retains historical route and definition revisions and makes one
-immutable conversion for each historical route policy. Existing copied policies
-keep their rule order, bounds and literal replacements. See the
+Configuration export writes `openllmproxy.dev/config/v2` with guardrail
+definitions, ordered policies and attachments. Promotion resolves portable
+project, policy and definition names plus credential references. Local revision
+IDs and secret values are not exported, and repeated unchanged promotion reuses
+revisions. See the
 [guardrail and capture qualification](../develop/qualification.md#guardrail-and-capture-qualification) for
 what still runs. Reference-hardware and live-vendor checks no longer run.
 
@@ -362,31 +355,6 @@ adapters are not eligible for capture redaction. The [pinned integration
 inventory](guardrail-integrations.md#vendor-inventory) records all 60 entries from the existing
 LiteLLM v1.105.0 baseline, local evidence, unsupported entries and follow-up owners.
 Aggregate vendor coverage remains `Partial`; live qualification is outstanding.
-
-## Legacy route content policy
-
-Published `content_policy` is an ordered local RE2 rule list: input/output phase,
-block/redact action, pattern and optional literal replacement. Limits: 64 rules,
-512 bytes/pattern, 16 KiB combined patterns, no empty-string matches. Replacement
-`$` sequences are literal. Strict routes allow blocking only; redaction requires
-transformed fidelity. [Named guardrails](guardrails.md) copy policy into revisions.
-
-Input runs before estimation/dispatch over supported text: messages/instructions,
-embedding/moderation inputs, rerank documents/queries and media prompts. URLs,
-binary/base64, tool schemas and unrelated metadata are not inspected. Redaction
-rewrites only memory; block returns `400 content_policy_blocked` without dispatch.
-
-Output inspects visible unary assistant text/refusals after usage accounting,
-not reasoning/tool arguments/citations/media. Blocking still accounts upstream
-consumption. Any output rule refuses streaming with
-`422 content_policy_streaming_requires_unary`; input-only policy may stream.
-Uninspectable native/background/stateful/Files/Batch/realtime surfaces refuse
-`content_policy_surface_unavailable`, rather than bypassing policy.
-
-Evidence stores rule ID/phase/action/outcome only, never matched text, offsets,
-patterns, replacements or bodies. This bounded text filter is not a universal
-safety or prompt-injection guarantee.
-
 
 ## Credential and attachment maintenance
 

@@ -45,11 +45,11 @@ func normalizeModels(models []Model) []Model {
 	out := slices.Clone(models)
 	for i := range out {
 		m := &out[i]
-		m.Aliases = sortedSet(m.Aliases)
-		m.InputModalities = sortedSet(m.InputModalities)
-		m.OutputModalities = sortedSet(m.OutputModalities)
+		m.Aliases = slices.Compact(slices.Sorted(slices.Values(m.Aliases)))
+		m.InputModalities = slices.Compact(slices.Sorted(slices.Values(m.InputModalities)))
+		m.OutputModalities = slices.Compact(slices.Sorted(slices.Values(m.OutputModalities)))
 		if m.SupportedParameters != nil {
-			parameters := sortedSet(*m.SupportedParameters)
+			parameters := slices.Compact(slices.Sorted(slices.Values(*m.SupportedParameters)))
 			if parameters == nil {
 				parameters = []string{}
 			}
@@ -100,15 +100,6 @@ func normalizeModels(models []Model) []Model {
 	}
 	slices.SortFunc(out, func(a, b Model) int { return strings.Compare(a.ID, b.ID) })
 	return out
-}
-
-func sortedSet(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := slices.Clone(values)
-	slices.Sort(out)
-	return slices.Compact(out)
 }
 
 func provenance(p Provenance) Provenance {

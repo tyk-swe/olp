@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -173,16 +173,15 @@ func (s *service) liveJourney(owner, consumer *harness.Caller, project, ownerID,
 		return setupFail("account", err)
 	}
 	accountIDs := []string{primary}
-	secondDetail := ""
-	if l.secondKeyEnv == "" {
-		secondDetail = "lane defines no second account env"
-	} else if second := os.Getenv(l.secondKeyEnv); second == "" {
-		secondDetail = "second account env " + l.secondKeyEnv + " not provided"
-	} else if spec2, err := l.seedSpec(second, time.Now()); err != nil {
-		secondDetail = "second credential: " + err.Error()
-	} else if id2, err := s.seedLiveAccount(owner, project, ownerID, model, "qualify-live-"+l.profile+"-2", spec2, l.adapter); err != nil {
-		secondDetail = "second account: " + err.Error()
-	} else {
+	if second := os.Getenv(l.secondKeyEnv); l.secondKeyEnv != "" && second != "" {
+		spec2, err := l.seedSpec(second, time.Now())
+		if err != nil {
+			return setupFail("second credential", err)
+		}
+		id2, err := s.seedLiveAccount(owner, project, ownerID, model, "qualify-live-"+l.profile+"-2", spec2, l.adapter)
+		if err != nil {
+			return setupFail("second account", err)
+		}
 		accountIDs = append(accountIDs, id2)
 	}
 	poolAccounts := make([]any, len(accountIDs))
@@ -199,7 +198,6 @@ func (s *service) liveJourney(owner, consumer *harness.Caller, project, ownerID,
 	slug := uniqueName("qualify-live-" + l.profile)
 	routeBody := map[string]any{
 		"project_id": project, "slug": slug, "pool_id": pool["id"], "models": []string{model}, "enabled": true,
-		"allowance_ordering": l.adapter == "codex",
 	}
 	if len(accountIDs) > 1 {
 		routeBody["initial_recovery_attempts"] = 1
@@ -211,7 +209,7 @@ func (s *service) liveJourney(owner, consumer *harness.Caller, project, ownerID,
 	if _, err := s.liveCreate(owner, "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, harness.Idempotent(harness.ETag(route)), http.StatusOK); err != nil {
 		return setupFail("publish", err)
 	}
-	return s.liveChecks(owner, consumer, project, slug, primary, accountIDs, secondDetail, l)
+	return s.liveChecks(owner, consumer, project, slug, primary, accountIDs, l)
 }
 
 func (s *service) liveInference(consumer *harness.Caller, slug string, l liveLane) int {
@@ -246,7 +244,7 @@ func (s *service) liveDecisions(owner *harness.Caller, project string) []map[str
 	return items
 }
 
-func (s *service) liveChecks(owner, consumer *harness.Caller, project, slug, primary string, accountIDs []string, secondDetail string, l liveLane) []runCheck {
+func (s *service) liveChecks(owner, consumer *harness.Caller, project, slug, primary string, accountIDs []string, l liveLane) []runCheck {
 	status := s.liveInference(consumer, slug, l)
 	inference := runCheck{Name: "inference", Result: "fail", Detail: fmt.Sprintf("journey returned status %d", status)}
 	if status == http.StatusOK {
@@ -265,13 +263,11 @@ func (s *service) liveChecks(owner, consumer *harness.Caller, project, slug, pri
 	if inference.Result != "pass" {
 		return append(checks,
 			runCheck{Name: "allowance", Result: "no_signal", Detail: "inference did not pass"},
-			runCheck{Name: "bands", Result: "no_signal", Detail: "inference did not pass"},
 			runCheck{Name: "cooldown", Result: "no_signal", Detail: "inference did not pass"},
 			runCheck{Name: "failover", Result: "no_signal", Detail: "inference did not pass"})
 	}
 	return append(checks,
 		s.liveAllowanceCheck(owner, project, primary, l),
-		s.liveBandsCheck(owner, project, accountIDs, secondDetail, l),
 		s.liveCooldownCheck(owner, project, accountIDs),
 		s.liveFailoverCheck(owner, project, accountIDs, l))
 }
@@ -288,24 +284,6 @@ func (s *service) liveAllowanceCheck(owner *harness.Caller, project, primary str
 		return runCheck{Name: "allowance", Result: "pass", Detail: "allowance windows observed after inference"}
 	}
 	return runCheck{Name: "allowance", Result: "no_signal", Detail: "no passive allowance observed; active reads are not qualified"}
-}
-
-func (s *service) liveBandsCheck(owner *harness.Caller, project string, accountIDs []string, secondDetail string, l liveLane) runCheck {
-	if l.adapter != "codex" {
-		return runCheck{Name: "bands", Result: "no_signal", Detail: "band ordering is scoped to Codex in stage one"}
-	}
-	if len(accountIDs) < 2 {
-		return runCheck{Name: "bands", Result: "no_signal", Detail: secondDetail}
-	}
-	evidenced := pollLive(15*time.Second, time.Second, func() bool {
-		return slices.ContainsFunc(s.liveDecisions(owner, project), func(decision map[string]any) bool {
-			return slices.Contains(accountIDs, fmt.Sprint(decision["chosen_account_id"])) && decision["evidence"] != nil
-		})
-	})
-	if evidenced {
-		return runCheck{Name: "bands", Result: "pass", Detail: "selection decision carries allowance evidence across two accounts"}
-	}
-	return runCheck{Name: "bands", Result: "fail", Detail: "no selection decision carries allowance evidence"}
 }
 
 func (s *service) liveCooldownCheck(owner *harness.Caller, project string, accountIDs []string) runCheck {
@@ -358,7 +336,7 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 		}
 		writer.emitClaims(t, deriveClaims(records))
 		if !liveReliability(records) {
-			t.Error("live reliability requires scoped client journeys with inference, bands, cooldown and failover evidence, plus Codex allowance evidence")
+			t.Error("live reliability requires scoped client journeys with inference, cooldown and failover evidence, plus Codex allowance evidence")
 		}
 	}()
 	complete := func(record runRecord) {

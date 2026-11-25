@@ -236,7 +236,6 @@ report it as `Unused`. This is monetary allocation, not physical utilization.
 Unpriced or incomplete metering keeps coverage incomplete, even when all cost is
 currently unallocated. Open periods remain provisional.
 
-Migration 0073 preserves the existing report calculation for historical periods.
 Published snapshots and retained accounting evidence support historical FOCUS
 regeneration; missing historical evidence is explicitly incomplete. Full-period
 allocation context remains available for retained hourly reporting.
@@ -287,7 +286,7 @@ the future falls through to the next scope; revisions never layer.
 
 | Case | Charge |
 | --- | --- |
-| Card's explicit price matches (vendor-scoped first) | `price_usage` on the card price at discount 1. Commitments and discounts never apply |
+| Card's explicit price matches (vendor-scoped first) | Evaluated directly on the card price at discount 1. Commitments and discounts never apply |
 | No explicit match, card markup | `round(cost × markup, 12)`, NULL when cost is NULL |
 | No card | cost itself, `rate_card_revision_id` NULL |
 | Not billable | NULL |

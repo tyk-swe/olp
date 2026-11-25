@@ -8,8 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -43,7 +44,7 @@ func (s *Server) organization(r *http.Request, p authz.Principal) (httpkit.Reply
 }
 
 func CreateOrganization(ctx context.Context, tx pgx.Tx, name, creator string) (string, string, error) {
-	id, etag := httpkit.NewID(), httpkit.NewID()
+	id, etag := ids.New(), ids.New()
 	_, err := tx.Exec(ctx, "INSERT INTO olp.organizations(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, name, etag, creator)
 	if err != nil {
 		return "", "", err
@@ -103,7 +104,7 @@ func (s *Server) updateOrganization(r *http.Request, _ authz.Principal) (httpkit
 		if err = httpkit.Match(r, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag = httpkit.NewID()
+		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, in.Name, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -204,7 +205,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 		if !managers {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_organization_manager", "Keep at least one organization manager.")
 		}
-		etag = httpkit.NewID()
+		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

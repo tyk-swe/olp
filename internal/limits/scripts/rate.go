@@ -2,10 +2,12 @@ package scripts
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
 type Share struct {
@@ -80,26 +82,23 @@ func (r Runner) reservationKeys(q RateReservation) []string {
 	return keys
 }
 
-type MembershipEntry struct {
-	Member string
-	Active bool
-}
-
-func (r Runner) SyncMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
-	if len(entries) == 0 {
-		return nil
+func (r Runner) SyncMemberships(ctx context.Context, generation int64, updates []limits.SharedMembership) error {
+	ordinal := strconv.FormatInt(generation, 10)
+	calls := make([]call, len(updates))
+	for index, update := range updates {
+		args := append([]string{ordinal, strconv.FormatInt(update.Ceiling, 10)}, update.Members...)
+		calls[index] = call{script: syncMembership, keys: []string{r.Key("{" + update.Lookup + "}:members")}, args: args}
 	}
-	args := make([]string, 0, 1+2*len(entries))
-	args = append(args, strconv.FormatInt(generation, 10))
-	for _, entry := range entries {
-		state := "0"
-		if entry.Active {
-			state = "1"
+	for _, answer := range r.runAll(ctx, calls) {
+		if answer.err == nil {
+			continue
 		}
-		args = append(args, entry.Member, state)
+		if _, ok := errors.AsType[*limits.ServiceError](answer.err); ok {
+			return answer.err
+		}
+		return &limits.ServiceError{Err: &coordination.CommandError{Cause: answer.err}}
 	}
-	_, err := r.run(ctx, call{script: syncMembership, keys: []string{r.Key("{" + lookup + "}:members")}, args: args})
-	return err
+	return nil
 }
 
 func (r Runner) ReserveRate(ctx context.Context, q RateReservation) (RateGrant, error) {
@@ -194,7 +193,7 @@ func decodeAllowance(items []any, q RateReservation, h head, rejected limits.Dim
 	inWindow := reset >= 1 && reset <= fixedWindowMS
 	if requestRemaining > requestLimit || tokenRemaining > tokenLimit ||
 		limited && (!inWindow || window >= maxWindowID) || !limited && reset != 0 ||
-		requestLimit != q.RequestsPerMinute || tokenLimit != q.TokensPerMinute {
+		requestLimit != q.RequestsPerMinute || (q.Member == "" && tokenLimit != q.TokensPerMinute) || (q.Member != "" && tokenLimit == 0) {
 		return limits.RateState{}, false
 	}
 	switch rejected {

@@ -5,7 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
@@ -48,7 +49,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	return &Lease{limiter: l, cost: cost, rate: rate}, nil
 }
 
-func (l *Limiter) holdCost(ctx context.Context, budget *CostBudget, ttl time.Duration) (*costHold, error) {
+func (l *Limiter) holdCost(ctx context.Context, budget *limits.CostBudget, ttl time.Duration) (*costHold, error) {
 	if budget == nil {
 		return nil, nil
 	}
@@ -59,21 +60,14 @@ func (l *Limiter) holdCost(ctx context.Context, budget *CostBudget, ttl time.Dur
 	return &costHold{budget: *budget, reservation: reservation}, nil
 }
 
-func limit(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
 func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error) {
-	id := uuid.Must(uuid.NewV7()).String()
+	id := ids.New()
 	reservation := scripts.RateReservation{
 		Lookup: r.Lookup, LeaseID: id, TTL: r.LeaseTTL,
 		Tokens: r.Rate.Tokens, InputTokens: r.Rate.InputTokens, OutputTokens: r.Rate.OutputTokens,
-		RequestsPerMinute: limit(r.Rate.RequestsPerMinute), TokensPerMinute: limit(r.Rate.TokensPerMinute),
-		InputTokensPerMinute: limit(r.Rate.InputTokensPerMinute), OutputTokensPerMinute: limit(r.Rate.OutputTokensPerMinute),
-		MaxConcurrency: limit(r.Rate.MaxConcurrency), TrackConcurrency: r.Rate.TrackConcurrency,
+		RequestsPerMinute: ptr.Value(r.Rate.RequestsPerMinute), TokensPerMinute: ptr.Value(r.Rate.TokensPerMinute),
+		InputTokensPerMinute: ptr.Value(r.Rate.InputTokensPerMinute), OutputTokensPerMinute: ptr.Value(r.Rate.OutputTokensPerMinute),
+		MaxConcurrency: ptr.Value(r.Rate.MaxConcurrency), TrackConcurrency: r.Rate.TrackConcurrency,
 		Stated: r.Rate.reports(),
 	}
 	if r.Rate.Share.divides() {
@@ -108,29 +102,15 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 	return hold, nil
 }
 
-func (b CostBudget) Caps() scripts.CostCaps {
-	return scripts.CostCaps{
-		Owner: b.Owner, Daily: text(b.Daily), Weekly: text(b.Weekly), Monthly: text(b.Monthly),
-		Increases: b.Increases,
-	}
-}
-
-func text(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
-func (l *Limiter) reserveCost(ctx context.Context, b CostBudget, ttl time.Duration, retain bool) (*costReservation, error) {
+func (l *Limiter) reserveCost(ctx context.Context, b limits.CostBudget, ttl time.Duration, retain bool) (*costReservation, error) {
 	if b.Estimate == nil {
 		return nil, l.decided(ctx, b.Owner.ID, func() error {
-			return l.scripts.ReserveCost(ctx, b.Caps(), "0", "", 0)
+			return l.scripts.ReserveCost(ctx, scripts.BudgetCaps(b), "0", "", 0)
 		})
 	}
 	held := &costReservation{hold: scripts.CostHold{Owner: b.Owner, LeaseID: limits.CanonicalUUID(b.Estimate.RequestID)}}
 	err := l.decided(ctx, b.Owner.ID, func() error {
-		return l.scripts.ReserveCost(ctx, b.Caps(), b.Estimate.Amount, held.hold.LeaseID, ttl+costGrace)
+		return l.scripts.ReserveCost(ctx, scripts.BudgetCaps(b), b.Estimate.Amount, held.hold.LeaseID, ttl+costGrace)
 	})
 	if err == nil {
 		return held, nil
@@ -156,17 +136,8 @@ func (l *Limiter) repaired(ctx context.Context, ownerID string, decision error, 
 	return again()
 }
 
-type MembershipEntry struct {
-	Member string
-	Active bool
-}
-
-func (l *Limiter) SyncSharedMembership(ctx context.Context, lookup string, generation int64, entries []MembershipEntry) error {
-	synced := make([]scripts.MembershipEntry, len(entries))
-	for i, entry := range entries {
-		synced[i] = scripts.MembershipEntry(entry)
-	}
-	return l.scripts.SyncMembership(ctx, lookup, generation, synced)
+func (l *Limiter) SyncSharedMemberships(ctx context.Context, generation int64, updates []limits.SharedMembership) error {
+	return l.scripts.SyncMemberships(ctx, generation, updates)
 }
 
 func (l *Limiter) InstallSnapshot(ctx context.Context, s limits.Snapshot) (limits.Installed, error) {

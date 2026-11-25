@@ -169,8 +169,8 @@ func importOf(imp providerImport) nullable.Nullable[importStatus] {
 		return nullable.NewNullNullable[importStatus]()
 	}
 	return nullable.NewNullableWithValue(importStatus{
-		LastErrorCode: nullableOf(imp.LastErrorCode),
-		LastSuccessAt: nullableOf(imp.LastSuccessAt),
+		LastErrorCode: valueOrNull(imp.LastErrorCode),
+		LastSuccessAt: valueOrNull(imp.LastSuccessAt),
 	})
 }
 
@@ -274,7 +274,7 @@ func nonEmpty(value string) nullable.Nullable[string] {
 	return nullable.NewNullableWithValue(value)
 }
 
-func nullableOf[T any](value *T) nullable.Nullable[T] {
+func valueOrNull[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nullable.NewNullNullable[T]()
 	}

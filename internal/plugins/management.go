@@ -18,13 +18,14 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
-	"github.com/tyk-swe/olp/internal/pluginindex"
-	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
+	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
@@ -137,7 +138,7 @@ func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 		}
 		tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
-			digest, abi.Version, data, module, len(module), httpkit.NewID(), p.ID)
+			digest, abi.Version, data, module, len(module), ids.New(), p.ID)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -171,7 +172,7 @@ func (s *Management) approve(r *http.Request, _ authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, access.Event{}, &httpkit.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
 				Detail: "Approve exactly the origins the plugin declares; review them again."}
 		}
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, httpkit.NewID(), digest); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, ids.New(), digest); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		approved, err := loadPlugin(r.Context(), tx, digest)

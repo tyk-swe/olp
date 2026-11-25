@@ -7,37 +7,19 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/agents/tasks"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 var ErrTaskAttemptLimit = errors.New("agent task attempt limit reached")
 
-type taskCapabilityStore interface {
-	Lookup(context.Context, []byte) (tasks.Capability, error)
-	AdmitCallback(context.Context, []byte, string, string) error
-}
-
-func (m *Manager) taskCapabilities() taskCapabilityStore {
+func (m *Manager) taskCapabilities() taskCapabilityDatabase {
 	if m.taskStore != nil {
 		return m.taskStore
 	}
-	return tasks.NewCapabilities(m.pool)
-}
-func taskCapabilityError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, tasks.ErrCapabilityInvalid):
-		return ErrInvalidKey
-	case errors.Is(err, tasks.ErrCallbackLimit):
-		return ErrTaskAttemptLimit
-	default:
-		return ErrStaleAuthority
-	}
+	return m.pool
 }
 
 func (m *Manager) AuthenticateTaskCapability(ctx context.Context, token string) (*keyauthority.Authority, error) {
@@ -45,9 +27,9 @@ func (m *Manager) AuthenticateTaskCapability(ctx context.Context, token string) 
 }
 
 func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte) (*keyauthority.Authority, error) {
-	record, lookupErr := m.taskCapabilities().Lookup(ctx, digest)
-	if lookupErr != nil {
-		return nil, taskCapabilityError(lookupErr)
+	record, err := lookupTaskCapability(ctx, m.taskCapabilities(), digest)
+	if err != nil {
+		return nil, err
 	}
 	if err := m.AuthorizeAgentTask(record.KeyID, record.ProjectID, record.PublicationID, record.RevisionID, record.WorkloadRevision, record.CallerExpires); err != nil {
 		return nil, err
@@ -70,7 +52,14 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	}
 	boundedExpiry := boundDelegationExpiry(record.Expires, principalExpires)
 	capability := &keyauthority.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(record.Definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(record.Definition.Agent.ToolsetRevisions)}
-	callback := currentPolicy.TaskAuthority(principal, snapshot, record.WorkloadRevision, &boundedExpiry, record.EndUser, capability)
+	callback := currentPolicy.TaskAuthority(keyauthority.TaskDerivation{
+		Identity:         principal,
+		SnapshotID:       snapshot,
+		WorkloadRevision: record.WorkloadRevision,
+		ExpiresAt:        &boundedExpiry,
+		EndUserDigest:    record.EndUser,
+		Capability:       capability,
+	})
 	return &callback, nil
 }
 
@@ -115,8 +104,7 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 	if authority.TaskCapability == nil {
 		return ErrInvalidKey
 	}
-	id, err := uuid.Parse(accountingID)
-	if err != nil || id == uuid.Nil || id.String() != accountingID {
+	if !ids.Canonical(accountingID) {
 		return ErrInvalidKey
 	}
 	digest, err := hex.DecodeString(authority.TaskCapability.Digest)
@@ -139,5 +127,5 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 	if scope != "inference" && scope != "tools" {
 		return httpkit.Forbidden()
 	}
-	return taskCapabilityError(m.taskCapabilities().AdmitCallback(ctx, digest, scope, accountingID))
+	return admitTaskCallback(ctx, m.taskCapabilities(), digest, scope, accountingID)
 }

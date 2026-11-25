@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 var elevenLabsCodec = codec{speech: encodeElevenLabsSpeech, transcription: encodeElevenLabsTranscription}
@@ -33,7 +34,7 @@ func encodeElevenLabsSpeech(r *Request, p Speech, _ connectors.Config, model str
 	if failure := refuseSpeechControls(r, p, "ElevenLabs"); failure != nil {
 		return nil, failure
 	}
-	format, ok := elevenLabsFormats[valueOr(p.Format, "mp3")]
+	format, ok := elevenLabsFormats[ptr.Or(p.Format, "mp3")]
 	if !ok {
 		return nil, invalidMedia("ElevenLabs returns speech as mp3, opus, pcm or wav.")
 	}
@@ -56,7 +57,7 @@ func encodeElevenLabsSpeech(r *Request, p Speech, _ connectors.Config, model str
 }
 
 func vendorTranscriptFormat(r *Request, p Transcription, vendor string, formats ...string) (string, *Error) {
-	format := valueOr(p.Format, "json")
+	format := ptr.Or(p.Format, "json")
 	switch last := len(formats) - 1; {
 	case !slices.Contains(formats, format):
 		return "", invalidMedia(vendor + " transcripts are served as " + strings.Join(formats[:last], ", ") + " or " + formats[last] + ".")
@@ -140,7 +141,7 @@ func encodeDeepgramSpeech(r *Request, p Speech, _ connectors.Config, model strin
 	if p.Voice == "" || !strings.Contains(model, "-"+p.Voice+"-") {
 		return nil, invalidMedia("Deepgram speech names the voice of its model, such as thalia for aura-2-thalia-en.")
 	}
-	encoding, ok := deepgramEncodings[valueOr(p.Format, "mp3")]
+	encoding, ok := deepgramEncodings[ptr.Or(p.Format, "mp3")]
 	if !ok {
 		return nil, invalidMedia("Deepgram does not produce the requested speech format.")
 	}
@@ -211,7 +212,7 @@ func encodePollySpeech(r *Request, p Speech, cfg connectors.Config, model string
 	if failure := refuseSpeechControls(r, p, "Amazon Polly"); failure != nil {
 		return nil, failure
 	}
-	format, ok := pollyFormats[valueOr(p.Format, "mp3")]
+	format, ok := pollyFormats[ptr.Or(p.Format, "mp3")]
 	switch {
 	case !ok:
 		return nil, invalidMedia("Amazon Polly returns speech as mp3 or opus.")

@@ -5,8 +5,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 type surface struct{ kernel *kernel.Server }

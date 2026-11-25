@@ -1,5 +1,5 @@
 <script lang="ts">
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import { resolve } from '$app/paths';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';

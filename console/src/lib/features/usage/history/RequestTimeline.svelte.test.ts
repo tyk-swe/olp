@@ -1,10 +1,11 @@
 import { createQuery } from '@tanstack/svelte-query';
 import { getAllContexts, mount, unmount } from 'svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import { getRequest } from './api.js';
 import RequestTimeline from './RequestTimeline.svelte';
+import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,8 +25,7 @@ it.each([
         json({
           cache_result: result,
           cache_lookup_reason: reason,
-          attempts: [],
-          policy_decisions: []
+          attempts: []
         }),
       ['read', 'usage']
     );
@@ -46,7 +46,7 @@ it.each([
       await unmount(setup.mock.results[0].value);
       await unmount(harness);
     });
-    await vi.waitFor(() =>
+    await eventually(() =>
       expect(target.querySelector('p.muted')?.textContent?.trim()).toBe(
         `Response cache: ${result}${suffix}`
       )

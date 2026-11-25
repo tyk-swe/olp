@@ -5,10 +5,11 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codemode/codeplans"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -124,7 +125,7 @@ func (s *Store) CreateResearchSession(ctx context.Context, b codemode.ResearchSe
 	if !available {
 		return "", codemode.Refuse(429, "code_research_session_limit")
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	_, err = tx.Exec(ctx, `INSERT INTO olp.code_research_sessions(id,api_key_id,revision_id,service,account_id,credential_id,generation,upstream_id,expires_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+interval '1 hour')`, id, b.APIKeyID, b.RevisionID, b.Service, b.AccountID, b.CredentialID, b.Generation, upstream)
 	if err != nil {

@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	signin "github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -161,7 +162,7 @@ func (s server) apply(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 				ConfigurationPlanResponse: result,
 			}
 		}
-		for _, step := range s.appliers(d, promotion.ValueOf(ready), r) {
+		for _, step := range s.appliers(d, ptr.Value(ready), r) {
 			if err := step(ctx, tx, p); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
@@ -199,11 +200,7 @@ func (s server) decode(r *http.Request) (desired, error) {
 	if !request.Document.ApiVersion.Valid() {
 		return desired{}, httpkit.Fail(http.StatusUnprocessableEntity, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
-	document, err := guardrail.Upgrade(request.Document)
-	if err != nil {
-		return desired{}, err
-	}
-	parsed, err := s.parse(document, request.CodeBindings)
+	parsed, err := s.parse(request.Document, request.CodeBindings)
 	if err != nil {
 		return desired{}, err
 	}
@@ -211,7 +208,7 @@ func (s server) decode(r *http.Request) (desired, error) {
 	if err != nil {
 		return desired{}, err
 	}
-	planners := s.planners(parsed, promotion.NamesOf(document), bindings)
+	planners := s.planners(parsed, promotion.NamesOf(request.Document), bindings)
 	if err := promotion.Claimed(bindings, claims(planners)); err != nil {
 		return desired{}, err
 	}

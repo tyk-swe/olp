@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func (s *Server) ReadResourceBody(w http.ResponseWriter, r *http.Request) ([]byte, *fault.Error) {
@@ -34,15 +36,21 @@ func SetFileDownloadHeaders(h http.Header, contentType string, contentLength int
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 }
 
-func CopyResourceContent(w http.ResponseWriter, reader io.Reader, expected int64) (int64, error) {
+func (s *Server) DeliverResourceContent(ctx context.Context, w http.ResponseWriter, x *Call, exchange *PinnedExchange, reader io.Reader, expected int64, failureMessage string) {
+	x.ResponseHeaders(w.Header(), false)
+	w.WriteHeader(http.StatusOK)
 	written, err := io.Copy(w, reader)
-	if err == nil && written != expected {
-		err = io.ErrUnexpectedEOF
+	if err != nil || written != expected || http.NewResponseController(w).Flush() != nil {
+		exchange.Delivery(DeliveryState(written))
+		x.Failure = fault.ServerError(http.StatusBadGateway, "client_delivery_failed", failureMessage)
+		s.finishContext(ctx, x, &Outcome{Err: x.Failure, Committed: true, Cancelled: true}, x.Failure.Status)
+		return
 	}
-	if err == nil {
-		err = http.NewResponseController(w).Flush()
+	if written > 0 {
+		x.Delivered(s.Now())
 	}
-	return written, err
+	exchange.Delivery(usage.ClientTerminal)
+	s.finishContext(ctx, x, &Outcome{Committed: true}, http.StatusOK)
 }
 
 func MustJSON(value any) []byte {

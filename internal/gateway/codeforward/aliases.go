@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/domain/protocols/sse"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
@@ -38,7 +38,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 		if readErr != nil || len(body) > codewire.MaxBody {
 			return codemode.Refuse(502, "code_upstream_invalid")
 		}
-		a.observeUnary(body)
+		a.observeUnary(ctx, body)
 		rewritten, rewriteErr := codewire.RewriteResponseModel(body, a.model, a.publicModel)
 		if rewriteErr != nil {
 			return rewriteErr
@@ -59,7 +59,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 			return readErr
 		}
 		if frame.HasData {
-			a.observe(a.observer.Event(frame.Data))
+			a.observe(ctx, a.observer.Event(frame.Data))
 		}
 		body := func() []byte {
 			rewritten, rewriteErr := codewire.RewriteEventFrame(frame, a.endpoint.Protocol, a.model, a.publicModel)
@@ -77,7 +77,7 @@ func (a *codeAttempt) copyModelResponse(ctx context.Context, w http.ResponseWrit
 func (a *codeAttempt) finishCodeStream(ctx context.Context) {
 	if !a.terminal {
 		if observation, ok := a.observer.Finish(); ok {
-			a.observe(observation)
+			a.observe(ctx, observation)
 		}
 	}
 	if !a.terminal && ctx.Err() == nil {

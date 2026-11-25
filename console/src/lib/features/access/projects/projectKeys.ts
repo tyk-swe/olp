@@ -20,5 +20,7 @@ export const projectKeys = {
   routeGroups: (projectId: string) =>
     [...root, 'route-groups', projectId] as const,
   limitTemplates: (projectId: string) =>
-    [...root, 'limit-templates', projectId] as const
+    [...root, 'limit-templates', projectId] as const,
+  publication: (projectId: string) =>
+    ['model-catalog', 'publication', projectId] as const
 };

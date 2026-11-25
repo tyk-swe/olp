@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"slices"
 	"sort"
 	"strings"
@@ -41,31 +42,8 @@ type Engine struct{ entries []compiledEntry }
 
 func (e *Engine) HasCompression() bool {
 	return e != nil && slices.ContainsFunc(e.entries, func(entry compiledEntry) bool {
-		return entry.entry.Phase == Input && !entry.entry.Monitor && entry.kind.compresses
+		return entry.entry.Phase == guardrailpolicy.Input && !entry.entry.Monitor && entry.kind.compresses
 	})
-}
-
-func (r compiledEntry) legacyInput() bool {
-	return r.definition.LegacyRuleID != "" && r.entry.Phase == Input && r.entry.Action == Block
-}
-
-func (r compiledEntry) detect(ctx context.Context, evaluation Evaluation) (Verdict, error) {
-	patterns, ok := r.detector.(*patternDetector)
-	if ok && r.legacyInput() && r.definition.Type == "builtin.regex" {
-		for _, text := range evaluation.LegacyInputTexts {
-			for _, pattern := range patterns.patterns {
-				if err := ctx.Err(); err != nil {
-					return Verdict{}, err
-				}
-				if pattern.re.MatchString(text) {
-					return Flag(pattern.category), nil
-				}
-			}
-		}
-	}
-	native := evaluation
-	native.LegacyInputTexts = nil
-	return r.detector.detect(ctx, native)
 }
 
 func (r compiledEntry) bound(external Evaluator) compiledEntry {
@@ -78,12 +56,6 @@ func (r compiledEntry) bound(external Evaluator) compiledEntry {
 
 func (e *Engine) entriesWhere(match func(compiledEntry) bool) bool {
 	return e != nil && slices.ContainsFunc(e.entries, match)
-}
-
-func (e *Engine) HasLegacyInput() bool { return e.entriesWhere(compiledEntry.legacyInput) }
-
-func (e *Engine) HasLegacyOutput() bool {
-	return e.entriesWhere(func(r compiledEntry) bool { return r.definition.LegacyRuleID != "" && r.entry.Phase == Output })
 }
 
 // Bind returns an engine whose external entries evaluate through external.
@@ -139,7 +111,7 @@ func compile(entries []resolvedEntry, definitions map[string]Revision) (*Engine,
 	if len(entries) == 0 {
 		return nil, nil
 	}
-	if len(entries) > MaxEntries {
+	if len(entries) > guardrailpolicy.MaxEntries {
 		return nil, errors.New("too many effective guardrails")
 	}
 	e := &Engine{}
@@ -149,10 +121,10 @@ func compile(entries []resolvedEntry, definitions map[string]Revision) (*Engine,
 		if !ok || d.ID != entry.RevisionID || d.GuardrailID != entry.GuardrailID || !entry.Phase.Valid() || !entry.Action.Valid() {
 			return nil, errors.New("invalid guardrail revision or policy entry")
 		}
-		if entry.Action == Mask && entry.Phase != Input {
+		if entry.Action == guardrailpolicy.Mask && entry.Phase != guardrailpolicy.Input {
 			return nil, errors.New("mask requires synchronous input")
 		}
-		if entry.Action == Redact && entry.Phase == InputParallel && !entry.Monitor {
+		if entry.Action == guardrailpolicy.Redact && entry.Phase == guardrailpolicy.InputParallel && !entry.Monitor {
 			return nil, errors.New("parallel input cannot transform a dispatched request")
 		}
 		d.Configuration = slices.Clone(d.Configuration)
@@ -163,7 +135,7 @@ func compile(entries []resolvedEntry, definitions map[string]Revision) (*Engine,
 		if !k.supports(entry.Phase) {
 			return nil, errors.New("this vendor does not support the configured phase")
 		}
-		if !entry.Monitor && (entry.Action == Redact || entry.Action == Mask) && !k.transforms {
+		if !entry.Monitor && (entry.Action == guardrailpolicy.Redact || entry.Action == guardrailpolicy.Mask) && !k.transforms {
 			return nil, errors.New("this detector does not supply transformation spans")
 		}
 		e.entries = append(e.entries, compiledEntry{item.placement, entry, d, k, detectorOf(d, spec)})
@@ -171,11 +143,11 @@ func compile(entries []resolvedEntry, definitions map[string]Revision) (*Engine,
 	return e, nil
 }
 
-func (e *Engine) HasPhase(phase Phase) bool {
+func (e *Engine) HasPhase(phase guardrailpolicy.Phase) bool {
 	return e.entriesWhere(func(r compiledEntry) bool { return r.entry.Phase == phase })
 }
 
-func (e *Engine) HasAction(phase Phase, action Action) bool {
+func (e *Engine) HasAction(phase guardrailpolicy.Phase, action guardrailpolicy.Action) bool {
 	return e.entriesWhere(func(r compiledEntry) bool {
 		return r.entry.Phase == phase && r.entry.Action == action && !r.entry.Monitor
 	})
@@ -183,7 +155,7 @@ func (e *Engine) HasAction(phase Phase, action Action) bool {
 
 // Unavailable records an explicit lack of coverage. Monitoring and annotation
 // cannot change the invocation; enforcing entries require a 422 refusal.
-func (e *Engine) Unavailable(phases ...Phase) (Result, error) {
+func (e *Engine) Unavailable(phases ...guardrailpolicy.Phase) (Result, error) {
 	var result Result
 	var err error
 	if e != nil {
@@ -191,12 +163,12 @@ func (e *Engine) Unavailable(phases ...Phase) (Result, error) {
 			if len(phases) > 0 && !slices.Contains(phases, r.entry.Phase) {
 				continue
 			}
-			outcome := FailedOpen
+			outcome := guardrailpolicy.FailedOpen
 			if r.enforcesUnavailable() {
-				outcome = FailedClosed
+				outcome = guardrailpolicy.FailedClosed
 				err = ErrSurface
 			}
-			result.Decisions = append(result.Decisions, Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: r.entry.Phase, Action: r.entry.Action, Outcome: outcome, Categories: []string{"surface.unavailable"}})
+			result.Decisions = append(result.Decisions, guardrailpolicy.Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: r.entry.Phase, Action: r.entry.Action, Outcome: outcome, Categories: []string{"surface.unavailable"}})
 		}
 	}
 	return result, err
@@ -208,7 +180,7 @@ func (e *Engine) ValidateRoute(strict bool, deadlineMS int64) error {
 		return nil
 	}
 	for _, r := range e.entries {
-		if strict && !r.entry.Monitor && (r.entry.Action == Redact || r.entry.Action == Mask) {
+		if strict && !r.entry.Monitor && (r.entry.Action == guardrailpolicy.Redact || r.entry.Action == guardrailpolicy.Mask) {
 			return errors.New("strict routes cannot redact or mask")
 		}
 		if r.definition.TimeoutMS > deadlineMS {
@@ -232,13 +204,13 @@ func (e *Engine) ValidateStream(window int) error {
 }
 
 func (r compiledEntry) streamConflict(window int) bool {
-	if !r.enforcesUnavailable() || r.entry.Phase == OutputStream && r.definition.Type == "builtin.tools" {
+	if !r.enforcesUnavailable() || r.entry.Phase == guardrailpolicy.OutputStream && r.definition.Type == "builtin.tools" {
 		return false
 	}
-	if r.entry.Phase == Output {
+	if r.entry.Phase == guardrailpolicy.Output {
 		return true
 	}
-	if r.entry.Phase != OutputStream {
+	if r.entry.Phase != guardrailpolicy.OutputStream {
 		return false
 	}
 	width := r.detector.width()
@@ -313,9 +285,9 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 		if r.entry.Phase != request.Phase {
 			continue
 		}
-		ev := Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: Passed}
+		ev := guardrailpolicy.Evidence{GuardrailID: r.definition.GuardrailID, Revision: r.definition.ID, Phase: request.Phase, Action: r.entry.Action, Outcome: guardrailpolicy.Passed}
 		if request.InternalModel && r.kind.model {
-			ev.Outcome = Skipped
+			ev.Outcome = guardrailpolicy.Skipped
 			result.Decisions = append(result.Decisions, ev)
 			continue
 		}
@@ -333,12 +305,12 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			})
 			if len(evaluation.Segments) == 0 {
 				cancel()
-				ev.Outcome = Skipped
+				ev.Outcome = guardrailpolicy.Skipped
 				result.Decisions = append(result.Decisions, ev)
 				continue
 			}
 		}
-		verdict, err := r.detect(bounded, evaluation)
+		verdict, err := r.detector.detect(bounded, evaluation)
 		if err == nil {
 			err = bounded.Err()
 		}
@@ -348,9 +320,9 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 			err = validateVerdict(verdict, evaluation.Segments)
 		}
 		if err != nil {
-			ev.Outcome = FailedOpen
-			if r.definition.OnError == FailClosed && !r.entry.Monitor {
-				ev.Outcome = FailedClosed
+			ev.Outcome = guardrailpolicy.FailedOpen
+			if r.definition.OnError == guardrailpolicy.FailClosed && !r.entry.Monitor {
+				ev.Outcome = guardrailpolicy.FailedClosed
 			}
 			result.Decisions = append(result.Decisions, ev)
 			if blocks(ev.Outcome) {
@@ -370,14 +342,16 @@ func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Maskin
 	return result, nil
 }
 
-func blocks(outcome Outcome) bool { return outcome == Blocked || outcome == FailedClosed }
+func blocks(outcome guardrailpolicy.Outcome) bool {
+	return outcome == guardrailpolicy.Blocked || outcome == guardrailpolicy.FailedClosed
+}
 
 func validateVerdict(v Verdict, segments []Segment) error {
 	if len(v.categories) > 32 || len(v.redactions) > MaxFindings {
 		return errEvaluation
 	}
 	for _, c := range v.categories {
-		if !categoryID.MatchString(c) {
+		if !guardrailpolicy.ValidCategory(c) {
 			return errEvaluation
 		}
 	}
@@ -403,7 +377,7 @@ func validateVerdict(v Verdict, segments []Segment) error {
 	return nil
 }
 
-func transform(segments []Segment, edits []Redaction, action Action, masks *Masking) error {
+func transform(segments []Segment, edits []Redaction, action guardrailpolicy.Action, masks *Masking) error {
 	edits = slices.Clone(edits)
 	sort.SliceStable(edits, func(i, j int) bool { return edits[i].Start > edits[j].Start })
 	for i := range segments {
@@ -413,7 +387,7 @@ func transform(segments []Segment, edits []Redaction, action Action, masks *Mask
 				continue
 			}
 			replacement := r.Replacement
-			if action == Mask {
+			if action == guardrailpolicy.Mask {
 				if masks == nil {
 					return errEvaluation
 				}
@@ -433,17 +407,17 @@ func transform(segments []Segment, edits []Redaction, action Action, masks *Mask
 	return nil
 }
 
-func (r compiledEntry) applyFlagged(result Result, request Evaluation, verdict Verdict, masks *Masking) (Result, Outcome) {
+func (r compiledEntry) applyFlagged(result Result, request Evaluation, verdict Verdict, masks *Masking) (Result, guardrailpolicy.Outcome) {
 	switch {
 	case r.entry.Monitor:
-		return result, Monitored
-	case r.entry.Action == Annotate:
-		return result, Annotated
-	case r.entry.Action == Block:
-		return result, Blocked
+		return result, guardrailpolicy.Monitored
+	case r.entry.Action == guardrailpolicy.Annotate:
+		return result, guardrailpolicy.Annotated
+	case r.entry.Action == guardrailpolicy.Block:
+		return result, guardrailpolicy.Blocked
 	}
 	if len(verdict.Redactions()) == 0 {
-		return result, FailedClosed
+		return result, guardrailpolicy.FailedClosed
 	}
 	firstRecovery := len(result.Recovery)
 	originals := func() []Segment {
@@ -462,7 +436,7 @@ func (r compiledEntry) applyFlagged(result Result, request Evaluation, verdict V
 		result.Segments = slices.Clone(result.Segments)
 	}
 	if err := transform(result.Segments, verdict.Redactions(), r.entry.Action, masks); err != nil {
-		return result, FailedClosed
+		return result, guardrailpolicy.FailedClosed
 	}
 	result.Recovery = slices.Concat(result.Recovery, originals)
 	if len(originals) > 0 {
@@ -482,8 +456,8 @@ func (r compiledEntry) applyFlagged(result Result, request Evaluation, verdict V
 		})
 	}
 	result.Changed = true
-	if r.entry.Action == Mask {
-		return result, Masked
+	if r.entry.Action == guardrailpolicy.Mask {
+		return result, guardrailpolicy.Masked
 	}
-	return result, Redacted
+	return result, guardrailpolicy.Redacted
 }

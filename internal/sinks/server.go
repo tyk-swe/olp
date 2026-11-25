@@ -11,8 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
@@ -230,7 +231,7 @@ func (s *Server) retireSink(r *http.Request, tx pgx.Tx, current Definition) (htt
 	if err := changeable(r, current, input{}); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	if _, err := tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET enabled=false,retired_at=now(),etag=$2 WHERE id=$1", current.ID, httpkit.NewID()); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET enabled=false,retired_at=now(),etag=$2 WHERE id=$1", current.ID, ids.New()); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
 	if _, err := tx.Exec(ctx, "UPDATE olp.managed_export_deliveries SET status='cancelled',lease=NULL WHERE sink_id=$1 AND status='pending'", current.ID); err != nil {
@@ -254,7 +255,7 @@ func (s *Server) createSink(r *http.Request, tx pgx.Tx, p authz.Principal, in in
 	if count >= 64 {
 		return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", "At most 64 active sinks are supported.")
 	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
+	id, etag := ids.New(), ids.New()
 	if err := Insert(ctx, tx, id, in.spec(in.ProjectID), etag, p.UserID()); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
@@ -267,7 +268,7 @@ func (s *Server) updateSink(r *http.Request, tx pgx.Tx, current Definition, in i
 	if err := changeable(r, current, in); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if err := Update(r.Context(), tx, current.ID, in.spec(current.ProjectID), etag); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}

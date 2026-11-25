@@ -10,11 +10,13 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -72,17 +74,12 @@ func cloneTool(tool routing.MCPTool) routing.MCPTool {
 }
 
 func jsonEqual(left, right json.RawMessage) bool {
-	decode := func(raw json.RawMessage) (any, error) {
-		var value any
-		err := json.Unmarshal(raw, &value)
-		return value, err
-	}
-	leftValue, leftErr := decode(left)
-	rightValue, rightErr := decode(right)
+	leftValue, leftErr := jsonschema.UnmarshalJSON(bytes.NewReader(left))
+	rightValue, rightErr := jsonschema.UnmarshalJSON(bytes.NewReader(right))
 	if leftErr != nil || rightErr != nil {
 		return bytes.Equal(left, right)
 	}
-	return reflect.DeepEqual(leftValue, rightValue)
+	return reflect.DeepEqual(leftValue, rightValue) || (&jsonschema.Schema{Const: &leftValue}).Validate(rightValue) == nil
 }
 
 func toolsByName(tools []routing.MCPTool) map[string]routing.MCPTool {
@@ -265,7 +262,7 @@ func catalogCandidate(current *Definition, catalog *upstream.Catalog) Definition
 		Enabled: current.Enabled, Stdio: current.Stdio.Clone(), Catalog: catalog,
 		CredentialID: current.CredentialID, DelegationKeyID: current.DelegationKeyID, EntraClientSecretID: current.EntraClientSecretID,
 		Delegation: current.Delegation.Clone(), OAuth: current.OAuth.Clone(),
-		UnitPrice: clonePrice(current.UnitPrice), ToolPrices: retainedToolPrices(current.ToolPrices, catalog),
+		UnitPrice: ptr.Clone(current.UnitPrice), ToolPrices: retainedToolPrices(current.ToolPrices, catalog),
 		CallsPerMinute: current.CallsPerMinute, MaxConcurrency: current.MaxConcurrency,
 		PerKeyCallsPerMinute: current.PerKeyCallsPerMinute, PerKeyMaxConcurrency: current.PerKeyMaxConcurrency,
 	}

@@ -15,8 +15,9 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
@@ -256,9 +257,9 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpk
 			if r.Header.Get("If-Match") != "" {
 				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
 			}
-			c.ID = httpkit.NewID()
+			c.ID = ids.New()
 		}
-		c.ETag = httpkit.NewID()
+		c.ETag = ids.New()
 		c.UpdatedByEmail = p.Email
 		if input.ClientSecret != nil {
 			if err = s.saveOIDCClientSecret(r.Context(), tx, &c, old, *input.ClientSecret); err != nil {

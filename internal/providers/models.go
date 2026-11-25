@@ -10,8 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
@@ -316,7 +317,7 @@ func (s *Server) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, current *
 			discovered_listing_api_version=coalesce(excluded.discovered_listing_api_version,olp.provider_models.discovered_listing_api_version),
 			discovered_listing_credential_id=coalesce(excluded.discovered_listing_credential_id,olp.provider_models.discovered_listing_credential_id),
 			discovered_listing_credential_version=coalesce(excluded.discovered_listing_credential_version,olp.provider_models.discovered_listing_credential_version),
-			discovered_listing_at=coalesce(excluded.discovered_listing_at,olp.provider_models.discovered_listing_at)`, httpkit.NewID(), current.ID, m.Name, m.Display, at, endpoint, apiVersion, credentialID, credentialVersion, listedAt); err != nil {
+			discovered_listing_at=coalesce(excluded.discovered_listing_at,olp.provider_models.discovered_listing_at)`, ids.New(), current.ID, m.Name, m.Display, at, endpoint, apiVersion, credentialID, credentialVersion, listedAt); err != nil {
 			return err
 		}
 	}

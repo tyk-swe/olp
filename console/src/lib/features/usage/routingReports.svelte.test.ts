@@ -1,12 +1,95 @@
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
+import { formatBudget, formatDate } from '#lib/format.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import ReconciliationPanel from './ReconciliationPanel.svelte';
 import type { ReconciliationReport } from './reconciliation.js';
 import RoutingReportsPage from './RoutingReportsPage.svelte';
+import UsageDetails from './UsageDetails.svelte';
+import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('shows effective key allowances and the state and reset of a weekly cap', () => {
+  const target = document.createElement('div');
+  const currency = 'USD';
+  const daily = {
+    accrued: '15',
+    limit: '10',
+    effective_limit: '20',
+    window_ends_at: '2026-05-02T00:00:00Z'
+  };
+  const weekly = {
+    accrued: '15',
+    limit: '15',
+    window_ends_at: '2026-05-04T00:00:00Z'
+  };
+  const monthly = {
+    accrued: '15',
+    limit: '10',
+    effective_limit: '25',
+    window_ends_at: '2026-06-01T00:00:00Z'
+  };
+  const component = mount(UsageDetails, {
+    target,
+    props: {
+      apiKey: {
+        id: 'key',
+        name: 'Budgeted key',
+        budget: { daily, weekly, monthly, unpriced_attempts: 0 }
+      },
+      summary: { currency },
+      completeness: {
+        complete: true,
+        coverage: {
+          approximate: false,
+          range_complete: true,
+          excluded_partial_aggregate_boundaries: 0
+        },
+        request_count: 1,
+        priced_count: 1,
+        unpriced_count: 0,
+        incomplete_count: 0,
+        request_metadata_gap_events: 0,
+        uncertain_request_metadata_gap_count: 0,
+        request_metadata_consumer: {
+          state: 'healthy',
+          lag_events: 0,
+          pending_events: 0
+        }
+      }
+    }
+  });
+  onTestFinished(() => unmount(component));
+  flushSync();
+  const window = (name: string) =>
+    [
+      ...target.querySelectorAll('[aria-label="Filtered API key budget"] p')
+    ].find((label) => label.textContent === `${name} accrued / limit`)
+      ?.parentElement;
+
+  for (const [name, amounts] of [
+    ['Daily', daily],
+    ['Monthly', monthly]
+  ] as const) {
+    expect(window(name)?.textContent).toContain(
+      `${formatBudget(amounts.accrued, currency)} / ${formatBudget(amounts.effective_limit, currency)}`
+    );
+    expect(window(name)?.textContent).not.toContain(
+      'Requests with this key are refused'
+    );
+  }
+  expect(window('Weekly')?.textContent).toContain(
+    `${formatBudget(weekly.accrued, currency)} / ${formatBudget(weekly.limit, currency)}`
+  );
+  expect(window('Weekly')?.textContent).toContain(
+    `Window ends ${formatDate(weekly.window_ends_at)}`
+  );
+  expect(window('Weekly')?.textContent).toContain(
+    'Requests with this key are refused'
+  );
+});
 
 it('applies the same supported filters to both reports and distinguishes missing prices from zero savings', async () => {
   const queries = vi.fn<(path: string, query: URLSearchParams) => void>();
@@ -42,7 +125,7 @@ it('applies the same supported filters to both reports and distinguishes missing
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() =>
+  await eventually(() =>
     expect(target.querySelector('tbody tr')?.textContent).toContain('0 / 5')
   );
   expect(target.querySelector('tbody tr')?.textContent).toContain(
@@ -57,7 +140,7 @@ it('applies the same supported filters to both reports and distinguishes missing
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => {
+  await eventually(() => {
     const applied = queries.mock.calls.filter(
       ([, query]) => query.get('route') === 'chosen-route'
     );
@@ -125,7 +208,7 @@ it('shows the invoice currencies when a mixed-currency day has no total', async 
     await unmount(setup.mock.results[0].value);
     await unmount(harness);
   });
-  await vi.waitFor(() => {
+  await eventually(() => {
     const invoice = target.querySelector('tbody td:nth-child(3)');
     expect(invoice?.textContent).toBe('Multiple currencies (EUR, USD)');
   });

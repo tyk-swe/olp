@@ -13,11 +13,12 @@ import (
 	"github.com/crewjam/saml"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
-	"github.com/tyk-swe/olp/internal/samlidentity"
 )
 
 const samlFlowTTL = 5 * time.Minute
@@ -60,31 +61,9 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 	if err := s.admit(r, "saml_begin", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
-	var input struct {
-		ReturnTo string `json:"return_to"`
-		Purpose  string `json:"purpose"`
-		Resource string `json:"resource_id"`
-	}
-	if r.ContentLength != 0 {
-		if err := httpkit.Decode(r, &input); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if !safeReturn(input.ReturnTo) || len(input.ReturnTo) > 2048 {
-		return httpkit.Reply{}, httpkit.Invalid("return_to", "Use a local console destination.")
-	}
-	if input.ReturnTo == "" {
-		input.ReturnTo = "/"
-		if kind == "link" {
-			input.ReturnTo = "/settings/profile"
-		}
-	}
-	if kind == "reauthenticate" {
-		if err := validatePurpose(input.Purpose, input.Resource); err != nil {
-			return httpkit.Reply{}, err
-		}
-	} else if input.Purpose != "" || input.Resource != "" {
-		return httpkit.Reply{}, httpkit.Invalid("purpose", "This flow has no recent-authentication purpose.")
+	input, err := parseFederatedBeginInput(r, kind, false)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil {
@@ -108,46 +87,43 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
 	}
-	tx, err := s.access.Begin(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadSAML(r.Context(), tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if current.ETag != c.ETag || !current.Enabled {
-		return httpkit.Reply{}, httpkit.Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
-	}
-	flow := samlFlow{ID: httpkit.NewID(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.Resource, RequestID: request.ID, ETag: c.ETag, Expires: time.Now().Add(samlFlowTTL)}
-	if kind != "login" {
-		p, e := s.access.Reauthorize(r, tx)
-		if e != nil {
-			return httpkit.Reply{}, e
+	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+		current, err := loadSAML(r.Context(), tx)
+		if err != nil {
+			return httpkit.Reply{}, false, err
 		}
-		flow.UserID = p.ID
-		flow.SessionID = p.SessionID
-		if kind == "link" {
-			if e = s.access.ConsumeRecent(r, tx, p, "saml_link", ""); e != nil {
-				return httpkit.Reply{}, e
+		if current.ETag != c.ETag || !current.Enabled {
+			return httpkit.Reply{}, false, httpkit.Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
+		}
+		flow := samlFlow{ID: ids.New(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.ResourceID, RequestID: request.ID, ETag: c.ETag, Expires: time.Now().Add(samlFlowTTL)}
+		if kind != "login" {
+			p, e := s.access.Reauthorize(r, tx)
+			if e != nil {
+				return httpkit.Reply{}, false, e
+			}
+			flow.UserID = p.ID
+			flow.SessionID = p.SessionID
+			if kind == "link" {
+				if e = s.access.ConsumeRecent(r, tx, p, "saml_link", ""); e != nil {
+					return httpkit.Reply{}, false, e
+				}
 			}
 		}
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE expires_at<=now()"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	raw, err := json.Marshal(flow)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, flow.ID, secrets.SAMLFlow, raw, &flow.Expires); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at) VALUES($1,$2,$3,$4,$5,$6)", flow.ID, s.access.Auth.Digest(secrets.SAMLStateDigest, state), s.access.Auth.Digest(secrets.SAMLCookieDigest, browser), c.ETag, request.ID, flow.Expires); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{access.NewCookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, tx.Commit(r.Context())
+		if err = pruneExpiredSecrets(r.Context(), tx); err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		raw, err := json.Marshal(flow)
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, flow.ID, secrets.SAMLFlow, raw, &flow.Expires); err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at) VALUES($1,$2,$3,$4,$5,$6)", flow.ID, s.access.Auth.Digest(secrets.SAMLStateDigest, state), s.access.Auth.Digest(secrets.SAMLCookieDigest, browser), c.ETag, request.ID, flow.Expires); err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{access.NewCookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, true, nil
+	})
 }
 
 func (s *Server) readSAMLFlow(r *http.Request, q database.Queryer, state string) (samlFlow, []byte, *time.Time, error) {
@@ -241,100 +217,87 @@ func (s *Server) verifySAMLResponse(r *http.Request, c samlConfiguration, flow *
 }
 
 func (s *Server) recordSAMLAssertion(r *http.Request, c samlConfiguration, flow samlFlow, assertion *saml.Assertion, state string) (httpkit.Reply, error) {
-	tx, err := s.access.Begin(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	current, err := loadSAML(r.Context(), tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !current.Enabled || current.ETag != flow.ETag {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
-	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.saml_assertion_replays WHERE expires_at<=now()"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	replayInput, _ := json.Marshal([]string{c.EntityID, assertion.ID})
-	result, err := tx.Exec(r.Context(), "INSERT INTO olp.saml_assertion_replays(digest,expires_at) VALUES($1,$2) ON CONFLICT DO NOTHING", s.access.Auth.Digest(secrets.SAMLAssertionDigest, string(replayInput)), assertion.Conditions.NotOnOrAfter.Add(samlidentity.Skew))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if result.RowsAffected() != 1 {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_assertion_replayed", "Start SAML sign-in again.")
-	}
-	// The browser-bound completion cannot extend the verified assertion's life.
-	for _, end := range []time.Time{assertion.Conditions.NotOnOrAfter, assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.NotOnOrAfter} {
-		if deadline := end.Add(samlidentity.Skew); deadline.Before(flow.Expires) {
-			flow.Expires = deadline
+	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+		current, err := loadSAML(r.Context(), tx)
+		if err != nil {
+			return httpkit.Reply{}, false, err
 		}
-	}
-	if end := assertion.AuthnStatements[0].SessionNotOnOrAfter; end != nil && end.Add(samlidentity.Skew).Before(flow.Expires) {
-		flow.Expires = end.Add(samlidentity.Skew)
-	}
-	result, err = tx.Exec(r.Context(), "UPDATE olp.saml_flows SET received_at=now(),expires_at=$2 WHERE id=$1 AND received_at IS NULL AND expires_at>clock_timestamp()", flow.ID, flow.Expires)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if result.RowsAffected() != 1 {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
-	}
-	data, err := json.Marshal(flow)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer clear(data)
-	if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, flow.ID, secrets.SAMLFlow, data, &flow.Expires); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Reply{Status: 303, Location: "/api/v1/saml/complete?state=" + url.QueryEscape(state)}, tx.Commit(r.Context())
+		if !current.Enabled || current.ETag != flow.ETag {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
+		}
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.saml_assertion_replays WHERE digest IN (SELECT digest FROM olp.saml_assertion_replays WHERE expires_at<=now() LIMIT $1)", expiredCleanupLimit); err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		replayInput, _ := json.Marshal([]string{c.EntityID, assertion.ID})
+		result, err := tx.Exec(r.Context(), "INSERT INTO olp.saml_assertion_replays(digest,expires_at) VALUES($1,$2) ON CONFLICT DO NOTHING", s.access.Auth.Digest(secrets.SAMLAssertionDigest, string(replayInput)), assertion.Conditions.NotOnOrAfter.Add(samlidentity.Skew))
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if result.RowsAffected() != 1 {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_assertion_replayed", "Start SAML sign-in again.")
+		}
+		for _, end := range []time.Time{assertion.Conditions.NotOnOrAfter, assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.NotOnOrAfter} {
+			if deadline := end.Add(samlidentity.Skew); deadline.Before(flow.Expires) {
+				flow.Expires = deadline
+			}
+		}
+		if end := assertion.AuthnStatements[0].SessionNotOnOrAfter; end != nil && end.Add(samlidentity.Skew).Before(flow.Expires) {
+			flow.Expires = end.Add(samlidentity.Skew)
+		}
+		result, err = tx.Exec(r.Context(), "UPDATE olp.saml_flows SET received_at=now(),expires_at=$2 WHERE id=$1 AND received_at IS NULL AND expires_at>clock_timestamp()", flow.ID, flow.Expires)
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if result.RowsAffected() != 1 {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+		}
+		data, err := json.Marshal(flow)
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		defer clear(data)
+		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, flow.ID, secrets.SAMLFlow, data, &flow.Expires); err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		return httpkit.Reply{Status: 303, Location: "/api/v1/saml/complete?state=" + url.QueryEscape(state)}, true, nil
+	})
 }
 
 func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
 	if len(r.URL.Query()["state"]) != 1 {
 		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
-	tx, err := s.access.Begin(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	flow, digest, received, err := s.readSAMLFlow(r, tx, r.URL.Query().Get("state"))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.access.Auth.Digest(secrets.SAMLCookieDigest, access.CookieValue(r, "__Host-olp_saml_"+flow.ID))) {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
-	}
-	c, err := loadSAML(r.Context(), tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !c.Enabled || c.ETag != flow.ETag {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
-	}
-	// Concurrent completions can both read the flow, but only the one whose
-	// delete consumes it continues, so an assertion mints one session.
-	consumed, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if consumed.RowsAffected() != 1 {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
-	}
-	response, err := s.acceptSAML(r, tx, c, flow)
-	if err != nil {
-		var problem *httpkit.Problem
-		if errors.As(err, &problem) && problem.Code == "saml_provisioning_denied" {
-			if e := tx.Commit(r.Context()); e != nil {
-				return httpkit.Reply{}, e
-			}
+	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+		flow, digest, received, err := s.readSAMLFlow(r, tx, r.URL.Query().Get("state"))
+		if err != nil {
+			return httpkit.Reply{}, false, err
 		}
-		return httpkit.Reply{}, err
-	}
-	response.Cookies = append(response.Cookies, access.ClearCookie("__Host-olp_saml_"+flow.ID))
-	return response, tx.Commit(r.Context())
+		if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.access.Auth.Digest(secrets.SAMLCookieDigest, access.CookieValue(r, "__Host-olp_saml_"+flow.ID))) {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
+		}
+		c, err := loadSAML(r.Context(), tx)
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if !c.Enabled || c.ETag != flow.ETag {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
+		}
+		consumed, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID)
+		if err != nil {
+			return httpkit.Reply{}, false, err
+		}
+		if consumed.RowsAffected() != 1 {
+			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+		}
+		response, err := s.acceptSAML(r, tx, c, flow)
+		if err != nil {
+			var problem *httpkit.Problem
+			commitDeauth := errors.As(err, &problem) && problem.Code == "saml_provisioning_denied"
+			return httpkit.Reply{}, commitDeauth, err
+		}
+		response.Cookies = append(response.Cookies, access.ClearCookie("__Host-olp_saml_"+flow.ID))
+		return response, true, nil
+	})
 }
 
 func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (httpkit.Reply, error) {
@@ -377,15 +340,9 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 	}
 	var p authz.Principal
 	if flow.Kind != "login" {
-		p, err = s.access.Authenticate(r, tx)
+		p, err = s.authenticateFlowSession(r, tx, flow.UserID, flow.SessionID, "saml_session_changed", "Your browser session changed during sign-in.")
 		if err != nil {
 			return "", "", authz.Principal{}, err
-		}
-		if err = p.Authorize(authz.Self); err != nil {
-			return "", "", authz.Principal{}, err
-		}
-		if p.ID != flow.UserID || p.SessionID != flow.SessionID {
-			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_session_changed", "Your browser session changed during sign-in.")
 		}
 		if flow.Kind == "reauthenticate" && p.ID != userID {
 			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_identity_mismatch", "Use an identity linked to your current account.")
@@ -412,8 +369,8 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 		if role == "" {
 			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
 		}
-		userID = httpkit.NewID()
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, httpkit.NewID()); err != nil {
+		userID = ids.New()
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, ids.New()); err != nil {
 			return "", "", authz.Principal{}, err
 		}
 	}
@@ -422,7 +379,7 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 		return "", "", authz.Principal{}, err
 	}
 	if identityID == "" {
-		identityID = httpkit.NewID()
+		identityID = ids.New()
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.EntityID, flow.Subject, flow.Facts.Email, facts); err != nil {
 			return "", "", authz.Principal{}, err
 		}
@@ -440,14 +397,11 @@ func (s *Server) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p 
 			return httpkit.Reply{}, err
 		}
 		response.Cookies = grant.Cookies
-		response.Location = reauthenticatedAt(flow.Purpose) + "?reauthenticated=" + url.QueryEscape(flow.Purpose)
-		if flow.Resource != "" {
-			response.Location += "&resource_id=" + url.QueryEscape(flow.Resource)
-		}
+		response.Location = reauthenticatedLocation(flow.Purpose, flow.Resource)
 		return response, nil
 	}
 	if flow.Kind == "link" {
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, httpkit.NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, ids.New()); err != nil {
 			return httpkit.Reply{}, err
 		}
 		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {

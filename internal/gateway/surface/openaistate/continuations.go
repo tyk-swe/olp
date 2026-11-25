@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
-	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 

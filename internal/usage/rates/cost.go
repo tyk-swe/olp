@@ -68,131 +68,43 @@ var (
 	chainImageOut    = []rateField{fieldImageOutput, fieldOutput}
 )
 
-// cost mirrors olp.price_usage. Each division by a million is rounded at the
-// scale PostgreSQL gives its quotient, the terms are summed exactly, the window
-// and batch multipliers apply to the sum, and the total is rounded half away
-// from zero to the twelve places the column stores.
+// cost evaluates one attempt's price. Each division by a million is rounded at
+// the scale PostgreSQL gives its quotient, terms are summed exactly, window,
+// batch and discount multipliers apply to the sum, and the total rounds half
+// away from zero to twelve decimal places.
 func (r *priceRates) cost(u usage.AttemptUsage, startedAt time.Time, successful bool, discount *big.Int) (Cost, bool) {
-	if !u.Evidence.Complete() || !r.valid {
+	if !u.Evidence.Complete() {
 		return Cost{}, false
 	}
-	// Per-model eval totals do not reveal the individual input sizes that
-	// choose invocation tiers. Keep such costs and explicit charges unpriced.
-	if u.Deferred && u.InvocationCount != nil && *u.InvocationCount > 1 && len(r.tiers) > 0 {
+	res := r.evaluate(u, startedAt, successful, discount, false)
+	if !res.Complete {
 		return Cost{}, false
 	}
-	rates := r.selectRates(u.InputTokens)
-	total := new(big.Int)
-	if u.InputTokens == nil {
-		if !inputSharesAbsent(u) {
-			// Shares without the total they came out of cannot be priced.
-			return Cost{}, false
+	return res.Cost.ForStorage(), true
+}
+
+type tokenCollector func(field string, tokens int64, rate *big.Int)
+
+func (r *priceRates) selectTier(input *int64) (*rateSet, *int64) {
+	if input == nil {
+		return &r.rateSet, nil
+	}
+	selected := &r.rateSet
+	var matched *int64
+	for index := range r.tiers {
+		above := r.tiers[index].above
+		if above < *input && (matched == nil || above > *matched) {
+			selected = &r.tiers[index].rates
+			matched = &r.tiers[index].above
 		}
-	} else {
-		if !rates.inputHead() {
-			return Cost{}, false
-		}
-		charge, ok := rates.inputCharge(u)
-		if !ok {
-			return Cost{}, false
-		}
-		total.Add(total, quotient(charge))
 	}
-	if u.OutputTokens == nil {
-		if u.AudioOutputTokens != nil || u.ImageOutputTokens != nil {
-			return Cost{}, false
-		}
-	} else {
-		if !rates.outputHead() {
-			return Cost{}, false
-		}
-		charge, ok := rates.outputCharge(u)
-		if !ok {
-			return Cost{}, false
-		}
-		total.Add(total, quotient(charge))
-	}
-	if u.MediaUnits != nil {
-		if r.unit == nil {
-			return Cost{}, false
-		}
-		units, ok := scaledDecimal(*u.MediaUnits, mediaDigits)
-		if !ok {
-			return Cost{}, false
-		}
-		total.Add(total, units.Mul(units, r.unit))
-	}
-	invocations := int64(1)
-	if u.Deferred {
-		invocations = 0
-	}
-	if u.InvocationCount != nil {
-		invocations = *u.InvocationCount
-	}
-	if invocations < 0 {
-		return Cost{}, false
-	}
-	if successful && invocations > 0 && r.perRequest != nil {
-		total.Add(total, new(big.Int).Mul(new(big.Int).Mul(r.perRequest, perMillion), big.NewInt(invocations)))
-	}
-	for tool, calls := range u.ToolCalls {
-		if calls <= 0 {
-			continue
-		}
-		fee, priced := r.tools[tool]
-		if !priced {
-			return Cost{}, false
-		}
-		total.Add(total, new(big.Int).Mul(new(big.Int).Mul(big.NewInt(calls), fee), perMillion))
-	}
-	if usage.RetainedValues(u) {
-		return r.retainedCost(total, u, startedAt, discount)
-	}
-	window := r.windowAt(startedAt)
-	if u.Batch && r.batch == nil {
-		return Cost{}, false
-	}
-	if window == nil && !u.Batch && discount == nil {
-		// total is in units of 10^-18: round half up, which is half away from
-		// zero for an amount that cannot be negative.
-		total.Add(total, big.NewInt(500_000))
-		total.Quo(total, perMillion)
-		return clampCost(total), true
-	}
-	// Window and batch multipliers scale the whole usage charge. Each is a
-	// rate-scale decimal, so the product's scale grows twelve places per
-	// multiplier and the final rounding divides them back out.
-	divisorDigits := 6
-	if window != nil {
-		total.Mul(total, window)
-		divisorDigits += costDigits
-	}
-	if u.Batch {
-		total.Mul(total, r.batch)
-		divisorDigits += costDigits
-	}
-	if discount != nil {
-		total.Mul(total, discount)
-		divisorDigits += costDigits
-	}
-	divisor := new(big.Int).Exp(bigTen, big.NewInt(int64(divisorDigits)), nil)
-	total.Add(total, new(big.Int).Quo(divisor, big.NewInt(2)))
-	total.Quo(total, divisor)
-	return clampCost(total), true
+	return selected, matched
 }
 
 // selectRates is the rate set the attempt prices against: the highest tier its
 // input tokens exceed, else the entry's own rates.
 func (r *priceRates) selectRates(input *int64) *rateSet {
-	if input == nil {
-		return &r.rateSet
-	}
-	selected := &r.rateSet
-	for index := range r.tiers {
-		if r.tiers[index].above < *input {
-			selected = &r.tiers[index].rates
-		}
-	}
+	selected, _ := r.selectTier(input)
 	return selected
 }
 
@@ -228,7 +140,7 @@ func inputSharesAbsent(u usage.AttemptUsage) bool {
 // first rate its fallback chain carries. It is false when a share exceeds its
 // total or a nonzero share finds no rate in its chain, either of which leaves
 // the attempt unpriced.
-func (s *rateSet) inputCharge(u usage.AttemptUsage) (*big.Int, bool) {
+func (s *rateSet) inputCharge(u usage.AttemptUsage, collect tokenCollector) (*big.Int, bool) {
 	count := func(tokens *int64) int64 {
 		if tokens == nil {
 			return 0
@@ -273,16 +185,17 @@ func (s *rateSet) inputCharge(u usage.AttemptUsage) (*big.Int, bool) {
 		{write1h, chainWrite1h},
 	} {
 		if share.tokens < 0 {
-			// Counts that exceed their own total are refused when an event is
-			// validated; PostgreSQL would reject the row.
 			return nil, false
 		}
 		if share.tokens == 0 {
 			continue
 		}
-		rate, _ := s.firstRate(share.chain)
+		rate, field := s.firstRate(share.chain)
 		if rate == nil {
 			return nil, false
+		}
+		if collect != nil {
+			collect(field, share.tokens, rate)
 		}
 		term := new(big.Int).Mul(big.NewInt(share.tokens), rate)
 		if charge == nil {
@@ -299,7 +212,7 @@ func (s *rateSet) inputCharge(u usage.AttemptUsage) (*big.Int, bool) {
 
 // outputCharge is the output side of the bill before it is divided by a
 // million, with the same share and fallback rules as inputCharge.
-func (s *rateSet) outputCharge(u usage.AttemptUsage) (*big.Int, bool) {
+func (s *rateSet) outputCharge(u usage.AttemptUsage, collect tokenCollector) (*big.Int, bool) {
 	count := func(tokens *int64) int64 {
 		if tokens == nil {
 			return 0
@@ -329,9 +242,12 @@ func (s *rateSet) outputCharge(u usage.AttemptUsage) (*big.Int, bool) {
 		if share.tokens == 0 {
 			continue
 		}
-		rate, _ := s.firstRate(share.chain)
+		rate, field := s.firstRate(share.chain)
 		if rate == nil {
 			return nil, false
+		}
+		if collect != nil {
+			collect(field, share.tokens, rate)
 		}
 		term := new(big.Int).Mul(big.NewInt(share.tokens), rate)
 		if charge == nil {

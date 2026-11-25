@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func codeRecoveryFrom(recovery *Recovery) *string {
@@ -138,7 +138,7 @@ func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in Admission, opera
 		if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
 			return codemode.Operation{}, codeSelection{}, err
 		}
-		selection, err := codeAccount(ctx, tx, selected, "", "", nil, selected.Route.AllowanceOrdering)
+		selection, err := codeAccount(ctx, tx, selected, "", "", nil)
 		if err == nil {
 			return operation, selection, nil
 		}

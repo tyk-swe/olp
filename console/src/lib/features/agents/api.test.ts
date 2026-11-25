@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import { ApiProblem } from '#lib/management/http.js';
 import * as api from './api';
 
@@ -152,7 +152,6 @@ describe('publication HTTP contracts', () => {
 
 describe('server and execution HTTP contracts', () => {
   it.each([
-    ['projects', api.listProjects],
     ['mcp-servers', api.listServers],
     ['mcp-user-grants', api.listMCPGrants]
   ] as const)(

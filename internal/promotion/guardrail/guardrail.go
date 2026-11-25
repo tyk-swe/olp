@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/definition"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -33,7 +35,7 @@ type Guardrail struct {
 	Type          guardrails.Kind
 	Configuration json.RawMessage
 	TimeoutMS     int64
-	OnError       guardrails.OnError
+	OnError       guardrailpolicy.OnError
 	spec          guardrails.Spec
 	credentials   []reference
 }
@@ -69,8 +71,8 @@ func parseGuardrail(entry contract.ConfigurationGuardrail) (Guardrail, error) {
 	revision := guardrails.Revision{
 		Type:          guardrails.Kind(entry.Type),
 		Configuration: configuration,
-		TimeoutMS:     cmp.Or(promotion.ValueOf(entry.TimeoutMs), 1000),
-		OnError:       cmp.Or(guardrails.OnError(promotion.ValueOf(entry.OnError)), guardrails.FailClosed),
+		TimeoutMS:     cmp.Or(ptr.Value(entry.TimeoutMs), 1000),
+		OnError:       cmp.Or(guardrailpolicy.OnError(ptr.Value(entry.OnError)), guardrailpolicy.FailClosed),
 	}
 	spec, err := guardrails.ParseRevision(revision)
 	if err != nil {
@@ -152,7 +154,7 @@ func planDefinition(ctx context.Context, q database.Queryer, directory promotion
 		return promotion.Conflict(contract.ConfigurationPlanItemKindGuardrail, key, "The owning project is not declared or present at the destination."), nil
 	}
 	if !present {
-		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable bounded content-policy definition."), nil
+		return item(contract.ConfigurationPlanItemKindGuardrail, key, contract.ConfigurationPlanItemActionCreate, "Publish a reusable guardrail definition."), nil
 	}
 	current, err := definition.FindActive(ctx, q, id, g.Name)
 	if err != nil {

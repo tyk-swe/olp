@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -168,7 +168,7 @@ func (q retainedWorkRequest) routeTarget() (retainedWorkTarget, *fault.Error) {
 	}
 	operation := q.work.operation
 	pin, err := q.server.kernel.SelectBoundPinSurface(q.r.Context(), q.x, route, operation, "openai", "unary", kernel.ResourceDemand(q.x), bound, func(provider *routing.Provider, model string) bool {
-		return provider.CredentialSource != "caller" && (provider.Kind == "openai" || provider.Kind == "azure_openai") && provider.Connector().Supports(operation, "openai", "unary")
+		return provider.CredentialSource != "caller" && provider.Connector().NativeOpenAI() && provider.Connector().Supports(operation, "openai", "unary")
 	})
 	q.reply.end.pin = pin
 	if err != nil {

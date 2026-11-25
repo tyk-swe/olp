@@ -12,9 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -259,12 +260,12 @@ func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply
 		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
 		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || routing.ObservedPrincipal(from.Slots) != routing.ObservedPrincipal(to.Slots),
 		"name_changed":                   from.Name != to.Name,
-		"endpoint_changed":               deref(a.Endpoint) != deref(b.Endpoint),
-		"cloud_context_changed":          deref(a.CloudRegion) != deref(b.CloudRegion) || deref(a.CloudProject) != deref(b.CloudProject) || !sameJSON(a.BatchStorage, b.BatchStorage),
-		"deployment_changed":             deref(a.Deployment) != deref(b.Deployment),
-		"api_version_changed":            deref(a.APIVersion) != deref(b.APIVersion),
+		"endpoint_changed":               ptr.Value(a.Endpoint) != ptr.Value(b.Endpoint),
+		"cloud_context_changed":          ptr.Value(a.CloudRegion) != ptr.Value(b.CloudRegion) || ptr.Value(a.CloudProject) != ptr.Value(b.CloudProject) || !sameJSON(a.BatchStorage, b.BatchStorage),
+		"deployment_changed":             ptr.Value(a.Deployment) != ptr.Value(b.Deployment),
+		"api_version_changed":            ptr.Value(a.APIVersion) != ptr.Value(b.APIVersion),
 		"connector_changed":              a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
-		"credential_changed":             deref(from.CredentialVersion) != deref(to.CredentialVersion),
+		"credential_changed":             ptr.Value(from.CredentialVersion) != ptr.Value(to.CredentialVersion),
 		"models_added":                   added, "models_removed": removed, "models_changed": changed,
 		"capabilities_added": capsAdded, "capabilities_removed": capsRemoved,
 	}), nil

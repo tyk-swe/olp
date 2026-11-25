@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/authz"
 	"github.com/tyk-swe/olp/internal/codesessions"
 
-	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codemode/codeclient"
 )
 
 // CodeClientConfiguration returns configuration for the latest publication.

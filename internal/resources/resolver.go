@@ -78,10 +78,10 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 
 	routeRevision := routing.RouteRevision{RevisionID: res.RouteRevisionID}
 	err = query.QueryRow(ctx,
-		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.content_policy,v.behavior
+		`SELECT v.route_id::text,v.slug,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.fidelity,v.behavior
          FROM olp.route_revisions v JOIN olp.routes r ON r.id=v.route_id WHERE v.id=$1`,
 		res.RouteRevisionID).Scan(&routeRevision.ID, &routeRevision.Slug, &routeRevision.Revision, &routeRevision.Operations,
-		&routeRevision.OverallTimeout, &routeRevision.MaxAttempts, &routeRevision.Targets, &routeRevision.PublishedAt, &routeRevision.Policy, &routeRevision.ProjectID, &routeRevision.Fidelity, &routeRevision.ContentPolicy, &routeRevision.Behavior)
+		&routeRevision.OverallTimeout, &routeRevision.MaxAttempts, &routeRevision.Targets, &routeRevision.PublishedAt, &routeRevision.Policy, &routeRevision.ProjectID, &routeRevision.Fidelity, &routeRevision.Behavior)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ResolvedPin{}, fmt.Errorf("route revision %s: %w", res.RouteRevisionID, ErrNoRows)
 	}

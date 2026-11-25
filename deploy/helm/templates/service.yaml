@@ -1,8 +1,8 @@
 {{- $root := . -}}
 {{- range $componentName := list "gateway" "control" "worker" -}}
 {{- $component := index $root.Values $componentName -}}
-{{- if and $component.enabled (or (eq $componentName "worker") $component.service.enabled) }}
-{{- if ne $componentName "worker" }}
+{{- if $component.enabled }}
+{{- if and (ne $componentName "worker") $component.service.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

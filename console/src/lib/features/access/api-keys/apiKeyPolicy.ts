@@ -4,7 +4,7 @@ import {
   namedLimitsInput,
   namedLimitsError,
   type NamedLimitRow
-} from '../budgets/namedLimits';
+} from '#lib/features/budgets/index.js';
 import { groupNames, groupNamesError } from '../route-groups/policy';
 import {
   attributionForm,

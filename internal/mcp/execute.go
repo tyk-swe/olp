@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -134,7 +135,7 @@ func (s *Executor) reserveToolCall(ctx context.Context, in CallRequest) (*accoun
 	reservedResult, err := s.ledger.Reserve(ctx, accounting.ReserveInput{
 		Authority: in.Authority, Approval: in.Approval, RunID: in.RunID, Ordinal: in.Ordinal, ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
 		ReleaseID: in.ReleaseID, ToolAlias: in.Tool.Alias, InputDigest: s.toolInputDigest(in.Arguments),
-		CallDigest: s.callDigest(in.Authority, in.CallID), UnitPrice: cloneUnitPrice(in.Tool.UnitPrice),
+		CallDigest: s.callDigest(in.Authority, in.CallID), UnitPrice: ptr.Clone(in.Tool.UnitPrice),
 		ServerID: in.Tool.ServerID, ServerRevisionID: in.Tool.ServerRevisionID,
 	})
 	if err == nil && reservedResult.Repeat != nil {

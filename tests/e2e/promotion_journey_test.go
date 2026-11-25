@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/authz"
+	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -26,8 +26,6 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
-
-const legacyRouteSlug = "legacy-content-policy-for-a-route-whose-slug-is-long-enough-to-hash-its-name"
 
 func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller, fixture canaryFixture) {
 	s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
@@ -63,22 +61,6 @@ func testPromotionRoundTrip(t *testing.T, parent *service, owner *harness.Caller
 	replanned := s.Want(operator, "POST", "/api/v1/configuration/plan", request, nil, http.StatusOK)
 	if !reflect.DeepEqual(replanned, planned) {
 		t.Errorf("re-plan after apply differs:\nbefore %v\nafter  %v", planned, replanned)
-	}
-
-	legacy := s.Want(operator, "POST", "/api/v1/configuration/plan", map[string]any{"document": legacyDocument(t, document)}, nil, http.StatusOK)
-	policy := "route.legacy-content-policy-for-a-route-whose-slug-is-long-enoug-25c7b87b3a3e376a"
-	want := []map[string]any{
-		{"kind": "guardrail_attachment", "key": "route/" + legacyRouteSlug + "/" + policy, "action": "create"},
-		{"kind": "guardrail_policy", "key": "canary-project/" + policy, "action": "create"},
-	}
-	got := []map[string]any{}
-	for _, action := range items(legacy["actions"]) {
-		if action["kind"] == "guardrail_attachment" || action["kind"] == "guardrail_policy" {
-			got = append(got, map[string]any{"kind": action["kind"], "key": action["key"], "action": action["action"]})
-		}
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("v1 content policy converted to %v, want %v", got, want)
 	}
 
 	s.Want(operator, "POST", "/api/v1/configuration/apply", map[string]any{"document": installationPolicyDocument(document)}, harness.Idempotent(), http.StatusOK)
@@ -271,32 +253,6 @@ func assertSorted(t *testing.T, label string, entries []map[string]any, key func
 	if !slices.IsSortedFunc(entries, func(a, b map[string]any) int { return slices.Compare(key(a), key(b)) }) {
 		t.Errorf("%s are not in canonical order: %v", label, entries)
 	}
-}
-
-func legacyDocument(t *testing.T, exported map[string]any) map[string]any {
-	t.Helper()
-	raw, err := json.Marshal(exported)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document map[string]any
-	if err = json.Unmarshal(raw, &document); err != nil {
-		t.Fatal(err)
-	}
-	routes := items(document["routes"])
-	canary := routes[slices.IndexFunc(routes, func(r map[string]any) bool { return r["slug"] == "canary-route" })]
-	legacy := map[string]any{}
-	for field, value := range canary {
-		legacy[field] = value
-	}
-	legacy["slug"] = legacyRouteSlug
-	legacy["content_policy"] = map[string]any{"rules": []any{map[string]any{"id": "secret", "phase": "input", "pattern": "sk-[a-z]+", "action": "block"}}}
-	document["api_version"] = "openllmproxy.dev/config/v1"
-	document["routes"] = append(document["routes"].([]any), legacy)
-	for _, field := range []string{"guardrails", "guardrail_policies", "guardrail_attachments"} {
-		delete(document, field)
-	}
-	return document
 }
 
 func items(value any) []map[string]any {
