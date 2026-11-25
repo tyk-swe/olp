@@ -1,31 +1,33 @@
 <script lang="ts">
-  import { useAction } from '#lib/editing/action.svelte.js';
-  const runAction = useAction();
-  import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { confirmAction } from '#lib/components/confirm.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { captureResult } from '#lib/editing/result.js';
   import {
     listRoutes,
-    selectActiveRoutes,
-    routeKeys
+    routeKeys,
+    selectActiveRoutes
   } from '#lib/features/routes/index.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { confirmAction } from '#lib/components/confirm.js';
-  import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
   import {
     ResourceRequestError,
     agentSubmissionFingerprint,
+    extractResourceResponseMetadata,
     runAgentRequest,
     type AgentAction
   } from './lifecycle';
 
+  const mutation = useMutation();
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal),
     select: selectActiveRoutes
   }));
   const eligible = $derived(
-    (routes.data ?? []).filter((route) =>
-      route.latest_revision.operations.includes('agent_resource')
+    (routes.data ?? []).filter((item) =>
+      item.latest_revision.operations.includes('agent_resource')
     )
   );
   let apiKey = $state('');
@@ -35,76 +37,86 @@
   );
   let id = $state('');
   let result = $state('');
-  let problem = $state('');
-
   let nextPage = $state('');
-  let submissionKey = crypto.randomUUID();
-  let submittedDefinition = '';
   let controller: AbortController | undefined;
-  let destroyed = false;
+
+  usePrincipalLifetime(() => {
+    controller?.abort();
+    controller = undefined;
+    apiKey = route = id = result = nextPage = '';
+  });
+
   $effect(() => {
     if (route && !eligible.some((item) => item.slug === route)) route = '';
   });
-  onDestroy(() => {
-    destroyed = true;
-    controller?.abort();
-    apiKey = '';
-    result = '';
-  });
 
   async function run(action: AgentAction, pageToken?: string) {
-    if (runAction.busy) return;
-    problem = '';
-    controller = new AbortController();
-    const owner = controller;
-    await runAction.run(
-      () => {
-        if (action === 'create') {
-          const fingerprint = agentSubmissionFingerprint(route, definition);
-          if (fingerprint !== submittedDefinition) {
-            submissionKey = crypto.randomUUID();
-            submittedDefinition = fingerprint;
-          }
-        }
-        return runAgentRequest({
-          action,
-          apiKey,
-          route,
-          id,
-          body: definition,
-          submissionKey,
-          pageToken,
-          signal: owner.signal
-        });
-      },
-      (response, current) => {
-        if (destroyed || !current()) return;
-        result = response || 'Resource deleted.';
-        nextPage = '';
-        if (response) {
-          const parsed = parseNativeJSON(response);
-          if (nativeObject(parsed)) {
-            if (typeof parsed.id === 'string') id = parsed.id;
-            if (typeof parsed.next_page_token === 'string')
-              nextPage = parsed.next_page_token;
-          }
-        }
-        if (action === 'create') submittedDefinition = '';
-      },
-      {
-        failure: (error) => {
-          if (destroyed || owner.signal.aborted) return '';
-          if (error instanceof ResourceRequestError && error.resourceId)
-            id = error.resourceId;
-          return errorMessage(
-            error,
-            'The resource request could not be completed.'
-          );
-        }
+    if (mutation.busy) return;
+    const fingerprint =
+      action === 'create'
+        ? captureResult(() => agentSubmissionFingerprint(route, definition))
+        : null;
+    if (fingerprint && !fingerprint.ok) {
+      mutation.error = errorMessage(
+        fingerprint.error,
+        'The resource request could not be completed.'
+      );
+      return;
+    }
+    const owner = new AbortController();
+    controller = owner;
+    const request = {
+      action,
+      apiKey,
+      route,
+      id,
+      body: definition,
+      pageToken,
+      signal: owner.signal
+    };
+    const accept = (response: string) => {
+      result = response || 'Resource deleted.';
+      const metadata = extractResourceResponseMetadata(response);
+      if (metadata.id) id = metadata.id;
+      nextPage = metadata.nextPageToken ?? '';
+    };
+    const feedback = {
+      key: action,
+      failure: (cause: unknown) => {
+        if (owner.signal.aborted) return '';
+        if (cause instanceof ResourceRequestError && cause.resourceId)
+          id = cause.resourceId;
+        return errorMessage(
+          cause,
+          'The resource request could not be completed.'
+        );
       }
-    );
-    if (!destroyed) problem = runAction.error;
+    };
+    if (fingerprint) {
+      await mutation.submit(
+        [fingerprint.value, apiKey.trim()],
+        (_intent, requestId) =>
+          runAgentRequest({ ...request, submissionKey: requestId }),
+        accept,
+        feedback
+      );
+    } else {
+      await mutation.run(() => runAgentRequest(request), accept, feedback);
+    }
+    if (controller === owner) controller = undefined;
   }
+
+  const confirmDelete = async () => {
+    if (
+      await confirmAction({
+        title: `Delete agent ${id}?`,
+        body: 'This asks the provider to delete the agent.',
+        confirmLabel: 'Delete agent',
+        danger: true
+      })
+    )
+      await run('delete');
+  };
 </script>
 
 <section class="card agent-resources" aria-labelledby="agent-resources-title">
@@ -119,32 +131,35 @@
         type="password"
         autocomplete="off"
         bind:value={apiKey}
-        disabled={runAction.busy}
+        disabled={mutation.busy}
       />
     </label>
-    <label>
-      Published route<select
-        bind:value={route}
-        disabled={runAction.busy || routes.isPending}
-      >
-        <option value="">Choose a route</option>
-        {#each eligible as item (item.slug)}<option value={item.slug}>
-            {item.slug}
-          </option>{/each}
-      </select>
-    </label>
+    <QueryView
+      query={routes}
+      loading="Loading published routes…"
+      failure={errorMessage(routes.error, 'Routes could not be loaded.')}
+      emptyWhen={eligible.length === 0}
+    >
+      {#snippet empty()}
+        <p class="muted">
+          Publish a strict Gemini managed-agent route to enable creation.
+        </p>
+      {/snippet}
+      <label>
+        Published route<select bind:value={route} disabled={mutation.busy}>
+          <option value="">Choose a route</option>
+          {#each eligible as item (item.slug)}<option value={item.slug}>
+              {item.slug}
+            </option>{/each}
+        </select>
+      </label>
+    </QueryView>
   </div>
-  {#if routes.isError}<p class="inline-problem" role="alert">
-      {errorMessage(routes.error, 'Routes could not be loaded.')}
-    </p>
-  {:else if !routes.isPending && eligible.length === 0}<p>
-      Publish a strict Gemini managed-agent route to enable creation.
-    </p>{/if}
   <label>
     Agent definition (JSON)<textarea
       rows="7"
       bind:value={definition}
-      disabled={runAction.busy}
+      disabled={mutation.busy}
       spellcheck="false"></textarea>
   </label>
   <div class="resource-actions">
@@ -152,7 +167,7 @@
       class="button button-primary"
       type="button"
       onclick={() => run('create')}
-      disabled={runAction.busy || !route || !apiKey}
+      disabled={mutation.busy || !route || !apiKey}
     >
       Create agent
     </button>
@@ -160,7 +175,7 @@
       class="button button-secondary"
       type="button"
       onclick={() => run('list')}
-      disabled={runAction.busy || !apiKey}
+      disabled={mutation.busy || !apiKey}
     >
       List my agents
     </button>
@@ -168,7 +183,7 @@
   <label>
     Agent resource ID<input
       bind:value={id}
-      disabled={runAction.busy}
+      disabled={mutation.busy}
       placeholder="agent_resource_…"
     />
   </label>
@@ -177,25 +192,15 @@
       class="button button-secondary"
       type="button"
       onclick={() => run('get')}
-      disabled={runAction.busy || !id || !apiKey}
+      disabled={mutation.busy || !id || !apiKey}
     >
       Inspect agent
     </button>
     <button
       class="button button-secondary"
       type="button"
-      onclick={async () => {
-        if (
-          await confirmAction({
-            title: `Delete agent ${id}?`,
-            body: 'This asks the provider to delete the agent.',
-            confirmLabel: 'Delete agent',
-            danger: true
-          })
-        )
-          await run('delete');
-      }}
-      disabled={runAction.busy || !id || !apiKey}
+      onclick={confirmDelete}
+      disabled={mutation.busy || !id || !apiKey}
     >
       Delete agent
     </button>
@@ -203,11 +208,11 @@
         class="button button-secondary"
         type="button"
         onclick={() => run('list', nextPage)}
-        disabled={runAction.busy}
+        disabled={mutation.busy}
       >
         Next page
       </button>{/if}
-    {#if runAction.busy}<button
+    {#if mutation.busy}<button
         class="button button-secondary"
         type="button"
         onclick={() => controller?.abort()}
@@ -215,10 +220,12 @@
         Stop waiting
       </button>{/if}
   </div>
-  {#if runAction.busy}<p role="status">
+  {#if mutation.busy}<p role="status">
       Waiting for the resource operation…
     </p>{/if}
-  {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
+  {#if mutation.error}<p class="inline-problem" role="alert">
+      {mutation.error}
+    </p>{/if}
   {#if result}<pre aria-label="Agent resource result">{result}</pre>{/if}
 </section>
 

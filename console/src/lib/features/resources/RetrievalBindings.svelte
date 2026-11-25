@@ -1,37 +1,38 @@
 <script lang="ts">
-  import RetrievalBindingList from './RetrievalBindingList.svelte';
-  import { notify } from '#lib/components/toasts.svelte.js';
-  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '#lib/management/http.js';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
+  import { notify } from '#lib/components/toasts.svelte.js';
+  import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import RetrievalBindingList from './RetrievalBindingList.svelte';
   import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
-  import { useAction } from '#lib/editing/action.svelte.js';
-  import { readResult } from '#lib/editing/result.js';
-  import { parseNativeJSON, nativeObject } from '#lib/nativeJson.js';
-  import {
-    listRetrievalBindings,
     getRetrievalBinding,
     getRetrievalRevision,
-    saveRetrievalBinding,
+    listRetrievalBindings,
     retireRetrievalBinding,
+    saveRetrievalBinding,
     type RetrievalBinding,
     type RetrievalBindingInput
-  } from './retrieval';
+  } from './api';
+  import { buildRetrievalBindingInput } from './lifecycle';
+  import { resourceKeys } from './resourceKeys';
 
   const access = useRole();
   const client = useQueryClient();
-  const intent = useMutationIntent();
-  const writeAction = useAction();
-  const queryKey = ['retrieval-bindings'] as const;
+  const queryKey = resourceKeys.retrievalBindings();
   const bindings = createQuery(() => ({
     queryKey,
     queryFn: listRetrievalBindings
   }));
+  const writeAction = useMutation(() => client.invalidateQueries({ queryKey }));
+  const readAction = useAction();
   const canManage = $derived(access.can('providers.manage'));
+  const busy = $derived(readAction.busy || writeAction.busy);
+  const conflict = $derived(writeAction.conflict);
+  const error = $derived(readAction.error || writeAction.error);
+
   let current = $state<RetrievalBinding | null>(null);
   let editor = $state(false);
   let project = $state('');
@@ -47,17 +48,11 @@
   let grants = $state('');
   let revision = $state('');
   let inspected = $state('');
-  let error = $state('');
-  let readBusy = $state(false);
-  const busy = $derived(readBusy || writeAction.busy);
-  const conflict = $derived(writeAction.conflict);
-  let epoch = 0;
-  const captureOwner = usePrincipalLifetime(() => {
-    epoch += 1;
+
+  usePrincipalLifetime(() => {
     current = null;
     editor = false;
     inspected = '';
-    error = '';
   });
 
   function populate(value: RetrievalBinding | null) {
@@ -74,108 +69,106 @@
     revision = value?.revision_id ?? '';
     inspected = '';
     writeAction.reset();
-    intent.reset();
+    readAction.reset();
     editor = true;
   }
+
+  function close() {
+    current = null;
+    editor = false;
+    inspected = '';
+    writeAction.reset();
+    readAction.reset();
+  }
+
   async function edit(id?: string) {
     if (busy) return;
-    const version = ++epoch;
-    const isCurrent = captureOwner();
-    readBusy = true;
-    error = '';
-    const result = await readResult(() =>
-      id ? getRetrievalBinding(id) : Promise.resolve(null)
+    if (!id) {
+      populate(null);
+      return;
+    }
+    if (!writeAction.conflict) writeAction.reset();
+    await readAction.run(
+      () => getRetrievalBinding(id),
+      (value) => {
+        populate(value);
+      }
     );
-    if (!isCurrent() || version !== epoch) return;
-    readBusy = false;
-    if (result.ok) populate(result.value);
-    else error = errorMessage(result.error);
   }
-  function input(): RetrievalBindingInput {
-    const parsed = parseNativeJSON(fields);
-    if (!nativeObject(parsed))
-      throw new Error('Field mappings must be a JSON object.');
-    const keys = grants.split(/[\s,]+/).filter(Boolean);
-    if (new Set(keys).size !== keys.length)
-      throw new Error('Each API-key grant must appear once.');
-    return {
-      project_id: project.trim(),
-      name: name.trim(),
-      route: route.trim(),
-      target_id: target.trim(),
-      backend,
-      backend_resource: resource.trim(),
-      enabled,
-      fields: parsed as RetrievalBindingInput['fields'],
-      key_grants: keys
-    };
-  }
-  async function retire() {
-    if (!current) return;
-    if (
-      await confirmAction({
-        title: `Retire ${current.name}?`,
-        body: 'Retrieval through this binding stops on the route.',
-        confirmLabel: 'Retire binding',
-        danger: true
-      })
-    )
-      await write('retire');
-  }
-  async function write(action: 'save' | 'retire') {
+
+  async function save(event: SubmitEvent) {
+    event.preventDefault();
     if (busy || !canManage || conflict) return;
-    const version = epoch;
-    error = '';
-    await writeAction.run(
-      () => {
-        const next = action === 'save' ? input() : null;
-        const observed = current;
-        return intent.submit(
-          { action, observed, next },
-          async (submission, requestId) => {
-            if (submission.action === 'retire') {
-              if (!submission.observed)
-                throw new Error('Choose an existing binding.');
-              await retireRetrievalBinding(submission.observed, requestId);
-              return null;
-            }
-            if (!submission.next) throw new Error('Enter the binding fields.');
-            return saveRetrievalBinding(
-              submission.observed,
-              submission.next,
-              requestId
-            );
-          }
-        );
-      },
-      async (saved, isLive) => {
-        if (version !== epoch || !isLive()) return;
-        if (saved) populate(saved);
-        else {
-          current = null;
-          editor = false;
-        }
-        notify(saved ? 'Binding revision saved.' : 'Binding retired.');
+    readAction.reset();
+    const built = buildRetrievalBindingInput({
+      project,
+      name,
+      route,
+      target,
+      backend,
+      resource,
+      enabled,
+      fields,
+      grants
+    });
+    if (!built.ok) {
+      writeAction.error = built.message;
+      return;
+    }
+    const observed = current;
+    await writeAction.submit(
+      { action: 'save' as const, observed, input: built.value },
+      (submission, requestId) =>
+        saveRetrievalBinding(submission.observed, submission.input, requestId),
+      async (saved) => {
+        populate(saved);
+        notify('Binding revision saved.');
         await client.invalidateQueries({ queryKey });
-      },
-      { failure: (cause) => (version === epoch ? errorMessage(cause) : '') }
+      }
     );
-    if (writeAction.error) error = writeAction.error;
   }
-  async function inspect() {
-    if (!current || !revision || busy) return;
-    const version = epoch;
-    const isCurrent = captureOwner();
-    readBusy = true;
-    error = '';
-    const binding = current;
-    const result = await readResult(() =>
-      getRetrievalRevision(binding.id, revision.trim())
+
+  async function retire() {
+    const observed = current;
+    if (!observed || busy || !canManage || conflict) return;
+    const confirmed = await confirmAction({
+      title: `Retire ${observed.name}?`,
+      body: 'Retrieval through this binding stops on the route.',
+      confirmLabel: 'Retire binding',
+      danger: true
+    });
+    if (
+      !confirmed ||
+      current?.id !== observed.id ||
+      busy ||
+      !canManage ||
+      conflict
+    )
+      return;
+    readAction.reset();
+    await writeAction.submit(
+      { action: 'retire' as const, observed },
+      (submission, requestId) =>
+        retireRetrievalBinding(submission.observed, requestId),
+      async () => {
+        close();
+        notify('Binding retired.');
+        await client.invalidateQueries({ queryKey });
+      }
     );
-    if (!isCurrent() || version !== epoch) return;
-    readBusy = false;
-    if (result.ok) inspected = JSON.stringify(result.value, null, 2);
-    else error = errorMessage(result.error);
+  }
+
+  async function inspect() {
+    const binding = current;
+    const revisionId = revision.trim();
+    if (!binding || !revisionId || busy) return;
+    if (!writeAction.conflict) writeAction.error = '';
+    await readAction.run(
+      () => getRetrievalRevision(binding.id, revisionId),
+      (value) => {
+        inspected = JSON.stringify(value, null, 2);
+      }
+    );
   }
 </script>
 
@@ -194,7 +187,7 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => edit()}
+      onclick={() => void edit()}
       disabled={busy || !canManage}
     >
       Add binding
@@ -202,12 +195,7 @@
   </div>
   <RetrievalBindingList {bindings} {busy} {edit} />
   {#if editor}
-    <form
-      onsubmit={(event) => {
-        event.preventDefault();
-        void write('save');
-      }}
-    >
+    <form onsubmit={save}>
       <h3>{current ? 'Binding revision' : 'New binding'}</h3>
       <fieldset disabled={busy || !canManage}>
         <div class="binding-fields">
@@ -281,17 +269,15 @@
             </button>{/if}
         </div>
       </fieldset>
-      {#if conflict && current}<p class="inline-problem" role="alert">
-          This binding changed. Reload it before saving another revision.
-        </p>
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => edit(current?.id)}
+      {#if conflict && current}
+        <ConflictNotice
+          notice="conflict"
+          onReload={() => {
+            if (current) void edit(current.id);
+          }}
           disabled={busy}
-        >
-          Reload binding
-        </button>{/if}
+        />
+      {/if}
       {#if current}<label>
           Revision ID<input bind:value={revision} disabled={busy} />
         </label>
@@ -299,26 +285,16 @@
           class="button button-secondary"
           type="button"
           onclick={inspect}
-          disabled={busy || !revision}
+          disabled={busy || !revision.trim()}
         >
           Inspect revision
         </button>{/if}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => {
-          epoch += 1;
-          editor = false;
-          inspected = '';
-        }}
-        disabled={busy}
-      >
+      <button class="text-button" type="button" onclick={close} disabled={busy}>
         Close
       </button>
     </form>
   {/if}
   {#if busy}<p role="status">Waiting for the binding operation…</p>{/if}
-
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if inspected}<pre
       aria-label="Retrieval binding revision">{inspected}</pre>{/if}
