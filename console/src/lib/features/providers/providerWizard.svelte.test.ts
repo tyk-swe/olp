@@ -388,6 +388,122 @@ describe('provider wizard', () => {
     expect(state.wizardStep).toBe(3);
     expect(state.errorMessage).toBe('');
   });
+
+  async function connectedWizard(discovery: () => Promise<Response>) {
+    serveWizard(undefined, (request) =>
+      new URL(request.url).pathname.endsWith('/discovery')
+        ? discovery()
+        : undefined
+    );
+    const state = await wizard();
+    const draft = state.draft;
+    if (!draft) throw new Error('The wizard has no draft');
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
+    return state;
+  }
+
+  it('names the running step, sends one at a time and replaces the last failure', async () => {
+    const answers = [
+      Promise.withResolvers<Response>(),
+      Promise.withResolvers<Response>()
+    ];
+    const discovery = vi.fn(
+      () => answers[discovery.mock.calls.length - 1].promise
+    );
+    const state = await connectedWizard(discovery);
+
+    const first = state.discoverWizardProvider();
+    await eventually(() => expect(discovery).toHaveBeenCalledOnce());
+    expect(state.busy).toBe('discover');
+    expect(state.notice).toBe('');
+    state.manualModelNames = 'model-a';
+    await state.declareWizardModels();
+    expect(discovery).toHaveBeenCalledOnce();
+    answers[0].resolve(
+      problem('validation_failed', 422, {
+        detail: 'The endpoint is not reachable',
+        errors: {
+          endpoint: [{ code: 'invalid', message: 'Endpoint is invalid' }]
+        }
+      })
+    );
+    await first;
+    expect(state.busy).toBe('');
+    expect(state.errorMessage).toBe('The endpoint is not reachable');
+    expect(state.validationIssues).toEqual([
+      expect.objectContaining({ message: 'Endpoint is invalid' })
+    ]);
+
+    const second = state.discoverWizardProvider();
+    await eventually(() => expect(discovery).toHaveBeenCalledTimes(2));
+    expect(state.errorMessage).toBe('');
+    expect(state.validationIssues).toEqual([]);
+    answers[1].resolve(json({ ...provider, model_count: 2 }));
+    await second;
+    expect(state.busy).toBe('');
+    expect(state.errorMessage).toBe('');
+  });
+
+  it('flags a saved provider changed elsewhere without an error until it reloads', async () => {
+    const state = await connectedWizard(async () =>
+      problem('etag_mismatch', 412)
+    );
+
+    await state.discoverWizardProvider();
+    expect(state.wizardConflict).toBe(true);
+    expect(state.errorMessage).toBe('');
+    expect(state.busy).toBe('');
+    await state.reloadWizard();
+    expect(state.wizardConflict).toBe(false);
+    expect(state.busy).toBe('');
+  });
+
+  it('ignores a step answered after another principal signed in', async () => {
+    const answer = Promise.withResolvers<Response>();
+    const discovery = vi.fn(() => answer.promise);
+    const state = await connectedWizard(discovery);
+
+    const discovering = state.discoverWizardProvider();
+    await eventually(() => expect(discovery).toHaveBeenCalledOnce());
+    authLifecycle.establishSession({
+      user: {
+        id: 'another-owner',
+        email: 'another@example.test',
+        display_name: 'Another owner',
+        role: 'owner',
+        access_scope: 'global',
+        operations: ['read', 'configure']
+      },
+      csrf_token: 'fixture-csrf'
+    });
+    flushSync();
+    expect(state.busy).toBe('');
+    answer.resolve(json({ message: 'Refused' }, 500));
+    await discovering;
+    expect(state.errorMessage).toBe('');
+    expect(state.busy).toBe('');
+  });
+
+  it('ignores a step answered after starting another provider', async () => {
+    const answer = Promise.withResolvers<Response>();
+    const discovery = vi.fn(() => answer.promise);
+    const state = await connectedWizard(discovery);
+
+    const discovering = state.discoverWizardProvider();
+    await eventually(() => expect(discovery).toHaveBeenCalledOnce());
+    state.startAnother();
+    expect(state.busy).toBe('');
+    answer.resolve(problem('etag_mismatch', 412));
+    await discovering;
+    expect(state.errorMessage).toBe('');
+    expect(state.wizardConflict).toBe(false);
+    expect(state.wizardStep).toBe(1);
+    expect(state.busy).toBe('');
+  });
 });
 
 const editorProvider: Provider = {
