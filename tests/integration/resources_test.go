@@ -34,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
@@ -350,6 +351,7 @@ func (r *listedRuntime) NetworkSecret(_ context.Context, _ *release.Release, _, 
 type storedPlan struct {
 	slug, model string
 	kind        string
+	vendor      string
 	surface     string
 	profile     string
 	version     string
@@ -447,7 +449,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	snapshot := &routing.Snapshot{
 		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: 1, ActivatedAt: time.Now()},
 		Providers: map[string]routing.Provider{fixture.providerID: {
-			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
+			ID: fixture.providerID, Name: "listed", Kind: connectors.Kind(kind), VendorID: plan.vendor, Enabled: true, ProfileID: plan.profile, ProfileRevision: profileRevision, Network: network,
 			ActiveCredential: &g.credentialID, RevisionID: g.providerRevisionID, Capabilities: capabilities,
 			Endpoint: endpoint, AuthMode: "api_key", Slots: []routing.Slot{slot}, Deployment: plan.model, HealthProbe: plan.probe, Limits: plan.limits, OperationDefaults: plan.defaults,
 		}},
@@ -1060,6 +1062,32 @@ func (g *storedGateway) call(t *testing.T, key, method, path, contentType, body 
 	var decoded retainedObject
 	_ = json.Unmarshal(raw, &decoded)
 	return decoded
+}
+
+func TestABatchUploadToAVendorThatRefusesBatchesAnswersWithTheVendorsOwnReason(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const form = "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n{}\n\r\n--b--\r\n"
+	for _, vendor := range vendors.All() {
+		if vendor.BatchRefusal == "" {
+			continue
+		}
+		upstream := &retainedUpstream{replies: openAIReplies}
+		g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+			slug: "refused-" + vendor.ID, model: "batch-model", kind: vendor.Connector, vendor: vendor.ID, operations: []string{"generation", "batch"}, upstream: upstream,
+		})
+		g.key(t, "owner")
+		_, raw := g.send(t, "POST", "/v1/files", map[string]string{"Authorization": "Bearer owner", "Content-Type": "multipart/form-data; boundary=b"}, form, 422)
+		var refusal struct {
+			Error struct{ Code, Message string }
+		}
+		if err := json.Unmarshal(raw, &refusal); err != nil || refusal.Error.Code != "target_capability" || refusal.Error.Message != vendor.BatchRefusal {
+			t.Fatalf("%s refused a batch upload with %s, want its contract's reason %q", vendor.ID, raw, vendor.BatchRefusal)
+		}
+		if sent := upstream.sent("POST /files"); len(sent) != 0 {
+			t.Fatalf("%s received %d uploads, want none", vendor.ID, len(sent))
+		}
+	}
 }
 
 func TestFilesAndBatchesHideProviderIdentifiersIsolateKeysAndSpendTheProviderCredential(t *testing.T) {
