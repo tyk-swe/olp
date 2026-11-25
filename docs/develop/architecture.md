@@ -263,8 +263,9 @@ package instead.
 `make lint` enforces the structure through `.golangci.yml` and
 `scripts/check-lint.sh`. Read the failure message and fix the code.
 
-- Nothing under `internal/gateway` imports `internal/access`, and nothing under
-  `internal/access` imports the gateway. The gateway serves inference and the
+- Nothing under `internal/gateway` imports `internal/access` or a package
+  below it, and nothing under `internal/access` imports the gateway. The
+  gateway serves inference and the
   management kit serves the control plane. `cmd/olp` is the only place that
   knows both, so pass a collaborator in there instead of importing across.
 - Nothing under `internal` imports `cmd`.

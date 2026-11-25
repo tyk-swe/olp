@@ -37,7 +37,7 @@ linters:
         serving:
           files: ["**/internal/gateway/**", "!$test"]
           deny:
-            - pkg: github.com/tyk-swe/olp/internal/access$
+            - pkg: github.com/tyk-swe/olp/internal/access
               desc: The gateway serves inference and must not depend on the management kit. Pass what it needs in through cmd/olp.
         management:
           files: ["**/internal/access/**", "!$test"]
@@ -49,10 +49,6 @@ linters:
           deny:
             - pkg: github.com/jackc/pgx
               desc: The execution kernel must not own SQL or database transactions. Move persistence into the owning store package.
-            - pkg: github.com/tyk-swe/olp/internal/access/httpkit
-              desc: The execution kernel serves inference and must not import management HTTP types. Convert faults in cmd/olp.
-            - pkg: github.com/tyk-swe/olp/internal/access/authz
-              desc: The execution kernel must not import management principals. Pass an authorization callback through Member from cmd/olp.
         gateway_isolation:
           files: ["**/internal/**", "!**/internal/gateway/**", "!$test"]
           deny:
