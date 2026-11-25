@@ -9,7 +9,7 @@
   import { cacheStatistics, purgeCache } from './api';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();
-  const locked = $derived(!editor.canManage || Boolean(editor.busy));
+  const locked = $derived(!editor.canManage || editor.action.busy);
   let status = $state<components['schemas']['CacheStatistics'] | null>(null);
   const purgeAction = useAction();
   let refreshing = $state(false);

@@ -53,7 +53,7 @@
       id="route-tool-execution"
       value={editor.behavior.tool_execution ?? ''}
       onchange={(event) => setExecution(event.currentTarget.value)}
-      disabled={!editor.canManage || Boolean(editor.busy)}
+      disabled={!editor.canManage || editor.action.busy}
     >
       <option value="">Client</option>
       <option value="gateway">Gateway</option>
@@ -67,7 +67,7 @@
     <RunLimits
       prefix="route-run"
       value={editor.behavior.run_limits}
-      disabled={!editor.canManage || Boolean(editor.busy)}
+      disabled={!editor.canManage || editor.action.busy}
       onChange={(run_limits) => {
         editor.behavior = { ...editor.behavior, run_limits };
         editor.touch();
@@ -84,7 +84,7 @@
           };
           editor.touch();
         }}
-        disabled={!editor.canManage || Boolean(editor.busy)}
+        disabled={!editor.canManage || editor.action.busy}
       />
       Responses clients support MCP output items
     </label>
@@ -101,7 +101,7 @@
         >
       </p>
     {/if}
-    <fieldset disabled={!editor.canManage || Boolean(editor.busy)}>
+    <fieldset disabled={!editor.canManage || editor.action.busy}>
       <legend>Allowed published toolsets</legend>
       {#if editor.toolsets.isPending}
         <p role="status">Loading published toolsets…</p>

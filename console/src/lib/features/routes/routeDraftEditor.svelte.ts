@@ -7,7 +7,8 @@ import { untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+import { isEtagMismatch } from '#lib/management/http.js';
+import { useAction } from '#lib/editing/action.svelte.js';
 import {
   acceptRemote,
   beginReload,
@@ -113,12 +114,20 @@ export class RouteDraftEditorState {
   hasUnsavedChanges = $derived(this.sync.dirty || this.policyDirty);
   private editVersion = 0;
   private activeResource = '';
-  busy = $state('');
-  publicationBlocked = $derived(
-    Boolean(this.busy) || this.policyBusy || this.hasUnsavedChanges
-  );
-  errorMessage = $state('');
   notice = $state('');
+  readonly action = useAction({
+    conflict: (cause) => {
+      if (!isEtagMismatch(cause)) return false;
+      this.sync = markConflict(this.sync);
+      return true;
+    },
+    begin: () => {
+      this.notice = '';
+    }
+  });
+  publicationBlocked = $derived(
+    this.action.busy || this.policyBusy || this.hasUnsavedChanges
+  );
   routingPreferences = $state('{}');
   seed = $state('setup-preview');
   simulationOperation = $state('generation');
@@ -173,7 +182,7 @@ export class RouteDraftEditorState {
   private resetResource() {
     this.createdDraftId = '';
     this.intents.resetAll();
-    this.session.advance();
+    this.action.retire();
     this.slug = 'default';
     this.projectId = '';
     this.operations = ['generation'];
@@ -186,8 +195,6 @@ export class RouteDraftEditorState {
     this.sync = initialConcurrentEdit();
     this.policyDirty = false;
     this.policyBusy = false;
-    this.busy = '';
-    this.errorMessage = '';
     this.notice = '';
     this.routingPreferences = '{}';
     this.seed = 'setup-preview';
@@ -200,29 +207,6 @@ export class RouteDraftEditorState {
     this.simulationVersion += 1;
     this.activation = null;
   }
-
-  run = async (
-    label: string,
-    action: (
-      isCurrent: () => boolean,
-      samePrincipal: () => boolean
-    ) => Promise<void>
-  ) => {
-    if (this.busy) return;
-    const { isCurrent, samePrincipal } = this.session.capture();
-    this.busy = label;
-    this.errorMessage = '';
-    this.notice = '';
-    try {
-      await action(isCurrent, samePrincipal);
-    } catch (error) {
-      if (!isCurrent()) return;
-      if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
-      else this.errorMessage = errorMessage(error);
-    } finally {
-      if (isCurrent()) this.busy = '';
-    }
-  };
 
   invalidateSimulation = () => {
     this.simulationVersion += 1;
@@ -237,13 +221,17 @@ export class RouteDraftEditorState {
   };
 
   reload = async () => {
-    await this.run('reload', async (isCurrent) => {
-      const result = await this.draft.refetch();
-      if (!isCurrent()) return;
-      if (result.error) throw result.error;
-      if (!result.data) throw new Error('The route draft is unavailable.');
-      this.sync = beginReload(this.sync);
-    });
+    await this.action.run(
+      async (isCurrent) => {
+        const result = await this.draft.refetch();
+        if (!isCurrent()) return;
+        if (result.error) throw result.error;
+        if (!result.data) throw new Error('The route draft is unavailable.');
+        this.sync = beginReload(this.sync);
+      },
+      undefined,
+      { key: 'reload' }
+    );
   };
 
   policySaved = async (etag: string, previousEtag: string) => {
@@ -293,7 +281,8 @@ export class RouteDraftEditorState {
     createIntent: this.intents.create,
     activateRouteIntent: this.intents.activate,
     canManage: () => this.canManage,
-    busy: () => this.busy,
+    busy: () => this.action.busy,
+    samePrincipal: () => this.session.capture().samePrincipal,
     publicationBlocked: () => this.publicationBlocked,
     createdDraftId: () => this.createdDraftId,
     setCreatedDraftId: (id) => {
@@ -307,7 +296,7 @@ export class RouteDraftEditorState {
     },
     editVersion: () => this.editVersion,
     setError: (message) => {
-      this.errorMessage = message;
+      this.action.error = message;
     },
     setNotice: (message) => {
       this.notice = message;
@@ -329,7 +318,7 @@ export class RouteDraftEditorState {
       seed: this.seed,
       preferencesJson: this.routingPreferences
     }),
-    run: this.run
+    run: this.action.run
   });
 
   create = this.actions.create;

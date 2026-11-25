@@ -56,7 +56,7 @@
         class="button button-secondary button-danger"
         type="button"
         onclick={() => editor.remove(draft)}
-        disabled={Boolean(editor.busy)}>Delete draft</button
+        disabled={editor.action.busy}>Delete draft</button
       >
     {/if}
   {/snippet}
@@ -68,25 +68,25 @@
 {#if !editor.canManage}<ReadOnlyNote
     >Your role can view this route draft but not change or activate it.</ReadOnlyNote
   >{/if}
-{#if editor.errorMessage}<div
+{#if editor.action.error}<div
     class="inline-problem"
     role="alert"
     tabindex="-1"
     data-error-summary
     use:focusErrorSummary
   >
-    {editor.errorMessage}
+    {editor.action.error}
   </div>{/if}
 {#if editor.notice}<Callout tone="success">
     {editor.notice}
   </Callout>{/if}
 <p class="sr-only" role="status">
-  {editor.busy ? 'Operation in progress. Please wait.' : ''}
+  {editor.action.busy ? 'Operation in progress. Please wait.' : ''}
 </p>
 <ConflictNotice
   notice={editor.concurrentNotice}
   onReload={editor.reload}
-  disabled={Boolean(editor.busy)}
+  disabled={editor.action.busy}
 />
 {#if !editor.isNew && editor.draft.isError && !editor.draft.data}
   <div class="inline-problem" role="alert">
@@ -117,7 +117,7 @@
 {:else}
   <form
     class="studio"
-    aria-busy={Boolean(editor.busy)}
+    aria-busy={editor.action.busy}
     onsubmit={async (event) => {
       event.preventDefault();
       const root = event.currentTarget.closest('main');
@@ -147,7 +147,7 @@
           {#if editor.isNew}<ProjectScopeField
               id="route-project"
               bind:value={editor.projectId}
-              disabled={!editor.canManage || Boolean(editor.busy)}
+              disabled={!editor.canManage || editor.action.busy}
             />{:else if editor.draft.data}<div class="form-field">
               <span class="scope-label">Project</span><span
                 >{editor.draft.data.project_name ?? 'Installation-wide'}</span
@@ -237,7 +237,7 @@
     scope="route-draft"
     id={editor.draft.data.id}
     resourceEtag={editor.draft.data.etag}
-    canManage={editor.canManage && !editor.busy}
+    canManage={editor.canManage && !editor.action.busy}
     bind:dirty={editor.policyDirty}
     bind:busy={editor.policyBusy}
     onSaved={editor.policySaved}

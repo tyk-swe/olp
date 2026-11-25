@@ -21,7 +21,7 @@
     <select
       id="route-fidelity"
       value={mode}
-      disabled={!editor.canManage || Boolean(editor.busy)}
+      disabled={!editor.canManage || editor.action.busy}
       onchange={(event) => change(event.currentTarget.value)}
       aria-describedby="route-fidelity-help"
     >

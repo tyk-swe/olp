@@ -46,7 +46,7 @@
     <input
       type="checkbox"
       checked={config !== null}
-      disabled={!editor.canManage || Boolean(editor.busy)}
+      disabled={!editor.canManage || editor.action.busy}
       onchange={(event) => toggle(event.currentTarget.checked)}
     />
     Serve unmodeled provider endpoints through this route

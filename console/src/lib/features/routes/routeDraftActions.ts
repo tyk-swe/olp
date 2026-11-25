@@ -7,6 +7,7 @@ import { routeKeys } from '#lib/features/routes/routeKeys.js';
 import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
 import type { components } from '#lib/management/schema.js';
 import { errorMessage } from '#lib/management/http.js';
+import type { Action } from '#lib/editing/action.svelte.js';
 import type { MutationIntent } from '#lib/editing/mutationIntent.js';
 import {
   acceptRemote,
@@ -92,7 +93,8 @@ export type RouteDraftActionContext = {
   readonly createIntent: MutationIntent;
   readonly activateRouteIntent: MutationIntent;
   readonly canManage: () => boolean;
-  readonly busy: () => string;
+  readonly busy: () => boolean;
+  readonly samePrincipal: () => () => boolean;
   readonly publicationBlocked: () => boolean;
   readonly createdDraftId: () => string;
   readonly setCreatedDraftId: (id: string) => void;
@@ -116,13 +118,7 @@ export type RouteDraftActionContext = {
     seed: string;
     preferencesJson: string;
   };
-  readonly run: (
-    label: string,
-    action: (
-      isCurrent: () => boolean,
-      samePrincipal: () => boolean
-    ) => Promise<void>
-  ) => Promise<void>;
+  readonly run: Action['run'];
 };
 
 export function createRouteDraftActions(ctx: RouteDraftActionContext) {
@@ -132,8 +128,8 @@ export function createRouteDraftActions(ctx: RouteDraftActionContext) {
       if (!ctx.canManage() || ctx.busy()) return;
       const existingId = ctx.createdDraftId();
       if (existingId) {
-        await ctx.run('open', async (isCurrent) => {
-          if (isCurrent()) await goto(resolve(`routes/${existingId}`));
+        await ctx.run(() => goto(resolve(`routes/${existingId}`)), undefined, {
+          key: 'open'
         });
         return;
       }
@@ -142,30 +138,35 @@ export function createRouteDraftActions(ctx: RouteDraftActionContext) {
         ctx.setError(issue);
         return;
       }
-      await ctx.run('save', async (isCurrent, samePrincipal) => {
-        const { id } = await ctx.createIntent.submit(
-          buildCreateRouteDraftInput(ctx.editorValues(), ctx.modelOptions()),
-          (input, requestId) => createRouteDraft(input, requestId)
-        );
-        if (!samePrincipal()) return;
-        if (isCurrent()) {
-          ctx.setCreatedDraftId(id);
-          ctx.setSync(initialConcurrentEdit());
-          ctx.setNotice('Draft saved.');
-        }
-        try {
-          await ctx.queryClient.invalidateQueries(
-            { queryKey: routeKeys.lists },
-            { throwOnError: true }
+      const samePrincipal = ctx.samePrincipal();
+      await ctx.run(
+        async (isCurrent) => {
+          const { id } = await ctx.createIntent.submit(
+            buildCreateRouteDraftInput(ctx.editorValues(), ctx.modelOptions()),
+            (input, requestId) => createRouteDraft(input, requestId)
           );
-        } catch (cause) {
-          if (isCurrent())
-            ctx.setError(
-              `Draft saved, but refreshing failed. ${errorMessage(cause)}`
+          if (!samePrincipal()) return;
+          if (isCurrent()) {
+            ctx.setCreatedDraftId(id);
+            ctx.setSync(initialConcurrentEdit());
+            ctx.setNotice('Draft saved.');
+          }
+          try {
+            await ctx.queryClient.invalidateQueries(
+              { queryKey: routeKeys.lists },
+              { throwOnError: true }
             );
-        }
-        if (isCurrent()) await goto(resolve(`routes/${id}`));
-      });
+          } catch (cause) {
+            if (isCurrent())
+              ctx.setError(
+                `Draft saved, but refreshing failed. ${errorMessage(cause)}`
+              );
+          }
+          if (isCurrent()) await goto(resolve(`routes/${id}`));
+        },
+        undefined,
+        { key: 'save' }
+      );
     },
 
     save: async (current: RouteDraft) => {
@@ -181,26 +182,31 @@ export function createRouteDraftActions(ctx: RouteDraftActionContext) {
         return;
       }
       ctx.invalidateSimulation();
-      await ctx.run('save', async (isCurrent, samePrincipal) => {
-        const snapshotEtag = ctx.sync().snapshotEtag;
-        if (!snapshotEtag) throw new Error('Reload the draft before saving.');
-        const submittedVersion = ctx.editVersion();
-        const updated = await replaceRouteDraft(
-          current.id,
-          snapshotEtag,
-          buildReplaceRouteDraftInput(ctx.editorValues())
-        );
-        if (!samePrincipal()) return;
-        ctx.queryClient.setQueryData(routeKeys.draft(current.id), updated);
-        if (!isCurrent()) return;
-        const stillDirty = ctx.editVersion() !== submittedVersion;
-        ctx.setSync(markSaved(updated.etag, stillDirty));
-        ctx.setNotice(
-          stillDirty
-            ? 'Draft saved. You have additional unsaved changes.'
-            : 'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.'
-        );
-      });
+      const samePrincipal = ctx.samePrincipal();
+      await ctx.run(
+        async (isCurrent) => {
+          const snapshotEtag = ctx.sync().snapshotEtag;
+          if (!snapshotEtag) throw new Error('Reload the draft before saving.');
+          const submittedVersion = ctx.editVersion();
+          const updated = await replaceRouteDraft(
+            current.id,
+            snapshotEtag,
+            buildReplaceRouteDraftInput(ctx.editorValues())
+          );
+          if (!samePrincipal()) return;
+          ctx.queryClient.setQueryData(routeKeys.draft(current.id), updated);
+          if (!isCurrent()) return;
+          const stillDirty = ctx.editVersion() !== submittedVersion;
+          ctx.setSync(markSaved(updated.etag, stillDirty));
+          ctx.setNotice(
+            stillDirty
+              ? 'Draft saved. You have additional unsaved changes.'
+              : 'Draft saved. Validate to preview, or activate directly; activation validates the saved draft.'
+          );
+        },
+        undefined,
+        { key: 'save' }
+      );
     },
 
     simulate: async (current: RouteDraft) => {
@@ -208,76 +214,96 @@ export function createRouteDraftActions(ctx: RouteDraftActionContext) {
       ctx.invalidateSimulation();
       const version = ctx.simulationVersion();
       const params = ctx.simulationParams();
-      await ctx.run('simulate', async (isCurrent) => {
-        let simulation: RouteSimulation;
-        try {
-          simulation = await simulateRoute(current.id, {
-            operation: params.operation,
-            surface: params.surface,
-            mode: params.mode,
-            seed: params.seed || 'preview',
-            preferences: JSON.parse(params.preferencesJson),
-            request: parseSimulationRequest(params.requestJson),
-            dialect: (params.dialect || undefined) as
-              components['schemas']['SimulationDialect'] | undefined
-          });
-        } catch (error) {
-          if (isCurrent() && version === ctx.simulationVersion()) throw error;
-          return;
-        }
-        if (!isCurrent() || version !== ctx.simulationVersion()) return;
-        ctx.setSimulation(simulation);
-        ctx.setNotice(simulationNotice);
-      });
+      await ctx.run(
+        async (isCurrent) => {
+          let simulation: RouteSimulation;
+          try {
+            simulation = await simulateRoute(current.id, {
+              operation: params.operation,
+              surface: params.surface,
+              mode: params.mode,
+              seed: params.seed || 'preview',
+              preferences: JSON.parse(params.preferencesJson),
+              request: parseSimulationRequest(params.requestJson),
+              dialect: (params.dialect || undefined) as
+                components['schemas']['SimulationDialect'] | undefined
+            });
+          } catch (error) {
+            if (isCurrent() && version === ctx.simulationVersion()) throw error;
+            return;
+          }
+          if (!isCurrent() || version !== ctx.simulationVersion()) return;
+          ctx.setSimulation(simulation);
+          ctx.setNotice(simulationNotice);
+        },
+        undefined,
+        { key: 'simulate' }
+      );
     },
 
     validate: async (current: RouteDraft) => {
       if (!ctx.canManage() || ctx.publicationBlocked()) return;
-      await ctx.run('validate', async (isCurrent, samePrincipal) => {
-        const validation = await validateRoute(current);
-        if (!samePrincipal()) return;
-        ctx.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
-          ...current,
-          state: validation.state,
-          etag: validation.etag
-        });
-        if (!isCurrent()) return;
-        ctx.setSync(acceptRemote(ctx.sync(), validation.etag));
-        ctx.setNotice(
-          'Validation passed. The saved draft is ready to activate.'
-        );
-      });
+      const samePrincipal = ctx.samePrincipal();
+      await ctx.run(
+        async (isCurrent) => {
+          const validation = await validateRoute(current);
+          if (!samePrincipal()) return;
+          ctx.queryClient.setQueryData<RouteDraft>(
+            routeKeys.draft(current.id),
+            {
+              ...current,
+              state: validation.state,
+              etag: validation.etag
+            }
+          );
+          if (!isCurrent()) return;
+          ctx.setSync(acceptRemote(ctx.sync(), validation.etag));
+          ctx.setNotice(
+            'Validation passed. The saved draft is ready to activate.'
+          );
+        },
+        undefined,
+        { key: 'validate' }
+      );
     },
 
     activate: async (current: RouteDraft) => {
       if (!ctx.canManage() || ctx.publicationBlocked()) return;
-      await ctx.run('activate', async (isCurrent, samePrincipal) => {
-        const activation = await ctx.activateRouteIntent.submit(
-          { id: current.id, etag: current.etag },
-          (input, requestId) => activateRoute(input, requestId)
-        );
-        if (!samePrincipal()) return;
-        if (isCurrent()) {
-          ctx.setSync(acceptRemote(ctx.sync(), activation.draft_etag));
-        }
-        ctx.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
-          ...current,
-          state: 'draft',
-          etag: activation.draft_etag
-        });
-        await Promise.all([
-          ctx.queryClient.invalidateQueries({
-            queryKey: routeKeys.draft(current.id)
-          }),
-          ctx.queryClient.invalidateQueries({ queryKey: routeKeys.lists }),
-          ctx.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
-        ]);
-        if (!isCurrent()) return;
-        ctx.setActivation(activation);
-        ctx.setNotice(
-          `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`
-        );
-      });
+      const samePrincipal = ctx.samePrincipal();
+      await ctx.run(
+        async (isCurrent) => {
+          const activation = await ctx.activateRouteIntent.submit(
+            { id: current.id, etag: current.etag },
+            (input, requestId) => activateRoute(input, requestId)
+          );
+          if (!samePrincipal()) return;
+          if (isCurrent()) {
+            ctx.setSync(acceptRemote(ctx.sync(), activation.draft_etag));
+          }
+          ctx.queryClient.setQueryData<RouteDraft>(
+            routeKeys.draft(current.id),
+            {
+              ...current,
+              state: 'draft',
+              etag: activation.draft_etag
+            }
+          );
+          await Promise.all([
+            ctx.queryClient.invalidateQueries({
+              queryKey: routeKeys.draft(current.id)
+            }),
+            ctx.queryClient.invalidateQueries({ queryKey: routeKeys.lists }),
+            ctx.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
+          ]);
+          if (!isCurrent()) return;
+          ctx.setActivation(activation);
+          ctx.setNotice(
+            `Route activated as revision ${activation.revision} in runtime generation ${activation.runtime_generation.sequence}.`
+          );
+        },
+        undefined,
+        { key: 'activate' }
+      );
     },
 
     remove: async (current: RouteDraft) => {
@@ -291,15 +317,19 @@ export function createRouteDraftActions(ctx: RouteDraftActionContext) {
         }))
       )
         return;
-      await ctx.run('delete', async (isCurrent) => {
-        await deleteRouteDraft(current.id, current.etag);
-        await ctx.queryClient.invalidateQueries({
-          queryKey: routeKeys.lists
-        });
-        if (!isCurrent()) return;
-        ctx.setSync(initialConcurrentEdit());
-        await goto(resolve('routes'));
-      });
+      await ctx.run(
+        async (isCurrent) => {
+          await deleteRouteDraft(current.id, current.etag);
+          await ctx.queryClient.invalidateQueries({
+            queryKey: routeKeys.lists
+          });
+          if (!isCurrent()) return;
+          ctx.setSync(initialConcurrentEdit());
+          await goto(resolve('routes'));
+        },
+        undefined,
+        { key: 'delete' }
+      );
     }
   };
 }

@@ -228,7 +228,7 @@ describe('route draft editor', () => {
     expect(state.slug).toBe('local');
     expect(state.hasUnsavedChanges).toBe(true);
     expect(state.concurrentNotice).toBe('conflict');
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
   });
 
   it('names the running write, sends one at a time and replaces the last outcome', async () => {
@@ -241,7 +241,7 @@ describe('route draft editor', () => {
 
     const saving = state.save(draft);
     await eventually(() => expect(replace).toHaveBeenCalledOnce());
-    expect(state.busy).toBe('save');
+    expect(state.action.key).toBe('save');
     await state.save(draft);
     await state.reload();
     expect(replace).toHaveBeenCalledOnce();
@@ -251,13 +251,13 @@ describe('route draft editor', () => {
     );
     await saving;
     flushSync();
-    expect(state.busy).toBe('');
-    expect(state.errorMessage).toBe('The slug is taken.');
+    expect(state.action.busy).toBe(false);
+    expect(state.action.error).toBe('The slug is taken.');
     expect(state.hasUnsavedChanges).toBe(true);
 
     await state.save(draft);
     flushSync();
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.notice).toContain('Draft saved');
 
     state.touch();
@@ -296,7 +296,7 @@ describe('route draft editor', () => {
     await saving;
     flushSync();
 
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.notice).toBe('');
     expect(state.sync.snapshotEtag).toBe(draft.etag);
   });
@@ -314,7 +314,7 @@ describe('route draft editor', () => {
     await eventually(() => expect(replace).toHaveBeenCalledOnce());
     routeId = 'another-draft';
     flushSync();
-    expect(state.busy).toBe('');
+    expect(state.action.busy).toBe(false);
     expect(state.hasUnsavedChanges).toBe(false);
 
     answer.resolve(json({ ...draft, slug: 'updated', etag: 'version-2' }));
@@ -322,7 +322,7 @@ describe('route draft editor', () => {
     flushSync();
 
     expect(state.notice).toBe('');
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.sync.snapshotEtag).toBeNull();
     expect(state.queryClient.getQueryData(routeKeys.draft(draft.id))).toEqual(
       expect.objectContaining({ etag: 'version-2' })
@@ -352,7 +352,7 @@ describe('route draft editor', () => {
     state.simulationRequestJson = '[]';
     await state.simulate(draft);
     expect(simulate).not.toHaveBeenCalled();
-    expect(state.errorMessage).toBe(
+    expect(state.action.error).toBe(
       'The native request must be a JSON object.'
     );
   });

@@ -31,9 +31,9 @@
   <button
     class="button button-secondary"
     type="submit"
-    disabled={!editor.canManage || Boolean(editor.busy)}
+    disabled={!editor.canManage || editor.action.busy}
   >
-    {editor.busy === 'save'
+    {editor.action.key === 'save'
       ? 'Saving…'
       : editor.isNew
         ? 'Create draft'
@@ -71,7 +71,7 @@
     <RoutingPreferencesForm
       bind:value={editor.routingPreferences}
       id="simulation-routing"
-      disabled={Boolean(editor.busy)}
+      disabled={editor.action.busy}
     />
     <label for="simulation-seed">Dry-run seed</label>
     <input
@@ -81,7 +81,11 @@
         // Enter would implicitly submit the studio form and re-save the draft.
         if (event.key !== 'Enter' || event.isComposing) return;
         event.preventDefault();
-        if (editor.canManage && !editor.publicationBlocked && !editor.busy)
+        if (
+          editor.canManage &&
+          !editor.publicationBlocked &&
+          !editor.action.busy
+        )
           void editor.simulate(draft);
       }}
     />
@@ -150,21 +154,27 @@
       type="button"
       onclick={() => editor.simulate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'simulate' ? 'Simulating…' : 'Simulate order'}</button
+      >{editor.action.key === 'simulate'
+        ? 'Simulating…'
+        : 'Simulate order'}</button
     >
     <button
       class="button button-secondary"
       type="button"
       onclick={() => editor.validate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'validate' ? 'Validating…' : 'Validate draft'}</button
+      >{editor.action.key === 'validate'
+        ? 'Validating…'
+        : 'Validate draft'}</button
     >
     <button
       class="button button-primary"
       type="button"
       onclick={() => editor.activate(draft)}
       disabled={!editor.canManage || editor.publicationBlocked}
-      >{editor.busy === 'activate' ? 'Activating…' : 'Activate route'}</button
+      >{editor.action.key === 'activate'
+        ? 'Activating…'
+        : 'Activate route'}</button
     >
   {/if}
 
