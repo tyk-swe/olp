@@ -268,6 +268,94 @@ describe('playground composer', () => {
     );
   });
 
+  it('asks for a route before inspecting, shows why a dry run failed and replaces it with the next plan', async () => {
+    const decision = { provider: 'fixture', eligible: true };
+    const handler = vi.fn<() => Response | Promise<Response>>(() =>
+      json({ title: 'Refused', detail: 'The route is not published.' }, 409)
+    );
+    serve(handler);
+    const state = playground();
+
+    await state.explain();
+    expect(state.simulationError).toBe('Enter an active route slug.');
+    expect(handler).not.toHaveBeenCalled();
+
+    state.model = 'route-a';
+    await state.explain();
+    expect(state.simulationError).toBe('The route is not published.');
+    expect(state.explanation).toBeNull();
+
+    const answer = Promise.withResolvers<Response>();
+    handler.mockImplementationOnce(() => answer.promise);
+    const explaining = state.explain();
+    await eventually(() => expect(state.simulation.isPending).toBe(true));
+    expect(state.simulationError).toBe('');
+    answer.resolve(json([decision]));
+    await explaining;
+    await eventually(() =>
+      expect(state.explanation).toEqual({
+        dryRun: true,
+        decisions: [decision]
+      })
+    );
+    expect(state.simulation.isPending).toBe(false);
+
+    state.simulateSeed = 'another';
+    flushSync();
+    expect(state.explanation).toBeNull();
+  });
+
+  it('shows a failed run in the result, replaces it on the next run and drops the dry run', async () => {
+    const planned = { provider: 'planned', eligible: true };
+    const ran = { provider: 'ran', eligible: true };
+    const run = vi.fn<() => Response | Promise<Response>>(() =>
+      json({
+        id: 'response',
+        model: 'route-a',
+        output_text: 'Done',
+        latency_ms: 1,
+        routing: [ran],
+        tool_calls: []
+      })
+    );
+    serve((request) =>
+      new URL(request.url).pathname === '/api/v1/routing/simulate'
+        ? json([planned])
+        : run()
+    );
+    const state = playground();
+    state.model = 'route-a';
+    state.input = 'Hello';
+    await state.explain();
+    await eventually(() => expect(state.explanation?.dryRun).toBe(true));
+
+    run.mockImplementationOnce(() =>
+      json({ title: 'Refused', detail: 'The route refused the request.' }, 500)
+    );
+    await state.submit(submitEvent());
+    await eventually(() => expect(state.mutation.isError).toBe(true));
+    expect(state.mutation.error?.message).toBe(
+      'The route refused the request.'
+    );
+    expect(state.explanation).toBeNull();
+
+    const answer = Promise.withResolvers<Response>();
+    run.mockImplementationOnce(() => answer.promise);
+    const running = state.submit(submitEvent());
+    await eventually(() => expect(state.mutation.isPending).toBe(true));
+    expect(state.mutation.isError).toBe(false);
+    answer.resolve(run());
+    await running;
+    await eventually(() =>
+      expect(state.explanation).toEqual({ dryRun: false, decisions: [ran] })
+    );
+
+    state.clearResult();
+    await eventually(() => expect(state.mutation.data).toBeUndefined());
+    expect(state.explanation).toBeNull();
+    expect(state.completedRequest).toBeNull();
+  });
+
   it('rejects a submission without a route or prompt before dispatch', async () => {
     const handler = vi.fn(() => json({}));
     serve(handler);
