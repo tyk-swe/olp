@@ -140,11 +140,26 @@ func TestCreateRequiresWorkloadIdentity(t *testing.T) {
 
 func TestCreateRejectsMalformedBounds(t *testing.T) {
 	t.Parallel()
-	keys := &delegationKeys{plainKeys: plainKeys{bySecret: testAuthorities([]string{"inference"})}}
-	r := delegationRequest(`{`)
-	r.Header.Set("Authorization", "Bearer "+agentSecret)
-	recorder := serve(t, newTestHandler(keys, 1), r)
-	wantError(t, recorder, http.StatusBadRequest, "invalid_request", "Provide bounded delegation scopes and resources.")
+	for name, test := range map[string]struct{ contentType, body string }{
+		"truncated":       {"application/json", `{`},
+		"duplicate key":   {"application/json", `{"scopes":["inference"],"scopes":["tools"]}`},
+		"unknown member":  {"application/json", `{"scopes":["inference"],"extra":true}`},
+		"member alias":    {"application/json", `{"Scopes":["inference"]}`},
+		"trailing value":  {"application/json", `{"scopes":["inference"]} {}`},
+		"over the limit":  {"application/json", `{"scopes":["inference"],"allowed_routes":["` + strings.Repeat("a", 16<<10) + `"]}`},
+		"not JSON typed":  {"text/plain", `{"scopes":["inference"]}`},
+		"no content type": {"", `{"scopes":["inference"]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			keys := &delegationKeys{plainKeys: plainKeys{bySecret: testAuthorities([]string{"inference"})}}
+			r := delegationRequest(test.body)
+			r.Header.Set("Content-Type", test.contentType)
+			r.Header.Set("Authorization", "Bearer "+agentSecret)
+			recorder := serve(t, newTestHandler(keys, 1), r)
+			wantError(t, recorder, http.StatusBadRequest, "invalid_request", "Provide bounded delegation scopes and resources.")
+		})
+	}
 }
 
 func TestCreateRejectsConsentWithDelegatingKey(t *testing.T) {

@@ -14,21 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 )
 
-var errNotJSON = errors.New("request body is not application/json")
-
-func DecodeStrict(r *http.Request, destination any, limit int64) error {
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return errNotJSON
-	}
-	defer r.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
-	if err != nil {
-		return err
-	}
-	return oif.DecodeStrict(data, destination, oif.StrictLimits(limit))
-}
-
 // ReadBody bounds both the encoded and decoded body before parsing.
 func (g *Gate) ReadBody(r *http.Request) ([]byte, *fault.Error) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

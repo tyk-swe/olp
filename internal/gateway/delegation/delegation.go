@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
 )
+
+var errNotJSON = errors.New("request body is not application/json")
 
 type creator interface {
 	CreateDelegation(context.Context, keyauthority.Authority, keyauthority.Authority, release.DelegationBounds) (release.DelegationGrant, error)
@@ -61,7 +66,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var bounds release.DelegationBounds
-	if err := ingress.DecodeStrict(r, &bounds, 16<<10); err != nil {
+	if err := decodeStrict(r, &bounds, 16<<10); err != nil {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
@@ -101,6 +106,19 @@ func scope(bounds release.DelegationBounds) string {
 		return "agents"
 	}
 	return "inference"
+}
+
+func decodeStrict(r *http.Request, destination any, limit int64) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return errNotJSON
+	}
+	defer r.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return err
+	}
+	return oif.DecodeStrict(data, destination, oif.StrictLimits(limit))
 }
 
 func writeGrant(w http.ResponseWriter, grant release.DelegationGrant, err error) {
