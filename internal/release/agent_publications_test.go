@@ -247,6 +247,13 @@ func TestAgentLiveAuthority(t *testing.T) {
 	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
 		t.Fatal("captured key authority overrode live revocation")
 	}
+	pausedAt := time.Now()
+	paused := a
+	paused.PausedAt = &pausedAt
+	m.authority.agentPrincipals[a.ID] = paused
+	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
+		t.Fatal("captured key authority overrode live pause")
+	}
 	m.authority.agentPrincipals[a.ID] = a
 	m.authority.readAt = time.Now().Add(-AuthorityStaleAfter - time.Second)
 	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {

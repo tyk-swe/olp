@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 func delegationPrincipals(project, issuer string) (keyauthority.Authority, keyauthority.Authority) {
@@ -144,5 +145,40 @@ func TestDelegatingAgentPauseRefusesUnlessRevoked(t *testing.T) {
 				t.Fatalf("delegating agent refusal = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestPausedWorkloadAgentCannotReceiveMemberConsent(t *testing.T) {
+	project, issuerID, resource := "project", "issuer", "agent"
+	now := time.Now()
+	agent := keyauthority.Authority{
+		ID: "agent", ProjectID: &project, AgentPrincipal: true, WorkloadIssuerID: &issuerID, WorkloadMapping: "worker",
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"agents"}, AllowedAgents: []string{resource}},
+	}
+	key := keyauthority.Authority{
+		ID: "key", ProjectID: &project,
+		Policy: keyauthority.KeyPolicy{Scopes: []string{"delegate", "agents"}, AllowedAgents: []string{resource}},
+	}
+	state := authorityState{
+		workloadIssuers: map[string]workloadIssuer{
+			issuerID: {
+				ID:       issuerID,
+				Revision: "rev",
+				Config: workload.Config{
+					Enabled:  true,
+					Mappings: []workload.Mapping{{Name: "worker", ProjectID: project, AgentPrincipal: true}},
+				},
+				bindings: map[string]keyauthority.Authority{"worker": agent},
+			},
+		},
+	}
+	paused := agent
+	paused.PausedAt = &now
+	resolved, _, ok := state.memberConsentAgent(paused)
+	if !ok {
+		t.Fatal("paused workload agent disappeared from consent resolution")
+	}
+	if delegationResourcesAllowed(resolved, key, nil, nil, []string{resource}, now) {
+		t.Fatal("paused workload agent was allowed to receive member consent")
 	}
 }

@@ -80,16 +80,13 @@ func (m *Management) cancel(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 }
 
 func (m *Management) remote(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
-	id, idErr := httpkit.ParseUUID(r.PathValue("task_id"))
-	if idErr != nil {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
-	}
-	task, err := m.tasks.Remote(r.Context(), id)
-	if errors.Is(err, tasks.ErrNotFound) {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
-	}
+	id, err := taskID(r)
 	if err != nil {
 		return httpkit.Reply{}, err
+	}
+	task, err := m.tasks.Remote(r.Context(), id)
+	if err != nil {
+		return httpkit.Reply{}, remoteLookupError(err)
 	}
 	if err := principal.Project(&task.ProjectID, authz.Change); err != nil {
 		return httpkit.Reply{}, err

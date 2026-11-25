@@ -82,6 +82,11 @@ func TestConsumerResourceDenyMatrix(t *testing.T) {
 		t.Fatal("revoked key accepted")
 	}
 	a.RevokedAt = nil
+	a.PausedAt = &now
+	if a.AllowsResource("tools", resource, project, now) {
+		t.Fatal("paused key accepted")
+	}
+	a.PausedAt = nil
 	a.ExpiresAt = &now
 	if a.AllowsResource("tools", resource, project, now) {
 		t.Fatal("expired key accepted")

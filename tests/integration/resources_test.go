@@ -75,26 +75,35 @@ func TestA2ACancellationAuditsProjectActorBeforePeerDispatch(t *testing.T) {
 	t.Parallel()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
-	actor, task := uuid.NewString(), uuid.NewString()
-	const upstream = "peer-task"
-	seedA2ACancellation(t, fixture, actor, task, upstream)
+	actor, completedTask, revokedTask := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	const completedUpstream, revokedUpstream = "peer-task-ok", "peer-task-revoked"
+	seedA2ACancellation(t, fixture, actor, completedTask, completedUpstream, revokedTask, revokedUpstream)
 
-	checkAudit := func(ctx context.Context) {
+	auditCount := func(ctx context.Context, action, taskID string) int {
 		var rows int
-		err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE action='a2a_task.cancel_attempt'
-			AND resource_type='a2a_task' AND resource_id=$1 AND project_id=$2 AND actor_user_id=$3`,
-			task, fixture.projectID, actor).Scan(&rows)
-		if err != nil || rows != 1 {
-			t.Errorf("attributed cancellation attempts = %d, want 1 (%v)", rows, err)
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE action=$1
+			AND resource_type='a2a_task' AND resource_id=$2 AND project_id=$3 AND actor_user_id=$4`,
+			action, taskID, fixture.projectID, actor).Scan(&rows)
+		if err != nil {
+			t.Errorf("query audit %s for %s: %v", action, taskID, err)
 		}
+		return rows
 	}
 	peer := cancellationPeer{cancel: func(ctx context.Context, request *protocol.CancelTaskRequest) (*protocol.Task, error) {
-		checkAudit(ctx)
-		if request.ID != upstream {
-			return nil, fmt.Errorf("cancellation targeted %q, want %q", request.ID, upstream)
-		}
-		if _, err := pool.Exec(ctx, `DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2`, fixture.projectID, actor); err != nil {
-			return nil, err
+		switch string(request.ID) {
+		case completedUpstream:
+			if rows := auditCount(ctx, "a2a_task.cancel_attempt", completedTask); rows != 1 {
+				t.Errorf("attributed cancellation attempts before ok dispatch = %d, want 1", rows)
+			}
+		case revokedUpstream:
+			if rows := auditCount(ctx, "a2a_task.cancel_attempt", revokedTask); rows != 1 {
+				t.Errorf("attributed cancellation attempts before revoked dispatch = %d, want 1", rows)
+			}
+			if _, err := pool.Exec(ctx, `DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2`, fixture.projectID, actor); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("unexpected cancellation target %q", request.ID)
 		}
 		return &protocol.Task{ID: request.ID, ContextID: "peer-context", Status: protocol.TaskStatus{State: protocol.TaskStateCanceled}}, nil
 	}}
@@ -102,19 +111,30 @@ func TestA2ACancellationAuditsProjectActorBeforePeerDispatch(t *testing.T) {
 	call := managementHTTPAs(t, pool, actor, func(mux *http.ServeMux, server *access.Server) {
 		a2a.NewManagement(server, store, agents.NewTaskOperations(store, peer, nil)).Register(mux)
 	})
-	if result := call("POST", "/api/v1/a2a-tasks/"+task+"/cancel", "", ""); result.status != http.StatusNotFound {
+	if result := call("POST", "/api/v1/a2a-tasks/"+completedTask+"/cancel", "", ""); result.status != http.StatusOK {
+		t.Fatalf("successful cancellation = %d %s, want 200", result.status, result.body)
+	}
+	if rows := auditCount(t.Context(), "a2a_task.cancel", completedTask); rows != 1 {
+		t.Fatalf("attributed cancellation completions = %d, want 1", rows)
+	}
+	if result := call("POST", "/api/v1/a2a-tasks/"+revokedTask+"/cancel", "", ""); result.status != http.StatusNotFound {
 		t.Fatalf("cancellation after project access was removed = %d %s, want 404", result.status, result.body)
 	}
 	var state tasks.State
-	if err := pool.QueryRow(t.Context(), `SELECT state FROM olp.a2a_tasks WHERE id=$1`, task).Scan(&state); err != nil || state != tasks.Canceled {
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM olp.a2a_tasks WHERE id=$1`, revokedTask).Scan(&state); err != nil || state != tasks.Canceled {
 		t.Fatalf("stored task state = %q, want %q (%v)", state, tasks.Canceled, err)
 	}
-	checkAudit(t.Context())
+	if rows := auditCount(t.Context(), "a2a_task.cancel_attempt", revokedTask); rows != 1 {
+		t.Fatalf("attributed cancellation attempts = %d, want 1", rows)
+	}
+	if rows := auditCount(t.Context(), "a2a_task.cancel", revokedTask); rows != 0 {
+		t.Fatalf("revoked cancellation completions = %d, want 0", rows)
+	}
 }
 
-func seedA2ACancellation(t *testing.T, f usageFixture, actor, task, upstream string) {
+func seedA2ACancellation(t *testing.T, f usageFixture, actor, task1, upstream1, task2, upstream2 string) {
 	t.Helper()
-	publication, revision, dispatch := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	publication, revision, dispatch1, dispatch2 := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	_, err := f.pool.Exec(t.Context(), `WITH actor AS (
 		INSERT INTO olp.users(id,email,display_name,role,access_scope,etag)
 		VALUES($1::uuid,$1::text||'@example.test','Task operator','operator','assigned',$1::uuid) RETURNING id
@@ -127,13 +147,18 @@ func seedA2ACancellation(t *testing.T, f usageFixture, actor, task, upstream str
 		INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by)
 		SELECT $5,id,$2,'agent',jsonb_build_object('project_id',$2::uuid,'agent','{}'::jsonb),repeat('0',64),$3 FROM publication
 		RETURNING id, publication_id
-	), debit AS (
+	), debits AS (
 		INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,prepared_until)
-		VALUES($6,$7,$2,'agent','{}',decode(repeat('00',32),'hex'),$6,'USD',0,0,now()) RETURNING id
+		VALUES($6,$8,$2,'agent','{}',decode(repeat('00',32),'hex'),$6,'USD',0,0,now()),
+		      ($7,$8,$2,'agent','{}',decode(repeat('00',32),'hex'),$7,'USD',0,0,now())
+		RETURNING id
 	)
 	INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,state)
-	SELECT $8,$7,$2,revision.publication_id,revision.id,debit.id,$9,'active' FROM revision CROSS JOIN debit`,
-		actor, f.projectID, f.ownerID, publication, revision, dispatch, f.keyID, task, upstream)
+	SELECT v.task_id,$8,$2,revision.publication_id,revision.id,v.dispatch_id,v.upstream_id,'active'
+	FROM revision
+	CROSS JOIN (VALUES ($9::uuid,$6::uuid,$10::text), ($11::uuid,$7::uuid,$12::text)) AS v(task_id,dispatch_id,upstream_id)
+	JOIN debits ON debits.id=v.dispatch_id`,
+		actor, f.projectID, f.ownerID, publication, revision, dispatch1, dispatch2, f.keyID, task1, upstream1, task2, upstream2)
 	if err != nil {
 		t.Fatal(err)
 	}
