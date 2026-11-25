@@ -32,6 +32,8 @@ func (a BatchAdapter) Managed() bool {
 	return a == BatchTogether || a == BatchMistral || a == BatchGeminiManaged
 }
 
+func (c Config) BatchesByDeployment() bool { return c.Kind == KindAzureOpenAI }
+
 func (c Config) FilesBatchesAdapter() (BatchAdapter, bool) {
 	if !c.SupportsFilesBatches() {
 		return "", false

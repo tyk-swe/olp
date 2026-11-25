@@ -309,7 +309,8 @@ func openAIBatchBody(source oif.Document, upstreamFile string, p *kernel.Pin, wi
 		{Pointer: "/input_file_id", Value: string(kernel.MustJSON(upstreamFile)), Origin: oif.ResourceBinding, Reason: "owner-scoped uploaded file"},
 		{Pointer: "/completion_window", Value: string(kernel.MustJSON(upstreamWindow)), Origin: oif.ResourceBinding, Reason: "provider batch completion window"},
 	}
-	if deployment := p.Provider.Connector().Model(p.Model); p.Provider.Kind == "azure_openai" && deployment != "" {
+	connector := p.Provider.Connector()
+	if deployment := connector.Model(p.Model); connector.BatchesByDeployment() && deployment != "" {
 		changes = append(changes, oif.Change{Pointer: "/model", Value: string(kernel.MustJSON(deployment)), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
 	}
 	effective, err := oif.Apply(source, changes)

@@ -72,7 +72,7 @@ func (t *DurableTemplate) BindBatch(source oif.Document, route, localFile, upstr
 	endpoint, ok := source.Root().Lookup("endpoint")
 	path, valid := endpoint.Text()
 	classificationPath := path
-	if t.provider.Kind == "azure_openai" {
+	if t.provider.BatchesByDeployment() {
 		classificationPath = wire.CanonicalBatchEndpoint(path)
 	}
 	if !ok || !valid || !slices.Contains([]string{"/v1/chat/completions", "/v1/responses", "/v1/embeddings"}, classificationPath) {
@@ -99,7 +99,7 @@ func (t *DurableTemplate) BindBatch(source oif.Document, route, localFile, upstr
 			encoded, _ = json.Marshal(t.model)
 			changes = append(changes, oif.Change{Pointer: "/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "selected provider model"})
 		}
-	} else if t.provider.Kind == "azure_openai" {
+	} else if t.provider.BatchesByDeployment() {
 		encoded, _ = json.Marshal(t.model)
 		changes = append(changes, oif.Change{Pointer: "/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "selected Azure deployment"})
 	}

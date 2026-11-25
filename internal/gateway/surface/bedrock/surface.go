@@ -31,9 +31,7 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 }
 
 func qualified(p *routing.Provider, model, operation, mode string) bool {
-	return p.Kind == "bedrock" &&
-		p.Connector().Supports(operation, "bedrock", mode) &&
-		p.Supports(model, operation, "bedrock", mode)
+	return p.Supports(model, operation, "bedrock", mode) && p.Connector().Supports(operation, "bedrock", mode)
 }
 
 func (s surface) converse(w http.ResponseWriter, r *http.Request) {

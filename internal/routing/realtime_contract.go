@@ -41,23 +41,24 @@ func compileWebRTCContract(c realtimeContractConfig) (*RealtimeTemplate, error) 
 	return compileRealtimeTemplate(c, true)
 }
 
+func realtimeMode(webrtc bool) string {
+	if webrtc {
+		return "webrtc"
+	}
+	return "realtime"
+}
+
 func compileRealtimeTemplate(c realtimeContractConfig, webrtc bool) (*RealtimeTemplate, error) {
 	c.Provider = c.Provider.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
 		return nil, realtimeRefuse("target_capability", "/profile", "explicit_profile", "Strict realtime requires a registered versioned provider profile.")
 	}
-	mode := "realtime"
-	hosted := (p.Kind == "openai" && p.Hosting == "direct-openai") ||
-		(p.Kind == "azure_openai" && p.Hosting == "azure-v1")
-	if webrtc {
-		mode = "webrtc"
-		hosted = p.Kind == "openai" && p.Hosting == "direct-openai"
-	}
+	mode := realtimeMode(webrtc)
 	if p.OperationDialect("realtime") != "openai-realtime" ||
 		!slices.Contains(p.Operations, "realtime") ||
 		!c.Provider.Supports("realtime", "openai", mode) ||
-		!hosted {
+		!p.HostsRealtime(mode) {
 		return nil, realtimeRefuse("target_capability", "/profile", "native_realtime_contract", "This provider profile has no strict OpenAI Realtime WebSocket contract.")
 	}
 	if _, err := c.Provider.RealtimeURL(c.Model); err != nil {

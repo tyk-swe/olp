@@ -351,7 +351,7 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*DurableTemplate, err
 		// target (Anthropic, Gemini, native cloud, compatible vendors) has
 		// no template: its own handler refuses strict batch at request
 		// time, so activation must not fail here.
-		if provider.Kind != "openai" && provider.Kind != "azure_openai" {
+		if !provider.Connector().NativeOpenAI() {
 			continue
 		}
 		if !slices.ContainsFunc(provider.Capabilities, func(c Capability) bool {
