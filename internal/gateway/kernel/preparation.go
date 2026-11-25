@@ -4,10 +4,10 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -30,7 +30,7 @@ func attemptPreparationKey(attempt routing.Attempt) preparationKey {
 }
 
 type targetPreparation struct {
-	guardrailDecisions []guardrails.Evidence
+	guardrailDecisions []guardrailpolicy.Evidence
 	provider           preparedProvider
 	unary              unaryAdmission
 	encoding           encodedRequest
@@ -43,11 +43,11 @@ type unaryAdmission struct {
 	estimate           int64
 	parameters         routing.Names
 	receipt            oif.Receipt
-	guardrailDecisions []guardrails.Evidence
+	guardrailDecisions []guardrailpolicy.Evidence
 }
 
 type preparationEvidence struct {
-	guardrails []guardrails.Evidence
+	guardrails []guardrailpolicy.Evidence
 	planClass  string
 	output     *int64
 	document   oif.Document
@@ -85,7 +85,7 @@ func (p *requestPreparation) provider(key preparationKey, payload bool, build fu
 		return record.provider, nil
 	}
 	prepared, err := build()
-	evidence := guardrails.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
+	evidence := guardrailpolicy.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
 	if err != nil {
 		p.remember(key, record.withEvidence(evidence))
 		return prepared, err
@@ -103,7 +103,7 @@ func (p *requestPreparation) operation(key preparationKey, payload bool, build f
 		return record.unary, nil
 	}
 	prepared, err := build()
-	evidence := guardrails.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
+	evidence := guardrailpolicy.MergeEvidence(record.guardrailDecisions, prepared.guardrailDecisions)
 	if err != nil {
 		p.remember(key, record.withEvidence(evidence))
 		return prepared, err
@@ -167,7 +167,7 @@ func (p *requestPreparation) evidence(key preparationKey) preparationEvidence {
 	}
 }
 
-func (r targetPreparation) withEvidence(evidence []guardrails.Evidence) targetPreparation {
+func (r targetPreparation) withEvidence(evidence []guardrailpolicy.Evidence) targetPreparation {
 	return targetPreparation{
 		guardrailDecisions: evidence, provider: r.provider, unary: r.unary,
 		encoding: r.encoding, output: r.output, hasOutput: r.hasOutput,

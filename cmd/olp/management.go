@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/identity"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access/authz"

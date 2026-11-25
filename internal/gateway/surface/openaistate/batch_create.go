@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -20,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )

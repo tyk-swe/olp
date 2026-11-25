@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func TestKeyValidationNormalizesCostLimits(t *testing.T) {

@@ -1,19 +1,18 @@
-package access
+package keyauthority
 
 import (
 	"slices"
 	"testing"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
 func TestBudgetAndTemplateValidationNormalizeCostLimits(t *testing.T) {
 	budgetAmount, templateAmount := " 4.50 ", " 5.75 "
-	budgets := keyauthority.AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
-	templates := keyauthority.LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
+	budgets := AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
+	templates := LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
 	if err := budgets.ValidateAndNormalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -35,13 +34,13 @@ func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	project, issuer := "project", "issuer"
 	daily := "7"
 	expires := time.Now().Add(time.Hour)
-	policy := keyauthority.Authority{
+	policy := Authority{
 		Issuer: "binding", ProjectID: &project,
-		Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
+		Policy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
 	}
-	owner := keyauthority.Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
-	capability := &keyauthority.TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
-	callback := policy.TaskAuthority(keyauthority.TaskDerivation{
+	owner := Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
+	capability := &TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
+	callback := policy.TaskAuthority(TaskDerivation{
 		Identity:         owner,
 		SnapshotID:       "snapshot",
 		WorkloadRevision: "workload-revision",
@@ -69,16 +68,16 @@ func TestDerivedAuthoritiesFollowTheSourceKeyPause(t *testing.T) {
 	now := time.Now()
 	expires := now.Add(time.Hour)
 	for _, pausedAt := range []*time.Time{nil, &now} {
-		key := keyauthority.Authority{ID: "key", ProjectID: &project, PausedAt: pausedAt, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}}}
-		derived := map[string]keyauthority.Authority{
-			"task": key.TaskAuthority(keyauthority.TaskDerivation{
+		key := Authority{ID: "key", ProjectID: &project, PausedAt: pausedAt, Policy: KeyPolicy{Scopes: []string{"inference"}}}
+		derived := map[string]Authority{
+			"task": key.TaskAuthority(TaskDerivation{
 				Identity:   key,
 				SnapshotID: "snapshot",
 				ExpiresAt:  &expires,
 			}),
-			"delegation": *key.Delegated(keyauthority.DelegationDerivation{
+			"delegation": *key.Delegated(DelegationDerivation{
 				Scopes:      []string{"inference"},
-				Agent:       keyauthority.Authority{ID: "agent"},
+				Agent:       Authority{ID: "agent"},
 				MemberID:    "member",
 				PairDigest:  "pair",
 				TokenDigest: "token",
@@ -95,11 +94,11 @@ func TestDerivedAuthoritiesFollowTheSourceKeyPause(t *testing.T) {
 
 func TestKeyCostBoundaryCarriesKeyBudgetsAndStableLookup(t *testing.T) {
 	daily, weekly, monthly := "1", "2", "3"
-	authority := keyauthority.Authority{
+	authority := Authority{
 		ID:              "key-one",
 		LookupID:        "lookup-one",
 		BudgetIncreases: map[string]string{"key-one": "grant-evidence", "other": "ignored"},
-		Policy: keyauthority.KeyPolicy{
+		Policy: KeyPolicy{
 			CostBasis:        string(limits.BasisCharge),
 			DailyCostLimit:   &daily,
 			WeeklyCostLimit:  &weekly,
@@ -130,24 +129,24 @@ func TestCostBoundariesCoverEveryCappedBoundary(t *testing.T) {
 	group := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602"
 	organization := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50605"
 	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	authority := keyauthority.Authority{
+	authority := Authority{
 		ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one",
 		InstallationID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50604",
 		OrganizationID: &organization,
 		ProjectID:      &project, BudgetGroupID: &group,
 		BudgetGroupCostBasis:        string(limits.BasisCharge),
 		BudgetGroupMonthlyCostLimit: &groupMonthly,
-		InstallationBudget:          &keyauthority.BudgetPolicy{WeeklyCostLimit: &installationWeekly, CostBasis: "charge"},
-		OrganizationBudget:          &keyauthority.BudgetPolicy{DailyCostLimit: &organizationDaily},
-		ProjectBudget:               &keyauthority.BudgetPolicy{MonthlyCostLimit: &projectMonthly},
+		InstallationBudget:          &BudgetPolicy{WeeklyCostLimit: &installationWeekly, CostBasis: "charge"},
+		OrganizationBudget:          &BudgetPolicy{DailyCostLimit: &organizationDaily},
+		ProjectBudget:               &BudgetPolicy{MonthlyCostLimit: &projectMonthly},
 		Attribution:                 map[string]string{"team": "search"},
-		ProjectAttributionBudgets:   keyauthority.AttributionBudgets{"team": {"search": keyauthority.BudgetPolicy{DailyCostLimit: &attributionDaily, CostBasis: "charge"}}},
+		ProjectAttributionBudgets:   AttributionBudgets{"team": {"search": BudgetPolicy{DailyCostLimit: &attributionDaily, CostBasis: "charge"}}},
 		EndUserDigest:               digest,
-		ProjectEndUserPolicy:        &keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{MonthlyCostLimit: &endUserProjectMonthly}},
-		Policy: keyauthority.KeyPolicy{
+		ProjectEndUserPolicy:        &EndUserPolicy{Defaults: AdmissionLimits{MonthlyCostLimit: &endUserProjectMonthly}},
+		Policy: KeyPolicy{
 			DailyCostLimit: &keyDaily,
-			RouteLimits:    keyauthority.RouteLimits{"chat": {DailyCostLimit: &routeDaily}},
-			EndUserPolicy:  &keyauthority.EndUserPolicy{Defaults: keyauthority.AdmissionLimits{DailyCostLimit: &endUserKeyDaily}},
+			RouteLimits:    RouteLimits{"chat": {DailyCostLimit: &routeDaily}},
+			EndUserPolicy:  &EndUserPolicy{Defaults: AdmissionLimits{DailyCostLimit: &endUserKeyDaily}},
 		},
 	}
 	result := authority.CostBoundaries("chat")
@@ -191,11 +190,11 @@ func TestCostBoundariesCoverEveryCappedBoundary(t *testing.T) {
 		if got.Budget == nil || got.Budget.Owner != got.Owner || got.Budget.Daily != expected.daily || got.Budget.Weekly != expected.weekly || got.Budget.Monthly != expected.monthly {
 			t.Fatalf("boundary %d budget = %+v, want limits daily=%v weekly=%v monthly=%v", i, got.Budget, expected.daily, expected.weekly, expected.monthly)
 		}
-		aggregate := keyauthority.AggregateAccount{}
+		aggregate := AggregateAccount{}
 		if got.Aggregate != nil {
 			aggregate = *got.Aggregate
 		}
-		if aggregate != (keyauthority.AggregateAccount{Level: expected.level, Key: expected.subject, Value: expected.value}) {
+		if aggregate != (AggregateAccount{Level: expected.level, Key: expected.subject, Value: expected.value}) {
 			t.Fatalf("boundary %d aggregate identity = %+v, want %q/%q/%q", i, aggregate, expected.level, expected.subject, expected.value)
 		}
 	}
@@ -209,7 +208,7 @@ func TestCostBoundariesCoverEveryCappedBoundary(t *testing.T) {
 
 func TestCostBoundariesUncappedKeyHasNoCeiling(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
-	authority := keyauthority.Authority{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one", ProjectID: &project}
+	authority := Authority{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603", LookupID: "lookup-one", ProjectID: &project}
 	result := authority.CostBoundaries("")
 	if !result.Resolved || result.CostBudgeted() {
 		t.Fatalf("uncapped authority reported a ceiling: %+v", result)
@@ -218,7 +217,7 @@ func TestCostBoundariesUncappedKeyHasNoCeiling(t *testing.T) {
 		t.Fatalf("uncapped authority gained boundaries: %+v", result.Boundaries)
 	}
 	limited := "5"
-	authority.OrganizationBudget = &keyauthority.BudgetPolicy{DailyCostLimit: &limited}
+	authority.OrganizationBudget = &BudgetPolicy{DailyCostLimit: &limited}
 	if authority.CostBoundaries("").Resolved {
 		t.Fatal("aggregate boundary without a subject resolved")
 	}
@@ -228,10 +227,10 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 	project, pair := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	agentDaily, pairWeekly, teamMonthly := "3", "4", "5"
 	agentID, keyID := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602", "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603"
-	authority := keyauthority.Authority{
+	authority := Authority{
 		ID: keyID, ProjectID: &project, Attribution: map[string]string{"team": "core"}, DelegationPairDigest: pair,
-		DelegationAgentLimits: &keyauthority.DelegationAgentLimits{ID: agentID, LookupID: "agent", Limits: keyauthority.AdmissionLimits{DailyCostLimit: &agentDaily}},
-		ProjectAttributionBudgets: keyauthority.AttributionBudgets{
+		DelegationAgentLimits: &DelegationAgentLimits{ID: agentID, LookupID: "agent", Limits: AdmissionLimits{DailyCostLimit: &agentDaily}},
+		ProjectAttributionBudgets: AttributionBudgets{
 			attribution.DelegationPairKey: {pair: {WeeklyCostLimit: &pairWeekly}},
 			"team":                        {"core": {MonthlyCostLimit: &teamMonthly}},
 		},
@@ -249,7 +248,7 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 		{limits.AttributionBudgetID(project, "team", "core"), nil, nil, &teamMonthly},
 	}
 	for _, check := range checks {
-		index := slices.IndexFunc(result.Boundaries, func(boundary keyauthority.CostBoundary) bool { return boundary.Owner.ID == check.owner })
+		index := slices.IndexFunc(result.Boundaries, func(boundary CostBoundary) bool { return boundary.Owner.ID == check.owner })
 		if index < 0 || result.Boundaries[index].Budget == nil {
 			t.Fatalf("missing delegated budget owner %s", check.owner)
 		}
@@ -264,7 +263,7 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 			t.Fatalf("wrong limits for owner %s: %+v", check.owner, budget)
 		}
 	}
-	uncapped := keyauthority.Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &keyauthority.DelegationAgentLimits{ID: agentID}}
+	uncapped := Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &DelegationAgentLimits{ID: agentID}}
 	if uncapped.CostBoundaries("").CostBudgeted() {
 		t.Fatal("tracking an uncapped delegated pair must not create a cost limit")
 	}
@@ -273,11 +272,11 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 func TestDelegatedAuthorityPreservesRestrictionsAndDropsGroupRoutes(t *testing.T) {
 	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
 	expires := time.Now().Add(time.Hour)
-	parent := keyauthority.Authority{
+	parent := Authority{
 		ID:            "key-parent",
 		ProjectID:     &project,
-		SecretOverlap: &keyauthority.SecretOverlap{LookupID: "old", ExpiresAt: expires},
-		Policy: keyauthority.KeyPolicy{
+		SecretOverlap: &SecretOverlap{LookupID: "old", ExpiresAt: expires},
+		Policy: KeyPolicy{
 			Scopes:                  []string{"inference"},
 			AllowedRoutes:           []string{"allowed"},
 			AllowedRouteGroups:      []string{"group-a"},
@@ -286,14 +285,14 @@ func TestDelegatedAuthorityPreservesRestrictionsAndDropsGroupRoutes(t *testing.T
 			ForbidResponseCache:     false,
 		},
 	}
-	if err := parent.BindRouteGroups(keyauthority.RouteGroups{"group-a": {"group-only"}}); err != nil {
+	if err := parent.BindRouteGroups(RouteGroups{"group-a": {"group-only"}}); err != nil {
 		t.Fatal(err)
 	}
-	agent := keyauthority.Authority{
+	agent := Authority{
 		ID:     "agent-1",
-		Policy: keyauthority.KeyPolicy{ForbidResponseCache: true},
+		Policy: KeyPolicy{ForbidResponseCache: true},
 	}
-	delegated := parent.Delegated(keyauthority.DelegationDerivation{
+	delegated := parent.Delegated(DelegationDerivation{
 		Scopes:      []string{"inference"},
 		Routes:      []string{"allowed"},
 		Agent:       agent,

@@ -2,7 +2,7 @@ package cloudbatches
 
 import (
 	"context"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"net/http"
 	"slices"
 	"strings"

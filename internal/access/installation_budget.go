@@ -10,9 +10,9 @@ import (
 	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -27,17 +27,17 @@ func ValidateBudgetTimeZone(name string) error {
 	return nil
 }
 
-func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, desired *authority.BudgetPolicy) (bool, error) {
+func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, desired *keyauthority.BudgetPolicy) (bool, error) {
 	if desired == nil {
 		return false, nil
 	}
-	normalized := authority.NormalizedBudget(desired)
+	normalized := keyauthority.NormalizedBudget(desired)
 	var id string
-	var current *authority.BudgetPolicy
+	var current *keyauthority.BudgetPolicy
 	if err := tx.QueryRow(ctx, "SELECT id::text,budget_policy FROM olp.installation WHERE singleton FOR UPDATE").Scan(&id, &current); err != nil {
 		return false, err
 	}
-	if reflect.DeepEqual(authority.NormalizedBudget(current), normalized) {
+	if reflect.DeepEqual(keyauthority.NormalizedBudget(current), normalized) {
 		return false, nil
 	}
 	if err := p.Authorize(authz.Settings); err != nil {
@@ -49,7 +49,7 @@ func ApplyInstallationBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 	return true, nil
 }
 
-func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
+func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *keyauthority.BudgetPolicy) (string, error) {
 	if policy.Limited() {
 		if err := ledger.EnsureAggregateBudget(ctx, tx, "installation", id); err != nil {
 			return "", err
@@ -93,8 +93,8 @@ func ReadBudgetTimeZone(ctx context.Context, q database.Queryer) (string, error)
 	return zone, err
 }
 
-func ReadInstallationBudget(ctx context.Context, q database.Queryer) (*authority.BudgetPolicy, error) {
-	var policy *authority.BudgetPolicy
+func ReadInstallationBudget(ctx context.Context, q database.Queryer) (*keyauthority.BudgetPolicy, error) {
+	var policy *keyauthority.BudgetPolicy
 	err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
 	return policy, err
 }

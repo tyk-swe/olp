@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -85,7 +86,7 @@ func (p Settings) validate() error {
 	if !distinct(p.Include, func(i Include) (Include, bool) { return i, i.Valid() }) {
 		return invalid("include must contain distinct input, output or tool_calls values")
 	}
-	if len(p.Redact) > guardrails.MaxEntries {
+	if len(p.Redact) > guardrailpolicy.MaxEntries {
 		return invalid("redact supports at most 128 local detectors")
 	}
 	if !distinct(p.Redact, func(name string) (string, bool) { return strings.ToLower(name), detectorName(name) }) {

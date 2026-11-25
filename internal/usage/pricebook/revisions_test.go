@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -58,7 +58,7 @@ func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
 			if err == nil {
 				t.Fatal("the entry was accepted")
 			}
-			var problem *authority.ValidationError
+			var problem *keyauthority.ValidationError
 			if !errors.As(err, &problem) {
 				t.Fatalf("error = %v, want a validation failure", err)
 			}
@@ -134,7 +134,7 @@ func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 				}
 				return
 			}
-			var problem *authority.ValidationError
+			var problem *keyauthority.ValidationError
 			if !errors.As(err, &problem) {
 				t.Fatalf("currency conflict = %v", problem)
 			}

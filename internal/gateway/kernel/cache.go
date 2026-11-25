@@ -11,8 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -20,12 +21,13 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type responseCacheCall struct {
-	policy                   cache.Policy
-	controls                 cache.Controls
+	policy                   cachepolicy.Policy
+	controls                 cachepolicy.Controls
 	ticket                   cache.Ticket
 	entry                    *cache.Entry
 	admitted                 bool // Set only after the replay passes admission.
@@ -82,7 +84,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 	if x.Route.Cache == nil && x.request.cacheDirectives == "" {
 		return nil
 	}
-	c, err := cache.ParseControls(x.request.cacheDirectives)
+	c, err := cachepolicy.ParseControls(x.request.cacheDirectives)
 	if err != nil {
 		return fault.InvalidRequest("invalid_cache_control", err.Error(), nil)
 	}
@@ -103,7 +105,7 @@ func (s *Server) initializeCache(x *Call) *fault.Error {
 		x.noteCacheLookupReason(usage.CacheLookupUnavailable)
 		return nil
 	}
-	if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		return nil
 	}
 	doc := x.requestDocument()

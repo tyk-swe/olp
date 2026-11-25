@@ -13,10 +13,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
@@ -57,7 +58,7 @@ type GuardrailEvaluation struct {
 	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
-	Phase     guardrails.Phase
+	Phase     guardrailpolicy.Phase
 	Segments  []guardrails.Segment
 	Masks     *guardrails.Masking
 }

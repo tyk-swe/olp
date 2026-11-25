@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func metadataAttempt(ordinal int, providerID string, model string, committed bool) Attempt {
@@ -154,8 +155,8 @@ func TestEndUserDigestsAgreeWithAccessPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		decoded, decodeErr := Decode(payload)
-		if keyauthority.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
-			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, keyauthority.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
+		if attribution.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
+			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, attribution.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
 		}
 		if decodeErr == nil && decoded.EndUserDigest != tc.digest {
 			t.Errorf("digest %q decoded as %q", tc.digest, decoded.EndUserDigest)
@@ -292,10 +293,10 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 		{"malformed model family", func(e *Event) { e.Attempts[1].ModelFamily = "OpenAI o200k" }},
 		{"oversized model family", func(e *Event) { e.Attempts[1].ModelFamily = "f" + strings.Repeat("a", 64) }},
 		{"malformed request guardrail evidence", func(e *Event) {
-			e.GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+			e.GuardrailDecisions = []guardrailpolicy.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Outcome: "maybe"}}
 		}},
 		{"malformed attempt guardrail evidence", func(e *Event) {
-			e.Attempts[1].GuardrailDecisions = []guardrails.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrails.Input, Action: guardrails.Block, Outcome: "maybe"}}
+			e.Attempts[1].GuardrailDecisions = []guardrailpolicy.Evidence{{GuardrailID: "g", Revision: "r", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Outcome: "maybe"}}
 		}},
 	}
 	for _, tc := range cases {
@@ -339,7 +340,7 @@ func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
 			}
 			_, requestErr := openai.Parse(wire.Chat, request)
 			accessErr := (keyauthority.RouteGroups{"group": []string{tc.slug}}).Validate()
-			cacheErr := (&cache.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
+			cacheErr := (&cachepolicy.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
 			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
 				t.Fatalf("accounting error = %v, request error = %v, access error = %v, cache error = %v", accountingErr, requestErr, accessErr, cacheErr)
 			}

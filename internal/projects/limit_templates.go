@@ -6,16 +6,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 // ValidateTemplateReferences prevents removing templates still used by live local
 // keys/groups, enabled workload mappings or the project policy, including during
 // configuration promotion. Workload principals derive limits from their issuer.
-func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project string, t authority.LimitTemplates) error {
+func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project string, t keyauthority.LimitTemplates) error {
 	var names []string
 	err := q.QueryRow(ctx, `SELECT ARRAY(SELECT DISTINCT name FROM (
  SELECT policy->>'limit_template' name FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL AND revoked_at IS NULL
@@ -43,7 +43,7 @@ func (s *Server) projectLimitTemplates(r *http.Request, p authz.Principal) (http
 	if err = p.Project(&id, authz.View); err != nil {
 		return httpkit.Reply{}, err
 	}
-	var templates authority.LimitTemplates
+	var templates keyauthority.LimitTemplates
 	var etag string
 	if err = s.access.Pool.QueryRow(r.Context(), "SELECT limit_templates,etag::text FROM olp.projects WHERE id=$1", id).Scan(&templates, &etag); err != nil {
 		return httpkit.Reply{}, err
@@ -57,7 +57,7 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ authz.Principal) (h
 		return httpkit.Reply{}, err
 	}
 	var input struct {
-		Templates authority.LimitTemplates `json:"templates"`
+		Templates keyauthority.LimitTemplates `json:"templates"`
 	}
 	if err = httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err

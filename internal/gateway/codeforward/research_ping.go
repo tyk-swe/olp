@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
 )
 

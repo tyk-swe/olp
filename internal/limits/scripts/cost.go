@@ -19,6 +19,20 @@ type CostCaps struct {
 	Increases string
 }
 
+func BudgetCaps(b limits.CostBudget) CostCaps {
+	return CostCaps{
+		Owner: b.Owner, Daily: text(b.Daily), Weekly: text(b.Weekly), Monthly: text(b.Monthly),
+		Increases: b.Increases,
+	}
+}
+
+func text(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 type CostHold struct {
 	Owner   limits.Owner
 	LeaseID string

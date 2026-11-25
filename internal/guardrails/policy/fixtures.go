@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -36,11 +37,11 @@ const (
 )
 
 type guardrailFixture struct {
-	ID                   string           `json:"id"`
-	Phase                guardrails.Phase `json:"phase"`
-	Text                 *string          `json:"text"`
-	Expected             fixtureOutcome   `json:"expected"`
-	ExpectedRedactedText *string          `json:"expected_redacted_text,omitempty"`
+	ID                   string                `json:"id"`
+	Phase                guardrailpolicy.Phase `json:"phase"`
+	Text                 *string               `json:"text"`
+	Expected             fixtureOutcome        `json:"expected"`
+	ExpectedRedactedText *string               `json:"expected_redacted_text,omitempty"`
 }
 
 type fixtureRunInput struct {
@@ -56,12 +57,12 @@ type fixtureOutcomeResult struct {
 }
 
 type fixtureResult struct {
-	ID        string               `json:"id"`
-	Phase     guardrails.Phase     `json:"phase"`
-	Expected  fixtureOutcome       `json:"expected"`
-	Baseline  fixtureOutcomeResult `json:"baseline"`
-	Candidate fixtureOutcomeResult `json:"candidate"`
-	Passed    bool                 `json:"passed"`
+	ID        string                `json:"id"`
+	Phase     guardrailpolicy.Phase `json:"phase"`
+	Expected  fixtureOutcome        `json:"expected"`
+	Baseline  fixtureOutcomeResult  `json:"baseline"`
+	Candidate fixtureOutcomeResult  `json:"candidate"`
+	Passed    bool                  `json:"passed"`
 }
 
 type fixtureReport struct {
@@ -100,7 +101,7 @@ func (f guardrailFixture) validate(field string) error {
 	if !fixtureIDPattern.MatchString(f.ID) {
 		return httpkit.Invalid(field+".id", "Use a fixture ID of 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or digit.")
 	}
-	if f.Phase != guardrails.Input && f.Phase != guardrails.Output {
+	if f.Phase != guardrailpolicy.Input && f.Phase != guardrailpolicy.Output {
 		return httpkit.Invalid(field+".phase", "Choose the unary input or output phase.")
 	}
 	if f.Text == nil || !utf8.ValidString(*f.Text) || len(*f.Text) > maxFixtureTextBytes {
@@ -117,10 +118,10 @@ func (f guardrailFixture) validate(field string) error {
 
 func fixtureReady(pinned guardrails.Pinned) error {
 	for _, entry := range pinned.Policy.Entries {
-		if entry.Phase != guardrails.Input && entry.Phase != guardrails.Output {
+		if entry.Phase != guardrailpolicy.Input && entry.Phase != guardrailpolicy.Output {
 			return fixtureUnsupported()
 		}
-		if entry.Action == guardrails.Mask {
+		if entry.Action == guardrailpolicy.Mask {
 			return fixtureUnsupported()
 		}
 		definition, ok := pinned.Definitions[entry.RevisionID]
@@ -234,15 +235,15 @@ func (fixture guardrailFixture) application(pinned guardrails.Pinned) guardrails
 	}}
 }
 
-func fixtureRole(phase guardrails.Phase) guardrails.Role {
-	if phase == guardrails.Output {
+func fixtureRole(phase guardrailpolicy.Phase) guardrails.Role {
+	if phase == guardrailpolicy.Output {
 		return guardrails.Assistant
 	}
 	return guardrails.User
 }
 
 func fixtureOutcomeOf(result guardrails.Result, fixture guardrailFixture) (fixtureOutcomeResult, error) {
-	if hasDecision(result, guardrails.FailedOpen, guardrails.FailedClosed) {
+	if hasDecision(result, guardrailpolicy.FailedOpen, guardrailpolicy.FailedClosed) {
 		return fixtureOutcomeResult{}, fixtureUnevaluable()
 	}
 	index := slices.IndexFunc(result.Segments, func(segment guardrails.Segment) bool { return segment.ID == fixtureSegmentID })
@@ -255,15 +256,15 @@ func fixtureOutcomeOf(result guardrails.Result, fixture guardrailFixture) (fixtu
 }
 
 func observedOutcome(result guardrails.Result) fixtureOutcome {
-	if hasDecision(result, guardrails.Blocked) {
+	if hasDecision(result, guardrailpolicy.Blocked) {
 		return outcomeBlock
 	}
-	if result.Changed || hasDecision(result, guardrails.Redacted) {
+	if result.Changed || hasDecision(result, guardrailpolicy.Redacted) {
 		return outcomeRedact
 	}
 	return outcomeAllow
 }
 
-func hasDecision(result guardrails.Result, outcomes ...guardrails.Outcome) bool {
-	return slices.ContainsFunc(result.Decisions, func(decision guardrails.Evidence) bool { return slices.Contains(outcomes, decision.Outcome) })
+func hasDecision(result guardrails.Result, outcomes ...guardrailpolicy.Outcome) bool {
+	return slices.ContainsFunc(result.Decisions, func(decision guardrailpolicy.Evidence) bool { return slices.Contains(outcomes, decision.Outcome) })
 }

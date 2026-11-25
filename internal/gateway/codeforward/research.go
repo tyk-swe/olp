@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward/coderesearch"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
 )
 

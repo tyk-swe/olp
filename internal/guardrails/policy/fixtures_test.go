@@ -11,11 +11,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 func fixtureRevision(id, guardrailID string, kind guardrails.Kind, configuration string) guardrails.Revision {
-	return guardrails.Revision{ID: id, GuardrailID: guardrailID, ProjectID: "project-1", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}
+	return guardrails.Revision{ID: id, GuardrailID: guardrailID, ProjectID: "project-1", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
 }
 
 func fixturePinned(policyRevisionID, blockPattern, redactPattern string) guardrails.Pinned {
@@ -23,10 +24,10 @@ func fixturePinned(policyRevisionID, blockPattern, redactPattern string) guardra
 	block := fixtureRevision("block-rev-"+suffix, "block-def", "builtin.regex", `{"rules":[{"id":"block-rule","pattern":"`+blockPattern+`"}]}`)
 	redact := fixtureRevision("redact-rev-"+suffix, "redact-def", "builtin.regex", `{"rules":[{"id":"redact-rule","pattern":"`+redactPattern+`","replacement":"[hidden]"}]}`)
 	entries := []guardrails.Entry{
-		{GuardrailID: "block-def", RevisionID: block.ID, Phase: guardrails.Input, Action: guardrails.Block},
-		{GuardrailID: "redact-def", RevisionID: redact.ID, Phase: guardrails.Input, Action: guardrails.Redact},
-		{GuardrailID: "block-def", RevisionID: block.ID, Phase: guardrails.Output, Action: guardrails.Block},
-		{GuardrailID: "redact-def", RevisionID: redact.ID, Phase: guardrails.Output, Action: guardrails.Redact},
+		{GuardrailID: "block-def", RevisionID: block.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
+		{GuardrailID: "redact-def", RevisionID: redact.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact},
+		{GuardrailID: "block-def", RevisionID: block.ID, Phase: guardrailpolicy.Output, Action: guardrailpolicy.Block},
+		{GuardrailID: "redact-def", RevisionID: redact.ID, Phase: guardrailpolicy.Output, Action: guardrailpolicy.Redact},
 	}
 	return guardrails.Pinned{
 		Policy:      guardrails.PolicyRevision{ID: policyRevisionID, PolicyID: "policy-1", ProjectID: "project-1", Entries: entries},
@@ -53,10 +54,10 @@ func directBatchEvaluator(r *http.Request, _ authz.Principal, batch []guardrails
 func fixtureSuite() []guardrailFixture {
 	redacted := "code [hidden] end"
 	return []guardrailFixture{
-		{ID: "allow-case", Phase: guardrails.Input, Text: new("a friendly note"), Expected: outcomeAllow},
-		{ID: "block-case", Phase: guardrails.Input, Text: new("a blocked-word here"), Expected: outcomeBlock},
-		{ID: "redact-case", Phase: guardrails.Input, Text: new("code secret-123 end"), Expected: outcomeRedact, ExpectedRedactedText: &redacted},
-		{ID: "output-block-case", Phase: guardrails.Output, Text: new("a blocked-word here"), Expected: outcomeBlock},
+		{ID: "allow-case", Phase: guardrailpolicy.Input, Text: new("a friendly note"), Expected: outcomeAllow},
+		{ID: "block-case", Phase: guardrailpolicy.Input, Text: new("a blocked-word here"), Expected: outcomeBlock},
+		{ID: "redact-case", Phase: guardrailpolicy.Input, Text: new("code secret-123 end"), Expected: outcomeRedact, ExpectedRedactedText: &redacted},
+		{ID: "output-block-case", Phase: guardrailpolicy.Output, Text: new("a blocked-word here"), Expected: outcomeBlock},
 	}
 }
 
@@ -126,7 +127,7 @@ func TestRunFixtureSuiteRefusesFailedClosedEvaluation(t *testing.T) {
 	api := &API{evaluateBatch: directBatchEvaluator}
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/guardrails/run-fixtures", nil)
 	pinned := fixturePinned("policy-rev-base", "a", "secret-[0-9]+")
-	overflow := []guardrailFixture{{ID: "overflow-case", Phase: guardrails.Input, Text: new(strings.Repeat("a", guardrails.MaxFindings+1)), Expected: outcomeBlock}}
+	overflow := []guardrailFixture{{ID: "overflow-case", Phase: guardrailpolicy.Input, Text: new(strings.Repeat("a", guardrails.MaxFindings+1)), Expected: outcomeBlock}}
 	_, err := api.runFixtureSuite(request, authz.Principal{}, pinned, pinned, overflow)
 	var problem *httpkit.Problem
 	if !errors.As(err, &problem) || problem.Code != fixtureUnevaluableCode {
@@ -145,7 +146,7 @@ func TestRunFixtureSuiteRefusesUnsupportedBeforeEvaluation(t *testing.T) {
 	unsupported := fixtureRevision("hook-rev", "hook-def", "webhook", `{"endpoint":"https://example.invalid","credential_ref":"cred-1","content_egress":true}`)
 	candidate := guardrails.Pinned{
 		Policy: guardrails.PolicyRevision{ID: "policy-rev-candidate", PolicyID: "policy-1", ProjectID: "project-1", Entries: []guardrails.Entry{
-			{GuardrailID: "hook-def", RevisionID: "hook-rev", Phase: guardrails.Input, Action: guardrails.Block},
+			{GuardrailID: "hook-def", RevisionID: "hook-rev", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block},
 		}},
 		Definitions: map[string]guardrails.Revision{"hook-rev": unsupported},
 	}
@@ -164,7 +165,7 @@ func TestFixtureRunInputValidate(t *testing.T) {
 			BaselinePolicyRevisionID:  "00000000-0000-0000-0000-000000000001",
 			CandidatePolicyRevisionID: "00000000-0000-0000-0000-000000000002",
 			Synthetic:                 true,
-			Fixtures:                  []guardrailFixture{{ID: "case-1", Phase: guardrails.Input, Text: new(""), Expected: outcomeAllow}},
+			Fixtures:                  []guardrailFixture{{ID: "case-1", Phase: guardrailpolicy.Input, Text: new(""), Expected: outcomeAllow}},
 		}
 	}
 	if err := valid().validate(); err != nil {
@@ -180,7 +181,7 @@ func TestFixtureRunInputValidate(t *testing.T) {
 	cases := map[string]func(*fixtureRunInput){
 		"not synthetic":     func(in *fixtureRunInput) { in.Synthetic = false },
 		"bad revision":      func(in *fixtureRunInput) { in.CandidatePolicyRevisionID = "candidate" },
-		"streaming phase":   func(in *fixtureRunInput) { in.Fixtures[0].Phase = guardrails.OutputStream },
+		"streaming phase":   func(in *fixtureRunInput) { in.Fixtures[0].Phase = guardrailpolicy.OutputStream },
 		"redacted on allow": func(in *fixtureRunInput) { in.Fixtures[0].ExpectedRedactedText = &redacted },
 		"duplicate id":      func(in *fixtureRunInput) { in.Fixtures = append(in.Fixtures, in.Fixtures[0]) },
 		"oversized text":    func(in *fixtureRunInput) { in.Fixtures[0].Text = new(strings.Repeat("x", maxFixtureTextBytes+1)) },

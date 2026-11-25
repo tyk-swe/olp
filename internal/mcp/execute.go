@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"

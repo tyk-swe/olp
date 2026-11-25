@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"

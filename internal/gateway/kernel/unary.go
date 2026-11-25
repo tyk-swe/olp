@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -17,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -157,8 +157,8 @@ func (x *Call) buildUnary(targetID string) (unaryAdmission, error) {
 	}, nil
 }
 
-func (x *Call) prepareOperationGuardrails(plan *unary.Plan) ([]guardrails.Evidence, error) {
-	if !x.guard.engine.HasPhase(guardrails.Input) && !x.guard.engine.HasPhase(guardrails.InputParallel) {
+func (x *Call) prepareOperationGuardrails(plan *unary.Plan) ([]guardrailpolicy.Evidence, error) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.Input) && !x.guard.engine.HasPhase(guardrailpolicy.InputParallel) {
 		return nil, nil
 	}
 	texts, err := plan.GuardrailInput()
@@ -167,11 +167,11 @@ func (x *Call) prepareOperationGuardrails(plan *unary.Plan) ([]guardrails.Eviden
 		x.guard.record(evidence)
 		return evidence, failure
 	}
-	result, unavailable := x.guard.engine.Unavailable(guardrails.Input)
+	result, unavailable := x.guard.engine.Unavailable(guardrailpolicy.Input)
 	x.guard.record(result.Decisions)
-	parallel, parallelErr := x.guard.engine.Unavailable(guardrails.InputParallel)
+	parallel, parallelErr := x.guard.engine.Unavailable(guardrailpolicy.InputParallel)
 	x.guard.record(parallel.Decisions)
-	evidence := guardrails.MergeEvidence(result.Decisions, parallel.Decisions)
+	evidence := guardrailpolicy.MergeEvidence(result.Decisions, parallel.Decisions)
 	if unavailable != nil {
 		return evidence, unavailable
 	}

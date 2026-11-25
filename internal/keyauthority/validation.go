@@ -1,4 +1,4 @@
-package authority
+package keyauthority
 
 type ValidationError struct {
 	Field  string

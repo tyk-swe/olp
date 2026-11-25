@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -30,8 +31,8 @@ func parsePlacement(in guardrails.Attachment) (guardrails.Attachment, error) {
 	return guardrails.Attachment{Scope: in.Scope, ScopeID: scopeID, PolicyRevisionID: revision, Order: in.Order}, nil
 }
 
-func scopeIdentity(scope guardrails.Scope, id string) (string, error) {
-	if scope == guardrails.InstallationScope {
+func scopeIdentity(scope guardrailpolicy.Scope, id string) (string, error) {
+	if scope == guardrailpolicy.InstallationScope {
 		return guardrails.InstallationProject, nil
 	}
 	parsed, err := httpkit.ParseUUID(id)
@@ -48,16 +49,16 @@ type target struct {
 }
 
 func (t target) owned() bool {
-	return t.Scope == guardrails.RouteScope || t.Scope == guardrails.KeyScope || t.Scope == guardrails.ToolsetScope
+	return t.Scope == guardrailpolicy.RouteScope || t.Scope == guardrailpolicy.KeyScope || t.Scope == guardrailpolicy.ToolsetScope
 }
 
-var changeOperation = map[guardrails.Scope]authz.Operation{
-	guardrails.InstallationScope: authz.Settings,
-	guardrails.OrganizationScope: authz.ManageOrganization,
-	guardrails.KeyScope:          authz.Keys,
+var changeOperation = map[guardrailpolicy.Scope]authz.Operation{
+	guardrailpolicy.InstallationScope: authz.Settings,
+	guardrailpolicy.OrganizationScope: authz.ManageOrganization,
+	guardrailpolicy.KeyScope:          authz.Keys,
 }
 
-func CanView(p authz.Principal, scope guardrails.Scope, id string, owner *string) bool {
+func CanView(p authz.Principal, scope guardrailpolicy.Scope, id string, owner *string) bool {
 	return authorize(p, target{Attachment: guardrails.Attachment{Scope: scope, ScopeID: id}, owner: owner, found: true}, authz.View) == nil
 }
 
@@ -68,13 +69,13 @@ func authorize(p authz.Principal, t target, need authz.Need) error {
 		}
 	}
 	switch {
-	case t.Scope == guardrails.InstallationScope && !p.AllProjects:
+	case t.Scope == guardrailpolicy.InstallationScope && !p.AllProjects:
 		return httpkit.Forbidden()
-	case t.Scope == guardrails.InstallationScope:
+	case t.Scope == guardrailpolicy.InstallationScope:
 		return p.Project(nil, need)
-	case t.Scope == guardrails.OrganizationScope:
+	case t.Scope == guardrailpolicy.OrganizationScope:
 		return p.Organization(t.ScopeID, need)
-	case t.Scope == guardrails.ProjectScope:
+	case t.Scope == guardrailpolicy.ProjectScope:
 		return p.Project(&t.ScopeID, need)
 	case !t.found:
 		return pgx.ErrNoRows

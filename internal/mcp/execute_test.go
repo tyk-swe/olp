@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
@@ -148,7 +149,7 @@ func TestNegotiateProtocolFallsBackToPreferred(t *testing.T) {
 }
 
 func TestExecuteSettlementAndReplay(t *testing.T) {
-	decisions := []guardrails.Evidence{{Phase: guardrails.Output, Outcome: "evaluated"}}
+	decisions := []guardrailpolicy.Evidence{{Phase: guardrailpolicy.Output, Outcome: "evaluated"}}
 	for _, tc := range []struct {
 		name    string
 		isError bool
@@ -165,10 +166,10 @@ func TestExecuteSettlementAndReplay(t *testing.T) {
 				defer cancel()
 				fixture := newExecutionFixture(t, executionScenario{isError: tc.isError, settlementFails: settlementFails, cancel: cancel,
 					guard: func(_ context.Context, evaluation GuardrailEvaluation) (guardrails.Result, error) {
-						if evaluation.Phase == guardrails.Input {
+						if evaluation.Phase == guardrailpolicy.Input {
 							return guardrails.Result{Segments: evaluation.Segments}, nil
 						}
-						if evaluation.Phase != guardrails.Output || evaluation.RequestID != "attempt" {
+						if evaluation.Phase != guardrailpolicy.Output || evaluation.RequestID != "attempt" {
 							t.Fatalf("unexpected guardrail evaluation: %+v", evaluation)
 						}
 						return guardrails.Result{Changed: true, Segments: slices.Collect(func(yield func(guardrails.Segment) bool) {
@@ -316,8 +317,8 @@ func newExecutionFixture(t *testing.T, scenario executionScenario) executionFixt
 		if scenario.guard == nil {
 			return nil
 		}
-		engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Output, Action: guardrails.Redact}}, map[string]guardrails.Revision{
-			"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["original"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
+		engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Output, Action: guardrailpolicy.Redact}}, map[string]guardrails.Revision{
+			"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["original"]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed},
 		})
 		if err != nil {
 			t.Fatal(err)

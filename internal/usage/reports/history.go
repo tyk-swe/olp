@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -41,45 +41,45 @@ type RequestSummary struct {
 	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
 	ContainerSessions  map[string]int64 `json:"container_sessions"`
 
-	CacheResult             *string               `json:"cache_result"`
-	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id,omitempty"`
-	BudgetBoundary          string                `json:"budget_boundary,omitempty"`
-	ID                      string                `json:"id"`
-	RuntimeGenerationID     string                `json:"runtime_generation_id"`
-	APIKeyID                *string               `json:"api_key_id"`
-	Origin                  string                `json:"origin"`
-	ParentRequestID         *string               `json:"parent_request_id"`
-	Route                   string                `json:"route"`
-	Operation               string                `json:"operation"`
-	Surface                 string                `json:"surface"`
-	StartedAt               time.Time             `json:"started_at"`
-	CompletedAt             *time.Time            `json:"completed_at"`
-	StatusCode              *int32                `json:"status_code"`
-	ErrorClass              *string               `json:"error_class"`
-	TotalLatencyMS          *int64                `json:"total_latency_ms"`
-	FirstByteMS             *int64                `json:"first_byte_ms"`
-	AttemptCount            int32                 `json:"attempt_count"`
-	InputTokens             *int64                `json:"input_tokens"`
-	OutputTokens            *int64                `json:"output_tokens"`
-	CachedInputTokens       *int64                `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        *int64                `json:"audio_input_tokens"`
-	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
-	ImageInputTokens        *int64                `json:"image_input_tokens"`
-	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
-	ImageOutputTokens       *int64                `json:"image_output_tokens"`
-	EstimatedCost           *string               `json:"estimated_cost"`
-	Charge                  *string               `json:"charge"`
-	Currency                *string               `json:"currency"`
-	Unpriced                *bool                 `json:"unpriced"`
-	UsageComplete           *bool                 `json:"usage_complete"`
-	EndUserDigest           string                `json:"end_user_digest"`
-	Attribution             map[string]string     `json:"attribution"`
-	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions"`
-	PayloadCaptured         bool                  `json:"payload_captured"`
+	CacheResult             *string                    `json:"cache_result"`
+	EvaluatorGuardrailID    *string                    `json:"evaluator_guardrail_id,omitempty"`
+	BudgetBoundary          string                     `json:"budget_boundary,omitempty"`
+	ID                      string                     `json:"id"`
+	RuntimeGenerationID     string                     `json:"runtime_generation_id"`
+	APIKeyID                *string                    `json:"api_key_id"`
+	Origin                  string                     `json:"origin"`
+	ParentRequestID         *string                    `json:"parent_request_id"`
+	Route                   string                     `json:"route"`
+	Operation               string                     `json:"operation"`
+	Surface                 string                     `json:"surface"`
+	StartedAt               time.Time                  `json:"started_at"`
+	CompletedAt             *time.Time                 `json:"completed_at"`
+	StatusCode              *int32                     `json:"status_code"`
+	ErrorClass              *string                    `json:"error_class"`
+	TotalLatencyMS          *int64                     `json:"total_latency_ms"`
+	FirstByteMS             *int64                     `json:"first_byte_ms"`
+	AttemptCount            int32                      `json:"attempt_count"`
+	InputTokens             *int64                     `json:"input_tokens"`
+	OutputTokens            *int64                     `json:"output_tokens"`
+	CachedInputTokens       *int64                     `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                     `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                     `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                     `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                     `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                     `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                     `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                     `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                     `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                     `json:"image_output_tokens"`
+	EstimatedCost           *string                    `json:"estimated_cost"`
+	Charge                  *string                    `json:"charge"`
+	Currency                *string                    `json:"currency"`
+	Unpriced                *bool                      `json:"unpriced"`
+	UsageComplete           *bool                      `json:"usage_complete"`
+	EndUserDigest           string                     `json:"end_user_digest"`
+	Attribution             map[string]string          `json:"attribution"`
+	GuardrailDecisions      []guardrailpolicy.Evidence `json:"guardrail_decisions"`
+	PayloadCaptured         bool                       `json:"payload_captured"`
 }
 
 // AttemptDetail is one provider attempt of a request, with the routing
@@ -92,50 +92,50 @@ type AttemptDetail struct {
 	CacheTokenSeconds  *string          `json:"cache_token_seconds"`
 	ContainerSessions  map[string]int64 `json:"container_sessions"`
 
-	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
-	Routing                 *usage.Routing        `json:"routing"`
-	ID                      string                `json:"id"`
-	Ordinal                 int32                 `json:"ordinal"`
-	ProviderID              string                `json:"provider_id"`
-	ProviderName            string                `json:"provider_name"`
-	ProviderRequestID       *string               `json:"provider_request_id,omitempty"`
-	UpstreamModel           string                `json:"upstream_model"`
-	StartedAt               time.Time             `json:"started_at"`
-	CompletedAt             *time.Time            `json:"completed_at"`
-	StatusCode              *int32                `json:"status_code"`
-	ErrorClass              *string               `json:"error_class"`
-	Committed               bool                  `json:"committed"`
-	LatencyMS               *int64                `json:"latency_ms"`
-	FirstByteMS             *int64                `json:"first_byte_ms"`
-	ChargeStatus            *string               `json:"charge_status"`
-	UsageObserved           *bool                 `json:"usage_observed"`
-	UsageComplete           *bool                 `json:"usage_complete"`
-	InputTokens             *int64                `json:"input_tokens"`
-	OutputTokens            *int64                `json:"output_tokens"`
-	CachedInputTokens       *int64                `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        *int64                `json:"audio_input_tokens"`
-	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
-	ImageInputTokens        *int64                `json:"image_input_tokens"`
-	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
-	ImageOutputTokens       *int64                `json:"image_output_tokens"`
-	MediaUnits              *string               `json:"media_units"`
-	ToolCalls               map[string]int64      `json:"tool_calls"`
-	Batch                   *bool                 `json:"batch"`
-	PricingComponents       []string              `json:"pricing_components"`
-	EstimatedCost           *string               `json:"estimated_cost"`
-	Currency                *string               `json:"currency"`
-	Unpriced                *bool                 `json:"unpriced"`
-	PricingRevisionID       *string               `json:"pricing_revision_id"`
-	CommitmentWeight        *string               `json:"commitment_weight"`
-	CommitmentAmount        *string               `json:"commitment_amount"`
-	CommitmentPeriod        *string               `json:"commitment_period"`
-	DiscountID              *string               `json:"discount_id"`
-	Charge                  *string               `json:"charge"`
-	RateCardRevisionID      *string               `json:"rate_card_revision_id"`
+	GuardrailDecisions      []guardrailpolicy.Evidence `json:"guardrail_decisions,omitempty"`
+	Routing                 *usage.Routing             `json:"routing"`
+	ID                      string                     `json:"id"`
+	Ordinal                 int32                      `json:"ordinal"`
+	ProviderID              string                     `json:"provider_id"`
+	ProviderName            string                     `json:"provider_name"`
+	ProviderRequestID       *string                    `json:"provider_request_id,omitempty"`
+	UpstreamModel           string                     `json:"upstream_model"`
+	StartedAt               time.Time                  `json:"started_at"`
+	CompletedAt             *time.Time                 `json:"completed_at"`
+	StatusCode              *int32                     `json:"status_code"`
+	ErrorClass              *string                    `json:"error_class"`
+	Committed               bool                       `json:"committed"`
+	LatencyMS               *int64                     `json:"latency_ms"`
+	FirstByteMS             *int64                     `json:"first_byte_ms"`
+	ChargeStatus            *string                    `json:"charge_status"`
+	UsageObserved           *bool                      `json:"usage_observed"`
+	UsageComplete           *bool                      `json:"usage_complete"`
+	InputTokens             *int64                     `json:"input_tokens"`
+	OutputTokens            *int64                     `json:"output_tokens"`
+	CachedInputTokens       *int64                     `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                     `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                     `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                     `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                     `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                     `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                     `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                     `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                     `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                     `json:"image_output_tokens"`
+	MediaUnits              *string                    `json:"media_units"`
+	ToolCalls               map[string]int64           `json:"tool_calls"`
+	Batch                   *bool                      `json:"batch"`
+	PricingComponents       []string                   `json:"pricing_components"`
+	EstimatedCost           *string                    `json:"estimated_cost"`
+	Currency                *string                    `json:"currency"`
+	Unpriced                *bool                      `json:"unpriced"`
+	PricingRevisionID       *string                    `json:"pricing_revision_id"`
+	CommitmentWeight        *string                    `json:"commitment_weight"`
+	CommitmentAmount        *string                    `json:"commitment_amount"`
+	CommitmentPeriod        *string                    `json:"commitment_period"`
+	DiscountID              *string                    `json:"discount_id"`
+	Charge                  *string                    `json:"charge"`
+	RateCardRevisionID      *string                    `json:"rate_card_revision_id"`
 }
 
 // RequestDetail is one request with its attempt timeline.

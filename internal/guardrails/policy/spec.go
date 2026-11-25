@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -37,7 +38,7 @@ func NewDraft(ctx context.Context, q database.Queryer, project, name string, ent
 
 func shape(name string, entries []guardrails.Entry) (string, error) {
 	trimmed := strings.TrimSpace(name)
-	if trimmed == "" || len(trimmed) > 100 || len(entries) > guardrails.MaxEntries {
+	if trimmed == "" || len(trimmed) > 100 || len(entries) > guardrailpolicy.MaxEntries {
 		return "", httpkit.Invalid("policy", "Supply a name and at most 128 entries.")
 	}
 	if slices.ContainsFunc(entries, func(e guardrails.Entry) bool { return uuid.Validate(e.RevisionID) != nil }) {

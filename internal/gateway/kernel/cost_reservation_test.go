@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/platform/staging"
@@ -432,8 +433,8 @@ func TestPreparationFollowsSourceChanges(t *testing.T) {
 			provider.Kind = "openai_compatible"
 			if transformed {
 				engine, err := guardrails.Compile(
-					[]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}},
-					map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"redact","pattern":"first|second","replacement":"filtered"}]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+					[]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact}},
+					map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"redact","pattern":"first|second","replacement":"filtered"}]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}},
 				)
 				if err != nil {
 					t.Fatal(err)

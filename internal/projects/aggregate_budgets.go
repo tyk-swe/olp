@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
 
@@ -83,7 +83,7 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ authz.Principal, projec
 	if len(body.Policy) == 0 {
 		return httpkit.Reply{}, httpkit.Invalid("policy", "A policy or explicit null is required.")
 	}
-	var policy *authority.BudgetPolicy
+	var policy *keyauthority.BudgetPolicy
 	d := json.NewDecoder(bytes.NewReader(body.Policy))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&policy); err != nil {
@@ -145,7 +145,7 @@ func aggregateReportSQL(level string) string {
 	}
 }
 
-func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *authority.BudgetPolicy) (string, error) {
+func SetOrganizationBudget(ctx context.Context, tx pgx.Tx, id string, policy *keyauthority.BudgetPolicy) (string, error) {
 	if policy.Limited() {
 		if err := ledger.EnsureAggregateBudget(ctx, tx, "organization", id); err != nil {
 			return "", err

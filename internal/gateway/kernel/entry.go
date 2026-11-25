@@ -3,10 +3,10 @@ package kernel
 import (
 	"net/http"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func (s *Server) EnterCall(w http.ResponseWriter, r *http.Request, x *Call, authenticate func(*http.Request) (keyauthority.Authority, *fault.Error)) (keyauthority.Authority, bool) {

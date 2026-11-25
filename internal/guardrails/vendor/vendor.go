@@ -13,13 +13,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type Type = contract.CreateGuardrailRequestType
-
-type Phase = contract.GuardrailPolicyEntryPhase
 
 type Role string
 
@@ -103,10 +102,10 @@ func (s Spec) Call(ctx context.Context, client *http.Client, credential Credenti
 type Info struct {
 	Transforms bool
 	Compresses bool
-	phases     []Phase
+	phases     []guardrailpolicy.Phase
 }
 
-func (i Info) Supports(phase Phase) bool {
+func (i Info) Supports(phase guardrailpolicy.Phase) bool {
 	return len(i.phases) == 0 || slices.Contains(i.phases, phase)
 }
 
@@ -116,8 +115,8 @@ type vendor struct {
 }
 
 var (
-	inputs      = []Phase{contract.GuardrailPolicyEntryPhaseInput, contract.GuardrailPolicyEntryPhaseInputParallel}
-	synchronous = []Phase{contract.GuardrailPolicyEntryPhaseInput}
+	inputs      = []guardrailpolicy.Phase{guardrailpolicy.Input, guardrailpolicy.InputParallel}
+	synchronous = []guardrailpolicy.Phase{guardrailpolicy.Input}
 )
 
 var vendors = map[Type]vendor{

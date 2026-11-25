@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -22,7 +23,7 @@ type Config struct {
 	Window        int
 	Strict        bool
 	ToolContext   context.Context
-	Record        func([]guardrails.Evidence)
+	Record        func([]guardrailpolicy.Evidence)
 }
 
 type Stream struct {
@@ -38,7 +39,7 @@ func New(config Config) (*Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if config.Engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		s.Masking(config.Masks)
 	}
 	if !config.Strict {
@@ -54,10 +55,10 @@ func (c Config) request() guardrails.Evaluation {
 }
 
 func (c Config) evaluation(segments []guardrails.Segment) guardrails.Evaluation {
-	return guardrails.Evaluation{RequestID: c.RequestID, Route: c.Route, InternalModel: c.InternalModel, Phase: guardrails.OutputStream, Segments: segments}
+	return guardrails.Evaluation{RequestID: c.RequestID, Route: c.Route, InternalModel: c.InternalModel, Phase: guardrailpolicy.OutputStream, Segments: segments}
 }
 
-func (g *Stream) Decisions() []guardrails.Evidence { return g.stream.Decisions() }
+func (g *Stream) Decisions() []guardrailpolicy.Evidence { return g.stream.Decisions() }
 
 func (g *Stream) Push(ctx context.Context, frame []byte) ([][]byte, error) {
 	touched, err := g.collectTools(frame)
