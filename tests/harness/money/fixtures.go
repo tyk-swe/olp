@@ -95,7 +95,7 @@ func Inputs(t testing.TB, snapshot *routing.Snapshot, operations ...string) *rou
 					Price: rates.Price{
 						ProviderKind: string(provider.Kind), Model: model, Operation: operation,
 						InputPerMillion: new("2000"), OutputPerMillion: new("8000"),
-						UnitPrice: new("0.04"), PerRequest: new("0.01"), Currency: "USD",
+						UnitPrice: new("0.04"), PerRequest: new("0.01"), StoragePerGiBDay: new("0.10"), Currency: "USD",
 					},
 				}))
 			}

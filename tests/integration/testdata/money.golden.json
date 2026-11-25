@@ -1,0 +1,383 @@
+{
+  "vector store": [
+    {
+      "step": "create without a budget",
+      "operation": "vector_store",
+      "status": 200,
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": {
+            "cost": "0.01",
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": []
+    },
+    {
+      "step": "retrieve",
+      "operation": "vector_store",
+      "status": 200,
+      "cost": "0.01",
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": {
+            "cost": "0.01",
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.015"
+          ],
+          "settled": [
+            "0.015"
+          ],
+          "released": false
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [
+            "0.01"
+          ],
+          "released": false
+        }
+      ]
+    },
+    {
+      "step": "search refused upstream",
+      "operation": "retrieval",
+      "status": 400,
+      "error": "provider_resource_error",
+      "attempts": [
+        {
+          "class": "upstream_client",
+          "committed": false,
+          "billing_uncertain": false,
+          "price": {
+            "cost": null,
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.015"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "provider listed",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "route",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [],
+          "released": true
+        }
+      ]
+    },
+    {
+      "step": "search",
+      "operation": "retrieval",
+      "status": 200,
+      "cost": "0.01",
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": {
+            "cost": "0.01",
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.015"
+          ],
+          "settled": [
+            "0.015"
+          ],
+          "released": false
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [
+            "0.01"
+          ],
+          "released": false
+        },
+        {
+          "owner": "provider listed",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [
+            "0.01"
+          ],
+          "released": false
+        },
+        {
+          "owner": "route",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [
+            "0.01"
+          ],
+          "released": false
+        }
+      ]
+    },
+    {
+      "step": "delete",
+      "operation": "vector_store",
+      "status": 200,
+      "cost": "0.01",
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": {
+            "cost": "0.01",
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.015"
+          ],
+          "settled": [
+            "0.015"
+          ],
+          "released": false
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.01"
+          ],
+          "settled": [
+            "0.01"
+          ],
+          "released": false
+        }
+      ]
+    }
+  ],
+  "video": [
+    {
+      "step": "create refused upstream",
+      "operation": "video_create",
+      "status": 400,
+      "error": "upstream_rejected",
+      "attempts": [
+        {
+          "class": "upstream_client",
+          "committed": false,
+          "billing_uncertain": false,
+          "price": {
+            "cost": null,
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.255"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "provider listed",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [],
+          "released": true
+        },
+        {
+          "owner": "route",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [],
+          "released": true
+        }
+      ]
+    },
+    {
+      "step": "create",
+      "operation": "video_create",
+      "status": 201,
+      "cost": "0.17",
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": {
+            "cost": "0.17",
+            "card_revision": 3,
+            "card_markup": "1.5",
+            "card_pinned": true
+          }
+        }
+      ],
+      "holds": [
+        {
+          "owner": "group",
+          "basis": "charge",
+          "reserved": [
+            "0.255"
+          ],
+          "settled": [
+            "0.255"
+          ],
+          "released": false
+        },
+        {
+          "owner": "key",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [
+            "0.17"
+          ],
+          "released": false
+        },
+        {
+          "owner": "provider listed",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [
+            "0.17"
+          ],
+          "released": false
+        },
+        {
+          "owner": "route",
+          "basis": "cost",
+          "reserved": [
+            "0.17"
+          ],
+          "settled": [
+            "0.17"
+          ],
+          "released": false
+        }
+      ]
+    },
+    {
+      "step": "retrieve",
+      "operation": "video_get",
+      "status": 200,
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": null
+        }
+      ],
+      "holds": []
+    },
+    {
+      "step": "delete",
+      "operation": "video_delete",
+      "status": 200,
+      "attempts": [
+        {
+          "class": "success",
+          "committed": true,
+          "billing_uncertain": false,
+          "price": null
+        }
+      ],
+      "holds": []
+    }
+  ]
+}

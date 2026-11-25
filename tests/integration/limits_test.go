@@ -24,7 +24,12 @@ import (
 
 func newRunner(t *testing.T) scripts.Runner {
 	t.Helper()
-	runner, err := scripts.NewRunner(harness.Valkey(t), "olp:"+uuid.NewString()+":")
+	return runnerOver(t, harness.Valkey(t))
+}
+
+func runnerOver(t *testing.T, client scripts.Commander) scripts.Runner {
+	t.Helper()
+	runner, err := scripts.NewRunner(client, "olp:"+uuid.NewString()+":")
 	if err != nil {
 		t.Fatal(err)
 	}
