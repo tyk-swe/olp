@@ -15,6 +15,7 @@ type offer struct {
 	kinds      []Kind
 	vendors    []string
 	vendorKind bool
+	batchAPI   bool
 }
 
 var (
@@ -28,8 +29,9 @@ var (
 	openAIUnary      = []offer{{surface: "openai", modes: unary, kinds: openAIKinds}}
 	openAIGenerating = []offer{{surface: "openai", modes: generating, kinds: openAIKinds}}
 	vendorUnary      = []offer{{surface: "openai", modes: unary, vendorKind: true}}
+	nativeClouds     = []Kind{KindVertexAI, KindBedrock}
 
-	nativeCloudVendors = map[Kind]string{KindVertexAI: "google-vertex", KindBedrock: "amazon-bedrock"}
+	openAIEndpoint = DefaultEndpoint(KindOpenAI, "", "")
 )
 
 var offers = map[string][]offer{
@@ -62,9 +64,9 @@ var offers = map[string][]offer{
 	"batch": {
 		{surface: "anthropic", modes: unary, kinds: []Kind{KindAnthropic}},
 		{surface: "gemini", modes: unary, kinds: []Kind{KindGemini}},
-		{surface: "openai", modes: unary, kinds: []Kind{KindGemini}, vendors: []string{"google"}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindGemini}, vendors: []string{vendors.DefaultFor(string(KindGemini))}},
 		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAI, KindAzureOpenAI}},
-		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible}, vendors: filesBatchesVendors()},
+		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible}, batchAPI: true},
 	},
 }
 
@@ -73,6 +75,9 @@ func (o offer) serves(kind Kind, vendor, surface, mode string) bool {
 		return false
 	}
 	if o.kinds != nil && !slices.Contains(o.kinds, kind) || o.vendors != nil && !slices.Contains(o.vendors, vendor) {
+		return false
+	}
+	if _, served := vendors.BatchAPIFor(vendor); o.batchAPI && !served {
 		return false
 	}
 	if !o.vendorKind {
@@ -84,7 +89,7 @@ func (o offer) serves(kind Kind, vendor, surface, mode string) bool {
 
 func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
-		return (operation != "agent_resource" || vendor == "google") && retainedapi.Supports(string(kind), operation, surface, mode)
+		return (operation != "agent_resource" || vendor == vendors.DefaultFor(string(KindGemini))) && retainedapi.Supports(string(kind), operation, surface, mode)
 	}
 	if !slices.Contains(surfaces, surface) {
 		return false
@@ -105,12 +110,12 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 }
 
 func supportsNativeSurface(kind Kind, vendor, operation, mode string, generates bool) (matched, supported bool) {
-	cloud, hosted := nativeCloudVendors[kind]
+	cloud := slices.Contains(nativeClouds, kind) && vendors.DefaultFor(string(kind)) == vendor
 	switch operation {
 	case "batch":
-		return true, mode == "unary" && hosted && cloud == vendor
+		return true, mode == "unary" && cloud
 	case "realtime":
-		nativeHost := kind == KindOpenAICompatible && vendor == "xai" || hosted && cloud == vendor
+		nativeHost := kind == KindOpenAICompatible && vendor == "xai" || cloud
 		return true, mode == "realtime" && nativeHost && vendors.Serves(vendor, operation)
 	case "generation":
 		nativeGen := kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2"))
@@ -249,7 +254,7 @@ func (c Config) SupportsRetainedResponses() bool {
 		return true
 	case KindOpenAI:
 		endpoint := strings.TrimSuffix(strings.TrimSpace(c.Endpoint), "/")
-		return endpoint == "" || endpoint == "https://api.openai.com/v1"
+		return endpoint == "" || endpoint == openAIEndpoint
 	}
 	return false
 }
@@ -261,22 +266,12 @@ func (c Config) SupportsFilesBatches() bool {
 	case KindOpenAI:
 		return c.SupportsRetainedResponses()
 	case KindOpenAICompatible:
-		_, ok := c.filesBatchesService()
+		_, ok := c.vendorBatchAdapter()
 		return ok
 	case KindGemini:
 		return c.ProfileID == "" && c.ProfileRevision == "" || c.selects("gemini-generation")
 	}
 	return false
-}
-
-func (c Config) filesBatchesService() (filesBatchesService, bool) {
-	i := slices.IndexFunc(filesBatchesServices, func(s filesBatchesService) bool {
-		return s.profile() == c.ProfileID && s.vendor == c.VendorID
-	})
-	if i < 0 || c.Kind != KindOpenAICompatible || c.ProfileRevision != ProfileRevision {
-		return filesBatchesService{}, false
-	}
-	return filesBatchesServices[i], true
 }
 
 func (c Config) NativeOpenAI() bool { return c.Kind == KindOpenAI || c.Kind == KindAzureOpenAI }

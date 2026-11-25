@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -302,15 +303,17 @@ func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 	return nil
 }
 
-func fireworksBatchRefusal(x *kernel.Call, route *routing.Route) *fault.Error {
+func vendorBatchRefusal(x *kernel.Call, route *routing.Route) *fault.Error {
 	if x == nil || route == nil {
 		return nil
 	}
 	for _, target := range route.Targets {
 		provider, ok := x.Snapshot().FindProvider(target.ProviderID)
-		if ok && provider.Kind == "openai_compatible" && provider.VendorID == "fireworks" {
-			return kernel.PolicyUnavailable("target_capability",
-				"Fireworks documents no OpenAI-compatible files/batches API; its dataset batch jobs return results only through provider-returned signed URLs, which the egress contract forbids.")
+		if !ok {
+			continue
+		}
+		if reason, refused := vendors.BatchRefusalFor(provider.VendorID); refused {
+			return kernel.PolicyUnavailable("target_capability", reason)
 		}
 	}
 	return nil
