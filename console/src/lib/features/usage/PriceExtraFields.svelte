@@ -47,18 +47,18 @@
     <p>Container session fees by memory tier</p>
     {#each containerFees as row, index (index)}
       <div class="component-row">
-        <label class="sr-only" for={`${idPrefix}-container-tier-${index}`}
-          >Container memory tier</label
-        >
+        <label class="sr-only" for={`${idPrefix}-container-tier-${index}`}>
+          Container memory tier
+        </label>
         <input
           id={`${idPrefix}-container-tier-${index}`}
           bind:value={row.tier}
           placeholder="1g"
           class="mono"
         />
-        <label class="sr-only" for={`${idPrefix}-container-fee-${index}`}
-          >Fee per session</label
-        >
+        <label class="sr-only" for={`${idPrefix}-container-fee-${index}`}>
+          Fee per session
+        </label>
         <input
           id={`${idPrefix}-container-fee-${index}`}
           bind:value={row.fee}
@@ -72,8 +72,10 @@
             containerFees = containerFees.filter(
               (_: ContainerFeeRow, i: number) => i !== index
             );
-          }}>Remove</button
+          }}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
@@ -81,15 +83,17 @@
       class="text-button"
       onclick={() => {
         containerFees = [...containerFees, { tier: '', fee: '' }];
-      }}>Add container tier</button
+      }}
     >
+      Add container tier
+    </button>
   </div>
   <div class="component-rows" aria-label="Tool fees">
     {#each toolFees as row, index (index)}
       <div class="component-row">
-        <label class="sr-only" for={`${idPrefix}-tool-name-${index}`}
-          >Tool name</label
-        >
+        <label class="sr-only" for={`${idPrefix}-tool-name-${index}`}>
+          Tool name
+        </label>
         <input
           id={`${idPrefix}-tool-name-${index}`}
           bind:value={row.name}
@@ -110,8 +114,10 @@
             toolFees = toolFees.filter(
               (_: ToolFeeRow, i: number) => i !== index
             );
-          }}>Remove</button
+          }}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
@@ -119,15 +125,17 @@
       class="text-button"
       onclick={() => {
         toolFees = [...toolFees, { name: '', fee: '' }];
-      }}>Add tool fee</button
+      }}
     >
+      Add tool fee
+    </button>
   </div>
   <div class="component-rows" aria-label="Input-token tiers">
     {#each tiers as row, index (index)}
       <div class="component-row tier-row">
-        <label for={`${idPrefix}-tier-threshold-${index}`}
-          >Above input tokens</label
-        >
+        <label for={`${idPrefix}-tier-threshold-${index}`}>
+          Above input tokens
+        </label>
         <input
           id={`${idPrefix}-tier-threshold-${index}`}
           bind:value={row.threshold}
@@ -135,9 +143,9 @@
           placeholder="1000000"
         />
         {#each rateFields.filter(([, value]) => value.trim() !== '') as [field, parentValue] (field)}
-          <label class="sr-only" for={`${idPrefix}-tier-${index}-${field}`}
-            >{field.replaceAll('_', ' ')}</label
-          >
+          <label class="sr-only" for={`${idPrefix}-tier-${index}-${field}`}>
+            {field.replaceAll('_', ' ')}
+          </label>
           <input
             id={`${idPrefix}-tier-${index}-${field}`}
             bind:value={row.rates[field]}
@@ -151,8 +159,10 @@
           class="text-button"
           onclick={() => {
             tiers = tiers.filter((_: TierRow, i: number) => i !== index);
-          }}>Remove</button
+          }}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
@@ -163,8 +173,10 @@
         for (const [field, value] of rateFields)
           if (value.trim() !== '') rates[field] = '';
         tiers = [...tiers, { threshold: '', rates }];
-      }}>Add tier</button
+      }}
     >
+      Add tier
+    </button>
   </div>
   <div class="component-rows" aria-label="Time windows">
     <div class="component-row">
@@ -193,31 +205,33 @@
                 period.days = period.days.includes(value)
                   ? period.days.filter((d: number) => d !== value)
                   : [...period.days, value];
-              }}>{label}</button
+              }}
             >
+              {label}
+            </button>
           {/each}
         </div>
-        <label class="sr-only" for={`${idPrefix}-window-start-${index}`}
-          >Start</label
-        >
+        <label class="sr-only" for={`${idPrefix}-window-start-${index}`}>
+          Start
+        </label>
         <input
           id={`${idPrefix}-window-start-${index}`}
           bind:value={period.start}
           placeholder="00:00"
           inputmode="numeric"
         />
-        <label class="sr-only" for={`${idPrefix}-window-end-${index}`}
-          >End</label
-        >
+        <label class="sr-only" for={`${idPrefix}-window-end-${index}`}>
+          End
+        </label>
         <input
           id={`${idPrefix}-window-end-${index}`}
           bind:value={period.end}
           placeholder="24:00"
           inputmode="numeric"
         />
-        <label class="sr-only" for={`${idPrefix}-window-multiplier-${index}`}
-          >Multiplier</label
-        >
+        <label class="sr-only" for={`${idPrefix}-window-multiplier-${index}`}>
+          Multiplier
+        </label>
         <input
           id={`${idPrefix}-window-multiplier-${index}`}
           bind:value={period.multiplier}
@@ -231,8 +245,10 @@
             windowPeriods = windowPeriods.filter(
               (_: WindowPeriodRow, i: number) => i !== index
             );
-          }}>Remove</button
+          }}
         >
+          Remove
+        </button>
       </div>
     {/each}
     <button
@@ -243,7 +259,9 @@
           ...windowPeriods,
           { days: [], start: '', end: '', multiplier: '' }
         ];
-      }}>Add window period</button
+      }}
     >
+      Add window period
+    </button>
   </div>
 </fieldset>

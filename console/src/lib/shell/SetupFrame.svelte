@@ -28,8 +28,10 @@
       <h1 id="setup-introduction">
         {#each headline as word, index (index)}<span
             class="word"
-            style="--word: {index}">{word}</span
-          >{index < headline.length - 1 ? ' ' : ''}{/each}
+            style="--word: {index}"
+          >
+            {word}
+          </span>{index < headline.length - 1 ? ' ' : ''}{/each}
       </h1>
       <p class="intro">
         Connect model providers, publish routes, and hand out API keys. Prompts

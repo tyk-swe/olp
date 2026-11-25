@@ -48,9 +48,9 @@
   {:else if identitiesError}
     <p class="field-error" role="alert">
       Your sign-in methods are unavailable.
-      <button class="text-button" type="button" onclick={onRetryIdentities}
-        >Try again</button
-      >
+      <button class="text-button" type="button" onclick={onRetryIdentities}>
+        Try again
+      </button>
     </p>
   {:else if enrollmentNeeded && !enrollmentVerified}
     <p class="security-note">
@@ -65,8 +65,9 @@
       type="button"
       onclick={onVerifyEnrollment}
       disabled={saving}
-      >{saving ? 'Redirecting…' : 'Verify identity with OIDC'}</button
     >
+      {saving ? 'Redirecting…' : 'Verify identity with OIDC'}
+    </button>
   {:else}
     {#if !enrollmentNeeded}<div class="form-field">
         <label for="current-password">Current password</label>
@@ -107,13 +108,13 @@
     {#if passwordError}<p id="password-error" class="field-error" role="alert">
         {passwordError}
       </p>{/if}
-    <button class="button button-primary" type="submit" disabled={saving}
-      >{saving
+    <button class="button button-primary" type="submit" disabled={saving}>
+      {saving
         ? 'Saving…'
         : enrollmentNeeded
           ? 'Add local password'
-          : 'Change password'}</button
-    >
+          : 'Change password'}
+    </button>
     <p class="security-note">
       This change revokes every previous session and rotates this browser to a
       new session.

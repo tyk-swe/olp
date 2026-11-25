@@ -235,8 +235,10 @@
     <button
       class="text-button"
       type="button"
-      onclick={() => contracts.refetch()}>Retry</button
+      onclick={() => contracts.refetch()}
     >
+      Retry
+    </button>
   {:else if !contracts.data?.length}<p>
       The server has not published selectable resource lifecycle actions.
     </p>
@@ -244,31 +246,31 @@
     <form onsubmit={run}>
       <fieldset disabled={busy}>
         <div class="resource-fields">
-          <label
-            >Resource family<select
+          <label>
+            Resource family<select
               bind:value={operation}
               onchange={selectEndpoint}
             >
-              {#each operations as value (value)}<option {value}
-                  >{value.replaceAll('_', ' ')}</option
-                >{/each}
-            </select></label
-          >
-          <label
-            >Action<select bind:value={endpointKey} onchange={selectEndpoint}>
-              {#each available as item (key(item))}<option value={key(item)}
-                  >{item.action} · {item.kind.replaceAll('_', ' ')} ({item.surface})</option
-                >{/each}
-            </select></label
-          >
-          <label
-            >Inference API key<input
+              {#each operations as value (value)}<option {value}>
+                  {value.replaceAll('_', ' ')}
+                </option>{/each}
+            </select>
+          </label>
+          <label>
+            Action<select bind:value={endpointKey} onchange={selectEndpoint}>
+              {#each available as item (key(item))}<option value={key(item)}>
+                  {item.action} · {item.kind.replaceAll('_', ' ')} ({item.surface})
+                </option>{/each}
+            </select>
+          </label>
+          <label>
+            Inference API key<input
               type="password"
               autocomplete="off"
               bind:value={apiKey}
               required
-            /></label
-          >
+            />
+          </label>
         </div>
         {#if endpoint}
           <NativeResourceFields
@@ -301,8 +303,10 @@
           <button
             class="button button-secondary"
             type="button"
-            onclick={() => controller?.abort()}>Stop waiting</button
+            onclick={() => controller?.abort()}
           >
+            Stop waiting
+          </button>
         </div>{/if}
     </form>
   {/if}
@@ -312,8 +316,9 @@
       class="button button-secondary"
       href={downloadUrl}
       download={downloadName}
-      >Download file ({downloadBytes.toLocaleString()} bytes)</a
-    >{/if}
+    >
+      Download file ({downloadBytes.toLocaleString()} bytes)
+    </a>{/if}
   {#if result}<pre aria-label="Native resource result">{result}</pre>{/if}
 </section>
 

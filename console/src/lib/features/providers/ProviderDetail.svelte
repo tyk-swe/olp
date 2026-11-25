@@ -66,8 +66,9 @@
     {#if canManage && snapshot.data?.provider}<a
         class="button button-secondary"
         href={`${resolve('providers/new')}?copy=${snapshot.data.provider.id}`}
-        >Duplicate</a
-      >{/if}
+      >
+        Duplicate
+      </a>{/if}
   {/snippet}
 </PageHeader>
 <Tabs
@@ -84,8 +85,10 @@
       class="button button-secondary"
       type="button"
       disabled={Boolean(busy)}
-      onclick={editor.retryRefresh}>Retry refresh</button
+      onclick={editor.retryRefresh}
     >
+      Retry refresh
+    </button>
   </div>
 {/if}
 
@@ -113,8 +116,10 @@
     unavailable until a retry succeeds. <button
       class="button button-secondary"
       type="button"
-      onclick={() => providerKinds.refetch()}>Retry</button
+      onclick={() => providerKinds.refetch()}
     >
+      Retry
+    </button>
   </div>
 {/if}
 {#if snapshot.isError && snapshot.data?.provider && !editorView.refreshError}
@@ -124,8 +129,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => snapshot.refetch()}>Retry</button
+      onclick={() => snapshot.refetch()}
     >
+      Retry
+    </button>
   </div>
 {/if}
 
@@ -137,8 +144,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => snapshot.refetch()}>Retry</button
+      onclick={() => snapshot.refetch()}
     >
+      Retry
+    </button>
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
@@ -150,11 +159,11 @@
         class="pending-banner"
         role="status"
       >
-        <strong>Revision {current.active_revision} remains live.</strong><span
-          >Draft configuration and the draft-selected credential are not serving
+        <strong>Revision {current.active_revision} remains live.</strong><span>
+          Draft configuration and the draft-selected credential are not serving
           traffic. Test, certify, and activate to replace the runtime revision
-          atomically.</span
-        >
+          atomically.
+        </span>
       </div>{/if}
     {#if view === 'settings'}
       <div class="detail-grid">

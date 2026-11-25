@@ -98,9 +98,9 @@
         onchange={(event) => selectMember(event.currentTarget.value)}
       >
         <option value="">My sessions</option>
-        {#each users.data ?? [] as user (user.id)}<option value={user.id}
-            >{user.display_name}</option
-          >{/each}
+        {#each users.data ?? [] as user (user.id)}<option value={user.id}>
+            {user.display_name}
+          </option>{/each}
       </select>
     </label>
   {/if}
@@ -112,43 +112,44 @@
   emptyWhen={!sessions.data?.items.length && pagination.history.length === 0}
 >
   {#snippet empty()}
-    <EmptyState title="No active sessions"
-      >Nobody is signed in that matches this view.</EmptyState
-    >
+    <EmptyState title="No active sessions">
+      Nobody is signed in that matches this view.
+    </EmptyState>
   {/snippet}
   <ScrollTable label="Sessions">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th>Browser / device</th><th>Status</th><th>Created</th><th
-            >Last session verification</th
-          ><th>Expires</th><th><span class="sr-only">Actions</span></th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th>Browser / device</th><th>Status</th><th>Created</th><th>
+            Last session verification
+          </th><th>Expires</th><th><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
       <tbody>
         {#each sessions.data?.items ?? [] as session (session.id)}
           <tr>
-            <td>{session.browser_hint || 'Unknown browser'}</td><td
-              ><span class:accent={session.current} class="badge"
-                >{session.current ? 'current' : 'active'}</span
-              ></td
-            >
-            <td>{formatDate(session.created_at)}</td><td
-              >{formatDate(session.last_seen_at)}</td
-            ><td>{formatDate(session.expires_at)}</td>
-            <td
-              >{#if canManage || session.current}<button
+            <td>{session.browser_hint || 'Unknown browser'}</td><td>
+              <span class:accent={session.current} class="badge">
+                {session.current ? 'current' : 'active'}
+              </span>
+            </td>
+            <td>{formatDate(session.created_at)}</td><td>
+              {formatDate(session.last_seen_at)}
+            </td><td>{formatDate(session.expires_at)}</td>
+            <td>
+              {#if canManage || session.current}<button
                   class="button button-secondary button-danger"
                   type="button"
                   onclick={() => removeSession(session.id, session.current)}
                   disabled={revoke.busy || exit.busy}
-                  >{revoke.key === session.id || exit.key === session.id
+                >
+                  {revoke.key === session.id || exit.key === session.id
                     ? 'Revoking…'
                     : session.current
                       ? 'Sign out'
-                      : 'Revoke'}</button
-                >{/if}</td
-            >
+                      : 'Revoke'}
+                </button>{/if}
+            </td>
           </tr>
         {/each}
       </tbody>

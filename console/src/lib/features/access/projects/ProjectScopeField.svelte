@@ -47,29 +47,35 @@
 
 <div class="form-field project-scope">
   <label for={id}>Project</label>
-  {#if memberships.isPending}<span class="inline-status" role="status"
-      >Loading projects…</span
-    >{:else if memberships.isError}<span class="field-error" role="alert"
-      >Projects are unavailable.
+  {#if memberships.isPending}<span class="inline-status" role="status">
+      Loading projects…
+    </span>{:else if memberships.isError}<span class="field-error" role="alert">
+      Projects are unavailable.
       <button
         class="text-button"
         type="button"
-        onclick={() => memberships.refetch()}>Retry</button
-      ></span
-    >{:else}<select
+        onclick={() => memberships.refetch()}
+      >
+        Retry
+      </button>
+    </span>{:else}<select
       {id}
       bind:value
       {disabled}
       required={!offerUnassigned}
       aria-label="Project"
-      >{#if offerUnassigned}<option value="">Installation-wide</option
-        >{/if}{#each writable as membership (membership.id)}<option
-          value={membership.id}>{membership.name}</option
-        >{/each}</select
-    >{#if !offerUnassigned && !writable.length}<small
-        >{#if globalScope}No project exists yet, and installation-wide resources
+    >
+      {#if offerUnassigned}<option value="">
+          Installation-wide
+        </option>{/if}{#each writable as membership (membership.id)}<option
+          value={membership.id}
+        >
+          {membership.name}
+        </option>{/each}
+    </select>{#if !offerUnassigned && !writable.length}<small>
+        {#if globalScope}No project exists yet, and installation-wide resources
           of this kind need an operator or owner.{:else}Your project memberships
           are read-only. A project manager membership is required to create
-          resources.{/if}</small
-      >{/if}{/if}
+          resources.{/if}
+      </small>{/if}{/if}
 </div>

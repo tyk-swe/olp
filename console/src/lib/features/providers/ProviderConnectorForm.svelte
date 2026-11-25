@@ -117,91 +117,90 @@
           {#each selectedSpec.presets as preset (preset.id)}
             <option value={preset.id}>{preset.label}</option>
           {/each}
-        </select><small
-          >Presets fill reviewed connector values. Custom endpoint preserves the
-          fully manual path.</small
-        >
+        </select><small>
+          Presets fill reviewed connector values. Custom endpoint preserves the
+          fully manual path.
+        </small>
       </div>{/if}
     {#if selectedVendor}<div class="vendor-note full" aria-live="polite">
         <strong>{selectedVendor.name}</strong>
         {#if selectedPreset}<span>{selectedPreset.description}</span>{/if}
         {#if selectedVendor.endpoint}<code>{selectedVendor.endpoint}</code>{/if}
-        {#if selectedPreset?.placeholder}<span
-            >The endpoint is a placeholder: replace it with your server's
-            address, and allow a private address in the egress policy.</span
-          >{/if}
-        {#if selectedPreset?.profile_id}<span
-            >Serves strict routes through the {selectedPreset.profile_id} profile,
-            which the vendor's reviewed contract matches exactly.</span
-          >{/if}
-        <span
-          >Operations: {selectedVendor.operations.map(stateLabel).join(', ')}.
+        {#if selectedPreset?.placeholder}<span>
+            The endpoint is a placeholder: replace it with your server's
+            address, and allow a private address in the egress policy.
+          </span>{/if}
+        {#if selectedPreset?.profile_id}<span>
+            Serves strict routes through the {selectedPreset.profile_id} profile,
+            which the vendor's reviewed contract matches exactly.
+          </span>{/if}
+        <span>
+          Operations: {selectedVendor.operations.map(stateLabel).join(', ')}.
           Reviewed parameters: {selectedVendor.parameters
             .map(stateLabel)
-            .join(', ')}.</span
-        >
-        <span
-          >{selectedVendor.discovery
+            .join(', ')}.
+        </span>
+        <span>
+          {selectedVendor.discovery
             ? 'Upstream model discovery is available once the connection is tested.'
-            : 'This vendor publishes no model list, so models are declared by hand and a probe model is required.'}</span
-        >
-        <span
-          >{#if selectedPreset}Maintained by {selectedPreset.maintainer}.
+            : 'This vendor publishes no model list, so models are declared by hand and a probe model is required.'}
+        </span>
+        <span>
+          {#if selectedPreset}Maintained by {selectedPreset.maintainer}.
           {/if}Verified against
           <a
             href={selectedPreset?.documentation_url ??
               selectedVendor.documentation_url}
             target="_blank"
             rel="noreferrer noopener"
-            >{selectedPreset?.documentation_label ??
-              `${selectedVendor.name} documentation`}</a
-          >.</span
-        >
+          >
+            {selectedPreset?.documentation_label ??
+              `${selectedVendor.name} documentation`}
+          </a>.
+        </span>
       </div>{/if}
     <div class="form-field">
-      <label for="initial-model"
-        >{seedModelRequired
-          ? probePrompt.label
-          : 'Seed model (optional)'}</label
-      ><input
+      <label for="initial-model">
+        {seedModelRequired ? probePrompt.label : 'Seed model (optional)'}
+      </label><input
         id="initial-model"
         aria-describedby="initial-model-help"
         autocomplete="off"
         bind:value={draft.model}
         placeholder={seedModelRequired ? probePrompt.placeholder : 'gpt-5.4'}
         required={seedModelRequired}
-      /><small id="initial-model-help"
-        >{plugin && seedModelRequired
+      /><small id="initial-model-help">
+        {plugin && seedModelRequired
           ? 'This plugin profile declares no model discovery: the connection test certifies this declared model.'
           : seedModelRequired
             ? 'This provider needs an explicit model to test credentials.'
-            : 'Used for the initial connector probe; upstream discovery follows.'}</small
-      >
+            : 'Used for the initial connector probe; upstream discovery follows.'}
+      </small>
     </div>
-    {#if draft.authMode === 'headers'}<label class="form-field full"
-        >Credential header names<input
+    {#if draft.authMode === 'headers'}<label class="form-field full">
+        Credential header names<input
           bind:value={draft.credentialHeaders}
           placeholder="authorization, x-account-id"
-        /><small
-          >Supply a JSON object with these names and their secret values in
-          Credential.</small
-        ></label
-      >{/if}
+        /><small>
+          Supply a JSON object with these names and their secret values in
+          Credential.
+        </small>
+      </label>{/if}
     {#if grantRequired}<div class="identity-note full">
-        <strong>Grant enrollment</strong><span
-          >This profile authenticates with a grant instead of a pasted
+        <strong>Grant enrollment</strong><span>
+          This profile authenticates with a grant instead of a pasted
           credential. {signInNext
             ? 'After saving, sign in to the upstream account as the plugin directs: paste back what its authorization page returns, or approve its device code.'
             : 'The draft holds a grant from an earlier sign-in.'} OLP keeps the grant
-          encrypted; the console never sees it.</span
-        >
+          encrypted; the console never sees it.
+        </span>
       </div>{:else if credentialRequired}<div class="form-field full">
-        <label
-          ><input
+        <label>
+          <input
             type="checkbox"
             bind:checked={draft.useExternalCredential}
-          />Use an external credential version</label
-        >
+          />Use an external credential version
+        </label>
         {#if draft.useExternalCredential}<ExternalReferenceEditor
             bind:value={draft.externalCredentialReference}
           />{:else}
@@ -212,18 +211,18 @@
             autocomplete="new-password"
             bind:value={draft.credential}
             required
-          />{/if}<small id="credential-help"
-          >Sent once to this installation; never saved by the console or
-          returned by the API.{#if plugin}
+          />{/if}<small id="credential-help">
+          Sent once to this installation; never saved by the console or returned
+          by the API.{#if plugin}
             The plugin's hosting adaptation places it in the headers and query
-            parameters the profile declares.{/if}</small
-        >
+            parameters the profile declares.{/if}
+        </small>
       </div>{:else}<div class="identity-note full">
-        <strong>No stored credential</strong><span
-          >{draft.authMode === 'none'
+        <strong>No stored credential</strong><span>
+          {draft.authMode === 'none'
             ? 'No authentication will be sent to this endpoint.'
-            : 'This provider uses the workload identity available to the OLP process.'}</span
-        >
+            : 'This provider uses the workload identity available to the OLP process.'}
+        </span>
       </div>{/if}
   </div>
   <ProviderProfileEditor
@@ -233,16 +232,20 @@
     onChange={() => {}}
   />
   <div class="form-actions">
-    <button class="button button-primary" type="submit" disabled={Boolean(busy)}
-      >{busy === 'create'
+    <button
+      class="button button-primary"
+      type="submit"
+      disabled={Boolean(busy)}
+    >
+      {busy === 'create'
         ? signInNext
           ? 'Saving…'
           : 'Saving and testing…'
         : signInNext
           ? 'Save and sign in upstream'
           : 'Save and test connection'}
-      <NavIcon name="arrow" /></button
-    >
+      <NavIcon name="arrow" />
+    </button>
   </div>
 </form>
 

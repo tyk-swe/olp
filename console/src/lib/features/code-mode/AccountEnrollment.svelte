@@ -182,8 +182,10 @@
         onclick={() => {
           void provider.refetch();
           void kinds.refetch();
-        }}>Retry</button
+        }}
       >
+        Retry
+      </button>
     </p>
   {:else if grant.enrollment}
     <GrantEnrollmentPanel
@@ -199,8 +201,10 @@
         class="button button-secondary"
         type="button"
         disabled={!!grant.busy || !allowed}
-        onclick={() => grant.poll()}>Check authorization again</button
-      >{/if}
+        onclick={() => grant.poll()}
+      >
+        Check authorization again
+      </button>{/if}
   {:else}
     <button
       class="button button-secondary"
@@ -219,9 +223,9 @@
       {grant.busy ? 'Starting…' : 'Enroll subscription account'}
     </button>
     {#if supported && importProfile}
-      <label for="subscription-credential-import"
-        >Import {importProfile.name} credentials once</label
-      >
+      <label for="subscription-credential-import">
+        Import {importProfile.name} credentials once
+      </label>
       <p>
         {#if importProfile.id === 'antigravity-subscription'}
           Paste migration JSON with type "antigravity", access_token,

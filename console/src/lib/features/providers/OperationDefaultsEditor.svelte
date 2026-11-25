@@ -60,9 +60,9 @@
       <summary>{name} defaults</summary>
       {#if nativeObject(settings)}
         <p class="dialect">
-          Dialect: <code
-            >{draft.text([...path, name, 'dialect']) || 'not configured'}</code
-          >
+          Dialect: <code>
+            {draft.text([...path, name, 'dialect']) || 'not configured'}
+          </code>
         </p>
         {#if draft.text([...path, name, 'dialect']) !== dialect}
           <p class="inline-problem" role="alert">
@@ -76,8 +76,10 @@
               onclick={() => {
                 draft.set([...path, name, 'dialect'], dialect);
                 onChange();
-              }}>Use selected operation dialect</button
-            >{/if}
+              }}
+            >
+              Use selected operation dialect
+            </button>{/if}
         {/if}
         <NativeMapEditor
           {draft}
@@ -107,8 +109,10 @@
         onclick={() => {
           draft.set([...path, name], undefined);
           onChange();
-        }}>Remove {name} defaults</button
+        }}
       >
+        Remove {name} defaults
+      </button>
     </details>
   {/each}
   <div class="add-operation">
@@ -117,10 +121,13 @@
         id={`${idPrefix}-operation`}
         bind:value={operation}
         disabled={disabled || !available.length}
-        ><option value="">Choose an operation</option
-        >{#each available as name (name)}<option value={name}>{name}</option
-          >{/each}</select
       >
+        <option value="">
+          Choose an operation
+        </option>{#each available as name (name)}<option value={name}>
+            {name}
+          </option>{/each}
+      </select>
     </div>
     <button
       class="button button-secondary"
@@ -129,8 +136,9 @@
       disabled={disabled ||
         !operation ||
         (value !== undefined && !nativeObject(value))}
-      >Add operation defaults</button
     >
+      Add operation defaults
+    </button>
   </div>
 </div>
 

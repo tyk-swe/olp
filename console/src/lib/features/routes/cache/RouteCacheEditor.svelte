@@ -106,9 +106,9 @@
         value={editor.behavior.cache?.mode ?? 'off'}
         onchange={(event) => setMode(event.currentTarget.value)}
       >
-        <option value="off">Disabled</option><option value="exact"
-          >Exact match</option
-        ><option value="semantic">Semantic match</option>
+        <option value="off">Disabled</option><option value="exact">
+          Exact match
+        </option><option value="semantic">Semantic match</option>
       </select>
     </div>
     {#if editor.behavior.cache}
@@ -118,10 +118,11 @@
             id="cache-scope"
             bind:value={editor.behavior.cache.scope}
             onchange={editor.touch}
-            ><option value="key">This API key</option><option value="project"
-              >Keys in this project</option
-            ><option value="route">Keys using this route</option></select
           >
+            <option value="key">This API key</option><option value="project">
+              Keys in this project
+            </option><option value="route">Keys using this route</option>
+          </select>
         </div>
         <div class="form-field">
           <label for="cache-ttl">Lifetime (seconds)</label><input
@@ -148,10 +149,13 @@
             id="cache-streaming"
             bind:value={editor.behavior.cache.streaming}
             onchange={editor.touch}
-            ><option value="replay">Replay original events</option><option
-              value="bypass">Bypass cache</option
-            ></select
           >
+            <option value="replay">Replay original events</option><option
+              value="bypass"
+            >
+              Bypass cache
+            </option>
+          </select>
         </div>
       </div>
       {#if editor.behavior.cache.scope !== 'key'}<p class="muted">
@@ -159,24 +163,24 @@
           authorized API keys in the same project.
         </p>{/if}
       <p>Hits count against request limits.</p>
-      <label
-        ><input
+      <label>
+        <input
           type="checkbox"
           checked={editor.behavior.cache.count_hits_against?.includes('tokens')}
           onchange={(event) =>
             toggleCount('tokens', event.currentTarget.checked)}
-        /> Also count cached tokens against token limits</label
-      >
-      <label
-        ><input
+        /> Also count cached tokens against token limits
+      </label>
+      <label>
+        <input
           type="checkbox"
           checked={editor.behavior.cache.count_hits_against?.includes(
             'budgets'
           )}
           onchange={(event) =>
             toggleCount('budgets', event.currentTarget.checked)}
-        /> Also debit budgets at the current equivalent cost</label
-      >
+        /> Also debit budgets at the current equivalent cost
+      </label>
       {#if editor.behavior.cache.mode === 'semantic'}
         <p class="muted">
           Semantic matching may reuse a response to a similar question. A
@@ -212,28 +216,28 @@
             />
           </div>
         </div>
-        <label
-          ><input
+        <label>
+          <input
             type="checkbox"
             bind:checked={editor.behavior.cache.allow_unsealed_vectors}
             onchange={editor.touch}
           /> I acknowledge that content-derived vectors are stored unencrypted in
-          the search index.</label
-        >
-        <label
-          ><input
+          the search index.
+        </label>
+        <label>
+          <input
             type="checkbox"
             bind:checked={editor.behavior.cache.allow_multiturn}
             onchange={editor.touch}
-          /> Allow matching the final question within an otherwise identical conversation</label
-        >
+          /> Allow matching the final question within an otherwise identical conversation
+        </label>
       {/if}
     {/if}
   </fieldset>
   <fieldset disabled={locked}>
     <legend>Provider prompt caching</legend>
-    <label
-      ><input
+    <label>
+      <input
         type="checkbox"
         checked={Boolean(editor.behavior.prompt_cache)}
         onchange={(event) => {
@@ -246,8 +250,8 @@
             : null;
           editor.touch();
         }}
-      /> Insert omitted provider cache controls</label
-    >
+      /> Insert omitted provider cache controls
+    </label>
     {#if editor.behavior.prompt_cache}
       <p class="muted">
         Available on transformed routes. Existing caller controls are preserved.
@@ -258,26 +262,29 @@
             id="prompt-cache-ttl"
             bind:value={editor.behavior.prompt_cache.ttl}
             onchange={editor.touch}
-            ><option value="5m">5 minutes</option><option value="1h"
-              >1 hour</option
-            ></select
           >
+            <option value="5m">5 minutes</option><option value="1h">
+              1 hour
+            </option>
+          </select>
         </div>
         <div class="form-field">
           <label for="prompt-cache-source">OpenAI cache identity</label><select
             id="prompt-cache-source"
             bind:value={editor.behavior.prompt_cache.key_source}
             onchange={editor.touch}
-            ><option value="key">API key</option><option value="session"
-              >Session label within the API key</option
-            ></select
           >
+            <option value="key">API key</option><option value="session">
+              Session label within the API key
+            </option>
+          </select>
         </div>
         {#if editor.behavior.prompt_cache.key_source === 'session'}<div
             class="form-field"
           >
-            <label for="prompt-cache-session">Session attribution label</label
-            ><input
+            <label for="prompt-cache-session">
+              Session attribution label
+            </label><input
               id="prompt-cache-session"
               bind:value={editor.behavior.prompt_cache.session_label}
               oninput={editor.touch}
@@ -291,13 +298,17 @@
       type="button"
       class="button button-secondary"
       disabled={refreshing || purgeAction.busy}
-      onclick={refresh}>Refresh cache statistics</button
-    ><button
+      onclick={refresh}
+    >
+      Refresh cache statistics
+    </button><button
       type="button"
       class="button button-secondary"
       disabled={locked || purgeAction.busy || editor.isNew}
-      onclick={purge}>Purge cached responses</button
+      onclick={purge}
     >
+      Purge cached responses
+    </button>
   </div>
   {#if status}<p role="status">
       Last 30 days: {status.hits} hits · {status.misses} misses · {status.bypasses}

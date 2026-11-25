@@ -101,18 +101,18 @@
       </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
     <form onsubmit={save}>
       <fieldset disabled={saml.busy || !editable}>
-        <legend>Identity provider</legend><label class="check"
-          ><input type="checkbox" bind:checked={enabled} />Enable SAML sign-in</label
-        >
+        <legend>Identity provider</legend><label class="check">
+          <input type="checkbox" bind:checked={enabled} />Enable SAML sign-in
+        </label>
         <div class="form-field">
           <label for="saml-metadata-url">Metadata URL</label><input
             id="saml-metadata-url"
             type="url"
             bind:value={url}
-          /><small
-            >Fetched through identity egress. Review the imported XML before
-            saving.</small
-          >
+          /><small>
+            Fetched through identity egress. Review the imported XML before
+            saving.
+          </small>
         </div>
         <button
           class="button button-secondary"
@@ -128,11 +128,14 @@
               },
               { fallback: 'SAML configuration could not be changed.' }
             );
-          }}>Import metadata</button
+          }}
         >
+          Import metadata
+        </button>
         <div class="form-field">
-          <label for="saml-metadata">Identity provider metadata XML</label
-          ><textarea
+          <label for="saml-metadata">
+            Identity provider metadata XML
+          </label><textarea
             id="saml-metadata"
             bind:value={metadata}
             rows="8"
@@ -164,41 +167,49 @@
           <label for="saml-default-role">Default role</label><select
             id="saml-default-role"
             bind:value={defaultRole}
-            ><option value="">Deny unless explicitly mapped</option
-            >{#each roles as role (role)}<option value={role}>{role}</option
-              >{/each}</select
           >
+            <option value="">
+              Deny unless explicitly mapped
+            </option>{#each roles as role (role)}<option value={role}>
+                {role}
+              </option>{/each}
+          </select>
         </div>
         <div class="form-field">
-          <label for="saml-email-mappings">Email role mappings (JSON)</label
-          ><textarea
+          <label for="saml-email-mappings">
+            Email role mappings (JSON)
+          </label><textarea
             id="saml-email-mappings"
             bind:value={emailMappings}
             rows="4"></textarea>
         </div>
         <div class="form-field">
-          <label for="saml-group-mappings">Group role mappings (JSON)</label
-          ><textarea
+          <label for="saml-group-mappings">
+            Group role mappings (JSON)
+          </label><textarea
             id="saml-group-mappings"
             bind:value={groupMappings}
-            rows="4"></textarea><small
-            >Use arrays of objects with claim_value and role. Exact email
+            rows="4"></textarea><small>
+            Use arrays of objects with claim_value and role. Exact email
             mappings take precedence; the highest matching group role wins.
-            Existing emails require explicit account linking.</small
-          >
+            Existing emails require explicit account linking.
+          </small>
         </div>
-        {#if query.data}<label class="check"
-            ><input type="checkbox" bind:checked={rotate} />Replace
-            service-provider signing key</label
-          ><small
-            >Coordinate the new public certificate with your identity provider.
-            Previous pending flows and saved sign-in evidence become unusable.</small
-          >{/if}
+        {#if query.data}<label class="check">
+            <input type="checkbox" bind:checked={rotate} />Replace
+            service-provider signing key
+          </label><small>
+            Coordinate the new public certificate with your identity provider.
+            Previous pending flows and saved sign-in evidence become unusable.
+          </small>{/if}
       </fieldset>
       <div class="actions">
-        {#if editable}<button class="button button-primary" disabled={saml.busy}
-            >Save SAML configuration</button
-          >{/if}<button
+        {#if editable}<button
+            class="button button-primary"
+            disabled={saml.busy}
+          >
+            Save SAML configuration
+          </button>{/if}<button
           type="button"
           class="button button-secondary"
           disabled={saml.busy}
@@ -211,8 +222,10 @@
                 fallback: 'SAML configuration could not be changed.'
               }
             );
-          }}>Reload saved configuration</button
+          }}
         >
+          Reload saved configuration
+        </button>
       </div>
     </form>
     {#if query.data}<h3>Service provider</h3>
@@ -228,11 +241,14 @@
         class="button button-secondary"
         href="/api/v1/saml/metadata"
         target="_blank"
-        rel="noreferrer">Open service-provider metadata</a
+        rel="noreferrer"
       >
+        Open service-provider metadata
+      </a>
       <div class="form-field">
-        <label for="saml-certificate">Public signing certificate</label
-        ><textarea
+        <label for="saml-certificate">
+          Public signing certificate
+        </label><textarea
           id="saml-certificate"
           readonly
           value={query.data.signing_certificate}

@@ -111,8 +111,10 @@
       class="button button-secondary"
       type="button"
       onclick={() => resources.refetch()}
-      disabled={resources.isFetching}>Refresh</button
+      disabled={resources.isFetching}
     >
+      Refresh
+    </button>
   {/snippet}
 </PageHeader>
 <AgentResources />
@@ -129,36 +131,43 @@
   aria-label="Provider resource filters"
   onsubmit={apply}
 >
-  <label
-    >Kind <select bind:value={kind}
-      ><option value="">All kinds</option>{#each kinds as value (value)}<option
-          {value}>{value}</option
-        >{/each}</select
-    ></label
-  >
+  <label>
+    Kind <select bind:value={kind}>
+      <option value="">All kinds</option>{#each kinds as value (value)}<option
+          {value}
+        >
+          {value}
+        </option>{/each}
+    </select>
+  </label>
   <label>Route <input bind:value={route} placeholder="All routes" /></label>
-  <label
-    >State <input bind:value={resourceState} placeholder="All states" /></label
-  >
-  <label
-    >API key ID <input
+  <label>
+    State <input bind:value={resourceState} placeholder="All states" />
+  </label>
+  <label>
+    API key ID <input
       bind:value={apiKeyId}
       class="mono"
       placeholder="All keys"
-    /></label
-  >
-  <label
-    >Provider ID <input
+    />
+  </label>
+  <label>
+    Provider ID <input
       bind:value={providerId}
       class="mono"
       placeholder="All providers"
-    /></label
-  >
+    />
+  </label>
   <div class="filter-actions">
-    <button class="button button-primary" type="submit">Apply filters</button
-    ><button class="button button-secondary" type="button" onclick={clear}
-      >Clear</button
+    <button class="button button-primary" type="submit">
+      Apply filters
+    </button><button
+      class="button button-secondary"
+      type="button"
+      onclick={clear}
     >
+      Clear
+    </button>
   </div>
 </form>
 {#if resources.isPending}<div class="loading-state" role="status">
@@ -169,8 +178,10 @@
     <button
       class="text-button"
       type="button"
-      onclick={() => resources.refetch()}>Retry</button
+      onclick={() => resources.refetch()}
     >
+      Retry
+    </button>
   </div>
 {:else if resources.data?.items.length === 0}<section class="card empty-state">
     <p>No provider resources match these filters.</p>
@@ -178,37 +189,44 @@
 {:else}
   <ScrollTable label="Provider resource results">
     <table class="data-table">
-      <caption class="sr-only">Provider resource mappings</caption><thead
-        ><tr
-          ><th scope="col">ID</th><th scope="col">Kind</th><th scope="col"
-            >Route</th
-          ><th scope="col">Provider</th><th scope="col">API key</th><th
-            scope="col">State</th
-          ><th scope="col">Expires</th><th scope="col">Updated</th></tr
-        ></thead
-      ><tbody
-        >{#each resources.data?.items ?? [] as item (item.id)}<tr
-            ><td data-label="ID"><code>{item.id}</code></td><td
-              data-label="Kind">{item.kind}</td
-            ><td data-label="Route">{item.route}</td><td data-label="Provider"
-              >{item.provider_name}<small>{item.upstream_model}</small></td
-            ><td data-label="API key"
-              >{item.api_key_name}<small class="mono">{item.api_key_id}</small
-              ></td
-            ><td data-label="State"
-              >{item.state}
-              {#if item.retained_settlement}<small
-                  >Settlement {item.retained_settlement.state}{item
+      <caption class="sr-only">Provider resource mappings</caption><thead>
+        <tr>
+          <th scope="col">ID</th><th scope="col">Kind</th><th scope="col">
+            Route
+          </th><th scope="col">Provider</th><th scope="col">API key</th><th
+            scope="col"
+          >
+            State
+          </th><th scope="col">Expires</th><th scope="col">Updated</th>
+        </tr>
+      </thead><tbody>
+        {#each resources.data?.items ?? [] as item (item.id)}<tr>
+            <td data-label="ID"><code>{item.id}</code></td><td
+              data-label="Kind"
+            >
+              {item.kind}
+            </td><td data-label="Route">{item.route}</td><td
+              data-label="Provider"
+            >
+              {item.provider_name}<small>{item.upstream_model}</small>
+            </td><td data-label="API key">
+              {item.api_key_name}<small class="mono">{item.api_key_id}</small>
+            </td><td data-label="State">
+              {item.state}
+              {#if item.retained_settlement}<small>
+                  Settlement {item.retained_settlement.state}{item
                     .retained_settlement.missing_evidence
                     ? ' · usage evidence pending'
-                    : ''}</small
-                ><button
+                    : ''}
+                </small><button
                   class="button button-secondary"
                   type="button"
                   onclick={() => {
                     selectedId = item.id;
-                  }}>Settlement controls</button
-                >{/if}
+                  }}
+                >
+                  Settlement controls
+                </button>{/if}
               {#if item.settlement}
                 <small>
                   Settlement {item.settlement.state} ·
@@ -216,12 +234,12 @@
                     .expected_results ?? '—'} settled · {item.settlement
                     .uncertain_results} uncertain
                 </small>
-              {/if}</td
-            ><td data-label="Expires"
-              >{item.expires_at ? formatDate(item.expires_at) : '—'}</td
-            ><td data-label="Updated">{formatDate(item.updated_at)}</td></tr
-          >{/each}</tbody
-      >
+              {/if}
+            </td><td data-label="Expires">
+              {item.expires_at ? formatDate(item.expires_at) : '—'}
+            </td><td data-label="Updated">{formatDate(item.updated_at)}</td>
+          </tr>{/each}
+      </tbody>
     </table>
   </ScrollTable>
   <CursorPagination

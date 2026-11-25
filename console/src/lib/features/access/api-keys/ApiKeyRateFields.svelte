@@ -38,9 +38,9 @@
         disabled={!canManage}
         aria-invalid={errors.requestsPerMinute ? 'true' : undefined}
         aria-describedby={errors.requestsPerMinute ? 'rpm-error' : undefined}
-      />{#if errors.requestsPerMinute}<small class="field-error" id="rpm-error"
-          >{errors.requestsPerMinute}</small
-        >{/if}
+      />{#if errors.requestsPerMinute}<small class="field-error" id="rpm-error">
+          {errors.requestsPerMinute}
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="tpm">Tokens per minute</label><input
@@ -53,9 +53,9 @@
         disabled={!canManage}
         aria-invalid={errors.tokensPerMinute ? 'true' : undefined}
         aria-describedby={errors.tokensPerMinute ? 'tpm-error' : undefined}
-      />{#if errors.tokensPerMinute}<small class="field-error" id="tpm-error"
-          >{errors.tokensPerMinute}</small
-        >{/if}
+      />{#if errors.tokensPerMinute}<small class="field-error" id="tpm-error">
+          {errors.tokensPerMinute}
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="concurrency">Concurrent requests</label><input
@@ -72,8 +72,10 @@
           : undefined}
       />{#if errors.maxConcurrency}<small
           class="field-error"
-          id="concurrency-error">{errors.maxConcurrency}</small
-        >{/if}
+          id="concurrency-error"
+        >
+          {errors.maxConcurrency}
+        </small>{/if}
     </div>
   </div>
   <Advanced
@@ -99,14 +101,14 @@
             {/each}
           </select>
 
-          <small id="priority-help" class="section-help"
-            >The class a saturated gateway queues this key's requests in.</small
-          >
+          <small id="priority-help" class="section-help">
+            The class a saturated gateway queues this key's requests in.
+          </small>
 
           {#if errors.priority}
-            <small class="field-error" id="priority-error"
-              >{errors.priority}</small
-            >
+            <small class="field-error" id="priority-error">
+              {errors.priority}
+            </small>
           {/if}
         </div>
         <div class="form-field">
@@ -123,9 +125,9 @@
             {/each}
           </select>
 
-          <small id="max-priority-help" class="section-help"
-            >Callers may ask for up to this class in the X-OLP-Routing header.</small
-          >
+          <small id="max-priority-help" class="section-help">
+            Callers may ask for up to this class in the X-OLP-Routing header.
+          </small>
         </div>
       </div>
       <RunLimits

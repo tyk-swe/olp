@@ -119,9 +119,9 @@
       </p>
     </div>
   </div>
-  {#if !canEdit}<ReadOnlyNote
-      >Your role can view discounts but not publish them.</ReadOnlyNote
-    >{/if}
+  {#if !canEdit}<ReadOnlyNote>
+      Your role can view discounts but not publish them.
+    </ReadOnlyNote>{/if}
   {#if create.error}<p class="inline-problem" role="alert">
       {create.error}
     </p>{/if}
@@ -135,21 +135,28 @@
           disabled={!canEdit ||
             providerKinds.isPending ||
             providerKinds.isError}
-          >{#each providerKinds.data ?? [] as option (option.kind)}<option
-              value={option.kind}>{option.label}</option
-            >{/each}</select
         >
+          {#each providerKinds.data ?? [] as option (option.kind)}<option
+              value={option.kind}
+            >
+              {option.label}
+            </option>{/each}
+        </select>
       </div>
       <div class="form-field">
         <label for="discount-vendor">Vendor scope</label><select
           id="discount-vendor"
           bind:value={vendorId}
           disabled={!canEdit}
-          ><option value="">All vendors using this connector</option
-          >{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
-              value={vendor.id}>{vendor.name}</option
-            >{/each}</select
         >
+          <option value="">
+            All vendors using this connector
+          </option>{#each (providerVendors.data ?? []).filter((vendor) => vendor.connector === providerKind) as vendor (vendor.id)}<option
+              value={vendor.id}
+            >
+              {vendor.name}
+            </option>{/each}
+        </select>
       </div>
       <div class="form-field">
         <label for="discount-provider">Provider</label><EntityPicker
@@ -177,51 +184,54 @@
           type="datetime-local"
           aria-describedby="discount-effective-help"
           disabled={!canEdit}
-        /><small id="discount-effective-help"
-          >Leave blank to apply immediately.</small
-        >
+        /><small id="discount-effective-help">
+          Leave blank to apply immediately.
+        </small>
       </div>
     </div>
     <button
       class="button button-primary"
       type="submit"
       disabled={!canEdit || create.busy || !providerKind}
-      >{create.busy ? 'Publishing…' : 'Publish discount'}</button
     >
+      {create.busy ? 'Publishing…' : 'Publish discount'}
+    </button>
   </form>
   {#if discounts.isPending}<div class="loading-state" role="status">
       Loading discounts…
     </div>
   {:else if discounts.isError}<div class="inline-problem" role="alert">
       {errorMessage(discounts.error)}
-      <button class="text-button" onclick={() => discounts.refetch()}
-        >Try again</button
-      >
+      <button class="text-button" onclick={() => discounts.refetch()}>
+        Try again
+      </button>
     </div>
   {:else if (discounts.data?.items ?? []).length === 0}
-    <EmptyState title="No discounts yet"
-      >Add a discount to reflect negotiated provider pricing in cost reports.</EmptyState
-    >
+    <EmptyState title="No discounts yet">
+      Add a discount to reflect negotiated provider pricing in cost reports.
+    </EmptyState>
   {:else}
     <ScrollTable label="Discounts">
       <table class="data-table">
         <caption class="sr-only">Discounts, newest first</caption>
-        <thead
-          ><tr
-            ><th scope="col">Scope</th><th scope="col">Multiplier</th><th
-              scope="col">Effective at</th
-            ><th scope="col">Created</th></tr
-          ></thead
-        >
-        <tbody
-          >{#each discounts.data?.items ?? [] as discount (discount.id)}<tr
-              ><td>{scope(discount)}</td><td class="mono"
-                >{discount.multiplier}</td
-              ><td>{formatDate(discount.effective_at)}</td><td
-                >{formatDate(discount.created_at)}</td
-              ></tr
-            >{/each}</tbody
-        >
+        <thead>
+          <tr>
+            <th scope="col">Scope</th><th scope="col">Multiplier</th><th
+              scope="col"
+            >
+              Effective at
+            </th><th scope="col">Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each discounts.data?.items ?? [] as discount (discount.id)}<tr>
+              <td>{scope(discount)}</td><td class="mono">
+                {discount.multiplier}
+              </td><td>{formatDate(discount.effective_at)}</td><td>
+                {formatDate(discount.created_at)}
+              </td>
+            </tr>{/each}
+        </tbody>
       </table>
     </ScrollTable>
     <CursorPagination

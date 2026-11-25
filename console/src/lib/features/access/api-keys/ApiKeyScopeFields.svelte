@@ -39,9 +39,10 @@
 <section aria-labelledby="scope-heading">
   <h2 id="scope-heading">What this key can reach</h2>
   <fieldset class="checks">
-    <legend>Scopes</legend
-    >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation'], ['tools', 'Toolset access'], ['agents', 'Agent access'], ['traces_write', 'Trace ingestion'], ['delegate', 'Delegation consent']] as scope (scope[0])}<label
-        ><input
+    <legend>
+      Scopes
+    </legend>{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation'], ['tools', 'Toolset access'], ['agents', 'Agent access'], ['traces_write', 'Trace ingestion'], ['delegate', 'Delegation consent']] as scope (scope[0])}<label>
+        <input
           type="checkbox"
           checked={form.scopes.includes(scope[0])}
           disabled={!canManage}
@@ -52,8 +53,8 @@
               event.currentTarget.checked
             ))}
         />
-        {scope[1]}</label
-      >{/each}
+        {scope[1]}
+      </label>{/each}
   </fieldset>
   <fieldset class="checks routes">
     <legend>Routes</legend>
@@ -62,9 +63,9 @@
         ? 'Leave every route unchecked to allow all current and future routes.'
         : 'Leave blank to allow all current and future routes.'}
     </p>
-    {#if services.pending}<span class="inline-status" role="status"
-        >Loading routes…</span
-      >
+    {#if services.pending}<span class="inline-status" role="status">
+        Loading routes…
+      </span>
     {:else if !services.gatewayAvailable}
       <label for="allowed-routes">Route slugs (comma separated)</label>
       <input
@@ -83,19 +84,22 @@
           touch();
         }}
       />
-      <span>Save planned route restrictions. Routing is not available yet.</span
-      >
-    {:else if routes.isPending}<span class="inline-status" role="status"
-        >Loading routes…</span
-      >{:else if routes.isError}<span class="inline-problem" role="alert"
-        >Routes are unavailable, so route restrictions cannot be reviewed.
+      <span>
+        Save planned route restrictions. Routing is not available yet.
+      </span>
+    {:else if routes.isPending}<span class="inline-status" role="status">
+        Loading routes…
+      </span>{:else if routes.isError}<span class="inline-problem" role="alert">
+        Routes are unavailable, so route restrictions cannot be reviewed.
         <button
           class="text-button"
           type="button"
-          onclick={() => routes.refetch()}>Retry</button
-        ></span
-      >{:else}{#each routes.data ?? [] as route (route.id)}<label
-          ><input
+          onclick={() => routes.refetch()}
+        >
+          Retry
+        </button>
+      </span>{:else}{#each routes.data ?? [] as route (route.id)}<label>
+          <input
             type="checkbox"
             checked={form.allowedRoutes.includes(route.slug)}
             disabled={!canManage}
@@ -121,10 +125,10 @@
           id="key-toolsets"
           bind:value={form.allowedToolsets}
           disabled={!canManage}
-        /><small
-          >Comma-separated; an empty list denies all toolsets. Route groups
-          grant no tool access.</small
-        >
+        /><small>
+          Comma-separated; an empty list denies all toolsets. Route groups grant
+          no tool access.
+        </small>
       </div>
       <div class="form-field">
         <label for="key-agents">Allowed published agent UUIDs</label><input
@@ -135,14 +139,14 @@
       </div>
       <fieldset class="checks">
         <legend>Provider state</legend>
-        <label
-          ><input
+        <label>
+          <input
             type="checkbox"
             bind:checked={form.allowProviderState}
             disabled={!canManage}
           />
-          Allow provider-retained state</label
-        >
+          Allow provider-retained state
+        </label>
         <p class="section-help">
           Permits stored Responses, previous_response_id chains, and lifecycle
           access. Provider state may retain user content at the upstream
@@ -151,21 +155,21 @@
       </fieldset>
       <fieldset class="checks">
         <legend>Response metadata</legend>
-        <label
-          ><input
+        <label>
+          <input
             type="checkbox"
             bind:checked={form.forbidResponseCache}
             disabled={!canManage}
-          /> Forbid response caching for this key</label
-        >
-        <label
-          ><input
+          /> Forbid response caching for this key
+        </label>
+        <label>
+          <input
             type="checkbox"
             bind:checked={form.responseMetadata}
             disabled={!canManage}
           />
-          Add gateway metadata headers</label
-        >
+          Add gateway metadata headers
+        </label>
         <p class="section-help">
           Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and
           X-OLP-Cost to inference responses. The gateway names the serving
@@ -214,11 +218,11 @@
           placeholder="192.0.2.0/24
     2001:db8::/32"></textarea>
 
-        <small id="key-allowed-cidrs-help"
-          >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
+        <small id="key-allowed-cidrs-help">
+          One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
           address. Forwarded addresses are accepted only through configured
-          trusted proxies.</small
-        >
+          trusted proxies.
+        </small>
 
         {#if errors.allowedCIDRs}
           <p id="key-allowed-cidrs-error" class="field-error" role="alert">
@@ -233,12 +237,12 @@
           disabled={!canManage || Boolean(busy)}
           aria-describedby="key-route-groups-help"
         />
-        <small id="key-route-groups-help"
-          >Existing group names in the selected project, separated by commas.
+        <small id="key-route-groups-help">
+          Existing group names in the selected project, separated by commas.
           Explicit routes and group members are combined. Both lists empty allow
           every route in the project; an empty or missing referenced group
-          grants nothing.</small
-        >
+          grants nothing.
+        </small>
       </div>
       <div class="form-field full">
         <label for="rotation-interval">Rotation reminder interval (days)</label>
@@ -250,11 +254,11 @@
           disabled={!canManage || Boolean(busy)}
           aria-describedby="rotation-interval-help"
         />
-        <small id="rotation-interval-help"
-          >Declare 1–3650 days from creation or the last rotation. Subscribe to
+        <small id="rotation-interval-help">
+          Declare 1–3650 days from creation or the last rotation. Subscribe to
           key.expiring in Notifications to receive reminders. Secrets rotate
-          only when explicitly requested.</small
-        >
+          only when explicitly requested.
+        </small>
       </div>
       <div class="form-field full">
         <label for="key-limit-template">Limit template</label><input
@@ -262,10 +266,10 @@
           bind:value={form.limitTemplate}
           maxlength="100"
           disabled={!canManage || Boolean(busy)}
-        /><small
-          >Optional template in this key’s project. The stricter template or
-          inline limit applies. Manage templates in Project policies.</small
-        >
+        /><small>
+          Optional template in this key’s project. The stricter template or
+          inline limit applies. Manage templates in Project policies.
+        </small>
       </div>
       <NamedLimitFields
         kind="route"
@@ -283,9 +287,9 @@
           Callers may attach short machine-token labels under these keys in the
           X-OLP-Attribution header. Leave blank to reject every label.
         </p>
-        <label for="allowed-attribution-keys"
-          >Attribution keys (comma separated)</label
-        >
+        <label for="allowed-attribution-keys">
+          Attribution keys (comma separated)
+        </label>
         <input
           id="allowed-attribution-keys"
           value={form.allowedAttributionKeys.join(', ')}

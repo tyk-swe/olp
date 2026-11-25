@@ -60,27 +60,30 @@
           <label for="aws-linked">Linked account IDs</label><textarea
             id="aws-linked"
             rows="3"
-            bind:value={form.linkedAccounts}></textarea><small
-            >One 12-digit ID per line, leave empty for all linked accounts</small
-          >
+            bind:value={form.linkedAccounts}></textarea><small>
+            One 12-digit ID per line, leave empty for all linked accounts
+          </small>
         </div>
         {#if editing}<div class="form-field">
-            <label class="inline-check"
-              ><input
+            <label class="inline-check">
+              <input
                 type="checkbox"
                 bind:checked={form.replaceCredential}
-              />Replace billing credential</label
-            >
+              />Replace billing credential
+            </label>
           </div>{/if}
         {#if !editing || form.replaceCredential}
           <div class="form-field">
             <label for="aws-auth">Authentication</label><select
               id="aws-auth"
               bind:value={form.awsAuthMode}
-              ><option value="static">Access keys</option><option
-                value="workload">Workload identity</option
-              ></select
             >
+              <option value="static">Access keys</option><option
+                value="workload"
+              >
+                Workload identity
+              </option>
+            </select>
           </div>
           {#if form.awsAuthMode === 'static'}
             <div class="form-field">
@@ -115,8 +118,12 @@
         </p>
       {:else if azure}
         <div class="form-field">
-          <label for="billing-azure-scope">Billing scope resource ID</label
-          ><input id="billing-azure-scope" bind:value={form.billingScope} />
+          <label for="billing-azure-scope">
+            Billing scope resource ID
+          </label><input
+            id="billing-azure-scope"
+            bind:value={form.billingScope}
+          />
         </div>
         <div class="form-field">
           <label for="billing-azure-export">Export name</label><input
@@ -137,26 +144,26 @@
           />
         </div>
         <div class="form-field">
-          <label for="billing-azure-prefix">Storage directory prefix</label
-          ><input id="billing-azure-prefix" bind:value={form.prefix} />
+          <label for="billing-azure-prefix">
+            Storage directory prefix
+          </label><input id="billing-azure-prefix" bind:value={form.prefix} />
         </div>
         <div class="form-field">
-          <label for="billing-azure-subscriptions">Subscription IDs</label
-          ><textarea
+          <label for="billing-azure-subscriptions">
+            Subscription IDs
+          </label><textarea
             id="billing-azure-subscriptions"
             rows="3"
-            bind:value={form.scopeText}></textarea><small
-            >One ID per line. Empty includes all subscriptions in the export.</small
-          >
+            bind:value={form.scopeText}></textarea><small>
+            One ID per line. Empty includes all subscriptions in the export.
+          </small>
         </div>
         <div class="form-field">
           <label for="billing-azure-auth">Azure credential</label>
           <select id="billing-azure-auth" bind:value={form.authMode}>
-            <option value=""
-              >{editing
-                ? 'Keep stored credential'
-                : 'Choose a credential'}</option
-            >
+            <option value="">
+              {editing ? 'Keep stored credential' : 'Choose a credential'}
+            </option>
             <option value="azure_default">Workload identity</option>
             <option value="azure_client_secret">Client secret</option>
           </select>
@@ -194,18 +201,17 @@
                 form.adminKey = '';
               }}
             >
-              {#if editing}<option value="keep">Keep existing credential</option
-                >{/if}
+              {#if editing}<option value="keep">
+                  Keep existing credential
+                </option>{/if}
               <option value="service_account">Service account key</option>
               <option value="adc">Workload identity</option>
             </select>
           {/if}
           {#if kind !== 'vertex_ai' || form.googleAuthMode === 'service_account'}
-            <label for="billing-admin-key"
-              >{kind === 'vertex_ai'
-                ? 'Service account JSON'
-                : 'Admin key'}</label
-            >
+            <label for="billing-admin-key">
+              {kind === 'vertex_ai' ? 'Service account JSON' : 'Admin key'}
+            </label>
             <input
               id="billing-admin-key"
               type="password"
@@ -256,34 +262,38 @@
               : kind === 'openai'
                 ? 'proj_…'
                 : 'wrkspc_… or default'}></textarea>
-          <small
-            >One ID per line. Leave empty to include all projects or workspaces.</small
-          >
+          <small>
+            One ID per line. Leave empty to include all projects or workspaces.
+          </small>
         </div>
       {/if}
       <div class="form-field">
-        <label class="inline-check"
-          ><input type="checkbox" bind:checked={form.enabled} />Enabled</label
-        >
+        <label class="inline-check">
+          <input type="checkbox" bind:checked={form.enabled} />Enabled
+        </label>
       </div>
     </div>
     <div class="form-actions">
-      <button class="button button-primary" type="submit" disabled={busy}
-        >{busy ? 'Saving…' : editing ? 'Save import' : 'Create import'}</button
-      >
+      <button class="button button-primary" type="submit" disabled={busy}>
+        {busy ? 'Saving…' : editing ? 'Save import' : 'Create import'}
+      </button>
       {#if editing}
         <button
           class="button button-secondary"
           type="button"
           disabled={busy || !savedEnabled}
-          onclick={onRunNow}>Run now</button
+          onclick={onRunNow}
         >
+          Run now
+        </button>
         <button
           class="button button-secondary"
           type="button"
           disabled={busy}
-          onclick={onRemove}>Remove</button
+          onclick={onRemove}
         >
+          Remove
+        </button>
       {/if}
     </div>
     {#if editing && !savedEnabled}

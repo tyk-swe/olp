@@ -22,12 +22,13 @@
 </script>
 
 {#if kind === 'gaps'}
-  {#if gapQuery.isPending}<span class="inline-status">Loading gaps…</span
-    >{:else if gapQuery.isError}<span class="inline-problem"
-      >Gap records are unavailable.</span
-    >{:else if !(gapQuery.data ?? []).length}<span class="section-help"
-      >No export gaps recorded.</span
-    >{:else}<ul class="gap-list">
+  {#if gapQuery.isPending}<span class="inline-status">
+      Loading gaps…
+    </span>{:else if gapQuery.isError}<span class="inline-problem">
+      Gap records are unavailable.
+    </span>{:else if !(gapQuery.data ?? []).length}<span class="section-help">
+      No export gaps recorded.
+    </span>{:else}<ul class="gap-list">
       {#each gapQuery.data ?? [] as gap (gap.id)}<li>
           <span class="mono">{gap.stream}</span> — {gap.record_count}
           records, {formatDate(gap.first_occurred_at)} → {formatDate(
@@ -36,34 +37,43 @@
         </li>{/each}
     </ul>{/if}
 {:else}
-  {#if focusDatasets.isPending}<span class="inline-status" role="status"
-      >Loading datasets…</span
-    >{:else if focusDatasets.isError}<span class="inline-problem" role="alert"
-      >Focus datasets are unavailable.</span
-    >{:else if !(focusDatasets.data?.items ?? []).length}<span
-      class="section-help">No datasets delivered yet.</span
-    >{:else}<table class="data-table focus-datasets">
-      <thead
-        ><tr
-          ><th scope="col">Charge date</th><th scope="col">Revision</th><th
-            scope="col">Delivered</th
-          ><th scope="col">Rows</th><th scope="col">Billed cost</th><th
-            scope="col">Commitments</th
-          ><th scope="col">Status</th></tr
-        ></thead
-      ><tbody>
+  {#if focusDatasets.isPending}<span class="inline-status" role="status">
+      Loading datasets…
+    </span>{:else if focusDatasets.isError}<span
+      class="inline-problem"
+      role="alert"
+    >
+      Focus datasets are unavailable.
+    </span>{:else if !(focusDatasets.data?.items ?? []).length}<span
+      class="section-help"
+    >
+      No datasets delivered yet.
+    </span>{:else}<table class="data-table focus-datasets">
+      <thead>
+        <tr>
+          <th scope="col">Charge date</th><th scope="col">Revision</th><th
+            scope="col"
+          >
+            Delivered
+          </th><th scope="col">Rows</th><th scope="col">Billed cost</th><th
+            scope="col"
+          >
+            Commitments
+          </th><th scope="col">Status</th>
+        </tr>
+      </thead><tbody>
         {#each focusDatasets.data?.items ?? [] as dataset (dataset.charge_date)}
-          <tr
-            ><td class="mono">{dataset.charge_date}</td><td
-              >{dataset.revision}</td
-            ><td
-              >{dataset.delivered_at
+          <tr>
+            <td class="mono">{dataset.charge_date}</td><td>
+              {dataset.revision}
+            </td><td>
+              {dataset.delivered_at
                 ? formatDate(dataset.delivered_at)
-                : 'pending'}</td
-            ><td>{dataset.row_count}</td><td
-              >{formatCost(dataset.billed_cost, null)}</td
-            ><td
-              >{#if dataset.commitment_totals}
+                : 'pending'}
+            </td><td>{dataset.row_count}</td><td>
+              {formatCost(dataset.billed_cost, null)}
+            </td><td>
+              {#if dataset.commitment_totals}
                 <div>
                   Purchased: {dataset.commitment_totals.purchased_cost}
                 </div>
@@ -80,9 +90,9 @@
                     ? 'Complete'
                     : 'Incomplete coverage'}
                 </div>
-              {:else}Unavailable{/if}</td
-            ><td>{focusDatasetStatus(dataset)}</td></tr
-          >
+              {:else}Unavailable{/if}
+            </td><td>{focusDatasetStatus(dataset)}</td>
+          </tr>
         {/each}
       </tbody>
     </table>{/if}
@@ -94,16 +104,20 @@
         disabled={focusDatasets.isFetching}
         onclick={() => {
           datasetCursors = datasetCursors.slice(0, -1);
-        }}>Newer datasets</button
+        }}
       >
+        Newer datasets
+      </button>
     {/if}
     {#if focusDatasets.isError}
       <button
         class="button button-secondary"
         type="button"
         disabled={focusDatasets.isFetching}
-        onclick={() => focusDatasets.refetch()}>Retry datasets</button
+        onclick={() => focusDatasets.refetch()}
       >
+        Retry datasets
+      </button>
     {/if}
     {#if focusDatasets.data?.nextCursor}
       <button
@@ -113,8 +127,10 @@
         onclick={() => {
           const cursor = focusDatasets.data?.nextCursor;
           if (cursor) datasetCursors = [...datasetCursors, cursor];
-        }}>Older datasets</button
+        }}
       >
+        Older datasets
+      </button>
     {/if}
   </div>
 {/if}

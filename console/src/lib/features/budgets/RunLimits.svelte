@@ -55,10 +55,10 @@
 
 <fieldset {disabled}>
   <legend>Workflow run limits</legend>
-  <small
-    >Leave a field empty to use the applicable default or another configured
-    limit.</small
-  >
+  <small>
+    Leave a field empty to use the applicable default or another configured
+    limit.
+  </small>
   {#each integerFields as field (field.key)}
     <div class="form-field">
       <label for={`${prefix}-${field.key}`}>{field.label}</label>

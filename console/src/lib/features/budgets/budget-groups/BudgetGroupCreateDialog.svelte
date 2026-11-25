@@ -138,8 +138,9 @@
           />
         </div>
         {#each rateFields as field (field)}<div class="form-field">
-            <label for={`group-${field}`}>{field.replaceAll('_', ' ')}</label
-            ><input
+            <label for={`group-${field}`}>
+              {field.replaceAll('_', ' ')}
+            </label><input
               id={`group-${field}`}
               bind:value={createRates[field]}
               inputmode="numeric"
@@ -173,10 +174,11 @@
           <label for="group-basis">Budget basis</label><select
             id="group-basis"
             bind:value={createBasis}
-            ><option value="cost">Provider cost</option><option value="charge"
-              >Consumer charge</option
-            ></select
           >
+            <option value="cost">Provider cost</option><option value="charge">
+              Consumer charge
+            </option>
+          </select>
         </div>
       </div>
       <div class="form-actions">
@@ -184,8 +186,9 @@
           class="button button-primary"
           type="submit"
           disabled={busy || !createName.trim()}
-          >{busy ? 'Creating…' : 'Create group'}</button
         >
+          {busy ? 'Creating…' : 'Create group'}
+        </button>
       </div>
     </fieldset>
   </form>

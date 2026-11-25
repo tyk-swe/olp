@@ -73,8 +73,10 @@
       class="button button-secondary"
       type="button"
       onclick={() => sessions.refetch()}
-      disabled={sessions.isFetching}>Refresh</button
+      disabled={sessions.isFetching}
     >
+      Refresh
+    </button>
   </div>
 
   {#if revoke.error || exit.error}<div class="inline-problem" role="alert">
@@ -94,35 +96,35 @@
           </div>
           <div>
             <div class="session-heading">
-              <strong
-                >{session.current
-                  ? 'Current session'
-                  : 'Browser session'}</strong
-              >
-              {#if session.current}<span class="badge success">This device</span
-                >{/if}
+              <strong>
+                {session.current ? 'Current session' : 'Browser session'}
+              </strong>
+              {#if session.current}<span class="badge success">
+                  This device
+                </span>{/if}
             </div>
             <p>
               Last session verification {formatDate(session.last_seen_at)} · Expires
               {formatDate(session.expires_at)}
             </p>
-            <small
-              >{session.browser_hint || 'Unknown browser'} · Created {formatDate(
+            <small>
+              {session.browser_hint || 'Unknown browser'} · Created {formatDate(
                 session.created_at
-              )}</small
-            >
+              )}
+            </small>
           </div>
           <button
             class="button button-secondary"
             type="button"
             onclick={() => endSession(session.id, session.current)}
             disabled={revoke.busy || exit.busy}
-            >{revoke.key === session.id || exit.key === session.id
+          >
+            {revoke.key === session.id || exit.key === session.id
               ? 'Revoking…'
               : session.current
                 ? 'Sign out'
-                : 'Revoke'}</button
-          >
+                : 'Revoke'}
+          </button>
         </article>
       {/each}
     </div>

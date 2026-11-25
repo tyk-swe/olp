@@ -66,12 +66,12 @@
 
 <PageTitle title="Routing reports" />
 <form class="card form-card" onsubmit={apply}>
-  <label class="form-field"
-    >Start<input required type="datetime-local" bind:value={start} /></label
-  >
-  <label class="form-field"
-    >End<input required type="datetime-local" bind:value={end} /></label
-  >
+  <label class="form-field">
+    Start<input required type="datetime-local" bind:value={start} />
+  </label>
+  <label class="form-field">
+    End<input required type="datetime-local" bind:value={end} />
+  </label>
   <label class="form-field">Route<input bind:value={route} /></label>
   <label class="form-field">Project ID<input bind:value={project} /></label>
   <div class="page-actions">
@@ -117,24 +117,24 @@
               <tr>
                 <td>{value.route}</td>
                 <td>{value.selector}</td>
-                <td
-                  >{formatInteger(value.compared_attempts)} / {formatInteger(
+                <td>
+                  {formatInteger(value.compared_attempts)} / {formatInteger(
                     value.attempts
-                  )}</td
-                >
-                <td
-                  >{value.compared_attempts
+                  )}
+                </td>
+                <td>
+                  {value.compared_attempts
                     ? value.estimated_cost
-                    : 'Unavailable'}</td
-                >
-                <td
-                  >{value.compared_attempts
+                    : 'Unavailable'}
+                </td>
+                <td>
+                  {value.compared_attempts
                     ? value.baseline_cost
-                    : 'Unavailable'}</td
-                >
-                <td
-                  >{value.compared_attempts ? value.savings : 'Unavailable'}</td
-                >
+                    : 'Unavailable'}
+                </td>
+                <td>
+                  {value.compared_attempts ? value.savings : 'Unavailable'}
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -160,9 +160,9 @@
         </p>
         <ScrollTable label={`Shadow comparison for ${value.route}`}>
           <table class="data-table">
-            <caption class="sr-only"
-              >Primary and shadow measurements for {value.route}</caption
-            >
+            <caption class="sr-only">
+              Primary and shadow measurements for {value.route}
+            </caption>
             <thead>
               <tr>
                 <th scope="col">Measurement</th>

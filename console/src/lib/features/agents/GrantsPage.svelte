@@ -264,8 +264,10 @@
     <button
       class="button button-secondary"
       disabled={working}
-      onclick={() => runEnrollment(enrollment.claim)}>Claim enrollment</button
+      onclick={() => runEnrollment(enrollment.claim)}
     >
+      Claim enrollment
+    </button>
   </section>
 {/if}
 {#if grantView.enrollmentID && !grantView.handoffToken && grantView.authorization?.state !== 'active'}
@@ -276,43 +278,51 @@
         class="button button-secondary"
         disabled={working}
         onclick={() => runEnrollment(enrollment.completeCallback)}
-        >Complete authorization</button
       >
+        Complete authorization
+      </button>
     {:else if grantView.authorization?.device}
       <p>
         Enter {grantView.authorization.device.user_code} at
         <a
           href={grantView.authorization.device.verification_url}
           target="_blank"
-          rel="noreferrer">the authorization page</a
+          rel="noreferrer"
         >
+          the authorization page
+        </a>
       </p>
       <p>Check again after {grantView.authorization.device.interval} seconds</p>
       <button
         class="button button-secondary"
         disabled={working}
         onclick={() => runEnrollment(enrollment.poll)}
-        >Check device approval</button
       >
+        Check device approval
+      </button>
     {:else if grantView.authorization?.authorization_url}
       <a
         class="button button-primary"
-        href={grantView.authorization.authorization_url}>Sign in upstream</a
+        href={grantView.authorization.authorization_url}
       >
+        Sign in upstream
+      </a>
     {:else}
       <button
         class="button button-secondary"
         disabled={working}
         onclick={() =>
           runEnrollment(() => enrollment.authorize('authorization_code'))}
-        >Authorize in browser</button
       >
+        Authorize in browser
+      </button>
       <button
         class="button button-secondary"
         disabled={working}
         onclick={() => runEnrollment(() => enrollment.authorize('device_code'))}
-        >Use device authorization</button
       >
+        Use device authorization
+      </button>
     {/if}
   </section>
 {/if}
@@ -352,8 +362,10 @@
             window.location.href
           )
         );
-      }}>Continue personal enrollment</a
+      }}
     >
+      Continue personal enrollment
+    </a>
   </p>{/if}
 <GrantStanding
   error={grants.error ? errorMessage(grants.error) : null}

@@ -86,67 +86,71 @@
       class="button button-secondary"
       type="button"
       onclick={() => audit.refetch()}
-      disabled={audit.isFetching || Boolean(urlProblem)}>Refresh</button
+      disabled={audit.isFetching || Boolean(urlProblem)}
     >
+      Refresh
+    </button>
   {/snippet}
 </PageHeader>
 <form class="card filters" aria-label="Audit filters" onsubmit={applyFilters}>
-  <label
-    >Action <input
-      bind:value={listState.action}
-      placeholder="All actions"
-    /></label
-  >
-  <label
-    >Outcome <select bind:value={listState.outcome}
-      ><option value="">All outcomes</option
-      >{#if listState.outcome && !['success', 'failure'].includes(listState.outcome)}<option
-          value={listState.outcome}>{listState.outcome}</option
-        >{/if}<option value="success">Succeeded</option><option value="failure"
-        >Failed</option
-      ></select
-    ></label
-  >
-  <label
-    >From <input
+  <label>
+    Action <input bind:value={listState.action} placeholder="All actions" />
+  </label>
+  <label>
+    Outcome <select bind:value={listState.outcome}>
+      <option value="">
+        All outcomes
+      </option>{#if listState.outcome && !['success', 'failure'].includes(listState.outcome)}<option
+          value={listState.outcome}
+        >
+          {listState.outcome}
+        </option>{/if}<option value="success">Succeeded</option><option
+        value="failure"
+      >
+        Failed
+      </option>
+    </select>
+  </label>
+  <label>
+    From <input
       bind:value={listState.occurredAfter}
       type={timeInputType(listState.occurredAfter)}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
-    /></label
-  >
-  <label
-    >To <input
+    />
+  </label>
+  <label>
+    To <input
       bind:value={listState.occurredBefore}
       type={timeInputType(listState.occurredBefore)}
       aria-invalid={rangeError ? 'true' : undefined}
       aria-describedby={rangeError ? 'audit-range-error' : undefined}
-    /></label
-  >
+    />
+  </label>
   <div class="more-filters">
     <Advanced label="More filters" open={hasMoreFilters}>
       <div class="more-grid">
-        <label
-          >Resource type <input
+        <label>
+          Resource type <input
             bind:value={listState.resourceType}
             placeholder="All resource types"
-          /></label
-        >
-        <label
-          >Resource ID <input
+          />
+        </label>
+        <label>
+          Resource ID <input
             bind:value={listState.resourceId}
             class="mono"
             placeholder="All resources"
-          /></label
-        >
-        <label
-          >Done by <EntityPicker
+          />
+        </label>
+        <label>
+          Done by <EntityPicker
             id="audit-actor"
             source={personOptions}
             bind:value={listState.actorUserId}
             emptyLabel="Anyone"
-          /></label
-        >
+          />
+        </label>
       </div>
     </Advanced>
   </div>
@@ -157,8 +161,10 @@
     <button class="button button-primary" type="submit">Apply</button><button
       class="button button-secondary"
       type="button"
-      onclick={clearFilters}>Reset</button
+      onclick={clearFilters}
     >
+      Reset
+    </button>
   </div>
 </form>
 
@@ -171,8 +177,10 @@
       {#snippet actions()}<button
           class="text-button"
           type="button"
-          onclick={() => audit.refetch()}>Try again</button
-        >{/snippet}
+          onclick={() => audit.refetch()}
+        >
+          Try again
+        </button>{/snippet}
     </Callout>
   {:else if audit.data?.items.length === 0 && listState.history.length === 0}
     <EmptyState title="No audit events">
@@ -187,35 +195,41 @@
       aria-label="Audit event results"
     >
       <table class="data-table">
-        <caption class="sr-only">Audit events, newest first</caption><thead
-          ><tr
-            ><th scope="col">Occurred</th><th scope="col">Actor</th><th
-              scope="col">Action</th
-            ><th scope="col">Resource</th><th scope="col">Outcome</th><th
-              scope="col">Source IP</th
-            ><th scope="col">User agent</th></tr
-          ></thead
-        ><tbody
-          >{#each audit.data?.items ?? [] as event (event.id)}<tr
-              ><td>{formatDate(event.occurred_at)}</td><td
-                >{auditActorLabel(event)}</td
-              ><td><code>{event.action}</code></td><td
-                ><strong>{event.resource_type}</strong
-                >{#if event.resource_id}<small class="mono"
-                    >{event.resource_id}</small
-                  >{/if}</td
-              ><td
-                ><span
+        <caption class="sr-only">Audit events, newest first</caption><thead>
+          <tr>
+            <th scope="col">Occurred</th><th scope="col">Actor</th><th
+              scope="col"
+            >
+              Action
+            </th><th scope="col">Resource</th><th scope="col">Outcome</th><th
+              scope="col"
+            >
+              Source IP
+            </th><th scope="col">User agent</th>
+          </tr>
+        </thead><tbody>
+          {#each audit.data?.items ?? [] as event (event.id)}<tr>
+              <td>{formatDate(event.occurred_at)}</td><td>
+                {auditActorLabel(event)}
+              </td><td><code>{event.action}</code></td><td>
+                <strong>
+                  {event.resource_type}
+                </strong>{#if event.resource_id}<small class="mono">
+                    {event.resource_id}
+                  </small>{/if}
+              </td><td>
+                <span
                   class="badge"
                   class:success={event.outcome === 'success'}
                   class:danger={event.outcome !== 'success'}
-                  >{event.outcome}</span
-                ></td
-              ><td class="mono">{event.source_ip ?? '—'}</td><td
-                >{event.user_agent_family ?? '—'}</td
-              ></tr
-            >{/each}</tbody
-        >
+                >
+                  {event.outcome}
+                </span>
+              </td><td class="mono">{event.source_ip ?? '—'}</td><td>
+                {event.user_agent_family ?? '—'}
+              </td>
+            </tr>{/each}
+        </tbody>
       </table>
     </div>
     <CursorPagination

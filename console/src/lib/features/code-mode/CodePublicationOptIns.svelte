@@ -40,13 +40,13 @@
   identity and prompts. Model rewriting and Codex identity compatibility require
   their separate opt-ins.
 </p>
-<label class="choice"
-  ><input
+<label class="choice">
+  <input
     id="code-chat-to-antigravity"
     type="checkbox"
     bind:checked={chatToAntigravity}
-  /> Translate Chat through Antigravity</label
->
+  /> Translate Chat through Antigravity
+</label>
 <p>
   Enables the controlled Gemini text and function tool path after publication.
   Signed thought state, reasoning controls, media and server tools are refused.

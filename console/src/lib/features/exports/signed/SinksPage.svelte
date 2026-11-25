@@ -64,15 +64,17 @@
   </p>
   <div class="page-actions">
     <div class="page-actions">
-      <button class="button button-secondary" type="button" onclick={refresh}
-        >Refresh delivery counts</button
-      >
+      <button class="button button-secondary" type="button" onclick={refresh}>
+        Refresh delivery counts
+      </button>
       {#if access.allows('POST /api/v1/sinks')}
         <button
           class="button button-primary"
           type="button"
-          onclick={() => select('')}>New export</button
+          onclick={() => select('')}
         >
+          New export
+        </button>
       {/if}
     </div>
   </div>
@@ -82,9 +84,9 @@
 {:else if sinks.isPending}
   <div class="loading-state" role="status">Loading exports…</div>
 {:else if !sinks.data?.length}
-  <EmptyState title="No signed exports yet"
-    >Create one to deliver signed records to your own endpoint.</EmptyState
-  >
+  <EmptyState title="No signed exports yet">
+    Create one to deliver signed records to your own endpoint.
+  </EmptyState>
 {:else}
   <ScrollTable label="Signed fact exports">
     <table class="data-table">
@@ -104,8 +106,9 @@
         {#each sinks.data as value (value.id)}
           <tr>
             <td>
-              <strong>{value.name}</strong><br /><code>{value.destination}</code
-              >
+              <strong>{value.name}</strong><br /><code>
+                {value.destination}
+              </code>
             </td>
             <td>
               {#if value.retired_at}
@@ -119,19 +122,21 @@
             <td>{formatInteger(value.delivery.delivered)}</td>
             <td>{formatInteger(value.delivery.failed)}</td>
             <td>{formatInteger(value.delivery.expired)}</td>
-            <td
-              >{value.delivery.last_delivered_at
+            <td>
+              {value.delivery.last_delivered_at
                 ? formatDate(value.delivery.last_delivered_at)
-                : 'None'}</td
-            >
+                : 'None'}
+            </td>
             <td>
               <div class="page-actions">
                 {#if !value.retired_at && access.allows('PUT /api/v1/sinks/{sink_id}')}
                   <button
                     class="button button-secondary"
                     type="button"
-                    onclick={() => select(value.id)}>Edit</button
+                    onclick={() => select(value.id)}
                   >
+                    Edit
+                  </button>
                 {/if}
                 {#if !value.retired_at && access.allows('DELETE /api/v1/sinks/{sink_id}')}
                   <ConfirmAction

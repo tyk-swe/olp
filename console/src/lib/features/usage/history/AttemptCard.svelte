@@ -42,18 +42,19 @@
   <span class="timeline-marker" aria-hidden="true">{attempt.ordinal}</span>
   <div class="attempt-heading">
     <div>
-      <strong
-        ><a
+      <strong>
+        <a
           class="provider-link"
           href={resolve(`providers/${attempt.provider_id}`)}
-          >{attempt.provider_name}</a
         >
+          {attempt.provider_name}
+        </a>
       </strong>
       <span class="mono">{attempt.upstream_model}</span>
     </div>
-    <span class="badge {statusTone(attempt.status_code, attempt.error_class)}"
-      >{statusLabel(attempt.status_code, attempt.error_class)}</span
-    >
+    <span class="badge {statusTone(attempt.status_code, attempt.error_class)}">
+      {statusLabel(attempt.status_code, attempt.error_class)}
+    </span>
   </div>
   <dl>
     {#if attempt.provider_request_id}
@@ -141,11 +142,11 @@
         <dd>
           {formatInteger(attempt.cache_write_input_tokens)}
           {#if attempt.cache_write_5m_input_tokens || attempt.cache_write_1h_input_tokens}
-            <small
-              >5m {formatInteger(attempt.cache_write_5m_input_tokens)} · 1h {formatInteger(
+            <small>
+              5m {formatInteger(attempt.cache_write_5m_input_tokens)} · 1h {formatInteger(
                 attempt.cache_write_1h_input_tokens
-              )}</small
-            >
+              )}
+            </small>
           {/if}
         </dd>
       </div>
@@ -160,9 +161,9 @@
             {formatInteger(attempt.audio_input_tokens)} in · {formatInteger(
               attempt.audio_output_tokens
             )} out{#if attempt.cached_audio_input_tokens != null}
-              <small
-                >{formatInteger(attempt.cached_audio_input_tokens)} cached input</small
-              >{/if}
+              <small>
+                {formatInteger(attempt.cached_audio_input_tokens)} cached input
+              </small>{/if}
           </dd>
         </div>
         <div>
@@ -171,9 +172,9 @@
             {formatInteger(attempt.image_input_tokens)} in · {formatInteger(
               attempt.image_output_tokens
             )} out{#if attempt.cached_image_input_tokens != null}
-              <small
-                >{formatInteger(attempt.cached_image_input_tokens)} cached input</small
-              >{/if}
+              <small>
+                {formatInteger(attempt.cached_image_input_tokens)} cached input
+              </small>{/if}
           </dd>
         </div>
       {/if}

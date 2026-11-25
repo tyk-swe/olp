@@ -132,14 +132,16 @@
     {#if report.isPending}
       <span class="inline-status" role="status">Loading reconciliation…</span>
     {:else if report.isError}
-      <span class="inline-problem" role="alert"
-        >The reconciliation report is unavailable.
+      <span class="inline-problem" role="alert">
+        The reconciliation report is unavailable.
         <button
           class="text-button"
           type="button"
-          onclick={() => report.refetch()}>Retry</button
-        ></span
-      >
+          onclick={() => report.refetch()}
+        >
+          Retry
+        </button>
+      </span>
     {:else if !(report.data?.items ?? []).length}
       <p class="section-help">
         Configure a billing import on an OpenAI, Anthropic, Bedrock, Vertex AI
@@ -148,49 +150,48 @@
     {:else}
       <ScrollTable label="Billing reconciliation">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Day</th><th scope="col">Attributed</th><th
-                scope="col">Invoiced</th
-              ><th scope="col">Capture</th><th scope="col">Unpriced share</th
-              ><th scope="col">Notes</th></tr
-            ></thead
-          >
+          <thead>
+            <tr>
+              <th scope="col">Day</th><th scope="col">Attributed</th><th
+                scope="col"
+              >
+                Invoiced
+              </th><th scope="col">Capture</th><th scope="col">
+                Unpriced share
+              </th><th scope="col">Notes</th>
+            </tr>
+          </thead>
           {#each [...byProvider] as [providerId, group] (providerId)}
             <tbody>
-              <tr class="recon-provider"
-                ><th scope="rowgroup" colspan="6">{providerName(providerId)}</th
-                ></tr
-              >
+              <tr class="recon-provider">
+                <th scope="rowgroup" colspan="6">{providerName(providerId)}</th>
+              </tr>
               {#each group.items as item (item.day)}
-                <tr
-                  ><td class="mono">{item.day}</td><td
-                    >{formatCost(
-                      item.attributed_cost,
-                      report.data?.currency
-                    )}</td
-                  ><td>{invoice(item, report.data?.currency)}</td><td
-                    >{item.capture_rate != null
+                <tr>
+                  <td class="mono">{item.day}</td><td>
+                    {formatCost(item.attributed_cost, report.data?.currency)}
+                  </td><td>{invoice(item, report.data?.currency)}</td><td>
+                    {item.capture_rate != null
                       ? percent(item.capture_rate)
-                      : reasonText(item.capture_rate_unavailable_reason)}</td
-                  ><td>{percent(item.unpriced_share)}</td><td
-                    >{#if item.provisional}<span class="badge provisional"
-                        >Provisional</span
-                      >{/if}{#if item.import?.last_error_code}<small
-                        >import: {item.import.last_error_code}</small
-                      >{/if}</td
-                  ></tr
-                >
+                      : reasonText(item.capture_rate_unavailable_reason)}
+                  </td><td>{percent(item.unpriced_share)}</td><td>
+                    {#if item.provisional}<span class="badge provisional">
+                        Provisional
+                      </span>{/if}{#if item.import?.last_error_code}<small>
+                        import: {item.import.last_error_code}
+                      </small>{/if}
+                  </td>
+                </tr>
               {/each}
               {#if group.totals}
-                <tr class="recon-totals"
-                  ><td><strong>Totals</strong> (covered days)</td><td
-                    >{formatCost(
+                <tr class="recon-totals">
+                  <td><strong>Totals</strong> (covered days)</td><td>
+                    {formatCost(
                       group.totals.attributed_cost_covered,
                       report.data?.currency
-                    )}</td
-                  ><td
-                    >{group.totals.capture_rate_unavailable_reason ===
+                    )}
+                  </td><td>
+                    {group.totals.capture_rate_unavailable_reason ===
                     'currency_mismatch'
                       ? 'Currency differs'
                       : group.totals.invoiced_cost == null
@@ -198,11 +199,11 @@
                         : formatCost(
                             group.totals.invoiced_cost,
                             report.data?.currency
-                          )}</td
-                  ><td>{percent(group.totals.capture_rate)}</td><td
-                    >{percent(group.totals.unpriced_share)}</td
-                  ><td></td></tr
-                >
+                          )}
+                  </td><td>{percent(group.totals.capture_rate)}</td><td>
+                    {percent(group.totals.unpriced_share)}
+                  </td><td></td>
+                </tr>
               {/if}
             </tbody>
           {/each}

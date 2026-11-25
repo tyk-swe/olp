@@ -223,34 +223,34 @@
       </p>
     {:else}
       <div class="form-field">
-        <label class="form-field"
-          >Consumer key
+        <label class="form-field">
+          Consumer key
           <select id="delegation-key" bind:value={keyID} disabled={action.busy}>
             <option value="">Choose a key</option>
-            {#each manageableKeys as key (key.id)}<option value={key.id}
-                >{key.name} ({key.project_name ?? key.project_id})</option
-              >{/each}
+            {#each manageableKeys as key (key.id)}<option value={key.id}>
+                {key.name} ({key.project_name ?? key.project_id})
+              </option>{/each}
           </select>
         </label>
       </div>
       <div class="form-field">
-        <label class="form-field"
-          >Agent workload
+        <label class="form-field">
+          Agent workload
           <select
             id="delegation-agent"
             bind:value={agentID}
             disabled={action.busy || !selectedKey || options.isPending}
           >
             <option value="">Choose a workload</option>
-            {#each agents as agent (agent.id)}<option value={agent.id}
-                >{agent.name} ({agent.workload_mapping})</option
-              >{/each}
+            {#each agents as agent (agent.id)}<option value={agent.id}>
+                {agent.name} ({agent.workload_mapping})
+              </option>{/each}
           </select>
         </label>
       </div>
       <div class="form-field">
-        <label class="form-field"
-          >Allowed inference routes
+        <label class="form-field">
+          Allowed inference routes
           <input
             bind:value={routeInput}
             disabled={action.busy}
@@ -259,8 +259,8 @@
         </label>
       </div>
       <div class="form-field">
-        <label class="form-field"
-          >Allowed toolsets
+        <label class="form-field">
+          Allowed toolsets
           <input
             bind:value={toolsetInput}
             disabled={action.busy}
@@ -269,8 +269,8 @@
         </label>
       </div>
       <div class="form-field">
-        <label class="form-field"
-          >Allowed A2A agents
+        <label class="form-field">
+          Allowed A2A agents
           <input
             bind:value={remoteAgentInput}
             disabled={action.busy}
@@ -343,8 +343,8 @@
         </p>
       {:else}
         <div class="form-field">
-          <label class="form-field"
-            >Current password
+          <label class="form-field">
+            Current password
             <input
               type="password"
               autocomplete="current-password"
@@ -357,15 +357,19 @@
           class="button button-secondary"
           type="button"
           disabled={action.busy || !selectedKey}
-          onclick={verifyIdentity}>Verify with linked identity</button
+          onclick={verifyIdentity}
         >
+          Verify with linked identity
+        </button>
       {/if}
       <button
         class="button button-secondary"
         type="button"
         disabled={action.busy || !ready}
-        onclick={confirm}>Confirm agent access</button
+        onclick={confirm}
       >
+        Confirm agent access
+      </button>
       {#if action.error}<p class="inline-problem" role="alert">
           {action.error}
         </p>{/if}
@@ -374,9 +378,9 @@
           Copy this one-use consent code to the selected agent through your
           approved channel. It expires at {formatDate(consent.expires_at)}.
         </p>
-        <label class="form-field"
-          >Consent code <input readonly value={consent.consent} /></label
-        >
+        <label class="form-field">
+          Consent code <input readonly value={consent.consent} />
+        </label>
         <div class="form-field">
           <label class="form-field">
             Pair budget ID

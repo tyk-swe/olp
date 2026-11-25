@@ -104,13 +104,13 @@
     />
   {/each}
   {#each [{ key: 'deny_data_collection', label: 'Require no data collection' }, { key: 'require_zero_data_retention', label: 'Require zero data retention' }, { key: 'require_parameters', label: 'Require declared parameter support' }] as field (field.key)}
-    <label class="check"
-      ><input
+    <label class="check">
+      <input
         type="checkbox"
         checked={current[field.key] === true}
         onchange={(e) => set(field.key, e.currentTarget.checked || undefined)}
-      />{field.label}</label
-    >
+      />{field.label}
+    </label>
   {/each}
   <div class="group" role="group" aria-labelledby="{id}-price-heading">
     <p class="group-heading" id="{id}-price-heading">Price ceiling</p>
@@ -140,9 +140,9 @@
   {#if !constraintsOnly}
     <div class="group" role="group" aria-labelledby="{id}-performance-heading">
       <p class="group-heading" id="{id}-performance-heading">Performance</p>
-      <label for="{id}-preferred_max_latency_ms"
-        >Preferred maximum latency</label
-      ><input
+      <label for="{id}-preferred_max_latency_ms">
+        Preferred maximum latency
+      </label><input
         id="{id}-preferred_max_latency_ms"
         value={count('preferred_max_latency_ms')}
         type="number"
@@ -152,9 +152,9 @@
         oninput={(e) =>
           setCount('preferred_max_latency_ms', e.currentTarget.value)}
       />
-      <label for="{id}-preferred_min_throughput"
-        >Preferred minimum throughput</label
-      ><input
+      <label for="{id}-preferred_min_throughput">
+        Preferred minimum throughput
+      </label><input
         id="{id}-preferred_min_throughput"
         value={count('preferred_min_throughput')}
         type="number"
@@ -172,9 +172,9 @@
     </div>
   {/if}
   <details>
-    <summary>Edit as JSON</summary><label for="{id}-json"
-      >Preferences JSON</label
-    ><textarea
+    <summary>Edit as JSON</summary><label for="{id}-json">
+      Preferences JSON
+    </label><textarea
       id="{id}-json"
       bind:value
       oninput={() => onChange(value)}
@@ -188,22 +188,25 @@
 {/snippet}
 
 <fieldset {disabled} class="preferences">
-  <legend
-    >{constraintsOnly ? 'Required constraints' : 'Routing preferences'}</legend
-  >
+  <legend>
+    {constraintsOnly ? 'Required constraints' : 'Routing preferences'}
+  </legend>
   {#if !constraintsOnly}
     <label for="{id}-strategy">Strategy</label><select
       id="{id}-strategy"
       value={String(current.strategy ?? '')}
       onchange={(e) => set('strategy', e.currentTarget.value || undefined)}
-      ><option value="">Use configured default</option><option value="weighted"
-        >Weighted</option
-      ><option value="price">Price</option><option value="latency"
-        >Latency</option
-      ><option value="throughput">Throughput</option><option value="capacity"
-        >Capacity headroom</option
-      ><option value="bounded_cost">Bounded cost</option></select
     >
+      <option value="">Use configured default</option><option value="weighted">
+        Weighted
+      </option><option value="price">Price</option><option value="latency">
+        Latency
+      </option><option value="throughput">Throughput</option><option
+        value="capacity"
+      >
+        Capacity headroom
+      </option><option value="bounded_cost">Bounded cost</option>
+    </select>
   {/if}
   {#if !constraintsOnly}
     <label for="{id}-fallbacks">Fallback attempts</label><select
@@ -218,10 +221,11 @@
           'allow_fallbacks',
           e.currentTarget.value ? e.currentTarget.value === 'true' : undefined
         )}
-      ><option value="">Use configured default</option><option value="true"
-        >Allow fallback attempts</option
-      ><option value="false">Disable fallback</option></select
     >
+      <option value="">Use configured default</option><option value="true">
+        Allow fallback attempts
+      </option><option value="false">Disable fallback</option>
+    </select>
   {/if}
   {#if constraintsOnly}
     {@render more()}

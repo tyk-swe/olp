@@ -117,60 +117,66 @@
 >
   {#if error}<Callout tone="danger">{error}</Callout>{/if}
   <form onsubmit={savePolicy}>
-    <label class="form-field"
-      >Name<input required maxlength="100" bind:value={policyName} /></label
-    >
-    <label class="form-field"
-      >Project<select required bind:value={project} disabled={!!selectedPolicy}
-        ><option value="">Choose a project</option
-        >{#each projects as value (value.id)}<option value={value.id}
-            >{value.name}</option
-          >{/each}</select
-      ></label
-    >
+    <label class="form-field">
+      Name<input required maxlength="100" bind:value={policyName} />
+    </label>
+    <label class="form-field">
+      Project<select required bind:value={project} disabled={!!selectedPolicy}>
+        <option value="">
+          Choose a project
+        </option>{#each projects as value (value.id)}<option value={value.id}>
+            {value.name}
+          </option>{/each}
+      </select>
+    </label>
     <ol>
       {#each entries as entry, i (i)}<li class="entry">
-          <label class="form-field"
-            >Guardrail<select
+          <label class="form-field">
+            Guardrail<select
               required
               value={entry.guardrail_id}
               onchange={(event) =>
                 chooseDefinition(i, event.currentTarget.value)}
-              ><option value="">Choose a definition</option
-              >{#each definitions.filter((value) => value.project_id === project) as value (value.id)}<option
+            >
+              <option value="">
+                Choose a definition
+              </option>{#each definitions.filter((value) => value.project_id === project) as value (value.id)}<option
                   value={value.id}
-                  >{value.name} · Revision {value.revision}</option
-                >{/each}</select
-            ></label
-          >
-          <label class="form-field"
-            >Phase<select bind:value={entry.phase}
-              >{#each phases as value (value)}<option {value}>{value}</option
-                >{/each}</select
-            ></label
-          >
-          <label class="form-field"
-            >Action<select bind:value={entry.action}
-              >{#each ['block', 'redact', 'mask', 'annotate'] as value (value)}<option
-                  {value}>{value}</option
-                >{/each}</select
-            ></label
-          >
-          <label class="check-field"
-            ><input type="checkbox" bind:checked={entry.monitor} />Monitor only</label
-          ><label class="check-field"
-            ><input
-              type="checkbox"
-              bind:checked={entry.mandatory}
-            />Mandatory</label
-          >
+                >
+                  {value.name} · Revision {value.revision}
+                </option>{/each}
+            </select>
+          </label>
+          <label class="form-field">
+            Phase<select bind:value={entry.phase}>
+              {#each phases as value (value)}<option {value}>
+                  {value}
+                </option>{/each}
+            </select>
+          </label>
+          <label class="form-field">
+            Action<select bind:value={entry.action}>
+              {#each ['block', 'redact', 'mask', 'annotate'] as value (value)}<option
+                  {value}
+                >
+                  {value}
+                </option>{/each}
+            </select>
+          </label>
+          <label class="check-field">
+            <input type="checkbox" bind:checked={entry.monitor} />Monitor only
+          </label><label class="check-field">
+            <input type="checkbox" bind:checked={entry.mandatory} />Mandatory
+          </label>
           <button
             class="button button-secondary"
             type="button"
             onclick={() => {
               entries = entries.filter((_, index) => index !== i);
-            }}>Remove entry {i + 1}</button
+            }}
           >
+            Remove entry {i + 1}
+          </button>
         </li>{/each}
     </ol>
     <button
@@ -188,17 +194,21 @@
             mandatory: true
           }
         ];
-      }}>Add guardrail</button
+      }}
     >
-    <button class="button button-primary" type="submit" disabled={busy}
-      >Save policy draft</button
-    >
+      Add guardrail
+    </button>
+    <button class="button button-primary" type="submit" disabled={busy}>
+      Save policy draft
+    </button>
     {#if selectedPolicy}<button
         class="button button-secondary"
         type="button"
         disabled={busy}
-        onclick={activatePolicyRevision}>Activate revision</button
-      >{/if}
+        onclick={activatePolicyRevision}
+      >
+        Activate revision
+      </button>{/if}
   </form>
 </Dialog>
 

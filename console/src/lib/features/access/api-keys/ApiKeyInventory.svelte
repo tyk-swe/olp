@@ -217,9 +217,9 @@
   description="Manage client access with scoped API keys, route permissions, and usage limits."
 >
   {#snippet actions()}
-    {#if canManage}<a class="button button-primary" href={resolve('keys/new')}
-        >New API key <NavIcon name="arrow" /></a
-      >
+    {#if canManage}<a class="button button-primary" href={resolve('keys/new')}>
+        New API key <NavIcon name="arrow" />
+      </a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -241,15 +241,15 @@
   </p>{/if}
 
 <div class="toolbar issuer-filter">
-  <label for="key-issuer"
-    >Created by <EntityPicker
+  <label for="key-issuer">
+    Created by <EntityPicker
       id="key-issuer"
       source={personOptions}
       bind:value={issuer}
       emptyLabel="Anyone"
       onchange={filterIssuer}
-    /></label
-  >
+    />
+  </label>
 </div>
 
 <QueryView
@@ -272,12 +272,16 @@
         {#if createdBy}<button
             class="button button-secondary"
             type="button"
-            onclick={() => filterIssuer('')}>Show all keys</button
-          >{/if}
+            onclick={() => filterIssuer('')}
+          >
+            Show all keys
+          </button>{/if}
         {#if canManage && !createdBy}<a
             class="button button-primary"
-            href={resolve('keys/new')}>Create first key</a
+            href={resolve('keys/new')}
           >
+            Create first key
+          </a>
         {/if}
       </div>
     </section>
@@ -317,19 +321,20 @@
         }}
       >
         <div class="form-field full">
-          <label for="rotation-overlap">Previous-secret overlap (seconds)</label
-          ><input
+          <label for="rotation-overlap">
+            Previous-secret overlap (seconds)
+          </label><input
             id="rotation-overlap"
             data-autofocus
             inputmode="numeric"
             bind:value={overlapSeconds}
             disabled={write.busy || rotationAttempted}
             aria-describedby="rotation-overlap-help"
-          /><small id="rotation-overlap-help"
-            >0 ends all previous overlaps when gateways refresh. A positive
-            value allows up to 24 hours, bounded by key expiry; existing overlap
-            deadlines stay unchanged.</small
-          >
+          /><small id="rotation-overlap-help">
+            0 ends all previous overlaps when gateways refresh. A positive value
+            allows up to 24 hours, bounded by key expiry; existing overlap
+            deadlines stay unchanged.
+          </small>
         </div>
         {#if rotationError}<div class="inline-problem" role="alert">
             {rotationError} Retry uses the same request and overlap to recover its
@@ -339,13 +344,17 @@
           <button
             class="button button-primary"
             type="submit"
-            disabled={write.busy}>Rotate key</button
-          ><button
+            disabled={write.busy}
+          >
+            Rotate key
+          </button><button
             class="button button-secondary"
             type="button"
             onclick={close}
-            disabled={write.busy}>Cancel</button
+            disabled={write.busy}
           >
+            Cancel
+          </button>
         </div>
       </form>
     {/snippet}

@@ -84,11 +84,12 @@
   <summary
     aria-label={`Choose installation: ${name}`}
     title={`Manage installations: ${name}`}
-    >{name}<span aria-hidden="true"> ▾</span></summary
   >
+    {name}<span aria-hidden="true"> ▾</span>
+  </summary>
   <div class="switcher-menu">
-    <label
-      >Installation<select
+    <label>
+      Installation<select
         aria-label="Switch installation"
         class="filter-control"
         value={origin}
@@ -96,33 +97,35 @@
       >
         <option value={origin}>{name} (current)</option>
         {#each bookmarks.filter((entry) => entry.origin !== origin) as entry (entry.origin)}<option
-            value={entry.origin}>{entry.name} — {entry.origin}</option
-          >{/each}
-      </select></label
-    >
+            value={entry.origin}
+          >
+            {entry.name} — {entry.origin}
+          </option>{/each}
+      </select>
+    </label>
     <p class="muted">
       Switching opens that installation with its own session. Bookmarks contain
       names and origins; keys and data stay separate.
     </p>
     <form onsubmit={add}>
-      <label
-        >Bookmark name<input
+      <label>
+        Bookmark name<input
           class="filter-control"
           bind:value={bookmarkName}
           maxlength="100"
           required
-        /></label
-      >
-      <label
-        >Installation origin<input
+        />
+      </label>
+      <label>
+        Installation origin<input
           class="filter-control"
           bind:value={bookmarkURL}
           type="url"
           maxlength="2048"
           placeholder="https://gateway.example.com"
           required
-        /></label
-      >
+        />
+      </label>
       <button class="button button-secondary">Add bookmark</button>
     </form>
     {#each bookmarks as entry (entry.origin)}<div class="bookmark">
@@ -130,8 +133,10 @@
           class="button button-quiet"
           type="button"
           aria-label={`Remove ${entry.name} bookmark`}
-          onclick={() => remove(entry.origin)}>Remove</button
+          onclick={() => remove(entry.origin)}
         >
+          Remove
+        </button>
       </div>{/each}
     {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   </div>

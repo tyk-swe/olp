@@ -26,13 +26,15 @@
       aria-describedby="route-fidelity-help"
     >
       {#each fidelityOptions as option (option.value)}<option
-          value={option.value}>{option.label}</option
-        >{/each}
+          value={option.value}
+        >
+          {option.label}
+        </option>{/each}
     </select>
-    <small id="route-fidelity-help"
-      >Routes are strict unless you declare them transformed. Native identity
-      and qualified translation describe individual plans.</small
-    >
+    <small id="route-fidelity-help">
+      Routes are strict unless you declare them transformed. Native identity and
+      qualified translation describe individual plans.
+    </small>
   </div>
   {#if changed}<p class="change-note" role="status">
       Draft fidelity: {saved} → {mode}. Activation publishes the change as a new

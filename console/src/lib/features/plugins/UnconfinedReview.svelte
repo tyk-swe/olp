@@ -38,17 +38,16 @@
   </dl>
   <ScrollTable label="Plugin profiles">
     <table class="data-table">
-      <thead
-        ><tr><th>Profile</th><th>Label</th><th>Dialect</th><th>Address</th></tr
-        ></thead
-      >
+      <thead>
+        <tr><th>Profile</th><th>Label</th><th>Dialect</th><th>Address</th></tr>
+      </thead>
       <tbody>
         {#each review.manifest.profiles as profile (profile.id)}
-          <tr
-            ><td><code>{profile.id}</code></td><td>{profile.label}</td><td
-              ><code>{profile.dialect}</code></td
-            ><td><code class="address">{profile.hosting.address}</code></td></tr
-          >
+          <tr>
+            <td><code>{profile.id}</code></td><td>{profile.label}</td><td>
+              <code>{profile.dialect}</code>
+            </td><td><code class="address">{profile.hosting.address}</code></td>
+          </tr>
         {/each}
       </tbody>
     </table>
@@ -66,23 +65,26 @@
     processes can, reaches any network and bypasses the egress policy. Permit only
     an executable you trust as much as OpenLLMProxy itself.
   </div>
-  <label class="acknowledge"
-    ><input type="checkbox" bind:checked={acknowledged} /> I understand that {review.name}
-    will run unconfined, with OpenLLMProxy's privileges.</label
-  >
+  <label class="acknowledge">
+    <input type="checkbox" bind:checked={acknowledged} /> I understand that {review.name}
+    will run unconfined, with OpenLLMProxy's privileges.
+  </label>
   <div class="actions">
     <button
       class="button button-primary"
       type="button"
       disabled={!acknowledged || Boolean(busy)}
       onclick={permit}
-      >{busy === 'permit' ? 'Permitting…' : 'Permit unconfined plugin'}</button
-    ><button
+    >
+      {busy === 'permit' ? 'Permitting…' : 'Permit unconfined plugin'}
+    </button><button
       class="button button-secondary"
       type="button"
       disabled={Boolean(busy)}
-      onclick={oncancel}>Cancel</button
+      onclick={oncancel}
     >
+      Cancel
+    </button>
   </div>
 </section>
 

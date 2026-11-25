@@ -201,9 +201,9 @@
       access its files and network. Review and permit only a build you trust.
       Registration alone does not permit execution
     </p>
-    {#if !canManage}<ReadOnlyNote
-        >Only an owner can review, permit or revoke executable digests</ReadOnlyNote
-      >
+    {#if !canManage}<ReadOnlyNote>
+        Only an owner can review, permit or revoke executable digests
+      </ReadOnlyNote>
     {:else}
       {#if $panel.problem}<div role="alert" class="inline-problem">
           {$panel.problem}
@@ -214,15 +214,16 @@
             class="text-button"
             disabled={busy}
             onclick={() => $panel.review && refreshReview($panel.review.name)}
-            >Retry status refresh</button
           >
+            Retry status refresh
+          </button>
         </div>{/if}
       {#if files.isPending}<p role="status">Loading installed executables</p>
       {:else if files.isError}<div role="alert" class="inline-problem">
           {errorMessage(files.error)}
-          <button class="text-button" onclick={() => files.refetch()}
-            >Retry</button
-          >
+          <button class="text-button" onclick={() => files.refetch()}>
+            Retry
+          </button>
         </div>
       {:else if !files.data?.length}<p class="muted">
           No executables are installed in the deployment directory
@@ -230,25 +231,24 @@
       {:else}
         <ScrollTable label="MCP executables">
           <table class="data-table">
-            <thead
-              ><tr
-                ><th>Executable</th><th>SHA-256</th><th>Size</th><th>Action</th
-                ></tr
-              ></thead
-            ><tbody>
-              {#each files.data as file (file.name)}<tr
-                  ><td><code>{file.name}</code></td><td
-                    ><code title={file.digest}>{shortDigest(file.digest)}</code
-                    ></td
-                  ><td>{formatBytes(file.size_bytes)}</td><td
-                    ><button
+            <thead>
+              <tr>
+                <th>Executable</th><th>SHA-256</th><th>Size</th><th>Action</th>
+              </tr>
+            </thead><tbody>
+              {#each files.data as file (file.name)}<tr>
+                  <td><code>{file.name}</code></td><td>
+                    <code title={file.digest}>{shortDigest(file.digest)}</code>
+                  </td><td>{formatBytes(file.size_bytes)}</td><td>
+                    <button
                       class="button button-secondary"
                       disabled={busy}
                       onclick={() => inspect(file.name)}
-                      >Review MCP executable</button
-                    ></td
-                  ></tr
-                >{/each}
+                    >
+                      Review MCP executable
+                    </button>
+                  </td>
+                </tr>{/each}
             </tbody>
           </table>
         </ScrollTable>
@@ -264,17 +264,19 @@
             <button
               class="button button-secondary"
               disabled={busy}
-              onclick={revoke}>Revoke MCP permission</button
+              onclick={revoke}
             >
+              Revoke MCP permission
+            </button>
           {:else}
-            <label
-              ><input
+            <label>
+              <input
                 type="checkbox"
                 checked={$panel.acknowledged}
                 onchange={(event) =>
                   patch({ acknowledged: event.currentTarget.checked })}
-              /> I understand this executable runs unconfined with the gateway's privileges</label
-            >
+              /> I understand this executable runs unconfined with the gateway's privileges
+            </label>
             <p class="muted">
               Permission requires recent authentication. After single sign-on,
               review this executable again and choose Permit
@@ -282,8 +284,10 @@
             <button
               class="button button-primary"
               disabled={busy || !$panel.acknowledged}
-              onclick={permit}>Permit MCP executable</button
+              onclick={permit}
             >
+              Permit MCP executable
+            </button>
           {/if}
         </section>
       {/if}

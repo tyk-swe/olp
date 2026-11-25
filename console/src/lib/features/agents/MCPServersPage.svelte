@@ -67,8 +67,10 @@
       <button
         class="button button-primary"
         type="button"
-        onclick={() => select('')}>New server</button
+        onclick={() => select('')}
       >
+        New server
+      </button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -81,9 +83,9 @@
 {:else if servers.isPending}
   <div class="loading-state" role="status">Loading servers…</div>
 {:else if !servers.data?.length}
-  <EmptyState title="No MCP servers yet"
-    >Register a server to make its tools available to agents.</EmptyState
-  >
+  <EmptyState title="No MCP servers yet">
+    Register a server to make its tools available to agents.
+  </EmptyState>
 {:else}
   <ScrollTable label="MCP servers">
     <table class="data-table">
@@ -118,8 +120,9 @@
                   class="button button-secondary"
                   type="button"
                   onclick={() => select(server.id)}
-                  >{canEdit ? 'Edit' : 'View'}</button
                 >
+                  {canEdit ? 'Edit' : 'View'}
+                </button>
                 {#if !server.retired_at && access.allows('DELETE /api/v1/mcp-servers/{server_id}')}
                   <ConfirmAction
                     danger

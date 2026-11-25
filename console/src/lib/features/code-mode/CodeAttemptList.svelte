@@ -131,11 +131,9 @@
               </p>
             {/if}
           {:else if result?.status === 'error'}
-            <span role="alert"
-              >Could not load account decision. {errorMessage(
-                result.error
-              )}</span
-            >
+            <span role="alert">
+              Could not load account decision. {errorMessage(result.error)}
+            </span>
           {:else}
             {decisionsPending
               ? 'Loading account decision'
@@ -160,8 +158,9 @@
             type="button"
             class="button button-secondary"
             onclick={() => onShowSource(attempt.recovery_from!)}
-            >{attempt.recovery_from}</button
           >
+            {attempt.recovery_from}
+          </button>
         {:else}
           No recovery source recorded
         {/if}
@@ -172,8 +171,10 @@
             onclick={() =>
               onShowConversation(
                 (attempt.paid_binding_id ?? attempt.binding_id)!
-              )}>Show conversation attempts</button
+              )}
           >
+            Show conversation attempts
+          </button>
         {/if}
       </dd>
       <dt>End user</dt>

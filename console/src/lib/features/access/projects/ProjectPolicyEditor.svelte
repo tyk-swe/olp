@@ -93,9 +93,9 @@
     <p role="status">Loading {name}…</p>
   {:else if policy.isError}
     <p class="inline-problem" role="alert">{errorMessage(policy.error)}</p>
-    <button class="button button-secondary" type="button" onclick={reload}
-      >Retry {name}</button
-    >
+    <button class="button button-secondary" type="button" onclick={reload}>
+      Retry {name}
+    </button>
   {:else if etag}
     <form onsubmit={submit}>
       <p class="muted">{help}</p>
@@ -110,14 +110,17 @@
             class="button button-primary"
             type="submit"
             disabled={action.busy}
-            >{action.busy ? 'Saving…' : `Save ${name}`}</button
-          >{/if}
+          >
+            {action.busy ? 'Saving…' : `Save ${name}`}
+          </button>{/if}
         <button
           type="button"
           class="button button-secondary"
           disabled={action.busy}
-          onclick={reload}>Reload saved policy</button
+          onclick={reload}
         >
+          Reload saved policy
+        </button>
       </div>
     </form>
   {/if}

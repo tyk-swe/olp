@@ -29,100 +29,97 @@
 
 <form class="card filters" aria-label="Request filters" onsubmit={onApply}>
   <div class="filter-grid">
-    <label
-      >Route <input
+    <label>
+      Route <input
         bind:value={listState.route}
         name="route"
         placeholder="support-chat"
-      /></label
-    >
+      />
+    </label>
     <label>Model <input bind:value={listState.model} name="model" /></label>
-    <label
-      >Status code <input
+    <label>
+      Status code <input
         bind:value={listState.statusCode}
         name="status"
         inputmode="numeric"
         pattern={'[0-9]{1,5}'}
         placeholder="429"
-      /></label
-    >
-    <label
-      >From <input
+      />
+    </label>
+    <label>
+      From <input
         bind:value={listState.startedAfter}
         name="after"
         type={timeInputType(listState.startedAfter)}
-      /></label
-    >
-    <label
-      >To <input
+      />
+    </label>
+    <label>
+      To <input
         bind:value={listState.startedBefore}
         name="before"
         type={timeInputType(listState.startedBefore)}
-      /></label
-    >
+      />
+    </label>
   </div>
   <Advanced label="More filters" open={hasMoreFilters}>
     <div class="filter-grid">
-      <label
-        >Operation <input
+      <label>
+        Operation <input
           bind:value={listState.operation}
           name="operation"
           placeholder="generation"
-        /></label
-      >
-      <label
-        >Error class <input
-          bind:value={listState.errorClass}
-          name="error"
-        /></label
-      >
-      <label
-        >Provider ID <input
+        />
+      </label>
+      <label>
+        Error class <input bind:value={listState.errorClass} name="error" />
+      </label>
+      <label>
+        Provider ID <input
           bind:value={listState.providerId}
           name="provider"
           class="mono"
-        /></label
-      >
-      <label
-        >API key ID <input
+        />
+      </label>
+      <label>
+        API key ID <input
           bind:value={listState.apiKeyId}
           name="key"
           class="mono"
-        /></label
-      >
-      <label
-        >Project ID <input
+        />
+      </label>
+      <label>
+        Project ID <input
           bind:value={listState.projectId}
           name="project"
           class="mono"
-        /></label
-      >
-      <label
-        >Session ID <input
+        />
+      </label>
+      <label>
+        Session ID <input
           bind:value={listState.sessionId}
           name="session"
           class="mono"
-        /></label
-      >
-      <label
-        >Attribution key <input
+        />
+      </label>
+      <label>
+        Attribution key <input
           bind:value={listState.attributionKey}
           name="attribution_key"
-        /></label
-      >
-      <label
-        >Attribution value <input
+        />
+      </label>
+      <label>
+        Attribution value <input
           bind:value={listState.attributionValue}
           name="attribution_value"
-        /></label
-      >
+        />
+      </label>
     </div>
   </Advanced>
   <div class="filter-actions">
     <button class="button button-primary" type="submit">Apply</button>
-    <button class="button button-secondary" type="button" onclick={onReset}
-      >Reset</button
-    >
+    <button class="button button-secondary" type="button" onclick={onReset}>
+      Reset
+    </button>
   </div>
 </form>
 

@@ -135,13 +135,13 @@
       Missing evidence: {resource.retained_settlement.last_error}
     </p>{/if}
   {#if canReconcile}
-    <label
-      >Upstream resource hint (optional)<input
+    <label>
+      Upstream resource hint (optional)<input
         bind:value={hint}
         maxlength="512"
         disabled={busy}
-      /></label
-    >
+      />
+    </label>
     <p>
       A hint is verified against the original submission before a resource can
       be adopted.
@@ -150,8 +150,10 @@
       class="button button-secondary"
       type="button"
       onclick={reconcile}
-      disabled={busy}>Reconcile</button
+      disabled={busy}
     >
+      Reconcile
+    </button>
   {/if}
   {#if canEvidence}
     <form onsubmit={submitEvidence}>
@@ -159,16 +161,18 @@
         class="button button-secondary"
         type="button"
         onclick={draftEvidence}
-        disabled={busy}>Prepare usage evidence</button
+        disabled={busy}
       >
-      <label
-        >Verified usage evidence<textarea
+        Prepare usage evidence
+      </button>
+      <label>
+        Verified usage evidence<textarea
           bind:value={evidence}
           rows="15"
           spellcheck="false"
           disabled={busy}
-          required></textarea></label
-      >
+          required></textarea>
+      </label>
       <p>
         Use UTC interval boundaries and an evidence SHA-256 digest. Enter
         verified quantities only; omitted quantities remain unknown. Terminal
@@ -178,8 +182,10 @@
       <button
         class="button button-primary"
         type="submit"
-        disabled={busy || !evidence.trim()}>Record evidence</button
+        disabled={busy || !evidence.trim()}
       >
+        Record evidence
+      </button>
     </form>
   {/if}
   {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}

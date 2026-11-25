@@ -304,28 +304,28 @@
   drops the whole capture. Detector coverage is bounded and does not guarantee removal
   of every secret or personal detail.
 </div>
-{#if captureConfig.isPending}<span class="inline-status" role="status"
-    >Loading capture…</span
-  >
-{:else if captureConfig.isError}<span class="inline-problem" role="alert"
-    >Capture settings are unavailable.
+{#if captureConfig.isPending}<span class="inline-status" role="status">
+    Loading capture…
+  </span>
+{:else if captureConfig.isError}<span class="inline-problem" role="alert">
+    Capture settings are unavailable.
     <button
       class="text-button"
       type="button"
-      onclick={() => captureConfig.refetch()}>Retry</button
-    ></span
-  >
+      onclick={() => captureConfig.refetch()}
+    >
+      Retry
+    </button>
+  </span>
 {:else if captureConfig.data}
   <p class="section-help">
     Installation capture is {captureConfig.data.enabled
       ? 'enabled'
       : 'disabled'}.
     {#if ownerOnly}
-      <button class="text-button" type="button" onclick={toggleMaster}
-        >{captureConfig.data.enabled
-          ? 'Disable capture'
-          : 'Enable capture'}</button
-      >
+      <button class="text-button" type="button" onclick={toggleMaster}>
+        {captureConfig.data.enabled ? 'Disable capture' : 'Enable capture'}
+      </button>
     {:else}<span>Only the installation owner can change this.</span>{/if}
   </p>
 {/if}

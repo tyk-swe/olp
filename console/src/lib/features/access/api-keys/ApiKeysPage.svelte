@@ -170,8 +170,10 @@
     {errorMessage(loaded.error)}
     {#snippet actions()}<a
         class="button button-secondary"
-        href={resolve('keys')}>All API keys</a
-      >{/snippet}
+        href={resolve('keys')}
+      >
+        All API keys
+      </a>{/snippet}
   </Callout>
 {:else if isForm}
   <ApiKeyPolicyForm

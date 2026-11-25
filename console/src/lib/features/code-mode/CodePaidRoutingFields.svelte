@@ -20,13 +20,13 @@
   } = $props();
 </script>
 
-<label
-  ><input
+<label>
+  <input
     id="code-paid-participation"
     type="checkbox"
     bind:checked={paidParticipation}
-  />Permit paid API targets</label
->
+  />Permit paid API targets
+</label>
 <p>
   Mapped models directly use the selected metered API target, even when a
   subscription supports the same model. Fallback targets are separate and keep
@@ -57,9 +57,9 @@
     {models}
     {providers}
   />
-  <small
-    >Paid targets use their native HTTP protocol. Publish after changing a
+  <small>
+    Paid targets use their native HTTP protocol. Publish after changing a
     provider or slot. Targets with request defaults, caller credentials or
-    subscription adapters are unsupported.</small
-  >
+    subscription adapters are unsupported.
+  </small>
 {/if}

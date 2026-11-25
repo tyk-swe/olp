@@ -22,9 +22,9 @@
     canManage={access.can('settings.update')}
   />
 {:else}
-  <Callout tone="info"
-    >Routing settings appear once a gateway is connected to this installation.</Callout
-  >
+  <Callout tone="info">
+    Routing settings appear once a gateway is connected to this installation.
+  </Callout>
 {/if}
 
 <style>

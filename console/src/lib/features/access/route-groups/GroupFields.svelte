@@ -28,16 +28,17 @@
           id={`${prefix}-${row.id}-routes`}
           bind:value={row.routes}
           placeholder="chat, embeddings"
-          rows="2"></textarea><small
-          >Separate route slugs with commas or spaces.</small
-        >
+          rows="2"></textarea><small>
+          Separate route slugs with commas or spaces.
+        </small>
       </div>
       <button
         type="button"
         class="button button-secondary"
         onclick={() => (form = form.filter((item) => item.id !== row.id))}
-        >Remove group {row.name}</button
       >
+        Remove group {row.name}
+      </button>
     </div>
   {/each}
   <button
@@ -46,8 +47,9 @@
     disabled={disabled || form.length >= 64}
     onclick={() =>
       (form = [...form, { id: crypto.randomUUID(), name: '', routes: '' }])}
-    >Add route group</button
   >
+    Add route group
+  </button>
 </fieldset>
 
 <style>

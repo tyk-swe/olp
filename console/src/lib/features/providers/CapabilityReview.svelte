@@ -199,21 +199,22 @@
 
 <div class="review">
   <div class="review-heading">
-    <label class="enable"
-      ><input
+    <label class="enable">
+      <input
         type="checkbox"
         bind:checked={enabled}
         onchange={touch}
         {disabled}
-      /> Eligible for routes</label
-    >
+      /> Eligible for routes
+    </label>
     <button
       class="button button-secondary"
       type="button"
       onclick={addCapability}
       disabled={disabled || limitReached || !unusedOptions.length}
-      >Add capability</button
     >
+      Add capability
+    </button>
   </div>
   {#if limitReached}<p class="empty">
       This model carries the maximum of {MAX_REVIEWED_CAPABILITIES} reviewed tuples.
@@ -230,59 +231,66 @@
   <div class="capability-list">
     {#each capabilities as capability, index (index)}
       <div class="capability-row">
-        <label
-          ><span class="sr-only">Operation {index + 1}</span><select
+        <label>
+          <span class="sr-only">Operation {index + 1}</span><select
             value={capability.operation}
             onchange={(event) =>
               update(index, 'operation', event.currentTarget.value)}
             disabled={disabled || !options.length}
-            >{#each operations as operation (operation)}<option
-                value={operation}>{stateLabel(operation)}</option
-              >{/each}</select
-          ></label
-        >
-        <label
-          ><span class="sr-only">Client surface {index + 1}</span><select
+          >
+            {#each operations as operation (operation)}<option
+                value={operation}
+              >
+                {stateLabel(operation)}
+              </option>{/each}
+          </select>
+        </label>
+        <label>
+          <span class="sr-only">Client surface {index + 1}</span><select
             value={capability.surface}
             onchange={(event) =>
               update(index, 'surface', event.currentTarget.value)}
             disabled={disabled || !options.length}
-            >{#each surfacesFor(capability.operation) as surface (surface)}<option
+          >
+            {#each surfacesFor(capability.operation) as surface (surface)}<option
                 value={surface}
-                >{surface === 'openai'
+              >
+                {surface === 'openai'
                   ? 'OpenAI'
                   : surface === 'anthropic'
                     ? 'Anthropic'
-                    : 'Gemini'}</option
-              >{/each}</select
-          ></label
-        >
-        <label
-          ><span class="sr-only">Mode {index + 1}</span><select
+                    : 'Gemini'}
+              </option>{/each}
+          </select>
+        </label>
+        <label>
+          <span class="sr-only">Mode {index + 1}</span><select
             value={capability.mode}
             onchange={(event) =>
               update(index, 'mode', event.currentTarget.value)}
             disabled={disabled || !options.length}
-            >{#each modesFor(capability) as mode (mode)}<option value={mode}
-                >{mode}</option
-              >{/each}</select
-          ></label
-        >
+          >
+            {#each modesFor(capability) as mode (mode)}<option value={mode}>
+                {mode}
+              </option>{/each}
+          </select>
+        </label>
         <button
           class="remove"
           type="button"
           aria-label={`Remove capability ${index + 1}`}
           onclick={() => remove(index)}
-          {disabled}>×</button
+          {disabled}
         >
+          ×
+        </button>
       </div>
     {/each}
   </div>
   <CapabilityEvidence {model} />
   {#if failedCertifications.length}
     <ul class="certification-results" aria-label="Failed certification tuples">
-      {#each failedCertifications as item (`${item.operation}-${item.surface}-${item.mode}`)}<li
-        >
+      {#each failedCertifications as item (`${item.operation}-${item.surface}-${item.mode}`)}<li>
           <code>{item.operation}/{item.surface}/{item.mode}</code>: {item.detail}{#if item.error_code}
             (<code>{item.error_code}</code>){/if}
         </li>{/each}
@@ -291,16 +299,18 @@
   {#if localError}<p class="error" role="alert">{localError}</p>{/if}
   <ConflictNotice notice={concurrentNotice} onReload={reload} {disabled} />
   <div class="review-footer">
-    <span
-      >Options are owned by the server. New tuples are stored with declared
-      provenance; unchanged tuples keep their certification.</span
-    >
+    <span>
+      Options are owned by the server. New tuples are stored with declared
+      provenance; unchanged tuples keep their certification.
+    </span>
     <button
       class="button button-secondary"
       type="button"
       onclick={save}
-      {disabled}>Save capability review</button
+      {disabled}
     >
+      Save capability review
+    </button>
   </div>
 </div>
 

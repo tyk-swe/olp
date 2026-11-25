@@ -11,6 +11,8 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import {
+    buildIssuerWrite,
+    defaultIssuerMappings,
     listIssuers,
     saveIssuer,
     issuerInput,
@@ -58,8 +60,6 @@
     lifetime = '3600';
     mappings = '[]';
   });
-  const words = (text: string) => text.split(/[\s,]+/).filter(Boolean);
-
   function open(value?: Issuer) {
     editing = value;
     name = value?.name ?? '';
@@ -71,18 +71,7 @@
     lifetime = String(value?.max_lifetime_seconds ?? 3600);
     disabledKeys = value?.disabled_key_ids.join('\n') ?? '';
     mappings = JSON.stringify(
-      value?.mappings ?? [
-        {
-          name: 'build',
-          match: { '/repository': 'example/repository' },
-          project_id: '',
-          limit_template: 'worker',
-          route_groups: ['generation'],
-          scopes: ['inference'],
-          end_user_claim: null,
-          allow_provider_state: false
-        }
-      ],
+      value?.mappings ?? defaultIssuerMappings,
       null,
       2
     );
@@ -96,32 +85,19 @@
     if (write.busy || !editable) return;
     let draft = pending;
     if (!draft) {
-      const built = captureResult((): IssuerWrite => {
-        const parsed: unknown = JSON.parse(mappings);
-        if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 32)
-          throw new Error('Provide one to 32 claim mappings.');
-        const seconds = Number(lifetime);
-        if (
-          !Number.isInteger(seconds) ||
-          seconds < 60 ||
-          seconds > 86400 ||
-          algorithms.length === 0
-        )
-          throw new Error(
-            'Choose a signature algorithm and a maximum lifetime between 60 and 86400 seconds.'
-          );
-        return {
-          name: name.trim(),
+      const built = captureResult(() =>
+        buildIssuerWrite({
+          name,
           issuer,
-          jwks_url: jwks,
+          jwks,
           enabled,
-          audiences: words(audiences),
-          algorithms: algorithms as IssuerWrite['algorithms'],
-          max_lifetime_seconds: seconds,
-          disabled_key_ids: words(disabledKeys),
-          mappings: parsed as IssuerWrite['mappings']
-        };
-      });
+          audiences,
+          algorithms,
+          lifetime,
+          disabledKeys,
+          mappings
+        })
+      );
       if (!built.ok) {
         write.error = errorMessage(
           built.error,
@@ -203,8 +179,10 @@
       <button
         class="button button-primary"
         disabled={write.busy}
-        onclick={() => open()}>New issuer</button
+        onclick={() => open()}
       >
+        New issuer
+      </button>
     </div>{/if}
 </div>
 {#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
@@ -215,42 +193,47 @@
   failure="Check your connection and try again."
   emptyWhen={(query.data ?? []).length === 0}
 >
-  {#snippet empty()}<EmptyState title="No workload issuers yet"
-      >Add an issuer to let workloads authenticate without an API key.</EmptyState
-    >{/snippet}
+  {#snippet empty()}<EmptyState title="No workload issuers yet">
+      Add an issuer to let workloads authenticate without an API key.
+    </EmptyState>{/snippet}
   <ScrollTable label="Workload issuers">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Name</th><th scope="col">Issuer URL</th><th
-            scope="col">Status</th
-          ><th scope="col"><span class="sr-only">Actions</span></th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Name</th><th scope="col">Issuer URL</th><th
+            scope="col"
+          >
+            Status
+          </th><th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
       <tbody>
         {#each query.data ?? [] as value (value.id)}
           <tr>
             <td><strong>{value.name}</strong></td>
             <td><code class="mono">{value.issuer}</code></td>
-            <td
-              ><StatusBadge
+            <td>
+              <StatusBadge
                 label={value.enabled ? 'Enabled' : 'Disabled'}
                 tone={value.enabled ? 'success' : 'neutral'}
-              /></td
-            >
+              />
+            </td>
             <td class="row-actions">
               <button
                 class="text-button"
                 disabled={write.busy}
                 onclick={() => open(value)}
                 aria-label={`Edit ${value.name}`}
-                >{editable ? 'Edit' : 'View'}</button
-              >{#if editable && value.enabled}<button
+              >
+                {editable ? 'Edit' : 'View'}
+              </button>{#if editable && value.enabled}<button
                   class="text-button danger"
                   disabled={write.busy}
                   onclick={() => disable(value)}
-                  aria-label={`Disable ${value.name}`}>Disable</button
-                >{/if}
+                  aria-label={`Disable ${value.name}`}
+                >
+                  Disable
+                </button>{/if}
             </td>
           </tr>
         {/each}
@@ -285,10 +268,10 @@
             bind:value={issuer}
             required
             readonly={Boolean(editing)}
-          /><small
-            >Must exactly match the token’s issuer. This identity cannot be
-            renamed.</small
-          >
+          /><small>
+            Must exactly match the token’s issuer. This identity cannot be
+            renamed.
+          </small>
         </div>
         <div class="form-field">
           <label for="issuer-jwks">JWKS URL</label><input
@@ -296,10 +279,10 @@
             type="url"
             bind:value={jwks}
             required
-          /><small
-            >Fetched through the separate identity egress policy. Redirects and
-            unsafe destinations are refused.</small
-          >
+          /><small>
+            Fetched through the separate identity egress policy. Redirects and
+            unsafe destinations are refused.
+          </small>
         </div>
         <label><input type="checkbox" bind:checked={enabled} /> Enabled</label>
         <div class="form-field">
@@ -307,20 +290,22 @@
             id="issuer-audiences"
             bind:value={audiences}
             required
-            rows="2"></textarea><small
-            >Separate exact audience values with commas or newlines.</small
-          >
+            rows="2"></textarea><small>
+            Separate exact audience values with commas or newlines.
+          </small>
         </div>
         <fieldset class="algorithms">
-          <legend>Signature algorithms</legend
-          >{#each ['RS256', 'ES256', 'EdDSA'] as alg (alg)}<label
-              ><input type="checkbox" bind:group={algorithms} value={alg} />
-              {alg}</label
-            >{/each}
+          <legend>
+            Signature algorithms
+          </legend>{#each ['RS256', 'ES256', 'EdDSA'] as alg (alg)}<label>
+              <input type="checkbox" bind:group={algorithms} value={alg} />
+              {alg}
+            </label>{/each}
         </fieldset>
         <div class="form-field">
-          <label for="issuer-lifetime">Maximum token lifetime (seconds)</label
-          ><input
+          <label for="issuer-lifetime">
+            Maximum token lifetime (seconds)
+          </label><input
             id="issuer-lifetime"
             type="text"
             inputmode="numeric"
@@ -329,8 +314,9 @@
           />
         </div>
         <div class="form-field">
-          <label for="issuer-disabled-keys">Disabled signing key IDs</label
-          ><textarea
+          <label for="issuer-disabled-keys">
+            Disabled signing key IDs
+          </label><textarea
             id="issuer-disabled-keys"
             bind:value={disabledKeys}
             rows="2"></textarea>
@@ -340,12 +326,12 @@
             id="issuer-mappings"
             bind:value={mappings}
             rows="17"
-            spellcheck="false"></textarea><small
-            >Ordered mappings use exact string matches at JSON pointers. Create
+            spellcheck="false"></textarea><small>
+            Ordered mappings use exact string matches at JSON pointers. Create
             the project template and route groups first. The first matching
             mapping wins. An optional end_user_claim must contain a bounded
-            machine identifier; the gateway retains only its digest.</small
-          >
+            machine identifier; the gateway retains only its digest.
+          </small>
         </div>
       </fieldset>
       {#if pending}<p>
@@ -353,21 +339,26 @@
           issuer to change it.
         </p>{/if}
       <div class="actions">
-        <button class="button button-primary" disabled={write.busy || !editable}
-          >{write.busy
+        <button
+          class="button button-primary"
+          disabled={write.busy || !editable}
+        >
+          {write.busy
             ? 'Saving…'
             : pending
               ? 'Retry save'
-              : 'Save workload issuer'}</button
-        ><button
+              : 'Save workload issuer'}
+        </button><button
           type="button"
           class="button button-secondary"
           disabled={write.busy}
           onclick={() => {
             opened = false;
             pending = undefined;
-          }}>Close editor</button
+          }}
         >
+          Close editor
+        </button>
       </div>
     </form>
   </Dialog>

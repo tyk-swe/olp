@@ -113,10 +113,10 @@
           <ol class="structure">
             {#each effective.structure as turn (`${turn.scope}-${turn.index}`)}
               <li>
-                <strong
-                  >{label(turn.scope)}
-                  {turn.index + 1} · {label(turn.role)}</strong
-                >
+                <strong>
+                  {label(turn.scope)}
+                  {turn.index + 1} · {label(turn.role)}
+                </strong>
                 <span>
                   {#each turn.parts as part, index (index)}
                     {#if index > 0}
@@ -144,24 +144,24 @@
           <h4>Effective native fields</h4>
           <ScrollTable label="Effective native fields">
             <table class="data-table">
-              <thead
-                ><tr
-                  ><th>Field</th><th>Presence</th><th>Origin</th><th
-                    >Safe value</th
-                  ></tr
-                ></thead
-              >
+              <thead>
+                <tr>
+                  <th>Field</th><th>Presence</th><th>Origin</th><th>
+                    Safe value
+                  </th>
+                </tr>
+              </thead>
               <tbody>
                 {#each effective.fields as field (`${field.field}-${field.kind}`)}
                   <tr>
                     <td><code>{field.field}</code></td>
                     <td>{field.kind}{field.empty ? ' · empty' : ''}</td>
                     <td>{label(field.origin)}</td>
-                    <td
-                      >{#if field.value_json !== undefined}<code
-                          >{field.value_json}</code
-                        >{:else}Hidden{/if}</td
-                    >
+                    <td>
+                      {#if field.value_json !== undefined}<code>
+                          {field.value_json}
+                        </code>{:else}Hidden{/if}
+                    </td>
                   </tr>
                 {/each}
               </tbody>

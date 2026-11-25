@@ -72,15 +72,15 @@
           pattern={'([0-9a-f]{64}|unidentified)'}
           aria-describedby="code-end-user-help"
         />
-        <small id="code-end-user-help"
-          >Use a lookup digest, or unidentified.</small
-        >
+        <small id="code-end-user-help">
+          Use a lookup digest, or unidentified.
+        </small>
       </div>
     {/if}
     <button class="button button-secondary" type="submit">Apply filters</button>
-    <button class="button button-secondary" type="button" onclick={onClear}
-      >Clear filters</button
-    >
+    <button class="button button-secondary" type="button" onclick={onClear}>
+      Clear filters
+    </button>
   </form>
 {/if}
 

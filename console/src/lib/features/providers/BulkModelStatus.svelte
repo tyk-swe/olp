@@ -31,23 +31,31 @@
       class="button button-primary"
       type="button"
       disabled={busy || refreshPending || !selectedCount}
-      onclick={onValidate}>Validate {selectedCount} selected models</button
-    >{/if}
+      onclick={onValidate}
+    >
+      Validate {selectedCount} selected models
+    </button>{/if}
   {#if failedCount && !busy && !refreshPending}<button
       class="button button-secondary"
       type="button"
-      onclick={onRetryFailed}>Retry {failedCount} failed models</button
-    >{/if}
+      onclick={onRetryFailed}
+    >
+      Retry {failedCount} failed models
+    </button>{/if}
   {#if refreshPending && !busy}<button
       class="button button-secondary"
       type="button"
-      onclick={onRetryRefresh}>Retry refresh</button
-    >{/if}
+      onclick={onRetryRefresh}
+    >
+      Retry refresh
+    </button>{/if}
   {#if busy}<button
       class="button button-secondary"
       type="button"
-      onclick={onStop}>Stop validation</button
-    >{/if}
+      onclick={onStop}
+    >
+      Stop validation
+    </button>{/if}
 </div>
 {#if status}<p class="status" role="status">{status}</p>{/if}
 {#if failures.length}<ul class="inline-problem" role="alert">

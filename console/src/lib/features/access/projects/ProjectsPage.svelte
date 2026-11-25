@@ -55,8 +55,10 @@
   {#snippet actions()}{#if canCreate}<button
         class="button button-primary"
         type="button"
-        onclick={startCreate}>New project</button
-      >{/if}{/snippet}
+        onclick={startCreate}
+      >
+        New project
+      </button>{/if}{/snippet}
 </PageHeader>
 
 {#if projects.isPending}
@@ -67,8 +69,10 @@
     {#snippet actions()}<button
         class="button button-secondary"
         type="button"
-        onclick={() => projects.refetch()}>Try again</button
-      >{/snippet}
+        onclick={() => projects.refetch()}
+      >
+        Try again
+      </button>{/snippet}
   </Callout>
 {:else if !projects.data.length}
   <EmptyState title="No projects yet">
@@ -78,8 +82,10 @@
     {#snippet action()}{#if canCreate}<button
           class="button button-primary"
           type="button"
-          onclick={startCreate}>New project</button
-        >{/if}{/snippet}
+          onclick={startCreate}
+        >
+          New project
+        </button>{/if}{/snippet}
   </EmptyState>
 {:else}
   <ScrollTable label="Projects">
@@ -88,17 +94,17 @@
       <tbody>
         {#each projects.data as project (project.id)}
           <tr>
-            <td
-              ><a href={resolve(`projects/${project.id}`)}
-                ><strong>{project.name}</strong></a
-              ></td
-            >
-            <td
-              ><StatusBadge
+            <td>
+              <a href={resolve(`projects/${project.id}`)}>
+                <strong>{project.name}</strong>
+              </a>
+            </td>
+            <td>
+              <StatusBadge
                 label={project.role === 'manager' ? 'Manager' : 'Viewer'}
                 tone={project.role === 'manager' ? 'accent' : 'neutral'}
-              /></td
-            >
+              />
+            </td>
           </tr>
         {/each}
       </tbody>
@@ -125,15 +131,16 @@
             {creation.error}
           </p>{/if}
         <div class="page-actions">
-          <button class="button button-secondary" type="button" onclick={close}
-            >Cancel</button
-          >
+          <button class="button button-secondary" type="button" onclick={close}>
+            Cancel
+          </button>
           <button
             class="button button-primary"
             type="submit"
             disabled={creation.busy || !name.trim()}
-            >{creation.busy ? 'Creating…' : 'Create project'}</button
           >
+            {creation.busy ? 'Creating…' : 'Create project'}
+          </button>
         </div>
       </form>
     {/snippet}

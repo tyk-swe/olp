@@ -253,13 +253,9 @@
         <div>
           <h2 id="oidc-heading">OpenID Connect</h2>
         </div>
-        <label class="enabled"
-          ><input
-            type="checkbox"
-            bind:checked={enabled}
-            disabled={!canManage}
-          /> Enabled</label
-        >
+        <label class="enabled">
+          <input type="checkbox" bind:checked={enabled} disabled={!canManage} /> Enabled
+        </label>
       </div>
       <p class="muted">
         Discovery metadata is validated server-side and must match the issuer
@@ -337,11 +333,13 @@
             id="default-role"
             bind:value={defaultRole}
             disabled={!canManage}
-            ><option value="">No default (mapping required)</option
-            >{#each FIXED_ROLES as role (role)}<option value={role}
-                >{role}</option
-              >{/each}</select
           >
+            <option value="">
+              No default (mapping required)
+            </option>{#each FIXED_ROLES as role (role)}<option value={role}>
+                {role}
+              </option>{/each}
+          </select>
         </div>
       </div>
     </section>

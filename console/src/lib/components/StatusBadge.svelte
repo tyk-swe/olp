@@ -11,5 +11,7 @@
   class:accent={tone === 'accent'}
   class:success={tone === 'success'}
   class:warning={tone === 'warning'}
-  class:danger={tone === 'danger'}>{label}</span
+  class:danger={tone === 'danger'}
 >
+  {label}
+</span>

@@ -17,20 +17,24 @@
   {#if routes.isError}<p class="inline-problem" role="alert">
       {errorMessage(routes.error)}
     </p>
-    <button class="button button-secondary" onclick={() => routes.refetch()}
-      >Reload published routes</button
-    >{/if}
-  <label
-    >Published route<select
+    <button class="button button-secondary" onclick={() => routes.refetch()}>
+      Reload published routes
+    </button>{/if}
+  <label>
+    Published route<select
       aria-label="Published route"
       class="filter-control"
       bind:value={selected}
-      ><option value="">Choose a published route</option
-      >{#each routes.data ?? [] as route (route.id)}<option value={route.id}
-          >{route.slug}</option
-        >{/each}</select
-    ></label
-  >
+    >
+      <option value="">
+        Choose a published route
+      </option>{#each routes.data ?? [] as route (route.id)}<option
+          value={route.id}
+        >
+          {route.slug}
+        </option>{/each}
+    </select>
+  </label>
   {#if selected}{#key selected}<ExposurePanel routeId={selected} />{/key}{/if}
 </details>
 

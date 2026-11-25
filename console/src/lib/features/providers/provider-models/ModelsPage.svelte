@@ -163,14 +163,16 @@
   <div class="page-actions">
     {#if canManage}<a
         class="button button-primary"
-        href={resolve('providers/new')}>Discover models</a
+        href={resolve('providers/new')}
       >
+        Discover models
+      </a>
     {/if}
   </div>
 </div>
-{#if !canManage}<ReadOnlyNote
-    >Your role can view the model inventory but not change route eligibility.</ReadOnlyNote
-  >{/if}
+{#if !canManage}<ReadOnlyNote>
+    Your role can view the model inventory but not change route eligibility.
+  </ReadOnlyNote>{/if}
 
 <div class="metric-grid">
   <article class="card metric-card">
@@ -198,8 +200,8 @@
 {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
 <div class="toolbar" role="search">
-  <label class="search"
-    ><span class="sr-only">Search models</span><input
+  <label class="search">
+    <span class="sr-only">Search models</span><input
       class="filter-control"
       type="search"
       bind:value={search}
@@ -208,30 +210,34 @@
         else debounce.schedule();
       }}
       placeholder="Search models or providers"
-    /></label
-  >
-  <label class="filter-choice"
-    ><span>Client surface</span><select
+    />
+  </label>
+  <label class="filter-choice">
+    <span>Client surface</span><select
       class="filter-control"
       bind:value={surface}
       onchange={debounce.applyNow}
-      ><option value="all">All surfaces</option><option value="openai"
-        >OpenAI</option
-      ><option value="anthropic">Anthropic</option><option value="gemini"
-        >Gemini</option
-      ></select
-    ></label
-  >
-  <label class="filter-choice"
-    ><span>Route eligibility</span><select
+    >
+      <option value="all">All surfaces</option><option value="openai">
+        OpenAI
+      </option><option value="anthropic">Anthropic</option><option
+        value="gemini"
+      >
+        Gemini
+      </option>
+    </select>
+  </label>
+  <label class="filter-choice">
+    <span>Route eligibility</span><select
       class="filter-control"
       bind:value={eligibility}
       onchange={debounce.applyNow}
-      ><option value="all">Any eligibility</option><option value="enabled"
-        >Enabled</option
-      ><option value="disabled">Disabled</option></select
-    ></label
-  >
+    >
+      <option value="all">Any eligibility</option><option value="enabled">
+        Enabled
+      </option><option value="disabled">Disabled</option>
+    </select>
+  </label>
 </div>
 
 <BulkRouteCreation
@@ -253,9 +259,9 @@
           <h2>No models discovered</h2>
           <p>Run a provider probe and capability review first.</p>
 
-          <a class="button button-primary" href={resolve('providers')}
-            >Open providers</a
-          >
+          <a class="button button-primary" href={resolve('providers')}>
+            Open providers
+          </a>
         </div>
       </section>
     {:else}
@@ -269,8 +275,10 @@
           <button
             class="button button-secondary"
             type="button"
-            onclick={clearFilters}>Clear filters</button
+            onclick={clearFilters}
           >
+            Clear filters
+          </button>
         </div>
       </section>
     {/if}

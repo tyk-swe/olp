@@ -18,10 +18,10 @@
         <p class="eyebrow">Plan only · no provider request</p>
         <h2 id="simulation-heading">Attempt explanation</h2>
       </div>
-      <code
-        >{editor.simulation.operation} · {editor.simulation.surface} · {editor
-          .simulation.mode} · seed: {editor.simulation.deterministic_seed}</code
-      >
+      <code>
+        {editor.simulation.operation} · {editor.simulation.surface} · {editor
+          .simulation.mode} · seed: {editor.simulation.deterministic_seed}
+      </code>
     </div>
     {#if editor.simulation.selectors.length}<ol
         class="trace"

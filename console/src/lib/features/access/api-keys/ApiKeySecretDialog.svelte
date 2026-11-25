@@ -122,16 +122,17 @@
   {onClose}
 >
   {#snippet children(close)}
-    <span class="secret-icon" aria-hidden="true"
-      ><NavIcon name="key" size={26} /></span
-    >
+    <span class="secret-icon" aria-hidden="true">
+      <NavIcon name="key" size={26} />
+    </span>
     <div class="secret-row">
       <code>{secret.secret}</code><button
         class="button button-secondary"
         type="button"
         onclick={() => copy(secret.secret, 'secret')}
-        >{copied === 'secret' ? 'Copied' : 'Copy key'}</button
       >
+        {copied === 'secret' ? 'Copied' : 'Copy key'}
+      </button>
     </div>
     {#if 'overlap_expires_at' in secret && secret.overlap_expires_at}<p
         class="section-help"
@@ -146,9 +147,9 @@
     {#if services.gatewayAvailable}
       <div class="snippet-heading">
         <div>
-          <strong>Test with a vendor SDK</strong><small
-            >Route slugs are sent as the model.</small
-          >
+          <strong>Test with a vendor SDK</strong><small>
+            Route slugs are sent as the model.
+          </small>
         </div>
         <div
           class="tabs slide-indicator"
@@ -166,12 +167,13 @@
               type="button"
               onclick={() => selectSdk(option)}
               onkeydown={(event) => moveSdkTab(event, index)}
-              >{option === 'openai'
+            >
+              {option === 'openai'
                 ? 'OpenAI Python'
                 : option === 'anthropic'
                   ? 'Anthropic TS'
-                  : 'Gemini TS'}</button
-            >{/each}
+                  : 'Gemini TS'}
+            </button>{/each}
         </div>
       </div>
       <div
@@ -201,21 +203,23 @@
           class="button button-secondary"
           type="button"
           onclick={() => copy(snippet, 'snippet')}
-          >{copied === 'snippet' ? 'Snippet copied' : 'Copy snippet'}</button
-        ><button
+        >
+          {copied === 'snippet' ? 'Snippet copied' : 'Copy snippet'}
+        </button><button
           class="button button-secondary"
           type="button"
           onclick={testGeneratedKey}
           disabled={testState === 'running'}
-          >{testState === 'running'
-            ? 'Testing…'
-            : 'Run connection test'}</button
-        >{/if}<button
+        >
+          {testState === 'running' ? 'Testing…' : 'Run connection test'}
+        </button>{/if}<button
         class="button button-primary"
         type="button"
         data-autofocus
-        onclick={close}>I have saved the key</button
+        onclick={close}
       >
+        I have saved the key
+      </button>
     </div>
   {/snippet}
 </SecretDialog>

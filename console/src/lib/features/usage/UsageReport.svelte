@@ -36,11 +36,11 @@
   </article>
   <article class="card metric-card">
     <p>Input / output tokens</p>
-    <strong
-      >{formatCompact(report.summary.input_tokens)} / {formatCompact(
+    <strong>
+      {formatCompact(report.summary.input_tokens)} / {formatCompact(
         report.summary.output_tokens
-      )}</strong
-    >
+      )}
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Cached input tokens</p>
@@ -49,24 +49,24 @@
   <article class="card metric-card">
     <p>Cache write tokens</p>
     <strong>{formatCompact(report.summary.cache_write_input_tokens)}</strong>
-    <small
-      >5m {formatCompact(report.summary.cache_write_5m_input_tokens)} · 1h {formatCompact(
+    <small>
+      5m {formatCompact(report.summary.cache_write_5m_input_tokens)} · 1h {formatCompact(
         report.summary.cache_write_1h_input_tokens
-      )}</small
-    >
+      )}
+    </small>
   </article>
   <article class="card metric-card">
     <p>Audio / image tokens</p>
-    <strong
-      >{formatCompact(report.summary.audio_input_tokens)} · {formatCompact(
+    <strong>
+      {formatCompact(report.summary.audio_input_tokens)} · {formatCompact(
         report.summary.image_input_tokens
-      )}</strong
-    >
-    <small
-      >in — {formatCompact(report.summary.audio_output_tokens)} · {formatCompact(
+      )}
+    </strong>
+    <small>
+      in — {formatCompact(report.summary.audio_output_tokens)} · {formatCompact(
         report.summary.image_output_tokens
-      )} out</small
-    >
+      )} out
+    </small>
   </article>
   <article class="card metric-card">
     <p>Media units</p>
@@ -74,51 +74,45 @@
   </article>
   <article class="card metric-card">
     <p>Allocated commitment</p>
-    <small
-      >Provisioned-capacity share priced at zero above, allocated across the
-      period's committed usage.</small
-    >
-    <strong
-      >{formatCost(
-        report.summary.allocated_commitment,
-        report.summary.currency
-      )}</strong
-    >
+    <small>
+      Provisioned-capacity share priced at zero above, allocated across the
+      period's committed usage.
+    </small>
+    <strong>
+      {formatCost(report.summary.allocated_commitment, report.summary.currency)}
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Charge</p>
-    <small
-      >What consumers are billed under the applicable rate card; identical to
-      cost when no card applies.</small
-    >
-    <strong class:unpriced={report.summary.charge == null}
-      >{formatCost(report.summary.charge, report.summary.currency)}</strong
-    >
-    {#if report.summary.uncharged_attempt_count > 0}<span class="badge warning"
-        >{report.summary.uncharged_attempt_count} uncharged</span
-      >{/if}
+    <small>
+      What consumers are billed under the applicable rate card; identical to
+      cost when no card applies.
+    </small>
+    <strong class:unpriced={report.summary.charge == null}>
+      {formatCost(report.summary.charge, report.summary.currency)}
+    </strong>
+    {#if report.summary.uncharged_attempt_count > 0}<span class="badge warning">
+        {report.summary.uncharged_attempt_count} uncharged
+      </span>{/if}
   </article>
   <article class="card metric-card">
     <p>Estimated cost</p>
-    <small
-      >Estimate from recorded, priced usage. Review delivery and coverage above;
-      this is not an upstream invoice.</small
-    >
-    <strong class:unpriced={report.summary.estimated_cost == null}
-      >{formatCost(
-        report.summary.estimated_cost,
-        report.summary.currency
-      )}</strong
-    >
+    <small>
+      Estimate from recorded, priced usage. Review delivery and coverage above;
+      this is not an upstream invoice.
+    </small>
+    <strong class:unpriced={report.summary.estimated_cost == null}>
+      {formatCost(report.summary.estimated_cost, report.summary.currency)}
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Input estimate error</p>
     <strong>{estimate.error}</strong>
-    <small
-      >{estimate.note}{#if estimate.hasSample}
+    <small>
+      {estimate.note}{#if estimate.hasSample}
         {estimate.comparison} estimated / reported input across {estimate.sample}
-        that had both.{/if}</small
-    >
+        that had both.{/if}
+    </small>
   </article>
 </section>
 
@@ -145,14 +139,15 @@
     <span class="badge">Top {report.breakdown.length}</span>
   </div>
   {#if report.breakdown.length === 0}
-    <EmptyState title="No usage in this time range"
-      >Try a wider date range or fewer filters.</EmptyState
-    >
+    <EmptyState title="No usage in this time range">
+      Try a wider date range or fewer filters.
+    </EmptyState>
   {:else}
     <ScrollTable label="Usage breakdown">
       <table class="data-table">
-        <caption class="sr-only">Usage breakdown by {applied.dimension}</caption
-        >
+        <caption class="sr-only">
+          Usage breakdown by {applied.dimension}
+        </caption>
         <thead>
           <tr>
             <th scope="col">{applied.dimension.replace('_', ' ')}</th>
@@ -181,16 +176,16 @@
               <td>{formatCompact(row.cached_input_tokens)}</td>
               <td>{formatCompact(row.cache_write_input_tokens)}</td>
               <td>{formatCompact(row.output_tokens)}</td>
-              <td
-                >{formatCompact(row.audio_input_tokens)} / {formatCompact(
+              <td>
+                {formatCompact(row.audio_input_tokens)} / {formatCompact(
                   row.audio_output_tokens
-                )}</td
-              >
-              <td
-                >{formatCompact(row.image_input_tokens)} / {formatCompact(
+                )}
+              </td>
+              <td>
+                {formatCompact(row.image_input_tokens)} / {formatCompact(
                   row.image_output_tokens
-                )}</td
-              >
+                )}
+              </td>
               <td>{formatCost(row.allocated_commitment, row.currency)}</td>
               <td>{rowEstimate.comparison}</td>
               <td>{rowEstimate.error}</td>
@@ -200,20 +195,20 @@
                   row.charge,
                   row.currency
                 )}{#if row.uncharged_attempt_count > 0}
-                  <span class="badge warning"
-                    >{row.uncharged_attempt_count}</span
-                  >
+                  <span class="badge warning">
+                    {row.uncharged_attempt_count}
+                  </span>
                 {/if}
               </td>
               <td>
                 {#if row.incomplete_count > 0}
-                  <span class="badge danger"
-                    >{row.incomplete_count} incomplete</span
-                  >
+                  <span class="badge danger">
+                    {row.incomplete_count} incomplete
+                  </span>
                 {:else if row.unpriced_count > 0}
-                  <span class="badge warning"
-                    >{row.unpriced_count} unpriced</span
-                  >
+                  <span class="badge warning">
+                    {row.unpriced_count} unpriced
+                  </span>
                 {:else}
                   <span class="badge success">Complete</span>
                 {/if}

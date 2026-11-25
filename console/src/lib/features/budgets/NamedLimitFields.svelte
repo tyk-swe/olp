@@ -37,8 +37,10 @@
         type="button"
         onclick={() => {
           form = form.filter((entry) => entry.id !== row.id);
-        }}>Remove {editor.item}</button
+        }}
       >
+        Remove {editor.item}
+      </button>
     </div>
   {/each}
   <button
@@ -47,8 +49,10 @@
     disabled={disabled || form.length >= editor.maxEntries}
     onclick={() => {
       form = [...form, namedLimitRow()];
-    }}>Add {editor.item}</button
+    }}
   >
+    Add {editor.item}
+  </button>
 </fieldset>
 
 <style>

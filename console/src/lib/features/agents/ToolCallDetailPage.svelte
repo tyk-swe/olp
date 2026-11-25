@@ -66,43 +66,43 @@
         the held amounts or records proof that the upstream never accepted the
         call.
       </p>
-      <label class="form-field"
-        >Outcome<select bind:value={outcome}
-          ><option value="settled">Settled</option><option value="not_accepted"
-            >Not accepted</option
-          ></select
-        ></label
-      >
-      <label class="form-field"
-        >Evidence SHA256 digest<input
+      <label class="form-field">
+        Outcome<select bind:value={outcome}>
+          <option value="settled">Settled</option><option value="not_accepted">
+            Not accepted
+          </option>
+        </select>
+      </label>
+      <label class="form-field">
+        Evidence SHA256 digest<input
           required
           pattern={'[a-f0-9]{64}'}
           bind:value={evidence}
-        /></label
-      >
+        />
+      </label>
       {#if outcome === 'settled'}
-        <label class="form-field"
-          >Observed cost<input
+        <label class="form-field">
+          Observed cost<input
             required
             pattern="[0-9]+(\.[0-9]+)?"
             bind:value={cost}
-          /></label
-        >
-        <label class="form-field"
-          >Observed charge<input
+          />
+        </label>
+        <label class="form-field">
+          Observed charge<input
             required
             pattern="[0-9]+(\.[0-9]+)?"
             bind:value={charge}
-          /></label
-        >
+          />
+        </label>
       {/if}
-      <label class="check-field"
-        ><input type="checkbox" required />I reviewed the evidence and amounts</label
-      >
+      <label class="check-field">
+        <input type="checkbox" required />I reviewed the evidence and amounts
+      </label>
       <div class="page-actions">
-        <button class="button button-primary" disabled={action.busy}
-          >Resolve call</button
-        >
+        <button class="button button-primary" disabled={action.busy}>
+          Resolve call
+        </button>
       </div>
     </form>
   {/if}

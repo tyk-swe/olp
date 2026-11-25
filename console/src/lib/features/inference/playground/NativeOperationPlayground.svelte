@@ -98,9 +98,9 @@
     <div class="form-field">
       <label for="native-operation-dialect">Registered native dialect</label>
       <select id="native-operation-dialect" bind:value={dialect}>
-        {#each options as option (option)}<option value={option}
-            >{option}</option
-          >{/each}
+        {#each options as option (option)}<option value={option}>
+            {option}
+          </option>{/each}
       </select>
     </div>
     <div class="form-field">
@@ -132,18 +132,23 @@
       class="button button-primary"
       onclick={run}
       disabled={busy || !key || !route || !dialect}
-      >{busy ? 'Running public operation…' : 'Run billable operation'}</button
     >
+      {busy ? 'Running public operation…' : 'Run billable operation'}
+    </button>
     {#if busy}<button
         type="button"
         class="button button-secondary"
-        onclick={() => abort?.abort()}>Cancel delivery</button
-      >{/if}
+        onclick={() => abort?.abort()}
+      >
+        Cancel delivery
+      </button>{/if}
     {#if result}<button
         type="button"
         class="button button-secondary"
-        onclick={clear}>Clear result</button
-      >{/if}
+        onclick={clear}
+      >
+        Clear result
+      </button>{/if}
   </div>
   {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
   {#if result}

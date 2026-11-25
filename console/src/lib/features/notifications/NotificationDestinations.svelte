@@ -177,8 +177,10 @@
         onclick={() => {
           create.error = '';
           creating = true;
-        }}>New destination</button
+        }}
       >
+        New destination
+      </button>
     </div>
   </div>{/if}
 {#if creating}
@@ -199,44 +201,48 @@
   emptyWhen={!(destinations.data ?? []).length}
 >
   {#snippet empty()}
-    <EmptyState title="No destinations yet"
-      >Add a webhook or email destination, then point rules at it.</EmptyState
-    >
+    <EmptyState title="No destinations yet">
+      Add a webhook or email destination, then point rules at it.
+    </EmptyState>
   {/snippet}
   <ScrollTable label="Notification destinations">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Name</th><th scope="col">Type</th><th scope="col"
-            >URL</th
-          ><th scope="col">Project</th><th scope="col">Secret</th><th
-            scope="col">Enabled</th
-          >{#if canManage || installationWide}<th scope="col"
-              ><span class="sr-only">Actions</span></th
-            >{/if}</tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Name</th><th scope="col">Type</th><th scope="col">
+            URL
+          </th><th scope="col">Project</th><th scope="col">Secret</th><th
+            scope="col"
+          >
+            Enabled
+          </th>{#if canManage || installationWide}<th scope="col">
+              <span class="sr-only">Actions</span>
+            </th>{/if}
+        </tr>
+      </thead>
       <tbody>
         {#each destinations.data ?? [] as destination (destination.id)}
           {#if editDestId === destination.id}
-            <tr
-              ><td
-                ><input
+            <tr>
+              <td>
+                <input
                   aria-label="Destination name"
                   bind:value={editDraft.name}
                   disabled={edit.busy}
                   required
-                /></td
-              ><td>{destination.type ?? 'webhook'}</td><td
-                ><input
+                />
+              </td><td>{destination.type ?? 'webhook'}</td><td>
+                <input
                   aria-label="Destination URL"
                   type="url"
                   bind:value={editDraft.url}
                   disabled={edit.busy}
                   required
-                /></td
-              ><td>{destination.project_name ?? 'Installation-wide'}</td><td
-                ><input
+                />
+              </td><td>
+                {destination.project_name ?? 'Installation-wide'}
+              </td><td>
+                <input
                   aria-label="Replacement secret"
                   bind:value={editDestSecret}
                   disabled={edit.busy}
@@ -249,12 +255,13 @@
                         : 'Keep current'}
                 />{#if !secretRequired(destination.type ?? 'webhook') || !destination.enabled}<label
                     class="inline-check"
-                    ><input
+                  >
+                    <input
                       type="checkbox"
                       bind:checked={editDestClear}
                       disabled={edit.busy}
-                    />Clear credential</label
-                  >{/if}
+                    />Clear credential
+                  </label>{/if}
                 {#if editDraft.type === 'email'}<div class="form-grid">
                     <input
                       aria-label="From address"
@@ -277,15 +284,16 @@
                       disabled={edit.busy}
                       placeholder="CA certificate (PEM)"
                     />
-                  </div>{/if}</td
-              ><td>{destination.enabled ? 'Yes' : 'No'}</td><td
-                ><button
+                  </div>{/if}
+              </td><td>{destination.enabled ? 'Yes' : 'No'}</td><td>
+                <button
                   class="text-button"
                   type="button"
                   disabled={edit.busy}
                   onclick={() => saveDestination(destination)}
-                  >{edit.busy ? 'Saving…' : 'Save'}</button
-                ><button
+                >
+                  {edit.busy ? 'Saving…' : 'Save'}
+                </button><button
                   class="text-button"
                   type="button"
                   disabled={edit.busy}
@@ -293,31 +301,38 @@
                     editDestId = '';
                     editDestination = null;
                     editDestSecret = '';
-                  }}>Cancel</button
-                ></td
-              ></tr
-            >
+                  }}
+                >
+                  Cancel
+                </button>
+              </td>
+            </tr>
           {:else}
-            <tr
-              ><td><strong>{destination.name}</strong></td><td
-                >{destination.type ?? 'webhook'}</td
-              ><td><span class="mono">{destination.url}</span></td><td
-                >{destination.project_name ?? 'Installation-wide'}</td
-              ><td>{destination.secret_configured ? 'Configured' : '—'}</td><td
-                >{destination.enabled ? 'Yes' : 'No'}</td
-              >{#if canManage || installationWide}<td
-                  >{#if canChange(destination)}<button
+            <tr>
+              <td><strong>{destination.name}</strong></td><td>
+                {destination.type ?? 'webhook'}
+              </td><td><span class="mono">{destination.url}</span></td><td>
+                {destination.project_name ?? 'Installation-wide'}
+              </td><td>
+                {destination.secret_configured ? 'Configured' : '—'}
+              </td><td>
+                {destination.enabled ? 'Yes' : 'No'}
+              </td>{#if canManage || installationWide}<td>
+                  {#if canChange(destination)}<button
                       class="text-button"
                       type="button"
                       disabled={edit.busy}
-                      onclick={() => startDestEdit(destination)}>Edit</button
-                    ><button
+                      onclick={() => startDestEdit(destination)}
+                    >
+                      Edit
+                    </button><button
                       class="text-button"
                       type="button"
                       disabled={toggle.busy}
                       onclick={() => toggleDestination(destination)}
-                      >{destination.enabled ? 'Disable' : 'Enable'}</button
                     >
+                      {destination.enabled ? 'Disable' : 'Enable'}
+                    </button>
                     {#if destination.enabled && (destination.type == null || destination.type === 'webhook' || destination.type === 'email')}
                       <NotificationDestinationTest {destination} />
                     {/if}
@@ -333,9 +348,9 @@
                             queryKey: notificationKeys.root
                           });
                         }}
-                      />{/if}{/if}</td
-                >{/if}</tr
-            >
+                      />{/if}{/if}
+                </td>{/if}
+            </tr>
           {/if}
         {/each}
       </tbody>

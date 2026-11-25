@@ -93,9 +93,9 @@
   <div class="form-field">
     <label for="translation-format">Response format</label>
     <select id="translation-format" bind:value={format}>
-      {#each translationFormats as item (item)}<option value={item}
-          >{item}</option
-        >{/each}
+      {#each translationFormats as item (item)}<option value={item}>
+          {item}
+        </option>{/each}
     </select>
   </div>
   <div class="actions">
@@ -103,20 +103,25 @@
       class="button button-primary"
       type="submit"
       disabled={runAction.busy || !key || !route || !files?.[0]}
-      >{runAction.busy ? 'Translating…' : 'Run billable translation'}</button
     >
+      {runAction.busy ? 'Translating…' : 'Run billable translation'}
+    </button>
     {#if runAction.busy}<button
         class="button button-secondary"
         type="button"
-        onclick={() => abort?.abort()}>Cancel delivery</button
-      >{/if}
+        onclick={() => abort?.abort()}
+      >
+        Cancel delivery
+      </button>{/if}
     {#if result !== null}<button
         class="button button-secondary"
         type="button"
         onclick={() => {
           result = null;
-        }}>Clear result</button
-      >{/if}
+        }}
+      >
+        Clear result
+      </button>{/if}
   </div>
   {#if runAction.error}<p role="alert" class="inline-problem">
       {runAction.error}

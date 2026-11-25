@@ -31,23 +31,28 @@
       class="button button-primary"
       type="submit"
       disabled={submission.busy || enrolling || saveBlocked || !allowed}
-      >{submission.busy
+    >
+      {submission.busy
         ? 'Saving…'
         : submission.submitted
           ? 'Retry save'
-          : 'Save'}</button
-    ><button
+          : 'Save'}
+    </button><button
       class="button button-secondary"
       type="button"
       disabled={submission.busy || enrolling}
-      onclick={submission.cancel}>Cancel</button
+      onclick={submission.cancel}
     >
+      Cancel
+    </button>
     {#if submission.submitted}<button
         class="button button-secondary"
         type="button"
         disabled={submission.busy || !allowed}
-        onclick={submission.editRequest}>Edit request</button
+        onclick={submission.editRequest}
       >
+        Edit request
+      </button>
       <p>
         Retry keeps the original submission to recover a lost response.
       </p>{/if}

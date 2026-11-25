@@ -178,9 +178,9 @@
   {:else if routes.isPending || keys.isPending || dialects.isPending}
     <p role="status">Loading routes, keys and surfaces…</p>
   {:else if !activeRoutes.length}
-    <EmptyState title="No active routes"
-      >Publish a route before previewing its guardrails.</EmptyState
-    >
+    <EmptyState title="No active routes">
+      Publish a route before previewing its guardrails.
+    </EmptyState>
   {:else}
     <form
       onsubmit={inspect}
@@ -201,11 +201,11 @@
         <label class="form-field">
           API key
           <select required bind:value={keyId} disabled={!availableKeys.length}>
-            <option value=""
-              >{selectedRoute && !availableKeys.length
+            <option value="">
+              {selectedRoute && !availableKeys.length
                 ? 'No keys in this project'
-                : 'Choose an API key'}</option
-            >
+                : 'Choose an API key'}
+            </option>
             {#each availableKeys as key (key.id)}
               <option value={key.id}>{key.name} · {key.id.slice(0, 8)}</option>
             {/each}
@@ -279,21 +279,21 @@
       <h2>Serving release {result.release_sequence}</h2>
       <p class="identifier">Release ID <code>{result.release_id}</code></p>
       {#if result.stale}
-        <Callout tone="warning"
-          >A newer release has been published. This preview shows the release
-          still serving here.</Callout
-        >
+        <Callout tone="warning">
+          A newer release has been published. This preview shows the release
+          still serving here.
+        </Callout>
       {/if}
       {#if result.partial_visibility}
         <Callout>{partialNotice}</Callout>
       {:else if result.static_compatible === false}
-        <Callout tone="warning"
-          >The guardrail chain has a conflict on the selected surface.</Callout
-        >
+        <Callout tone="warning">
+          The guardrail chain has a conflict on the selected surface.
+        </Callout>
       {:else if result.static_compatible === true}
-        <Callout
-          >No static guardrail conflicts found for the selected surface.</Callout
-        >
+        <Callout>
+          No static guardrail conflicts found for the selected surface.
+        </Callout>
       {/if}
       {#if result.entries.length}
         <ScrollTable label="Guardrails in serving order">
@@ -313,21 +313,20 @@
               {#each result.entries as entry, index (index)}
                 <tr>
                   <td>{index + 1}</td>
-                  <td class="identifier"
-                    ><code>{entry.policy_id}</code><br />Revision
-                    <code>{entry.policy_revision_id}</code></td
-                  >
-                  <td class="identifier"
-                    ><code>{entry.guardrail_id}</code><br />Revision
-                    <code>{entry.revision_id}</code></td
-                  >
+                  <td class="identifier">
+                    <code>{entry.policy_id}</code><br />Revision
+                    <code>{entry.policy_revision_id}</code>
+                  </td>
+                  <td class="identifier">
+                    <code>{entry.guardrail_id}</code><br />Revision
+                    <code>{entry.revision_id}</code>
+                  </td>
                   <td>{entry.scope}</td>
                   <td>{entry.phase.replaceAll('_', ' ')}</td>
                   <td>{entry.mode === 'monitor' ? 'Monitor' : 'Enforce'}</td>
-                  <td
-                    >{entry.notes.map((note) => notes[note]).join(' ') ||
-                      'None'}</td
-                  >
+                  <td>
+                    {entry.notes.map((note) => notes[note]).join(' ') || 'None'}
+                  </td>
                 </tr>
               {/each}
             </tbody>

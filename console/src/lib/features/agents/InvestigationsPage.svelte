@@ -42,9 +42,9 @@
 >
   {#snippet actions()}
     {#if access.allows('POST /api/v1/investigations')}
-      <a class="button button-primary" href={resolve('investigations/new')}
-        >New investigation</a
-      >
+      <a class="button button-primary" href={resolve('investigations/new')}>
+        New investigation
+      </a>
     {/if}
   {/snippet}
 </PageHeader>
@@ -56,8 +56,8 @@
     filters.set({ project: typeof project === 'string' ? project : '' });
   }}
 >
-  <label class="form-field"
-    >Project
+  <label class="form-field">
+    Project
     <select name="project">
       <option value="">All authorized projects</option>
       {#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as project (project.id)}
@@ -81,29 +81,32 @@
 {:else}
   <ScrollTable label="Investigations">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Summary</th><th scope="col">Project</th><th
-            scope="col">Saved</th
-          ></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Summary</th><th scope="col">Project</th><th
+            scope="col"
+          >
+            Saved
+          </th>
+        </tr>
+      </thead>
       <tbody>
         {#each investigations.data.items as investigation (investigation.id)}
           <tr>
-            <td
-              ><a
+            <td>
+              <a
                 class="text-button"
                 href={resolve(`investigations/${investigation.id}`)}
-                >{investigation.summary}</a
               >
+                {investigation.summary}
+              </a>
             </td>
 
-            <td
-              >{projects.data?.find(
+            <td>
+              {projects.data?.find(
                 (project) => project.id === investigation.project_id
-              )?.name ?? investigation.project_id}</td
-            >
+              )?.name ?? investigation.project_id}
+            </td>
             <td>{formatDate(investigation.created_at)}</td>
           </tr>
         {/each}
@@ -118,8 +121,9 @@
     disabled={!$filters.cursor || investigations.isFetching}
     onclick={() =>
       filters.update((current) => ({ ...current, cursor: undefined }))}
-    >Newest</button
   >
+    Newest
+  </button>
   <button
     class="button button-secondary"
     type="button"
@@ -130,12 +134,16 @@
       filters.update((current) => ({
         ...current,
         cursor: investigations.data?.nextCursor ?? undefined
-      }))}>Older</button
+      }))}
   >
+    Older
+  </button>
   <button
     class="button button-secondary"
     type="button"
     disabled={investigations.isFetching}
-    onclick={() => investigations.refetch()}>Refresh</button
+    onclick={() => investigations.refetch()}
   >
+    Refresh
+  </button>
 </nav>

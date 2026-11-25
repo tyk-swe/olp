@@ -9,8 +9,8 @@
 <section class="diff-grid" aria-label="Revision differences">
   <article class="card">
     <p>Route settings</p>
-    <strong
-      >{[
+    <strong>
+      {[
         revisionDiff.slug_changed && 'slug',
         revisionDiff.timeout_changed && 'deadline',
         revisionDiff.max_attempts_changed && 'attempts',
@@ -18,8 +18,8 @@
         revisionDiff.routing_policy_changed && 'routing policy'
       ]
         .filter(Boolean)
-        .join(', ') || 'unchanged'}</strong
-    >
+        .join(', ') || 'unchanged'}
+    </strong>
   </article>
   {#if revisionDiff.fidelity_changed}
     <article class="card">
@@ -55,21 +55,23 @@
         {#each revisionDiff.targets_added as item (item)}<li>
             <code>{item}</code>
           </li>{/each}
-      </ul>{/if}{#if revisionDiff.targets_removed.length}<strong>Removed</strong
-      >
+      </ul>{/if}{#if revisionDiff.targets_removed.length}<strong>
+        Removed
+      </strong>
       <ul>
         {#each revisionDiff.targets_removed as item (item)}<li>
             <code>{item}</code>
           </li>{/each}
-      </ul>{/if}{#if revisionDiff.targets_changed.length}<strong>Changed</strong
-      >
+      </ul>{/if}{#if revisionDiff.targets_changed.length}<strong>
+        Changed
+      </strong>
       <ul>
         {#each revisionDiff.targets_changed as item (item)}<li>
             <code>{item}</code>
           </li>{/each}
-      </ul>{/if}{#if !revisionDiff.targets_added.length && !revisionDiff.targets_removed.length && !revisionDiff.targets_changed.length}<strong
-        >None</strong
-      >{/if}
+      </ul>{/if}{#if !revisionDiff.targets_added.length && !revisionDiff.targets_removed.length && !revisionDiff.targets_changed.length}<strong>
+        None
+      </strong>{/if}
   </article>
   {#if revisionDiff.routing_policy_changed}<article class="card policy-diff">
       <p>Routing policy changes</p>

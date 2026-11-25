@@ -134,12 +134,15 @@
         <button
           class="button button-primary"
           type="button"
-          onclick={() => (creating = true)}>Request increase</button
+          onclick={() => (creating = true)}
         >
+          Request increase
+        </button>
       </div>{/if}
   </div>
-  {#if decide.error && !creating}<Callout tone="danger">{decide.error}</Callout
-    >{/if}
+  {#if decide.error && !creating}<Callout tone="danger">
+      {decide.error}
+    </Callout>{/if}
   {#if canRequest && creating}
     <Dialog
       title="Request a budget increase"
@@ -164,10 +167,11 @@
               <label for="increase-request-window">Budget window</label><select
                 id="increase-request-window"
                 bind:value={window}
-                ><option value="day">Day</option><option value="week"
-                  >Week</option
-                ><option value="month">Month</option></select
               >
+                <option value="day">Day</option><option value="week">
+                  Week
+                </option><option value="month">Month</option>
+              </select>
             </div>
             <div class="form-field">
               <label for="increase-request-amount">Additional USD</label><input
@@ -183,18 +187,20 @@
                 bind:value={reason}
                 required
                 maxlength="256"
-              /><small
-                >The request binds to the current window and cap, so a changed
-                cap or a new window needs a new request.</small
-              >
+              /><small>
+                The request binds to the current window and cap, so a changed
+                cap or a new window needs a new request.
+              </small>
             </div>
           </div>
         </fieldset>
         <button
           class="button button-primary"
           disabled={create.busy}
-          type="submit">Request increase</button
+          type="submit"
         >
+          Request increase
+        </button>
       </form>
     </Dialog>
   {/if}
@@ -203,63 +209,75 @@
     </p>{:else if query.isError}<Callout
       tone="danger"
       title="Requests could not be loaded"
-      >{errorMessage(query.error)}{#snippet actions()}<button
+    >
+      {errorMessage(query.error)}{#snippet actions()}<button
           type="button"
           class="button button-secondary"
-          onclick={() => query.refetch()}>Retry</button
-        >{/snippet}</Callout
-    >{:else if !query.data?.items.length && !before}<EmptyState
+          onclick={() => query.refetch()}
+        >
+          Retry
+        </button>{/snippet}
+    </Callout>{:else if !query.data?.items.length && !before}<EmptyState
       title="No budget increase requests"
-      >Requests from project members show up here for review.</EmptyState
-    >{:else}
+    >
+      Requests from project members show up here for review.
+    </EmptyState>{:else}
     <ScrollTable label="Budget increase requests">
       <table class="data-table">
-        <thead
-          ><tr
-            ><th scope="col">Project</th><th scope="col">Amount</th><th
-              scope="col">Reason</th
-            ><th scope="col">Status</th><th scope="col">Requested</th><th
-              scope="col"><span class="sr-only">Actions</span></th
-            ></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th scope="col">Project</th><th scope="col">Amount</th><th
+              scope="col"
+            >
+              Reason
+            </th><th scope="col">Status</th><th scope="col">Requested</th><th
+              scope="col"
+            >
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
         <tbody>
           {#each query.data?.items ?? [] as item (item.id)}
             <tr>
               <td><code class="mono">{item.project_id}</code></td>
-              <td class="mono"
-                >+${item.amount}<span class="muted"
-                  >{item.window_kind} window on a ${item.base_cap} cap</span
-                ></td
-              >
+              <td class="mono">
+                +${item.amount}<span class="muted">
+                  {item.window_kind} window on a ${item.base_cap} cap
+                </span>
+              </td>
               <td>{item.reason}</td>
-              <td
-                ><StatusBadge
+              <td>
+                <StatusBadge
                   label={item.status}
                   tone={statusTone(item.status)}
-                /></td
-              >
-              <td
-                >{formatDate(item.created_at)}<span class="muted"
-                  >{item.requested_by}</span
-                ></td
-              >
+                />
+              </td>
+              <td>
+                {formatDate(item.created_at)}<span class="muted">
+                  {item.requested_by}
+                </span>
+              </td>
               <td>
                 {#if canReview && item.status === 'pending'}
                   {#if item.requested_by !== access.user?.id}<button
                       type="button"
                       class="text-button"
                       disabled={decide.busy}
-                      onclick={() => approve(item)}>Approve</button
-                    >{:else}<span class="muted"
-                      >Another reviewer must approve this</span
-                    >{/if}
+                      onclick={() => approve(item)}
+                    >
+                      Approve
+                    </button>{:else}<span class="muted">
+                      Another reviewer must approve this
+                    </span>{/if}
                   <button
                     type="button"
                     class="text-button danger"
                     disabled={decide.busy}
-                    onclick={() => decline(item)}>Decline</button
+                    onclick={() => decline(item)}
                   >
+                    Decline
+                  </button>
                 {/if}
               </td>
             </tr>
@@ -273,14 +291,18 @@
           class="button button-secondary"
           onclick={() => {
             before = undefined;
-          }}>Newest</button
-        >{/if}{#if query.data?.next_cursor}<button
+          }}
+        >
+          Newest
+        </button>{/if}{#if query.data?.next_cursor}<button
           type="button"
           class="button button-secondary"
           onclick={() => {
             before = query.data?.next_cursor ?? undefined;
-          }}>Older</button
-        >{/if}
+          }}
+        >
+          Older
+        </button>{/if}
     </div>
   {/if}
 </section>

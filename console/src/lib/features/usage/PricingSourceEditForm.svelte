@@ -29,11 +29,11 @@
     />
   </div>
   <div class="form-field">
-    <label for={`edit-url-${source.id}`}
-      >Document URL{source.format === 'catalog'
+    <label for={`edit-url-${source.id}`}>
+      Document URL{source.format === 'catalog'
         ? ' (empty for the bundled catalog)'
-        : ''}</label
-    ><input
+        : ''}
+    </label><input
       id={`edit-url-${source.id}`}
       type="url"
       bind:value={url}
@@ -53,13 +53,17 @@
     class="text-button"
     type="button"
     disabled={busy === source.id}
-    onclick={onSave}>{busy === source.id ? 'Saving…' : 'Save'}</button
-  ><button
+    onclick={onSave}
+  >
+    {busy === source.id ? 'Saving…' : 'Save'}
+  </button><button
     class="text-button"
     type="button"
     disabled={Boolean(busy)}
-    onclick={onCancel}>Cancel</button
+    onclick={onCancel}
   >
+    Cancel
+  </button>
 </div>
 
 <style>

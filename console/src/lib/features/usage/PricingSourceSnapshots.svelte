@@ -59,13 +59,12 @@
         Removed: {diffKeys(fetched.diff.removed)}
       </p>{/if}
     {#if fetched.snapshot.document.unrepresentable?.length}<details>
-        <summary
-          >{fetched.snapshot.document.unrepresentable.length} price components no
-          revision can hold</summary
-        >
+        <summary>
+          {fetched.snapshot.document.unrepresentable.length} price components no revision
+          can hold
+        </summary>
         <ul>
-          {#each fetched.snapshot.document.unrepresentable as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}/${entry.component}`)}<li
-            >
+          {#each fetched.snapshot.document.unrepresentable as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}/${entry.component}`)}<li>
               <span class="mono">{entry.vendor_id}/{entry.model}</span>
               · {entry.operation} · {entry.component}: {entry.detail}
             </li>{/each}
@@ -74,8 +73,7 @@
     {#if fetched.skipped.length}<details>
         <summary>{fetched.skipped.length} catalog prices skipped</summary>
         <ul>
-          {#each fetched.skipped as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}`)}<li
-            >
+          {#each fetched.skipped as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}`)}<li>
               <span class="mono">{entry.vendor_id}/{entry.model}</span>
               · {entry.operation}: {entry.reason}
             </li>{/each}
@@ -87,12 +85,13 @@
   <div class="snapshot-list">
     {#each snapshots as snapshot (snapshot.id)}
       <div class="snapshot-row">
-        <span class="mono">{snapshot.sha256.slice(0, 16)}…</span><small
-          >{snapshot.price_count} prices · fetched {formatDate(
+        <span class="mono">{snapshot.sha256.slice(0, 16)}…</span><small>
+          {snapshot.price_count} prices · fetched {formatDate(
             snapshot.fetched_at
-          )}</small
-        >{#if snapshot.catalog}<small>{catalogProvenanceLabel(snapshot)}</small
-          >{/if}
+          )}
+        </small>{#if snapshot.catalog}<small>
+            {catalogProvenanceLabel(snapshot)}
+          </small>{/if}
         {#if canEdit}
           {#if publishId === snapshot.id}
             <div class="publish-form">
@@ -109,21 +108,26 @@
                 type="button"
                 disabled={busy === snapshot.id}
                 onclick={() => onSubmitPublish(snapshot)}
-                >{busy === snapshot.id ? 'Publishing…' : 'Publish'}</button
-              ><button
+              >
+                {busy === snapshot.id ? 'Publishing…' : 'Publish'}
+              </button><button
                 class="text-button"
                 type="button"
                 disabled={Boolean(busy)}
-                onclick={onCancelPublish}>Cancel</button
+                onclick={onCancelPublish}
               >
+                Cancel
+              </button>
             </div>
           {:else}
             <button
               class="text-button"
               type="button"
               disabled={Boolean(busy)}
-              onclick={() => onStartPublish(snapshot)}>Publish…</button
+              onclick={() => onStartPublish(snapshot)}
             >
+              Publish…
+            </button>
           {/if}
         {/if}
       </div>

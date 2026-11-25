@@ -72,8 +72,10 @@
     {#if epochs.data}<span
         class:warning={epochs.data.items.length > 0}
         class:success={epochs.data.items.length === 0}
-        class="badge">{epochs.data.items.length} on page</span
-      >{/if}
+        class="badge"
+      >
+        {epochs.data.items.length} on page
+      </span>{/if}
   </div>
   {#if epochNotice}<Callout tone="success">
       {epochNotice}
@@ -84,9 +86,9 @@
   {#if epochs.isError}
     <div class="inline-problem" role="alert">
       {errorMessage(epochs.error, 'Gateway epochs are unavailable.')}
-      <button class="text-button" onclick={() => epochs.refetch()}
-        >Try again</button
-      >
+      <button class="text-button" onclick={() => epochs.refetch()}>
+        Try again
+      </button>
     </div>
   {:else if !epochs.data}
     <div class="loading-state" role="status">Loading gateway epochs…</div>
@@ -97,53 +99,55 @@
   {:else}
     <ScrollTable label="Unresolved request metadata gateway epochs">
       <table class="data-table">
-        <caption class="sr-only"
-          >Unclean request metadata gateway process epochs awaiting operator
-          acknowledgement</caption
-        ><thead
-          ><tr
-            ><th scope="col">Gateway</th><th scope="col">Lifecycle</th><th
-              scope="col">Writer</th
-            ><th scope="col">Accepted / persisted</th><th scope="col"
-              >Dropped / abandoned</th
-            ><th scope="col">Uncertain lower bound</th><th scope="col"
-              >Acknowledged</th
-            ><th scope="col"><span class="sr-only">Action</span></th></tr
-          ></thead
-        ><tbody
-          >{#each epochs.data.items as epoch (epoch.process_epoch)}<tr
-              ><td
-                ><strong>{epoch.gateway_instance}</strong><code
-                  >{epoch.process_epoch}</code
-                ></td
-              ><td
-                >Started {formatDate(epoch.started_at)}<small
-                  >Detected {formatDate(
+        <caption class="sr-only">
+          Unclean request metadata gateway process epochs awaiting operator
+          acknowledgement
+        </caption><thead>
+          <tr>
+            <th scope="col">Gateway</th><th scope="col">Lifecycle</th><th
+              scope="col"
+            >
+              Writer
+            </th><th scope="col">Accepted / persisted</th><th scope="col">
+              Dropped / abandoned
+            </th><th scope="col">Uncertain lower bound</th><th scope="col">
+              Acknowledged
+            </th><th scope="col"><span class="sr-only">Action</span></th>
+          </tr>
+        </thead><tbody>
+          {#each epochs.data.items as epoch (epoch.process_epoch)}<tr>
+              <td>
+                <strong>{epoch.gateway_instance}</strong><code>
+                  {epoch.process_epoch}
+                </code>
+              </td><td>
+                Started {formatDate(epoch.started_at)}<small>
+                  Detected {formatDate(
                     epoch.stale_detected_at ?? epoch.updated_at
-                  )}</small
-                ><small
-                  >{epoch.gracefully_closed_at
+                  )}
+                </small><small>
+                  {epoch.gracefully_closed_at
                     ? `Closed ${formatDate(epoch.gracefully_closed_at)}`
-                    : 'Never closed gracefully'}</small
-                ></td
-              ><td
-                ><span class="badge {epoch.retrying ? 'warning' : ''}"
-                  >{epoch.retrying ? 'Retrying' : 'Not retrying'}</span
-                ><small
-                  >{epoch.writer_closed
-                    ? 'Writer closed'
-                    : 'Writer open'}</small
-                ></td
-              ><td>{epoch.accepted} / {epoch.persisted}</td><td
-                >{epoch.dropped} / {epoch.abandoned}</td
-              ><td>{epoch.uncertain_event_lower_bound}</td><td
-                >{epoch.acknowledged_at
+                    : 'Never closed gracefully'}
+                </small>
+              </td><td>
+                <span class="badge {epoch.retrying ? 'warning' : ''}">
+                  {epoch.retrying ? 'Retrying' : 'Not retrying'}
+                </span><small>
+                  {epoch.writer_closed ? 'Writer closed' : 'Writer open'}
+                </small>
+              </td><td>{epoch.accepted} / {epoch.persisted}</td><td>
+                {epoch.dropped} / {epoch.abandoned}
+              </td><td>{epoch.uncertain_event_lower_bound}</td><td>
+                {epoch.acknowledged_at
                   ? formatDate(epoch.acknowledged_at)
                   : 'Not acknowledged'}{#if epoch.acknowledged_by}<small
-                    class="mono">{epoch.acknowledged_by}</small
-                  >{/if}</td
-              ><td
-                ><button
+                    class="mono"
+                  >
+                    {epoch.acknowledged_by}
+                  </small>{/if}
+              </td><td>
+                <button
                   class="button button-secondary"
                   type="button"
                   onclick={() =>
@@ -152,13 +156,14 @@
                       epoch.gateway_instance
                     )}
                   disabled={Boolean(busyEpoch)}
-                  >{busyEpoch === epoch.process_epoch
+                >
+                  {busyEpoch === epoch.process_epoch
                     ? 'Acknowledging…'
-                    : 'Acknowledge epoch'}</button
-                ></td
-              ></tr
-            >{/each}</tbody
-        >
+                    : 'Acknowledge epoch'}
+                </button>
+              </td>
+            </tr>{/each}
+        </tbody>
       </table>
     </ScrollTable>
     <CursorPagination

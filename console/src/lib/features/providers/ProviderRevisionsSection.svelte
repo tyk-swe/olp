@@ -86,8 +86,10 @@
         type="button"
         class="button button-secondary"
         disabled={Boolean(busy)}
-        onclick={editor.retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}
       >
+        Retry refresh
+      </button>
     </p>{/if}
   <div class="section-heading">
     <div>
@@ -108,8 +110,10 @@
       <button
         class="button button-secondary"
         type="button"
-        onclick={() => revisions.refetch()}>Retry</button
+        onclick={() => revisions.refetch()}
       >
+        Retry
+      </button>
     </div>
   {:else if !revisions.data?.items.length && pagination.history.length === 0}<div
       class="empty-state"
@@ -121,25 +125,30 @@
         class="revision-compare"
         aria-label="Compare provider revisions"
       >
-        <label
-          >From<select bind:value={revisionFrom}
-            >{#each revisions.data?.items ?? [] as item (item.id)}<option
-                value={item.id}>Revision {item.revision}</option
-              >{/each}</select
-          ></label
-        ><label
-          >To<select bind:value={revisionTo}
-            >{#each revisions.data?.items ?? [] as item (item.id)}<option
-                value={item.id}>Revision {item.revision}</option
-              >{/each}</select
-          ></label
-        ><button
+        <label>
+          From<select bind:value={revisionFrom}>
+            {#each revisions.data?.items ?? [] as item (item.id)}<option
+                value={item.id}
+              >
+                Revision {item.revision}
+              </option>{/each}
+          </select>
+        </label><label>
+          To<select bind:value={revisionTo}>
+            {#each revisions.data?.items ?? [] as item (item.id)}<option
+                value={item.id}
+              >
+                Revision {item.revision}
+              </option>{/each}
+          </select>
+        </label><button
           class="button button-secondary"
           type="button"
           onclick={compare}
           disabled={Boolean(busy)}
-          >{busy === 'revision-diff' ? 'Comparing…' : 'Compare'}</button
         >
+          {busy === 'revision-diff' ? 'Comparing…' : 'Compare'}
+        </button>
       </div>{/if}
     {#if comparisonError}<p class="inline-problem" role="alert">
         {comparisonError}
@@ -150,32 +159,35 @@
           class="revision-row"
         >
           <div>
-            <strong>Revision {item.revision}</strong><small
-              >Activated {formatDate(item.activated_at)} by
-              <code>{item.activated_by}</code></small
-            ><small
-              >{item.model_count} models · credential metadata {item.historical_credential_version ==
+            <strong>Revision {item.revision}</strong><small>
+              Activated {formatDate(item.activated_at)} by
+              <code>{item.activated_by}</code>
+            </small><small>
+              {item.model_count} models · credential metadata {item.historical_credential_version ==
               null
                 ? 'workload identity'
-                : `version ${item.historical_credential_version}`}</small
-            >
+                : `version ${item.historical_credential_version}`}
+            </small>
           </div>
           <div class="revision-actions">
             <button
               class="button button-secondary view-button"
               type="button"
               aria-label={`View revision ${item.revision}`}
-              onclick={() => view(item.id, item.revision)}>View</button
+              onclick={() => view(item.id, item.revision)}
             >
+              View
+            </button>
             {#if canManage}<button
                 class="button button-secondary"
                 type="button"
                 onclick={() => restore(item.id, item.revision)}
                 disabled={Boolean(busy) || refreshPending}
-                >{busy === 'revision-restore'
+              >
+                {busy === 'revision-restore'
                   ? 'Restoring…'
-                  : 'Restore as draft'}</button
-              >{/if}
+                  : 'Restore as draft'}
+              </button>{/if}
           </div>
         </article>{/each}
     </div>

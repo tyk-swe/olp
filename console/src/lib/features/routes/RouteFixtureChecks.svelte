@@ -86,8 +86,9 @@
       type="button"
       disabled={!file || disabled || action.busy}
       onclick={compare}
-      >{action.busy ? 'Comparing…' : 'Compare fixtures'}</button
     >
+      {action.busy ? 'Comparing…' : 'Compare fixtures'}
+    </button>
   </div>
   {#if disabled && !action.busy}<p role="status">
       Save draft and routing policy changes before comparing.
@@ -95,11 +96,9 @@
   {#if action.error}<p role="alert">{action.error}</p>{/if}
   {#if report && !disabled}
     <div role="status">
-      <strong
-        >{report.passed
-          ? 'No failed assertions'
-          : 'Fixture assertions failed'}</strong
-      >
+      <strong>
+        {report.passed ? 'No failed assertions' : 'Fixture assertions failed'}
+      </strong>
       <p>
         Compared with published revision {report.published_revision} at {formatDate(
           report.planning_time
@@ -115,18 +114,18 @@
       >
         <summary>
           <strong>{result.name}</strong>
-          <span class="badge"
-            >{result.expect_eligible === null
+          <span class="badge">
+            {result.expect_eligible === null
               ? 'No assertion'
               : result.passed
                 ? 'Passed'
-                : 'Failed'}</span
-          >
-          <span
-            >{result.changes.length
+                : 'Failed'}
+          </span>
+          <span>
+            {result.changes.length
               ? `Changed: ${result.changes.join(', ')}`
-              : 'Unchanged'}</span
-          >
+              : 'Unchanged'}
+          </span>
         </summary>
         {#if result.expect_eligible !== null}
           <p>

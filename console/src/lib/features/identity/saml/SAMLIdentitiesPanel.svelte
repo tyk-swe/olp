@@ -77,9 +77,9 @@
     failure={errorMessage(identities.error, 'SAML identities are unavailable.')}
   >
     {#if hasLocalPassword}<div class="form-field">
-        <label for="saml-identity-password"
-          >Current password for SAML changes</label
-        ><input
+        <label for="saml-identity-password">
+          Current password for SAML changes
+        </label><input
           id="saml-identity-password"
           type="password"
           autocomplete="current-password"
@@ -99,14 +99,17 @@
           class="button button-secondary"
           disabled={saml.busy}
           onclick={() => act('saml_unlink', identity.id)}
-          >Unlink SAML identity</button
         >
+          Unlink SAML identity
+        </button>
       </div>{:else}<p>No SAML identities linked.</p>{/each}
     {#if identities.data?.linking_available}<button
         class="button button-primary"
         disabled={saml.busy}
-        onclick={() => act('saml_link')}>Link SAML identity</button
-      >{/if}
+        onclick={() => act('saml_link')}
+      >
+        Link SAML identity
+      </button>{/if}
   </QueryView>
 </section>
 

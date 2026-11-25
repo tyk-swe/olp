@@ -72,39 +72,44 @@
     </p>
   {/if}
   <form onsubmit={invite} novalidate>
-    <label
-      ><span>Email address</span><input
+    <label>
+      <span>Email address</span><input
         type="email"
         autocomplete="email"
         bind:value={email}
         placeholder="person@example.com"
         disabled={!canManage || !loginEnabled}
-      /></label
-    >
-    <label
-      ><span>Role</span><select
+      />
+    </label>
+    <label>
+      <span>Role</span><select
         bind:value={role}
         disabled={!canManage || !loginEnabled}
-        >{#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}
-            >{fixedRole}</option
-          >{/each}</select
-      ></label
-    >
-    <label
-      ><span>Expires in</span><select
+      >
+        {#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}>
+            {fixedRole}
+          </option>{/each}
+      </select>
+    </label>
+    <label>
+      <span>Expires in</span><select
         bind:value={expiresInHours}
         disabled={!canManage || !loginEnabled}
-        >{#each expiryChoices as choice (choice.hours)}<option
-            value={choice.hours}>{choice.label}</option
-          >{/each}</select
-      ></label
-    >
+      >
+        {#each expiryChoices as choice (choice.hours)}<option
+            value={choice.hours}
+          >
+            {choice.label}
+          </option>{/each}
+      </select>
+    </label>
     <button
       class="button button-primary"
       type="submit"
       disabled={!canManage || !loginEnabled || creating}
-      >{creating ? 'Creating…' : 'Create invitation'}</button
     >
+      {creating ? 'Creating…' : 'Create invitation'}
+    </button>
   </form>
 </section>
 

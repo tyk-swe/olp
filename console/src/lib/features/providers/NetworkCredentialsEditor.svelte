@@ -71,8 +71,10 @@
         type="button"
         class="button button-secondary"
         {disabled}
-        onclick={editor.retryRefresh}>Retry refresh</button
+        onclick={editor.retryRefresh}
       >
+        Retry refresh
+      </button>
     </p>{/if}
   <div class="form-field">
     <label for={`${idPrefix}-credential`}>Network credential</label>
@@ -89,27 +91,31 @@
       }}
     >
       <option value="">No proxy or client-certificate credential</option>
-      {#if missing}<option value={selected}>Saved reference unavailable</option
-        >{/if}
+      {#if missing}<option value={selected}>
+          Saved reference unavailable
+        </option>{/if}
       {#each credentials.data ?? [] as credential (credential.id)}<option
           value={credential.id}
           disabled={Boolean(credential.revoked_at)}
-          >Version {credential.version}{credential.revoked_at
+        >
+          Version {credential.version}{credential.revoked_at
             ? ' · revoked'
-            : ''}</option
-        >{/each}
+            : ''}
+        </option>{/each}
     </select>
-    <small
-      >Only unrevoked credentials owned by this connection can be selected.
-      Values are encrypted and never returned.</small
-    >
+    <small>
+      Only unrevoked credentials owned by this connection can be selected.
+      Values are encrypted and never returned.
+    </small>
   </div>
   {#if credentials.isError}<p class="inline-problem" role="alert">
       Network credentials could not be loaded. <button
         class="button button-secondary"
         type="button"
-        onclick={() => credentials.refetch()}>Retry</button
+        onclick={() => credentials.refetch()}
       >
+        Retry
+      </button>
     </p>{/if}
   <details>
     <summary>Add or revoke network credentials</summary>
@@ -118,9 +124,9 @@
       new encrypted version. Public trust roots belong in the connection fields.
     </p>
     <div class="form-field">
-      <label for={`${idPrefix}-secret`}
-        >Network credential JSON (write only)</label
-      ><input
+      <label for={`${idPrefix}-secret`}>
+        Network credential JSON (write only)
+      </label><input
         id={`${idPrefix}-secret`}
         type="password"
         bind:value={secret}
@@ -135,22 +141,24 @@
       type="button"
       onclick={create}
       disabled={editingDisabled || !secret}
-      >Store and select network credential</button
     >
+      Store and select network credential
+    </button>
     {#each credentials.data ?? [] as credential (credential.id)}<div
         class="credential-row"
       >
-        <span
-          >Version {credential.version} · {formatDate(
+        <span>
+          Version {credential.version} · {formatDate(
             credential.created_at
-          )}{credential.revoked_at ? ' · revoked' : ''}</span
-        >{#if !credential.revoked_at}<button
+          )}{credential.revoked_at ? ' · revoked' : ''}
+        </span>{#if !credential.revoked_at}<button
             class="button button-secondary"
             type="button"
             disabled={editingDisabled}
             onclick={() => revoke(credential.id)}
-            >Revoke version {credential.version}</button
-          >{/if}
+          >
+            Revoke version {credential.version}
+          </button>{/if}
       </div>{/each}
   </details>
 </div>

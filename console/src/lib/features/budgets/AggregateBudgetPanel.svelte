@@ -116,9 +116,9 @@
     <p role="status">Loading budget…</p>
   {:else if query.isError}
     <p class="inline-problem" role="alert">{errorMessage(query.error)}</p>
-    <button class="button button-secondary" type="button" onclick={reload}
-      >Retry budget</button
-    >
+    <button class="button button-secondary" type="button" onclick={reload}>
+      Retry budget
+    </button>
   {:else}
     <form onsubmit={submit}>
       <fieldset disabled={action.busy || !editable}>
@@ -142,9 +142,9 @@
             placeholder="Unlimited"
             bind:value={daily}
           />
-          <small
-            >{query.data?.usage.daily.accrued ?? '0'} USD accrued this day.</small
-          >
+          <small>
+            {query.data?.usage.daily.accrued ?? '0'} USD accrued this day.
+          </small>
         </div>
         <div class="form-field">
           <label for={`${prefix}-weekly`}>Weekly cost limit (USD)</label>
@@ -154,9 +154,9 @@
             placeholder="Unlimited"
             bind:value={weekly}
           />
-          <small
-            >{query.data?.usage.weekly?.accrued ?? '0'} USD accrued this ISO week.</small
-          >
+          <small>
+            {query.data?.usage.weekly?.accrued ?? '0'} USD accrued this ISO week.
+          </small>
         </div>
         <div class="form-field">
           <label for={`${prefix}-monthly`}>Monthly cost limit (USD)</label>
@@ -166,9 +166,9 @@
             placeholder="Unlimited"
             bind:value={monthly}
           />
-          <small
-            >{query.data?.usage.monthly.accrued ?? '0'} USD accrued this month.</small
-          >
+          <small>
+            {query.data?.usage.monthly.accrued ?? '0'} USD accrued this month.
+          </small>
         </div>
       </fieldset>
       <p class="section-help">
@@ -185,14 +185,18 @@
         {#if editable}<button
             class="button button-primary"
             type="submit"
-            disabled={action.busy}>Save {title.toLowerCase()}</button
-          >{/if}
+            disabled={action.busy}
+          >
+            Save {title.toLowerCase()}
+          </button>{/if}
         <button
           class="button button-secondary"
           type="button"
           disabled={action.busy}
-          onclick={reload}>Reload budget</button
+          onclick={reload}
         >
+          Reload budget
+        </button>
       </div>
     </form>
   {/if}

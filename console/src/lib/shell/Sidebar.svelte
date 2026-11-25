@@ -105,9 +105,9 @@
         aria-current={current === PROFILE ? 'page' : undefined}
         onclick={onNavigate}
       >
-        <span class="avatar" aria-hidden="true"
-          >{user.display_name.slice(0, 1).toUpperCase()}</span
-        >
+        <span class="avatar" aria-hidden="true">
+          {user.display_name.slice(0, 1).toUpperCase()}
+        </span>
         <span class="who">
           <strong>{user.display_name}</strong>
           <small>{user.role}</small>
@@ -121,8 +121,9 @@
           onclick={onSignOut}
           disabled={signingOut}
           aria-busy={signingOut}
-          >{signingOut ? 'Signing out…' : 'Sign out'}</button
         >
+          {signingOut ? 'Signing out…' : 'Sign out'}
+        </button>
       </Menu>
     </div>
   </div>

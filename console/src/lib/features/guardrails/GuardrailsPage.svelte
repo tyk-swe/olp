@@ -177,15 +177,17 @@
 </script>
 
 <PageTitle title="Guardrails" />
-{#if error && !definitionOpen && !policyOpen}<Callout tone="danger"
-    >{error}</Callout
-  >{/if}
+{#if error && !definitionOpen && !policyOpen}<Callout tone="danger">
+    {error}
+  </Callout>{/if}
 {#if definitions.isPending || policies.isPending || projects.isPending}
   <p role="status">Loading guardrail inventory…</p>
 {/if}
 {#if definitions.isError || policies.isError || attachments.isError || projects.isError}<Callout
-    tone="danger">Guardrails didn’t load. Reload the page to try again.</Callout
-  >{/if}
+    tone="danger"
+  >
+    Guardrails didn’t load. Reload the page to try again.
+  </Callout>{/if}
 
 {#if tab === 'checks'}
   <div class="toolbar">
@@ -196,8 +198,10 @@
     {#if canEdit}<div class="page-actions">
         <button
           class="button button-primary"
-          onclick={() => openDefinition(null)}>New check</button
+          onclick={() => openDefinition(null)}
         >
+          New check
+        </button>
       </div>{/if}
   </div>
   <GuardrailDefinitionTable
@@ -243,9 +247,9 @@
       installation, project, route or key.
     </p>
     {#if canEdit}<div class="page-actions">
-        <button class="button button-primary" onclick={() => openPolicy(null)}
-          >New policy</button
-        >
+        <button class="button button-primary" onclick={() => openPolicy(null)}>
+          New policy
+        </button>
       </div>{/if}
   </div>
   <GuardrailPolicyTable

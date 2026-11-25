@@ -138,26 +138,26 @@
         type="button"
         onclick={onRefresh}
         disabled={actionBusy !== null}
-        >{actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh now'}</button
       >
+        {actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh now'}
+      </button>
       {#if job.content_available && job.state === 'succeeded'}
-        <label class="variant-picker"
-          >Variant
+        <label class="variant-picker">
+          Variant
           <select bind:value={downloadVariant}>
             <option value="video">Video</option>
             <option value="thumbnail">Thumbnail</option>
             <option value="spritesheet">Spritesheet</option>
-          </select></label
-        >
+          </select>
+        </label>
         <button
           class="button button-secondary"
           type="button"
           onclick={onDownload}
           disabled={actionBusy !== null}
-          >{actionBusy === 'download'
-            ? 'Downloading…'
-            : 'Download content'}</button
         >
+          {actionBusy === 'download' ? 'Downloading…' : 'Download content'}
+        </button>
       {/if}
       {#if job.lifecycle !== 'deleted'}
         <button
@@ -165,8 +165,9 @@
           type="button"
           onclick={onRemove}
           disabled={actionBusy !== null}
-          >{actionBusy === 'delete' ? 'Deleting…' : 'Delete content'}</button
         >
+          {actionBusy === 'delete' ? 'Deleting…' : 'Delete content'}
+        </button>
       {/if}
     </div>
   {/if}

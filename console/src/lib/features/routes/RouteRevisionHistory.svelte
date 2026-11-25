@@ -127,8 +127,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => revisions.refetch()}>Retry</button
+      onclick={() => revisions.refetch()}
     >
+      Retry
+    </button>
   </div>
 {:else if !revisions.data?.length}
   <section class="card empty-state">
@@ -143,73 +145,82 @@
       <p class="eyebrow">Revision diff</p>
       <h2 id="compare-heading">Compare configuration</h2>
     </div>
-    <label
-      >From<select bind:value={fromRevision}
-        >{#each revisions.data as revision (revision.id)}<option
-            value={revision.id}>Revision {revision.revision}</option
-          >{/each}</select
-      ></label
-    ><label
-      >To<select bind:value={toRevision}
-        >{#each revisions.data as revision (revision.id)}<option
-            value={revision.id}>Revision {revision.revision}</option
-          >{/each}</select
-      ></label
-    ><button
+    <label>
+      From<select bind:value={fromRevision}>
+        {#each revisions.data as revision (revision.id)}<option
+            value={revision.id}
+          >
+            Revision {revision.revision}
+          </option>{/each}
+      </select>
+    </label><label>
+      To<select bind:value={toRevision}>
+        {#each revisions.data as revision (revision.id)}<option
+            value={revision.id}
+          >
+            Revision {revision.revision}
+          </option>{/each}
+      </select>
+    </label><button
       class="button button-secondary"
       type="button"
       onclick={compareRevisions}
       disabled={busy === 'diff'}
-      >{busy === 'diff' ? 'Comparing…' : 'Compare'}</button
     >
+      {busy === 'diff' ? 'Comparing…' : 'Compare'}
+    </button>
   </section>
   {#if revisionDiff}<RevisionDiff diff={revisionDiff} />{/if}
   <div class="table-shell revision-table-shell">
     <table class="data-table revision-table">
-      <thead
-        ><tr
-          ><th>Revision</th><th>Activated</th><th>Fidelity</th><th
-            >Operations</th
-          ><th>Deadline / attempts</th><th>Targets</th><th
-            ><span class="sr-only">Actions</span></th
-          ></tr
-        ></thead
-      ><tbody
-        >{#each revisions.data as revision (revision.id)}<tr
+      <thead>
+        <tr>
+          <th>Revision</th><th>Activated</th><th>Fidelity</th><th>
+            Operations
+          </th><th>Deadline / attempts</th><th>Targets</th><th>
+            <span class="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead><tbody>
+        {#each revisions.data as revision (revision.id)}<tr
             id={`revision-${revision.id}`}
-            ><td data-label="Revision"
-              ><strong>Revision {revision.revision}</strong><br /><code
-                >{revision.id}</code
-              ><br /><small
-                >From draft <code>{revision.source_draft_id}</code></small
-              >
+          >
+            <td data-label="Revision">
+              <strong>Revision {revision.revision}</strong><br /><code>
+                {revision.id}
+              </code><br /><small>
+                From draft <code>{revision.source_draft_id}</code>
+              </small>
               <details>
                 <summary>Routing policy</summary>
                 <pre>{JSON.stringify(revision.routing_policy, null, 2)}</pre>
-              </details></td
-            ><td data-label="Activated"
-              >{formatDate(revision.activated_at)}<br /><small
-                >By {revision.activated_by}</small
-              ></td
-            ><td data-label="Fidelity"
-              >{fidelityLabel(revision.fidelity, revision.passthrough)}</td
-            ><td data-label="Operations">{revision.operations.join(', ')}</td
-            ><td data-label="Deadline / attempts"
-              >{formatInteger(revision.overall_timeout_ms)} ms / {revision.max_attempts}</td
-            ><td data-label="Targets">{revision.targets.length}</td><td
+              </details>
+            </td><td data-label="Activated">
+              {formatDate(revision.activated_at)}<br /><small>
+                By {revision.activated_by}
+              </small>
+            </td><td data-label="Fidelity">
+              {fidelityLabel(revision.fidelity, revision.passthrough)}
+            </td><td data-label="Operations">
+              {revision.operations.join(', ')}
+            </td><td data-label="Deadline / attempts">
+              {formatInteger(revision.overall_timeout_ms)} ms / {revision.max_attempts}
+            </td><td data-label="Targets">{revision.targets.length}</td><td
               class="revision-action"
-              >{#if canManage}<button
+            >
+              {#if canManage}<button
                   class="button button-secondary"
                   type="button"
                   onclick={() => restore(revision)}
                   disabled={Boolean(busy)}
-                  >{busy === `restore-${revision.id}`
+                >
+                  {busy === `restore-${revision.id}`
                     ? 'Restoring…'
-                    : 'Restore as draft'}</button
-                >{/if}</td
-            ></tr
-          >{/each}</tbody
-      >
+                    : 'Restore as draft'}
+                </button>{/if}
+            </td>
+          </tr>{/each}
+      </tbody>
     </table>
   </div>
 {/if}

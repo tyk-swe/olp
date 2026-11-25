@@ -62,8 +62,9 @@
         class="button button-secondary button-danger"
         disabled={!!retiringKey}
         onclick={() => onRetire(item)}
-        >{retiringKey === item.id ? 'Retiring…' : 'Retire entire tree'}</button
-      >{/if}
+      >
+        {retiringKey === item.id ? 'Retiring…' : 'Retire entire tree'}
+      </button>{/if}
   </article>
 {/each}
 

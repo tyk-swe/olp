@@ -5,8 +5,8 @@
   }: { value?: string; disabled?: boolean } = $props();
 </script>
 
-<label
-  >Pinned external credential reference<textarea
+<label>
+  Pinned external credential reference<textarea
     aria-label="Pinned external credential reference"
     class="filter-control"
     bind:value
@@ -14,8 +14,8 @@
     rows="5"
     spellcheck="false"
     placeholder={'{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"1"}'}
-  ></textarea></label
->
+  ></textarea>
+</label>
 <p class="muted">
   Use AWS Secrets Manager, GCP Secret Manager, Azure Key Vault or Vault KV v2
   with an immutable version. The server uses its workload identity and validates

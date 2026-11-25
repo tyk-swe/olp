@@ -195,8 +195,10 @@
       class="button button-secondary"
       type="button"
       onclick={() => edit()}
-      disabled={busy || !canManage}>Add binding</button
+      disabled={busy || !canManage}
     >
+      Add binding
+    </button>
   </div>
   <RetrievalBindingList {bindings} {busy} {edit} />
   {#if editor}
@@ -209,68 +211,74 @@
       <h3>{current ? 'Binding revision' : 'New binding'}</h3>
       <fieldset disabled={busy || !canManage}>
         <div class="binding-fields">
-          <label>Name<input bind:value={name} required maxlength="100" /></label
-          >
-          <label
-            >Owning project ID<input
+          <label>
+            Name<input bind:value={name} required maxlength="100" />
+          </label>
+          <label>
+            Owning project ID<input
               bind:value={project}
               required
               readonly={!!current}
-            /></label
-          >
+            />
+          </label>
           <label>Route<input bind:value={route} required /></label>
           <label>Target ID<input bind:value={target} required /></label>
-          <label
-            >Backend<select bind:value={backend}
-              ><option value="bedrock_knowledge_base"
-                >Bedrock Knowledge Bases</option
-              ><option value="vertex_rag">Vertex RAG Engine</option><option
-                value="azure_ai_search">Azure AI Search</option
-              ></select
-            ></label
-          >
-          <label>Backend resource<input bind:value={resource} required /></label
-          >
+          <label>
+            Backend<select bind:value={backend}>
+              <option value="bedrock_knowledge_base">
+                Bedrock Knowledge Bases
+              </option><option value="vertex_rag">
+                Vertex RAG Engine
+              </option><option value="azure_ai_search">Azure AI Search</option>
+            </select>
+          </label>
+          <label>
+            Backend resource<input bind:value={resource} required />
+          </label>
         </div>
         <p class="muted">
           Use the native Knowledge Base ID, full RAG corpus name or search index
           name configured as the route target's model.
         </p>
-        <label
-          >Field mappings (JSON)<textarea
+        <label>
+          Field mappings (JSON)<textarea
             bind:value={fields}
             rows="5"
-            spellcheck="false"></textarea></label
-        >
+            spellcheck="false"></textarea>
+        </label>
         <p class="muted">
           Map logical filter keys under metadata. Azure also requires text and
           id fields; title, url and search fields are optional.
         </p>
-        <label
-          >API-key grants (UUIDs, one per line)<textarea
+        <label>
+          API-key grants (UUIDs, one per line)<textarea
             bind:value={grants}
             rows="3"
-            spellcheck="false"></textarea></label
-        >
+            spellcheck="false"></textarea>
+        </label>
         <p class="muted">
           Only active keys in the owning project can receive access. An empty
           list grants no access.
         </p>
-        <label class="check"
-          ><input type="checkbox" bind:checked={enabled} />Enable queries</label
-        >
+        <label class="check">
+          <input type="checkbox" bind:checked={enabled} />Enable queries
+        </label>
         <div class="binding-actions">
           <button
             class="button button-primary"
             type="submit"
-            disabled={conflict}>Save revision</button
+            disabled={conflict}
           >
+            Save revision
+          </button>
           {#if current}<button
               class="button button-secondary"
               type="button"
               onclick={retire}
-              disabled={conflict}>Retire binding</button
-            >{/if}
+              disabled={conflict}
+            >
+              Retire binding
+            </button>{/if}
         </div>
       </fieldset>
       {#if conflict && current}<p class="inline-problem" role="alert">
@@ -280,17 +288,21 @@
           class="button button-secondary"
           type="button"
           onclick={() => edit(current?.id)}
-          disabled={busy}>Reload binding</button
-        >{/if}
-      {#if current}<label
-          >Revision ID<input bind:value={revision} disabled={busy} /></label
+          disabled={busy}
         >
+          Reload binding
+        </button>{/if}
+      {#if current}<label>
+          Revision ID<input bind:value={revision} disabled={busy} />
+        </label>
         <button
           class="button button-secondary"
           type="button"
           onclick={inspect}
-          disabled={busy || !revision}>Inspect revision</button
-        >{/if}
+          disabled={busy || !revision}
+        >
+          Inspect revision
+        </button>{/if}
       <button
         class="text-button"
         type="button"
@@ -299,8 +311,10 @@
           editor = false;
           inspected = '';
         }}
-        disabled={busy}>Close</button
+        disabled={busy}
       >
+        Close
+      </button>
     </form>
   {/if}
   {#if busy}<p role="status">Waiting for the binding operation…</p>{/if}

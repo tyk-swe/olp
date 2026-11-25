@@ -47,8 +47,9 @@
         type="datetime-local"
         aria-describedby="card-effective-help"
         disabled={!canEdit}
-      /><small id="card-effective-help">Leave blank to apply immediately.</small
-      >
+      /><small id="card-effective-help">
+        Leave blank to apply immediately.
+      </small>
     </div>
   </div>
   {#each rows as row, index (index)}
@@ -60,21 +61,26 @@
             id={`card-kind-${index}`}
             bind:value={row.providerKind}
             disabled={!canEdit}
-            >{#each kinds as option (option.kind)}<option value={option.kind}
-                >{option.label}</option
-              >{/each}</select
           >
+            {#each kinds as option (option.kind)}<option value={option.kind}>
+                {option.label}
+              </option>{/each}
+          </select>
         </div>
         <div class="form-field">
           <label for={`card-vendor-${index}`}>Vendor scope</label><select
             id={`card-vendor-${index}`}
             bind:value={row.vendorId}
             disabled={!canEdit}
-            ><option value="">All vendors</option
-            >{#each vendors.filter((vendor) => vendor.connector === row.providerKind) as vendor (vendor.id)}<option
-                value={vendor.id}>{vendor.name}</option
-              >{/each}</select
           >
+            <option value="">
+              All vendors
+            </option>{#each vendors.filter((vendor) => vendor.connector === row.providerKind) as vendor (vendor.id)}<option
+                value={vendor.id}
+              >
+                {vendor.name}
+              </option>{/each}
+          </select>
         </div>
         <div class="form-field">
           <label for={`card-model-${index}`}>Model</label><input
@@ -89,10 +95,11 @@
             id={`card-operation-${index}`}
             bind:value={row.operation}
             disabled={!canEdit}
-            >{#each operationKinds as option (option)}<option value={option}
-                >{option}</option
-              >{/each}</select
           >
+            {#each operationKinds as option (option)}<option value={option}>
+                {option}
+              </option>{/each}
+          </select>
         </div>
       </div>
       <PriceFields
@@ -127,8 +134,10 @@
         class="text-button"
         onclick={() => {
           rows = rows.filter((_, i) => i !== index);
-        }}>Remove price</button
+        }}
       >
+        Remove price
+      </button>
     </fieldset>
   {/each}
   <button
@@ -136,12 +145,15 @@
     class="text-button"
     onclick={() => {
       rows = [...rows, emptyPriceRow(kinds[0]?.kind ?? '')];
-    }}>Add explicit price</button
+    }}
   >
+    Add explicit price
+  </button>
   <button
     class="button button-primary"
     type="submit"
     disabled={!canEdit || busy}
-    >{busy ? 'Publishing…' : 'Publish revision'}</button
   >
+    {busy ? 'Publishing…' : 'Publish revision'}
+  </button>
 </form>

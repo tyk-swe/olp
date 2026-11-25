@@ -97,9 +97,9 @@
   </div>
 {:else if services.error}<div class="inline-problem" role="alert">
     Request history capabilities are unavailable.
-    <button class="text-button" type="button" onclick={() => services.retry()}
-      >Try again</button
-    >
+    <button class="text-button" type="button" onclick={() => services.retry()}>
+      Try again
+    </button>
   </div>
 {:else if !services.retentionEnforced}<div
     class="card empty-state"

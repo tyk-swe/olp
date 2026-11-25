@@ -66,11 +66,9 @@
             />
             <span>
               <code>{item.upstream_model}</code>
-              {#if item.catalog_model !== item.upstream_model}<small
-                  >matched {item.catalog_model} by {stateLabel(
-                    item.matched_by
-                  )}</small
-                >{/if}
+              {#if item.catalog_model !== item.upstream_model}<small>
+                  matched {item.catalog_model} by {stateLabel(item.matched_by)}
+                </small>{/if}
             </span>
           </label>
           {#if item.conflict}<p class="conflict">
@@ -119,10 +117,11 @@
           !selected.length ||
           Boolean(busy)}
         onclick={accept}
-        >{busy === 'catalog-accept'
+      >
+        {busy === 'catalog-accept'
           ? 'Storing facts…'
-          : `Accept facts for ${selected.length} model${selected.length === 1 ? '' : 's'}`}</button
-      >{/if}
+          : `Accept facts for ${selected.length} model${selected.length === 1 ? '' : 's'}`}
+      </button>{/if}
   </section>
 {/if}
 

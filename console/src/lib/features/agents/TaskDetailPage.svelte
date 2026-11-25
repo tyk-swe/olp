@@ -97,24 +97,24 @@
           <tbody>
             {#each task.data.remote_fees as fee (fee.dispatch_id)}
               <tr>
-                <td
-                  ><a href={resolve(`activity/runs/${fee.run_id}`)}
-                    ><code>{fee.run_id}</code></a
-                  ></td
-                >
+                <td>
+                  <a href={resolve(`activity/runs/${fee.run_id}`)}>
+                    <code>{fee.run_id}</code>
+                  </a>
+                </td>
                 <td>{stateLabel(fee.state)}</td>
-                <td aria-label="Observed cost and charge"
-                  >{fee.observed_cost} / {fee.observed_charge}
-                  {fee.currency}</td
-                >
-                <td aria-label="Unresolved cost and charge"
-                  >{fee.remaining_cost} / {fee.remaining_charge}
-                  {fee.currency}</td
-                >
+                <td aria-label="Observed cost and charge">
+                  {fee.observed_cost} / {fee.observed_charge}
+                  {fee.currency}
+                </td>
+                <td aria-label="Unresolved cost and charge">
+                  {fee.remaining_cost} / {fee.remaining_charge}
+                  {fee.currency}
+                </td>
                 <td>{formatDate(fee.created_at)}</td>
               </tr>
-            {/each}</tbody
-          >
+            {/each}
+          </tbody>
         </table>
       </ScrollTable>
     {/if}
@@ -129,32 +129,34 @@
       </p>{:else}
       <ScrollTable label="Callback model usage">
         <table class="data-table">
-          <thead
-            ><tr
-              ><th scope="col">Request</th><th scope="col">Pricing</th><th
-                scope="col">Observed cost / charge</th
-              ><th scope="col">Unresolved cost / charge</th></tr
-            ></thead
-          >
-          <tbody
-            >{#each task.data.callback_models as model, index (model.attempt_id ?? `${model.request_id}-${index}`)}
-              <tr
-                ><td><code>{model.request_id}</code></td><td
-                  >{stateLabel(model.state)}</td
-                >
-                <td
-                  >{model.observed_cost ?? 'Unknown'} / {model.observed_charge ??
-                    'Unknown'}
-                  {model.currency ?? ''}</td
-                >
-                <td
-                  >{model.remaining_cost ?? 'Unknown'} / {model.remaining_charge ??
-                    'Unknown'}
-                  {model.currency ?? ''}</td
-                ></tr
+          <thead>
+            <tr>
+              <th scope="col">Request</th><th scope="col">Pricing</th><th
+                scope="col"
               >
-            {/each}</tbody
-          >
+                Observed cost / charge
+              </th><th scope="col">Unresolved cost / charge</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each task.data.callback_models as model, index (model.attempt_id ?? `${model.request_id}-${index}`)}
+              <tr>
+                <td><code>{model.request_id}</code></td><td>
+                  {stateLabel(model.state)}
+                </td>
+                <td>
+                  {model.observed_cost ?? 'Unknown'} / {model.observed_charge ??
+                    'Unknown'}
+                  {model.currency ?? ''}
+                </td>
+                <td>
+                  {model.remaining_cost ?? 'Unknown'} / {model.remaining_charge ??
+                    'Unknown'}
+                  {model.currency ?? ''}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
         </table>
       </ScrollTable>
     {/if}
@@ -179,23 +181,23 @@
           <tbody>
             {#each task.data.callback_tools as tool (tool.dispatch_id)}
               <tr>
-                <td
-                  ><a href={resolve(`activity/runs/${tool.run_id}`)}
-                    ><code>{tool.run_id}</code></a
-                  ></td
-                >
+                <td>
+                  <a href={resolve(`activity/runs/${tool.run_id}`)}>
+                    <code>{tool.run_id}</code>
+                  </a>
+                </td>
                 <td>{stateLabel(tool.state)}</td>
                 <td>{tool.pricing_state}</td>
-                <td
-                  >{tool.observed_cost ?? 'Unknown'} / {tool.observed_charge ??
+                <td>
+                  {tool.observed_cost ?? 'Unknown'} / {tool.observed_charge ??
                     'Unknown'}
-                  {tool.currency}</td
-                >
-                <td
-                  >{tool.remaining_cost ?? 'Unknown'} / {tool.remaining_charge ??
+                  {tool.currency}
+                </td>
+                <td>
+                  {tool.remaining_cost ?? 'Unknown'} / {tool.remaining_charge ??
                     'Unknown'}
-                  {tool.currency}</td
-                >
+                  {tool.currency}
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -206,8 +208,10 @@
   <button
     class="button button-secondary"
     type="button"
-    onclick={() => task.refetch()}>Refresh</button
+    onclick={() => task.refetch()}
   >
+    Refresh
+  </button>
 {/if}
 
 {#if task.data && access.allows('POST /api/v1/a2a-tasks/{task_id}/cancel')}
@@ -218,8 +222,9 @@
       type="button"
       disabled={action.busy}
       onclick={() => action.run(() => getRemoteTask(taskID), acceptRemote)}
-      >Fetch remote status</button
     >
+      Fetch remote status
+    </button>
     <ConfirmAction
       danger
       label="Cancel remote task"

@@ -194,8 +194,10 @@
         onclick={() => {
           increases.error = '';
           creating = true;
-        }}>New increase</button
+        }}
       >
+        New increase
+      </button>
     </div>{/if}
 </div>
 {#if problem && !creating}<Callout tone="danger">{problem}</Callout>{/if}
@@ -235,42 +237,47 @@
   emptyWhen={!query.data?.items.length && !before}
 >
   {#snippet empty()}
-    <EmptyState title="No budget increases"
-      >Increases you grant show up here until they expire.</EmptyState
-    >
+    <EmptyState title="No budget increases">
+      Increases you grant show up here until they expire.
+    </EmptyState>
   {/snippet}
   <ScrollTable label="Budget increases">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Applies to</th><th scope="col">Amount</th><th
-            scope="col">Reason</th
-          ><th scope="col">Status</th><th scope="col">Granted</th><th
-            scope="col"><span class="sr-only">Actions</span></th
-          ></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Applies to</th><th scope="col">Amount</th><th
+            scope="col"
+          >
+            Reason
+          </th><th scope="col">Status</th><th scope="col">Granted</th><th
+            scope="col"
+          >
+            <span class="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead>
       <tbody>
         {#each query.data?.items ?? [] as item (item.id)}
           {@const expired = new Date(item.expires_at).getTime() <= Date.now()}
           <tr>
             <td>
-              <strong
-                >{kinds.find((choice) => choice.value === item.target.kind)
-                  ?.label ?? item.target.kind}</strong
-              >
+              <strong>
+                {kinds.find((choice) => choice.value === item.target.kind)
+                  ?.label ?? item.target.kind}
+              </strong>
               <span class="muted">{item.window_kind} window</span>
-              {#if item.target.id}<code class="mono">{item.target.id}</code
-                >{/if}{#if item.target.route}<code class="mono"
-                  >{item.target.route}</code
-                >{/if}{#if item.target.label}<code class="mono"
-                  >{item.target.label}={item.target.value}</code
-                >{/if}
+              {#if item.target.id}<code class="mono">
+                  {item.target.id}
+                </code>{/if}{#if item.target.route}<code class="mono">
+                  {item.target.route}
+                </code>{/if}{#if item.target.label}<code class="mono">
+                  {item.target.label}={item.target.value}
+                </code>{/if}
             </td>
             <td class="mono">+${item.amount}</td>
             <td>{item.reason}</td>
-            <td
-              >{#if item.revoked_at}<StatusBadge
+            <td>
+              {#if item.revoked_at}<StatusBadge
                   label="Revoked"
                   tone="neutral"
                 />{:else if expired}<StatusBadge
@@ -279,21 +286,23 @@
                 />{:else}<StatusBadge
                   label={`Until ${formatDate(item.expires_at)}`}
                   tone="success"
-                />{/if}</td
-            >
-            <td
-              >{formatDate(item.created_at)}<span class="muted"
-                >{item.created_by}</span
-              ></td
-            >
-            <td
-              >{#if !item.revoked_at && !expired && canCreate && (item.target.kind !== 'installation' || canInstall)}<button
+                />{/if}
+            </td>
+            <td>
+              {formatDate(item.created_at)}<span class="muted">
+                {item.created_by}
+              </span>
+            </td>
+            <td>
+              {#if !item.revoked_at && !expired && canCreate && (item.target.kind !== 'installation' || canInstall)}<button
                   type="button"
                   class="text-button danger"
                   disabled={busy}
-                  onclick={() => revoke(item)}>Revoke</button
-                >{/if}</td
-            >
+                  onclick={() => revoke(item)}
+                >
+                  Revoke
+                </button>{/if}
+            </td>
           </tr>
         {/each}
       </tbody>
@@ -305,14 +314,18 @@
         class="button button-secondary"
         onclick={() => {
           before = undefined;
-        }}>Newest</button
-      >{/if}{#if query.data?.next_cursor}<button
+        }}
+      >
+        Newest
+      </button>{/if}{#if query.data?.next_cursor}<button
         type="button"
         class="button button-secondary"
         onclick={() => {
           before = query.data?.next_cursor ?? undefined;
-        }}>Older</button
-      >{/if}
+        }}
+      >
+        Older
+      </button>{/if}
   </div>
 </QueryView>
 

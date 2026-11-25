@@ -276,17 +276,17 @@
         {exportBusy ? 'Exporting…' : 'Export configuration'}
       </button>
       {#if exportedJSON}
-        <button class="button button-secondary" onclick={downloadExport}
-          >Download JSON</button
-        >
+        <button class="button button-secondary" onclick={downloadExport}>
+          Download JSON
+        </button>
         <button class="button button-secondary" onclick={copyExport}>
           {copied ? 'Copied' : 'Copy JSON'}
         </button>
       {/if}
     </div>
-    {#if exportDigest}<small class="mono" data-testid="export-digest"
-        >Digest {exportDigest}</small
-      >{/if}
+    {#if exportDigest}<small class="mono" data-testid="export-digest">
+        Digest {exportDigest}
+      </small>{/if}
   </div>
 
   <div class="card">
@@ -306,8 +306,8 @@
       onchange={upload}
     />
     {#if artifactDocument}
-      <label
-        >External credential bindings<textarea
+      <label>
+        External credential bindings<textarea
           class="filter-control"
           bind:value={externalBindingsJSON}
           oninput={() => {
@@ -319,15 +319,15 @@
           maxlength="65536"
           spellcheck="false"
           placeholder={'{"provider/primary":{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"1"}}'}
-        ></textarea></label
-      >
+        ></textarea>
+      </label>
       <p>
         Optionally bind artifact references to immutable secret-store versions.
         A reference must use either an external binding or a plaintext binding.
       </p>
       {#if artifactDocument.code}
-        <label
-          >Code destination bindings<textarea
+        <label>
+          Code destination bindings<textarea
             bind:value={codeBindingsJSON}
             oninput={() => {
               plan = null;
@@ -338,8 +338,8 @@
             maxlength="65536"
             spellcheck="false"
             placeholder={'{"credentials":{"account-ref":"destination-credential-id"},"users":{},"api_keys":{}}'}
-          ></textarea></label
-        >
+          ></textarea>
+        </label>
         <p>
           Enroll destination credentials first, then bind every credential,
           personal owner and API key reference to its destination ID. Rename
@@ -350,8 +350,10 @@
         <button
           class="button button-secondary"
           onclick={runPlan}
-          disabled={busy}>Plan</button
+          disabled={busy}
         >
+          Plan
+        </button>
       </div>
     {/if}
   </div>

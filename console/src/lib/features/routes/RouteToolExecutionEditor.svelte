@@ -96,9 +96,9 @@
     {#if editor.toolsets.isError}
       <p class="inline-problem" role="alert">
         Could not load toolsets. {errorMessage(editor.toolsets.error)}
-        <button type="button" onclick={() => editor.toolsets.refetch()}
-          >Retry</button
-        >
+        <button type="button" onclick={() => editor.toolsets.refetch()}>
+          Retry
+        </button>
       </p>
     {/if}
     <fieldset disabled={!editor.canManage || Boolean(editor.busy)}>

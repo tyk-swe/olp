@@ -37,8 +37,9 @@
       type="button"
       onclick={editor.addTarget}
       disabled={!editor.canManage || !editor.modelOptions.length}
-      >Add target</button
     >
+      Add target
+    </button>
   </div>
   {#if !editor.modelOptions.length}<div class="empty-state compact">
       <p>
@@ -61,9 +62,9 @@
               disabled={!editor.canManage}
             >
               {#if !editor.modelOptions.some((option) => option.id === target.providerModelId)}
-                <option value={target.providerModelId}
-                  >{storedTargetLabel(target)} — unavailable</option
-                >
+                <option value={target.providerModelId}>
+                  {storedTargetLabel(target)} — unavailable
+                </option>
               {/if}{#each editor.modelOptions as option (option.id)}
                 <option value={option.id}>{option.label}</option>
               {/each}
@@ -130,9 +131,9 @@
               disabled={!editor.canManage}
               aria-describedby={`shadow-help-${index}`}
             />
-            <small id={`shadow-help-${index}`}
-              >Mirror this share of requests here; leave empty to serve.</small
-            >
+            <small id={`shadow-help-${index}`}>
+              Mirror this share of requests here; leave empty to serve.
+            </small>
           </div>
         </div>
         <button
@@ -140,8 +141,10 @@
           type="button"
           aria-label={`Remove target ${index + 1}`}
           onclick={() => editor.removeTarget(index)}
-          disabled={!editor.canManage}>×</button
+          disabled={!editor.canManage}
         >
+          ×
+        </button>
         <div
           class:warning={targetUnavailable(target) ||
             missingTargetOperations(
@@ -151,39 +154,39 @@
             ).length > 0}
           class="target-eligibility"
         >
-          {#if targetUnavailable(target)}<span
-              ><strong>Unavailable:</strong> the connection was disabled, or this
-              model left its activated revision. The target stays in the route until
-              you remove it.</span
-            >{/if}
+          {#if targetUnavailable(target)}<span>
+              <strong>Unavailable:</strong> the connection was disabled, or this model
+              left its activated revision. The target stays in the route until you
+              remove it.
+            </span>{/if}
           {#if eligibleTargetTuples(target, editor.modelOptions, editor.operations).length}
-            <span
-              ><strong>Certified tuples:</strong>
+            <span>
+              <strong>Certified tuples:</strong>
               {eligibleTargetTuples(
                 target,
                 editor.modelOptions,
                 editor.operations
-              ).join(', ')}</span
-            >
+              ).join(', ')}
+            </span>
           {:else}
-            <span
-              >No selected operation has a certified tuple on this target.</span
-            >
+            <span>
+              No selected operation has a certified tuple on this target.
+            </span>
           {/if}
-          {#if missingTargetOperations(target, editor.modelOptions, editor.operations).length}<span
-              ><strong>Missing:</strong>
+          {#if missingTargetOperations(target, editor.modelOptions, editor.operations).length}<span>
+              <strong>Missing:</strong>
               {missingTargetOperations(
                 target,
                 editor.modelOptions,
                 editor.operations
-              ).join(', ')}</span
-            >{/if}
+              ).join(', ')}
+            </span>{/if}
         </div>
         {#if notice}
           <p class="target-lifecycle" class:danger={notice.tone === 'danger'}>
-            <strong
-              >{notice.tone === 'danger' ? 'Retired:' : 'Retiring:'}</strong
-            >
+            <strong>
+              {notice.tone === 'danger' ? 'Retired:' : 'Retiring:'}
+            </strong>
             {notice.text}
           </p>{/if}
       </li>
@@ -193,21 +196,21 @@
       class="eligibility-warning"
       role="status"
     >
-      <strong>Some targets are deprecated or retiring.</strong><span
-        >{editor.routeLifecycleWarnings
+      <strong>Some targets are deprecated or retiring.</strong><span>
+        {editor.routeLifecycleWarnings
           .map((warning) => `${warning.label}: ${warning.notice.text}`)
-          .join(' ')} Add a replacement target before the vendor retires them.</span
-      >
+          .join(' ')} Add a replacement target before the vendor retires them.
+      </span>
     </div>{/if}
   {#if editor.routeEligibilityWarnings.length}<div
       class="eligibility-warning"
       role="status"
     >
-      <strong>Route eligibility is incomplete.</strong><span
-        >No selected target has a certified tuple for: {editor.routeEligibilityWarnings.join(
+      <strong>Route eligibility is incomplete.</strong><span>
+        No selected target has a certified tuple for: {editor.routeEligibilityWarnings.join(
           ', '
-        )}.</span
-      >
+        )}.
+      </span>
     </div>{/if}
 </section>
 

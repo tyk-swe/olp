@@ -64,9 +64,9 @@
   <div>
     <dt>{term}</dt>
     <dd class:warning-text={age.stale}>
-      {age.seconds === null ? absent : age.label}{#if at}<small
-          >{formatDate(at)}</small
-        >{/if}
+      {age.seconds === null ? absent : age.label}{#if at}<small>
+          {formatDate(at)}
+        </small>{/if}
     </dd>
   </div>
 {/snippet}
@@ -74,33 +74,33 @@
 <section class="metric-grid" aria-label="Dependency readiness">
   <article class="card metric-card">
     <p>Gateway</p>
-    <strong
-      ><span class="badge {healthTone(readiness.status)}"
-        >{stateLabel(readiness.status)}</span
-      ></strong
-    >
+    <strong>
+      <span class="badge {healthTone(readiness.status)}">
+        {stateLabel(readiness.status)}
+      </span>
+    </strong>
   </article>
   <article class="card metric-card">
     <p>PostgreSQL</p>
-    <strong
-      ><span class="badge {healthTone(readiness.database)}"
-        >{stateLabel(readiness.database)}</span
-      ></strong
-    >
+    <strong>
+      <span class="badge {healthTone(readiness.database)}">
+        {stateLabel(readiness.database)}
+      </span>
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Distributed limits</p>
-    <strong
-      ><span class="badge {healthTone(readiness.limits)}"
-        >{stateLabel(readiness.limits)}</span
-      ></strong
-    >
+    <strong>
+      <span class="badge {healthTone(readiness.limits)}">
+        {stateLabel(readiness.limits)}
+      </span>
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Active generation</p>
-    <strong
-      >{readiness.generation == null ? '—' : `#${readiness.generation}`}</strong
-    >
+    <strong>
+      {readiness.generation == null ? '—' : `#${readiness.generation}`}
+    </strong>
   </article>
 </section>
 
@@ -117,9 +117,9 @@
         below is the backend's own verdict for every fixed task.
       </p>
     </div>
-    <span class="badge {healthTone(readiness.asynchronous_plane)}"
-      >{stateLabel(readiness.asynchronous_plane)}</span
-    >
+    <span class="badge {healthTone(readiness.asynchronous_plane)}">
+      {stateLabel(readiness.asynchronous_plane)}
+    </span>
   </div>
   <dl class="card facts">
     {@render fact(
@@ -157,9 +157,9 @@
       persistence.error,
       'Usage accounting completeness is unavailable.'
     )}
-    <button class="text-button" onclick={() => persistence.refetch()}
-      >Try again</button
-    >
+    <button class="text-button" onclick={() => persistence.refetch()}>
+      Try again
+    </button>
   </div>
 {:else if persistence.data}
   <section class="card persistence" aria-labelledby="persistence-title">
@@ -186,9 +186,9 @@
       </p>
 
       <p>
-        <a href={resolve('usage')}
-          >Open usage for priced totals and range coverage</a
-        >
+        <a href={resolve('usage')}>
+          Open usage for priced totals and range coverage
+        </a>
       </p>
     </div>
   </section>
@@ -206,9 +206,9 @@
         show recovery in progress, not necessarily an incident.
       </p>
     </div>
-    <span class="badge {healthTone(readiness.request_metadata_consumer)}"
-      >{stateLabel(readiness.request_metadata_consumer)}</span
-    >
+    <span class="badge {healthTone(readiness.request_metadata_consumer)}">
+      {stateLabel(readiness.request_metadata_consumer)}
+    </span>
   </div>
   <dl class="card facts">
     {@render fact(
@@ -280,9 +280,9 @@
         upstream outcome could not be established.
       </p>
     </div>
-    <span class="badge {healthTone(readiness.media_reconciliation)}"
-      >{stateLabel(readiness.media_reconciliation)}</span
-    >
+    <span class="badge {healthTone(readiness.media_reconciliation)}">
+      {stateLabel(readiness.media_reconciliation)}
+    </span>
   </div>
   <dl class="card facts">
     {@render fact(

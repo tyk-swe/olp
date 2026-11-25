@@ -16,8 +16,10 @@
   class="button button-secondary"
   type="button"
   aria-pressed={comparing}
-  onclick={() => (comparing = !comparing)}>Compare with previous period</button
+  onclick={() => (comparing = !comparing)}
 >
+  Compare with previous period
+</button>
 
 {#if comparing}
   <UsageSpendComparison

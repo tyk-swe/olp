@@ -49,13 +49,17 @@
       class="text-button"
       type="button"
       onclick={onExport}
-      disabled={exporting}>{exporting ? 'Exporting…' : 'Export CSV'}</button
-    ><button
+      disabled={exporting}
+    >
+      {exporting ? 'Exporting…' : 'Export CSV'}
+    </button><button
       class="text-button"
       type="button"
       onclick={() => requests.refetch()}
-      disabled={requests.isFetching}>Refresh</button
+      disabled={requests.isFetching}
     >
+      Refresh
+    </button>
   </div>
   {#if exportError}<div class="inline-problem" role="alert">
       {exportError}
@@ -66,9 +70,9 @@
   {:else if requests.isError}
     <div class="inline-problem" role="alert">
       {errorMessage(requests.error, 'Request metadata is unavailable.')}
-      <button class="text-button" onclick={() => requests.refetch()}
-        >Try again</button
-      >
+      <button class="text-button" onclick={() => requests.refetch()}>
+        Try again
+      </button>
     </div>
   {:else if requests.data?.items.length === 0 && listState.history.length === 0}
     <div class="card empty-state">
@@ -87,75 +91,86 @@
     >
       <table class="data-table">
         <caption class="sr-only">Request metadata, newest first</caption>
-        <thead
-          ><tr
-            ><th scope="col">Started</th><th scope="col">Route / operation</th
-            ><th scope="col">Status</th><th scope="col">Attempts</th><th
-              scope="col">TTFT / latency</th
-            ><th scope="col">Tokens</th><th scope="col">Cost</th><th scope="col"
-              ><span class="sr-only">Details</span></th
-            ></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th scope="col">Started</th><th scope="col">
+              Route / operation
+            </th><th scope="col">Status</th><th scope="col">Attempts</th><th
+              scope="col"
+            >
+              TTFT / latency
+            </th><th scope="col">Tokens</th><th scope="col">Cost</th><th
+              scope="col"
+            >
+              <span class="sr-only">Details</span>
+            </th>
+          </tr>
+        </thead>
         <tbody>
           {#each requests.data?.items ?? [] as request (request.id)}
             <tr>
-              <td
-                >{formatDate(request.started_at)}<small
-                  >{request.completed_at
+              <td>
+                {formatDate(request.started_at)}<small>
+                  {request.completed_at
                     ? `Completed ${formatDate(request.completed_at)}`
-                    : 'In flight'}</small
-                ></td
-              >
-              <td
-                ><strong>{request.route}</strong><small
-                  >{request.operation} · {request.surface}</small
-                ></td
-              >
-              <td
-                ><span
+                    : 'In flight'}
+                </small>
+              </td>
+              <td>
+                <strong>{request.route}</strong><small>
+                  {request.operation} · {request.surface}
+                </small>
+              </td>
+              <td>
+                <span
                   class="badge {statusTone(
                     request.status_code,
                     request.error_class
                   )}"
-                  >{statusLabel(request.status_code, request.error_class)}</span
-                >{#if request.payload_captured}<br /><small
+                >
+                  {statusLabel(request.status_code, request.error_class)}
+                </span>{#if request.payload_captured}<br /><small
                     class="capture-note"
                     title="Queued in the volatile capture queue — does not guarantee delivery"
-                    >Capture queued</small
-                  >{/if}</td
-              >
+                  >
+                    Capture queued
+                  </small>{/if}
+              </td>
               <td>{request.attempt_count}</td>
-              <td
-                >{request.first_byte_ms == null
+              <td>
+                {request.first_byte_ms == null
                   ? '—'
                   : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
                 null
                   ? '—'
-                  : `${request.total_latency_ms} ms`}</td
-              >
-              <td
-                >{formatInteger(request.input_tokens)} in<br />{formatInteger(
+                  : `${request.total_latency_ms} ms`}
+              </td>
+              <td>
+                {formatInteger(request.input_tokens)} in<br />{formatInteger(
                   request.output_tokens
-                )} out<small
-                  >{formatInteger(request.cached_input_tokens)} cached · {formatInteger(
+                )} out<small>
+                  {formatInteger(request.cached_input_tokens)} cached · {formatInteger(
                     request.cache_write_input_tokens
-                  )} write</small
-                ></td
-              >
-              <td
-                ><span class:unpriced={request.unpriced}
-                  >{formatCost(request.estimated_cost, request.currency)}</span
-                >{#if request.usage_complete === false}<small
-                    class="warning-text">Incomplete usage</small
-                  >{/if}</td
-              >
-              <td
-                ><a
+                  )} write
+                </small>
+              </td>
+              <td>
+                <span class:unpriced={request.unpriced}>
+                  {formatCost(request.estimated_cost, request.currency)}
+                </span>{#if request.usage_complete === false}<small
+                    class="warning-text"
+                  >
+                    Incomplete usage
+                  </small>{/if}
+              </td>
+              <td>
+                <a
                   class="row-link"
                   href={resolve(`requests/${request.id}${page.url.search}`)}
-                  aria-label={`View request ${request.id}`}>View</a
+                  aria-label={`View request ${request.id}`}
                 >
+                  View
+                </a>
               </td>
             </tr>
           {/each}
@@ -167,21 +182,24 @@
         <li class="card">
           <div class="mobile-result-heading">
             <div>
-              <strong>{request.route}</strong><small
-                >{request.operation} · {request.surface}</small
-              >
+              <strong>{request.route}</strong><small>
+                {request.operation} · {request.surface}
+              </small>
             </div>
             <span
               class="badge {statusTone(
                 request.status_code,
                 request.error_class
-              )}">{statusLabel(request.status_code, request.error_class)}</span
+              )}"
             >
+              {statusLabel(request.status_code, request.error_class)}
+            </span>
             {#if request.payload_captured}<small
                 class="capture-note"
                 title="Queued in the volatile capture queue — does not guarantee delivery"
-                >Capture queued</small
-              >{/if}
+              >
+                Capture queued
+              </small>{/if}
           </div>
           <dl>
             <div>
@@ -227,8 +245,10 @@
           <a
             class="button button-secondary"
             href={resolve(`requests/${request.id}${page.url.search}`)}
-            aria-label={`View request ${request.id}`}>View timeline</a
+            aria-label={`View request ${request.id}`}
           >
+            View timeline
+          </a>
         </li>
       {/each}
     </ul>
@@ -241,15 +261,19 @@
         class="button button-secondary"
         type="button"
         onclick={pagination.onPrevious}
-        disabled={!pagination.hasPrevious}>Previous</button
+        disabled={!pagination.hasPrevious}
       >
+        Previous
+      </button>
       <span>Page {pagination.page}</span>
       <button
         class="button button-secondary"
         type="button"
         onclick={pagination.onNext}
-        disabled={!pagination.hasNext}>Next</button
+        disabled={!pagination.hasNext}
       >
+        Next
+      </button>
     </nav>
   {/if}
 {/if}

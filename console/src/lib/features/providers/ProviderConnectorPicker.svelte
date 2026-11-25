@@ -67,21 +67,27 @@
       id="provider-vendor"
       value={draft.presetId || draft.options?.vendor_id || ''}
       onchange={chooseVendor}
-      ><option value="">Custom connection</option
-      >{#each vendors.data ?? [] as vendor (vendor.id)}<option value={vendor.id}
-          >{vendor.name}</option
-        >{/each}</select
-    ><small
-      >Each connection can have its own account, endpoint, region, and
-      credential pool.</small
     >
+      <option value="">
+        Custom connection
+      </option>{#each vendors.data ?? [] as vendor (vendor.id)}<option
+          value={vendor.id}
+        >
+          {vendor.name}
+        </option>{/each}
+    </select><small>
+      Each connection can have its own account, endpoint, region, and credential
+      pool.
+    </small>
   </div>
   {#if vendors.isError}<div class="inline-problem" role="alert">
       Vendor catalog unavailable. <button
         class="button button-secondary"
         type="button"
-        onclick={() => vendors.refetch()}>Retry</button
+        onclick={() => vendors.refetch()}
       >
+        Retry
+      </button>
     </div>{/if}
   <p class="connector-label">Connector protocol</p>
   <div class="connector-grid">

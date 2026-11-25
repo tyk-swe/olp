@@ -50,11 +50,9 @@
     <option value="">{options.isPending ? 'Loading…' : emptyLabel}</option>
     {#if value && !known}<option {value}>{value}</option>{/if}
     {#each options.data ?? [] as option (option.value)}
-      <option value={option.value}
-        >{option.detail
-          ? `${option.label} · ${option.detail}`
-          : option.label}</option
-      >
+      <option value={option.value}>
+        {option.detail ? `${option.label} · ${option.detail}` : option.label}
+      </option>
     {/each}
   </select>
 {/if}

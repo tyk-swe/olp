@@ -28,25 +28,26 @@
 {/if}
 <ScrollTable label="Provider models" busy={updating}>
   <table class="data-table">
-    <thead
-      ><tr
-        ><th>Model</th><th>Provider</th><th>Context</th><th>Max output</th><th
-          >Capability tuples / provenance</th
-        ><th>Route eligibility</th></tr
-      ></thead
-    ><tbody>
+    <thead>
+      <tr>
+        <th>Model</th><th>Provider</th><th>Context</th><th>Max output</th><th>
+          Capability tuples / provenance
+        </th><th>Route eligibility</th>
+      </tr>
+    </thead><tbody>
       {#each inventory as entry (`${entry.provider_id}-${entry.model.id}`)}
         {@const facts = metadataFacts(entry.metadata)}
         {@const lifecycle = lifecycleNotice(entry.lifecycle)}
         <tr>
-          <td
-            ><strong>{entry.model.display_name}</strong><br /><code
-              >{entry.model.upstream_model}</code
-            >{#if lifecycle}<small
+          <td>
+            <strong>{entry.model.display_name}</strong><br /><code>
+              {entry.model.upstream_model}
+            </code>{#if lifecycle}<small
                 class="lifecycle-notice"
                 class:danger={lifecycle.tone === 'danger'}
-                >{lifecycle.text}</small
-              >{/if}{#if facts.length}<details class="model-facts">
+              >
+                {lifecycle.text}
+              </small>{/if}{#if facts.length}<details class="model-facts">
                 <summary>Upstream metadata</summary>
                 <dl>
                   {#each facts as fact (fact.label)}<div>
@@ -58,38 +59,39 @@
             {/if}
           </td>
           <td>
-            <a href={resolve(`providers/${entry.provider_id}`)}
-              >{entry.provider_name}</a
-            >
+            <a href={resolve(`providers/${entry.provider_id}`)}>
+              {entry.provider_name}
+            </a>
             <br />
             <span class="badge">{stateLabel(entry.provider_kind)}</span>
           </td>
           <td>{formatInteger(entry.metadata.context_length)}</td>
           <td>{formatInteger(entry.metadata.max_output_tokens)}</td>
-          <td
-            ><div class="capabilities">
+          <td>
+            <div class="capabilities">
               {#each entry.model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
                   class:success={capability.source === 'certified'}
                   class:accent={capability.source !== 'certified'}
                   class="badge"
-                  ><strong>{capability.operation}</strong>
-                  {capability.surface} · {capability.mode} · {capability.source}</span
-                >{/each}
-            </div></td
-          >
-          <td
-            ><label class="eligibility"
-              >{#key `${entry.model.id}:${eligibilityVersion}`}<input
+                >
+                  <strong>{capability.operation}</strong>
+                  {capability.surface} · {capability.mode} · {capability.source}
+                </span>{/each}
+            </div>
+          </td>
+          <td>
+            <label class="eligibility">
+              {#key `${entry.model.id}:${eligibilityVersion}`}<input
                   type="checkbox"
                   checked={entry.model.enabled}
                   disabled={!canManage || busy || updating}
                   onchange={(event) =>
                     onToggle(entry, event.currentTarget.checked)}
-                />{/key}<span
-                >{entry.model.enabled ? 'Enabled' : 'Disabled'}</span
-              ></label
-            ></td
-          >
+                />{/key}<span>
+                {entry.model.enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </label>
+          </td>
         </tr>
       {/each}
     </tbody>

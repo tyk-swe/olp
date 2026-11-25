@@ -14,8 +14,10 @@
       <h2 id="result-title">Result</h2>
     </div>
     {#if playground.mutation.data && !playground.mutation.isPending}<span
-        class="badge success">{playground.mutation.data.latency_ms} ms</span
-      >{/if}
+        class="badge success"
+      >
+        {playground.mutation.data.latency_ms} ms
+      </span>{/if}
   </div>
   {#if playground.streaming || playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem}
     {#if playground.streamProblem}<div class="inline-problem" role="alert">

@@ -26,9 +26,9 @@
 {#each models as model (model)}
   {@const target = targets[model]}
   <div class="form-field">
-    <label for={prefix + '-provider-' + model}
-      >{label} provider for {model}</label
-    >
+    <label for={prefix + '-provider-' + model}>
+      {label} provider for {model}
+    </label>
     <select
       id={prefix + '-provider-' + model}
       value={target?.provider_id ?? ''}
@@ -39,18 +39,19 @@
         })}
     >
       <option value="">{emptyLabel}</option>
-      {#each providers as provider (provider.id)}<option value={provider.id}
-          >{provider.name}</option
-        >{/each}
+      {#each providers as provider (provider.id)}<option value={provider.id}>
+          {provider.name}
+        </option>{/each}
       {#if target?.provider_id && !providers.some((provider) => provider.id === target.provider_id)}<option
           value={target.provider_id}
-          >{target.provider_id} · current selection</option
-        >{/if}
+        >
+          {target.provider_id} · current selection
+        </option>{/if}
     </select>
     {#if target?.provider_id}
-      <label for={prefix + '-slot-' + model}
-        >{label} credential slot for {model}</label
-      >
+      <label for={prefix + '-slot-' + model}>
+        {label} credential slot for {model}
+      </label>
       <select
         id={prefix + '-slot-' + model}
         value={target.slot_id ?? ''}
@@ -66,8 +67,10 @@
       >
         <option value="">Choose a credential slot</option>
         {#each providers.find((provider) => provider.id === target.provider_id)?.slots ?? [] as slot (slot.id)}<option
-            value={slot.id}>{slot.name || slot.id}</option
-          >{/each}
+            value={slot.id}
+          >
+            {slot.name || slot.id}
+          </option>{/each}
       </select>
     {/if}
   </div>

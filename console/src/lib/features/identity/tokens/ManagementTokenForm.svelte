@@ -91,77 +91,83 @@
 </script>
 
 <form class="token-form" onsubmit={create} novalidate>
-  <label
-    ><span>Name</span><input
+  <label>
+    <span>Name</span><input
       type="text"
       autocomplete="off"
       bind:value={name}
       placeholder="deploy-automation"
       maxlength="100"
-    /></label
-  >
+    />
+  </label>
   <fieldset>
     <legend>Scopes</legend>
     {#each MANAGEMENT_TOKEN_SCOPES as scope (scope)}
-      <label class="scope-option"
-        ><input
+      <label class="scope-option">
+        <input
           type="checkbox"
           checked={scopes.includes(scope)}
           onchange={() => toggle(scope)}
-        />{scopeLabels[scope] ?? scope}<code>{scope}</code></label
-      >
+        />{scopeLabels[scope] ?? scope}<code>{scope}</code>
+      </label>
     {/each}
   </fieldset>
   <fieldset>
     <legend>Projects</legend>
-    <label class="scope-option"
-      ><input
+    <label class="scope-option">
+      <input
         type="radio"
         name="token-projects"
         checked={allProjects}
         onchange={() => (allProjects = true)}
-      />All projects</label
-    >
-    <label class="scope-option"
-      ><input
+      />All projects
+    </label>
+    <label class="scope-option">
+      <input
         type="radio"
         name="token-projects"
         checked={!allProjects}
         onchange={() => (allProjects = false)}
-      />Selected projects</label
-    >
+      />Selected projects
+    </label>
     {#if !allProjects}
-      {#if projects.isPending}<span class="inline-status" role="status"
-          >Loading projects…</span
-        >{:else if projects.isError}<span class="inline-problem" role="alert"
-          >Projects are unavailable.
+      {#if projects.isPending}<span class="inline-status" role="status">
+          Loading projects…
+        </span>{:else if projects.isError}<span
+          class="inline-problem"
+          role="alert"
+        >
+          Projects are unavailable.
           <button
             class="text-button"
             type="button"
-            onclick={() => projects.refetch()}>Retry</button
-          ></span
-        >{:else}{#each projects.data ?? [] as project (project.id)}<label
+            onclick={() => projects.refetch()}
+          >
+            Retry
+          </button>
+        </span>{:else}{#each projects.data ?? [] as project (project.id)}<label
             class="scope-option"
-            ><input
+          >
+            <input
               type="checkbox"
               checked={projectIds.includes(project.id)}
               onchange={() => toggleProject(project.id)}
-            />{project.name}</label
-          >{:else}<span
-            >No projects yet. Create one under Access, Projects.</span
-          >{/each}{/if}
+            />{project.name}
+          </label>{:else}<span>
+            No projects yet. Create one under Access, Projects.
+          </span>{/each}{/if}
     {/if}
   </fieldset>
-  <label
-    ><span>Expires in</span><select bind:value={expiresInDays}
-      >{#each expiryChoices as choice (choice.days)}<option value={choice.days}
-          >{choice.label}</option
-        >{/each}</select
-    ></label
-  >
-  <button class="button button-primary" type="submit" disabled={submitting}
-    >{submitting ? 'Creating…' : 'Create token'}</button
-  >
+  <label>
+    <span>Expires in</span><select bind:value={expiresInDays}>
+      {#each expiryChoices as choice (choice.days)}<option value={choice.days}>
+          {choice.label}
+        </option>{/each}
+    </select>
+  </label>
+  <button class="button button-primary" type="submit" disabled={submitting}>
+    {submitting ? 'Creating…' : 'Create token'}
+  </button>
 </form>
 
 <style>

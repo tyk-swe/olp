@@ -18,13 +18,13 @@
   } = $props();
 </script>
 
-<label class="choice"
-  ><input
+<label class="choice">
+  <input
     id="code-research-enabled"
     type="checkbox"
     bind:checked={research}
-  />Research tools</label
->
+  />Research tools
+</label>
 {#if research}
   <div class="form-field">
     <label for="code-research-account">Research account</label>
@@ -37,10 +37,10 @@
         <option value={researchAccount}>Current account · unavailable</option>
       {/if}
     </select>
-    <small
-      >Uses an enrolled Z.ai global account in this pool, independently of the
-      route's models.</small
-    >
+    <small>
+      Uses an enrolled Z.ai global account in this pool, independently of the
+      route's models.
+    </small>
     {#if !researchAccounts.length}
       <p>
         Add an eligible Z.ai global account to this pool to enable research.

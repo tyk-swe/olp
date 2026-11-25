@@ -20,10 +20,10 @@
       bind:value={form.required}
       placeholder="team, environment"
     />
-    <small
-      >Separate keys with commas. Caller-supplied keys must also be in the key's
-      allowed attribution keys.</small
-    >
+    <small>
+      Separate keys with commas. Caller-supplied keys must also be in the key's
+      allowed attribution keys.
+    </small>
   </div>
   {#each form.defaults as row (row.id)}
     <div class="pin">
@@ -49,8 +49,10 @@
         onclick={() =>
           (form.defaults = form.defaults.filter(
             (entry) => entry.id !== row.id
-          ))}>Remove pinned label</button
+          ))}
       >
+        Remove pinned label
+      </button>
     </div>
   {/each}
   <button
@@ -59,8 +61,9 @@
     disabled={form.defaults.length >= 4}
     onclick={() =>
       form.defaults.push({ id: crypto.randomUUID(), key: '', value: '' })}
-    >Add pinned label</button
   >
+    Add pinned label
+  </button>
 </fieldset>
 
 <style>

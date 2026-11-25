@@ -56,8 +56,10 @@
         class="button button-secondary button-danger"
         type="button"
         onclick={() => editor.remove(draft)}
-        disabled={Boolean(editor.busy)}>Delete draft</button
+        disabled={Boolean(editor.busy)}
       >
+        Delete draft
+      </button>
     {/if}
   {/snippet}
 </PageHeader>
@@ -65,9 +67,9 @@
     label="Route"
     tabs={routeTabs(editor.resourceId)}
   />{/if}
-{#if !editor.canManage}<ReadOnlyNote
-    >Your role can view this route draft but not change or activate it.</ReadOnlyNote
-  >{/if}
+{#if !editor.canManage}<ReadOnlyNote>
+    Your role can view this route draft but not change or activate it.
+  </ReadOnlyNote>{/if}
 {#if editor.errorMessage}<div
     class="inline-problem"
     role="alert"
@@ -94,8 +96,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => editor.draft.refetch()}>Retry</button
+      onclick={() => editor.draft.refetch()}
     >
+      Retry
+    </button>
   </div>
 {/if}
 <!-- The draft and the enabled-model inventory are independent queries; a failure in one must not blank the other. -->
@@ -106,8 +110,10 @@
     <button
       class="button button-secondary"
       type="button"
-      onclick={() => editor.providerModels.refetch()}>Retry</button
+      onclick={() => editor.providerModels.refetch()}
     >
+      Retry
+    </button>
   </div>
 {/if}
 {#if loading}
@@ -139,24 +145,25 @@
               bind:value={editor.slug}
               oninput={editor.touch}
               disabled={!editor.canManage}
-            /><small id="route-slug-help"
-              >Clients send this value as their model. Direct provider/model
-              addressing is unavailable.</small
-            >
+            /><small id="route-slug-help">
+              Clients send this value as their model. Direct provider/model
+              addressing is unavailable.
+            </small>
           </div>
           {#if editor.isNew}<ProjectScopeField
               id="route-project"
               bind:value={editor.projectId}
               disabled={!editor.canManage || Boolean(editor.busy)}
             />{:else if editor.draft.data}<div class="form-field">
-              <span class="scope-label">Project</span><span
-                >{editor.draft.data.project_name ?? 'Installation-wide'}</span
-              >
+              <span class="scope-label">Project</span><span>
+                {editor.draft.data.project_name ?? 'Installation-wide'}
+              </span>
             </div>{/if}
           <fieldset class="form-field full operations">
-            <legend>Supported operations</legend
-            >{#each editor.operationOptions as option (option[0])}<label
-                ><input
+            <legend>
+              Supported operations
+            </legend>{#each editor.operationOptions as option (option[0])}<label>
+                <input
                   type="checkbox"
                   checked={editor.operations.includes(option[0])}
                   disabled={!editor.canManage}
@@ -166,8 +173,8 @@
                       event.currentTarget.checked
                     )}
                 />
-                {option[1]}</label
-              >{/each}
+                {option[1]}
+              </label>{/each}
           </fieldset>
         </div>
       </section>

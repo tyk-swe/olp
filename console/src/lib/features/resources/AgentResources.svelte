@@ -114,25 +114,25 @@
     key stays in this page until you leave.
   </p>
   <div class="resource-fields">
-    <label
-      >Inference API key<input
+    <label>
+      Inference API key<input
         type="password"
         autocomplete="off"
         bind:value={apiKey}
         disabled={runAction.busy}
-      /></label
-    >
-    <label
-      >Published route<select
+      />
+    </label>
+    <label>
+      Published route<select
         bind:value={route}
         disabled={runAction.busy || routes.isPending}
       >
         <option value="">Choose a route</option>
-        {#each eligible as item (item.slug)}<option value={item.slug}
-            >{item.slug}</option
-          >{/each}
-      </select></label
-    >
+        {#each eligible as item (item.slug)}<option value={item.slug}>
+            {item.slug}
+          </option>{/each}
+      </select>
+    </label>
   </div>
   {#if routes.isError}<p class="inline-problem" role="alert">
       {errorMessage(routes.error, 'Routes could not be loaded.')}
@@ -140,41 +140,47 @@
   {:else if !routes.isPending && eligible.length === 0}<p>
       Publish a strict Gemini managed-agent route to enable creation.
     </p>{/if}
-  <label
-    >Agent definition (JSON)<textarea
+  <label>
+    Agent definition (JSON)<textarea
       rows="7"
       bind:value={definition}
       disabled={runAction.busy}
-      spellcheck="false"></textarea></label
-  >
+      spellcheck="false"></textarea>
+  </label>
   <div class="resource-actions">
     <button
       class="button button-primary"
       type="button"
       onclick={() => run('create')}
-      disabled={runAction.busy || !route || !apiKey}>Create agent</button
+      disabled={runAction.busy || !route || !apiKey}
     >
+      Create agent
+    </button>
     <button
       class="button button-secondary"
       type="button"
       onclick={() => run('list')}
-      disabled={runAction.busy || !apiKey}>List my agents</button
+      disabled={runAction.busy || !apiKey}
     >
+      List my agents
+    </button>
   </div>
-  <label
-    >Agent resource ID<input
+  <label>
+    Agent resource ID<input
       bind:value={id}
       disabled={runAction.busy}
       placeholder="agent_resource_…"
-    /></label
-  >
+    />
+  </label>
   <div class="resource-actions">
     <button
       class="button button-secondary"
       type="button"
       onclick={() => run('get')}
-      disabled={runAction.busy || !id || !apiKey}>Inspect agent</button
+      disabled={runAction.busy || !id || !apiKey}
     >
+      Inspect agent
+    </button>
     <button
       class="button button-secondary"
       type="button"
@@ -189,19 +195,25 @@
         )
           await run('delete');
       }}
-      disabled={runAction.busy || !id || !apiKey}>Delete agent</button
+      disabled={runAction.busy || !id || !apiKey}
     >
+      Delete agent
+    </button>
     {#if nextPage}<button
         class="button button-secondary"
         type="button"
         onclick={() => run('list', nextPage)}
-        disabled={runAction.busy}>Next page</button
-      >{/if}
+        disabled={runAction.busy}
+      >
+        Next page
+      </button>{/if}
     {#if runAction.busy}<button
         class="button button-secondary"
         type="button"
-        onclick={() => controller?.abort()}>Stop waiting</button
-      >{/if}
+        onclick={() => controller?.abort()}
+      >
+        Stop waiting
+      </button>{/if}
   </div>
   {#if runAction.busy}<p role="status">
       Waiting for the resource operation…

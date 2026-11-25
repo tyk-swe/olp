@@ -15,37 +15,35 @@
 <section class="metric-grid" aria-label="Request summary">
   <article class="card metric-card">
     <p>Status</p>
-    <strong
-      ><span class="badge {statusTone(data.status_code, data.error_class)}"
-        >{statusLabel(data.status_code, data.error_class)}</span
-      ></strong
-    >
+    <strong>
+      <span class="badge {statusTone(data.status_code, data.error_class)}">
+        {statusLabel(data.status_code, data.error_class)}
+      </span>
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Total latency</p>
-    <strong
-      >{data.total_latency_ms == null
-        ? '—'
-        : `${data.total_latency_ms} ms`}</strong
-    >
+    <strong>
+      {data.total_latency_ms == null ? '—' : `${data.total_latency_ms} ms`}
+    </strong>
   </article>
   <article class="card metric-card">
     <p>First byte</p>
-    <strong
-      >{data.first_byte_ms == null ? '—' : `${data.first_byte_ms} ms`}</strong
-    >
+    <strong>
+      {data.first_byte_ms == null ? '—' : `${data.first_byte_ms} ms`}
+    </strong>
   </article>
   <article class="card metric-card">
     <p>Estimated cost</p>
-    <strong class:unpriced={data.unpriced}
-      >{formatCost(data.estimated_cost, data.currency)}</strong
-    >
-    {#if data.charge != null}<small
-        >Charge {formatCost(data.charge, data.currency)}</small
-      >{/if}
-    {#if data.unpriced}<small class="unpriced"
-        >Unpriced — no published price covered part of this request.</small
-      >{/if}
+    <strong class:unpriced={data.unpriced}>
+      {formatCost(data.estimated_cost, data.currency)}
+    </strong>
+    {#if data.charge != null}<small>
+        Charge {formatCost(data.charge, data.currency)}
+      </small>{/if}
+    {#if data.unpriced}<small class="unpriced">
+        Unpriced — no published price covered part of this request.
+      </small>{/if}
     {#if data.estimated_cost != null}<details>
         <summary>Exact amount</summary>
         <p>{data.estimated_cost} {data.currency ?? ''}</p>
@@ -60,8 +58,10 @@
           href={resolve(
             `requests?session_id=${encodeURIComponent(data.attribution.session)}`
           )}
-          class="mono">{data.attribution.session}</a
+          class="mono"
         >
+          {data.attribution.session}
+        </a>
       </strong>
 
       <span>Requests in this session</span>
@@ -104,11 +104,11 @@
       <dd>
         {formatInteger(data.cache_write_input_tokens)}
         {#if data.cache_write_5m_input_tokens || data.cache_write_1h_input_tokens}
-          <small
-            >5m {formatInteger(data.cache_write_5m_input_tokens)} · 1h {formatInteger(
+          <small>
+            5m {formatInteger(data.cache_write_5m_input_tokens)} · 1h {formatInteger(
               data.cache_write_1h_input_tokens
-            )}</small
-          >
+            )}
+          </small>
         {/if}
       </dd>
     </div>
@@ -122,9 +122,11 @@
         {#if data.payload_captured}<span
             class="badge"
             title="Queued in the volatile capture queue — does not guarantee delivery"
-            >Capture queued</span
-          ><small>Queued ≠ delivered — see audit records.</small>{:else}Not
-          captured{/if}
+          >
+            Capture queued
+          </span><small>
+            Queued ≠ delivered — see audit records.
+          </small>{:else}Not captured{/if}
       </dd>
     </div>
     <div>
@@ -151,8 +153,10 @@
             href={resolve(
               `requests?session_id=${encodeURIComponent(data.attribution.session)}`
             )}
-            class="mono">{data.attribution.session}</a
+            class="mono"
           >
+            {data.attribution.session}
+          </a>
         </dd>
       </div>
     {/if}
@@ -175,9 +179,9 @@
           <li>
             <code>{decision.guardrail_id}</code> · {decision.phase} · {decision.action}
             · {decision.outcome} · {decision.latency_ms} ms
-            {#if decision.categories?.length}<small
-                >{decision.categories.join(', ')}</small
-              >{/if}
+            {#if decision.categories?.length}<small>
+                {decision.categories.join(', ')}
+              </small>{/if}
           </li>
         {/each}
       </ul>

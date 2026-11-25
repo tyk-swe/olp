@@ -104,8 +104,10 @@
   <button
     class="button button-primary"
     type="button"
-    onclick={() => onComplete(completed)}>I saved my recovery codes</button
+    onclick={() => onComplete(completed)}
   >
+    I saved my recovery codes
+  </button>
 {:else if challenge?.enrollment_required && !current}
   <p>
     This installation requires a second factor before local sign-in completes.
@@ -122,12 +124,14 @@
         id="mfa-kind"
         bind:value={kind}
         disabled={mfa.busy}
-        ><option value="totp">Authenticator app</option><option
+      >
+        <option value="totp">Authenticator app</option><option
           value="webauthn"
           disabled={challenge.webauthn_available === false}
-          >Security key or passkey</option
-        ></select
-      >
+        >
+          Security key or passkey
+        </option>
+      </select>
     </div>
     <div class="form-field">
       <label for="mfa-name">Authenticator name</label><input
@@ -138,9 +142,9 @@
         disabled={mfa.busy}
       />
     </div>
-    <button class="button button-primary" type="submit" disabled={mfa.busy}
-      >{mfa.busy ? 'Starting…' : 'Start enrollment'}</button
-    >
+    <button class="button button-primary" type="submit" disabled={mfa.busy}>
+      {mfa.busy ? 'Starting…' : 'Start enrollment'}
+    </button>
   </form>
 {:else}
   {#if current?.kind === 'totp'}<p>
@@ -167,21 +171,20 @@
           id="mfa-method"
           bind:value={method}
           disabled={mfa.busy}
-          >{#each methods as option (option)}<option value={option}
-              >{option === 'totp'
+        >
+          {#each methods as option (option)}<option value={option}>
+              {option === 'totp'
                 ? 'Authenticator app'
                 : option === 'recovery'
                   ? 'Recovery code'
-                  : 'Security key or passkey'}</option
-            >{/each}</select
-        >
+                  : 'Security key or passkey'}
+            </option>{/each}
+        </select>
       </div>{/if}
     {#if selected !== 'webauthn'}<div class="form-field">
-        <label for="mfa-code"
-          >{selected === 'recovery'
-            ? 'Recovery code'
-            : 'Authentication code'}</label
-        ><input
+        <label for="mfa-code">
+          {selected === 'recovery' ? 'Recovery code' : 'Authentication code'}
+        </label><input
           id="mfa-code"
           data-autofocus
           bind:value={code}
@@ -195,13 +198,13 @@
         Use your security key or passkey and confirm its PIN or device
         verification.
       </p>{/if}
-    <button class="button button-primary" type="submit" disabled={mfa.busy}
-      >{mfa.busy
+    <button class="button button-primary" type="submit" disabled={mfa.busy}>
+      {mfa.busy
         ? 'Verifying…'
         : selected === 'webauthn'
           ? 'Use security key'
-          : 'Verify'}</button
-    >
+          : 'Verify'}
+    </button>
   </form>
 {/if}
 

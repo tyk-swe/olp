@@ -33,9 +33,9 @@
       <p class="eyebrow">Configuration</p>
       <h2 id="configuration-heading">Connector context</h2>
     </div>
-    <span class="badge {providerStatusTone(current)}"
-      >{providerStatus(current)}</span
-    >
+    <span class="badge {providerStatusTone(current)}">
+      {providerStatus(current)}
+    </span>
   </div>
   <p class="muted">
     Renaming keeps probe evidence and certification. Changing the endpoint,

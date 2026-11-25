@@ -142,8 +142,10 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={comparison.isFetching || projects.isPending}>Compare</button
+      disabled={comparison.isFetching || projects.isPending}
     >
+      Compare
+    </button>
   </form>
   {#if projects.isError}
     <p class="inline-problem" role="alert">
@@ -176,8 +178,10 @@
       <button
         class="text-button"
         type="button"
-        onclick={() => comparison.refetch()}>Try again</button
+        onclick={() => comparison.refetch()}
       >
+        Try again
+      </button>
     </p>
   {:else if comparison.data}
     {@const report = comparison.data}
@@ -185,9 +189,9 @@
       ({ id }) => id === applied?.project_id
     )}
     <p>
-      Comparing estimated cost for <strong
-        >{project?.name ?? applied?.project_id}</strong
-      >
+      Comparing estimated cost for <strong>
+        {project?.name ?? applied?.project_id}
+      </strong>
     </p>
     <div class="periods">
       {#each [{ title: 'Previous period', period: report.previous }, { title: 'Current period', period: report.current }] as { title, period } (title)}
@@ -224,9 +228,9 @@
       <h3>Largest route spend changes ({report.currency})</h3>
       <ScrollTable label="Route spend changes">
         <table class="data-table">
-          <caption class="sr-only"
-            >Up to 25 routes ranked by absolute estimated cost change</caption
-          >
+          <caption class="sr-only">
+            Up to 25 routes ranked by absolute estimated cost change
+          </caption>
           <thead>
             <tr>
               <th scope="col">Route</th>

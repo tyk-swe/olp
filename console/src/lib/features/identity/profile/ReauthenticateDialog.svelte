@@ -86,19 +86,23 @@
         class="button button-secondary"
         type="button"
         disabled={busy}
-        onclick={onOidc}>Verify with single sign-on</button
+        onclick={onOidc}
       >
+        Verify with single sign-on
+      </button>
     {/if}
     <div class="dialog-actions">
       <button
         class="button button-secondary"
         type="button"
         onclick={cancel}
-        disabled={busy}>Cancel</button
+        disabled={busy}
       >
-      <button class="button button-primary" type="submit" disabled={busy}
-        >{busy ? 'Verifying…' : 'Confirm'}</button
-      >
+        Cancel
+      </button>
+      <button class="button button-primary" type="submit" disabled={busy}>
+        {busy ? 'Verifying…' : 'Confirm'}
+      </button>
     </div>
   </form>
 </dialog>

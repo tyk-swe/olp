@@ -129,8 +129,10 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => authLifecycle.validateSession()}>Retry</button
+          onclick={() => authLifecycle.validateSession()}
         >
+          Retry
+        </button>
       </div>
     {/if}
   </main>
@@ -155,8 +157,10 @@
           <button
             class="button button-secondary"
             type="button"
-            onclick={() => authLifecycle.validateSession()}>Retry</button
+            onclick={() => authLifecycle.validateSession()}
           >
+            Retry
+          </button>
         </div>
       {/if}
       {@render children()}

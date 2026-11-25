@@ -68,8 +68,9 @@
       type="button"
       disabled={busy}
       onclick={runPreview}
-      >{review ? 'Preview again' : 'Preview live catalog'}</button
     >
+      {review ? 'Preview again' : 'Preview live catalog'}
+    </button>
   </div>
   {#if preview.busy}
     <p class="inline-status" role="status">Contacting the MCP server.</p>
@@ -145,8 +146,10 @@
           class="button button-primary"
           type="button"
           disabled={busy}
-          onclick={runApproval}>Approve and certify</button
+          onclick={runApproval}
         >
+          Approve and certify
+        </button>
       </div>
     {/if}
   {/if}

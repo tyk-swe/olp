@@ -64,25 +64,25 @@
 {:else}
   <ScrollTable label="Agent runs">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Run</th><th scope="col">Project</th><th scope="col"
-            >API key</th
-          ><th scope="col">Started</th></tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Run</th><th scope="col">Project</th><th scope="col">
+            API key
+          </th><th scope="col">Started</th>
+        </tr>
+      </thead>
       <tbody>
         {#each runs.data.items as run (run.id)}
           <tr>
-            <td
-              ><a href={resolve(`activity/runs/${run.id}`)}
-                ><code>{run.id}</code></a
-              ></td
-            >
-            <td
-              >{projects.data?.find((project) => project.id === run.project_id)
-                ?.name ?? run.project_id}</td
-            >
+            <td>
+              <a href={resolve(`activity/runs/${run.id}`)}>
+                <code>{run.id}</code>
+              </a>
+            </td>
+            <td>
+              {projects.data?.find((project) => project.id === run.project_id)
+                ?.name ?? run.project_id}
+            </td>
             <td><code>{run.api_key_id}</code></td>
             <td>{formatDate(run.created_at)}</td>
           </tr>
@@ -98,8 +98,9 @@
     disabled={!$filters.cursor || runs.isFetching}
     onclick={() =>
       filters.update((current) => ({ ...current, cursor: undefined }))}
-    >Newest</button
   >
+    Newest
+  </button>
   <button
     class="button button-secondary"
     type="button"
@@ -108,12 +109,16 @@
       filters.update((current) => ({
         ...current,
         cursor: runs.data?.nextCursor ?? undefined
-      }))}>Older</button
+      }))}
   >
+    Older
+  </button>
   <button
     class="button button-secondary"
     type="button"
     disabled={runs.isFetching}
-    onclick={() => runs.refetch()}>Refresh</button
+    onclick={() => runs.refetch()}
   >
+    Refresh
+  </button>
 </nav>

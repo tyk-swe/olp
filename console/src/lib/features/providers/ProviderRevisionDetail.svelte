@@ -69,8 +69,10 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => revisionDetail.refetch()}>Retry</button
+          onclick={() => revisionDetail.refetch()}
         >
+          Retry
+        </button>
       </div>
     {:else if revisionDetail.data}
       {@const detail = revisionDetail.data}
@@ -155,8 +157,10 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => revisionModels.refetch()}>Retry</button
+          onclick={() => revisionModels.refetch()}
         >
+          Retry
+        </button>
       </div>
     {:else if !revisionModels.data?.items.length && modelPagination.history.length === 0}
       <p class="muted">This revision carried no models.</p>
@@ -166,23 +170,25 @@
             <div class="revision-model-name">
               <strong>{model.display_name}</strong>
               <code>{model.upstream_model}</code>
-              <span class="badge {model.enabled ? 'success' : 'warning'}"
-                >{model.enabled ? 'enabled' : 'not enabled'}</span
-              >
+              <span class="badge {model.enabled ? 'success' : 'warning'}">
+                {model.enabled ? 'enabled' : 'not enabled'}
+              </span>
             </div>
-            {#if model.discovered_at}<small
-                >Discovered {formatDate(model.discovered_at)}</small
-              >{/if}
+            {#if model.discovered_at}<small>
+                Discovered {formatDate(model.discovered_at)}
+              </small>{/if}
             <div class="revision-capabilities">
               {#each model.capabilities as capability (`${capability.operation}-${capability.surface}-${capability.mode}`)}<span
                   class:certified={capability.source === 'certified'}
-                  ><code
-                    >{capability.operation}/{capability.surface}/{capability.mode}</code
-                  >
+                >
+                  <code>
+                    {capability.operation}/{capability.surface}/{capability.mode}
+                  </code>
                   · {capability.source}{#if capability.certified_at}
-                    · {formatDate(capability.certified_at)}{/if}</span
-                >{:else}<span class="muted">No capabilities recorded.</span
-                >{/each}
+                    · {formatDate(capability.certified_at)}{/if}
+                </span>{:else}<span class="muted">
+                  No capabilities recorded.
+                </span>{/each}
             </div>
           </li>{/each}
       </ul>
@@ -199,8 +205,10 @@
         class="button button-primary"
         type="button"
         data-autofocus
-        onclick={close}>Close revision</button
+        onclick={close}
       >
+        Close revision
+      </button>
     </div>
   {/snippet}
 </SecretDialog>

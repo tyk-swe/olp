@@ -88,9 +88,9 @@
               <code>{value.tool_alias}</code>
               <details>
                 <summary>Attempt {value.id}</summary>
-                <a href={resolve(`activity/tool-calls/${value.id}`)}
-                  >Inspect and resolve</a
-                >
+                <a href={resolve(`activity/tool-calls/${value.id}`)}>
+                  Inspect and resolve
+                </a>
 
                 <dl class="detail-list">
                   <dt>Dispatch</dt>
@@ -130,21 +130,19 @@
                 {/if}
               </details>
             </td>
-            <td
-              >{stateLabel(value.status)}<br />{stateLabel(
-                value.debit_state
-              )}</td
-            >
-            <td
-              >{value.unit_price ?? 'Unpriced'}
-              {value.currency ?? ''}<br />{value.pricing_state}</td
-            >
-            <td aria-label="Observed cost and charge"
-              >{value.observed_cost} / {value.observed_charge}</td
-            >
-            <td aria-label="Unresolved cost and charge"
-              >{value.remaining_cost} / {value.remaining_charge}</td
-            >
+            <td>
+              {stateLabel(value.status)}<br />{stateLabel(value.debit_state)}
+            </td>
+            <td>
+              {value.unit_price ?? 'Unpriced'}
+              {value.currency ?? ''}<br />{value.pricing_state}
+            </td>
+            <td aria-label="Observed cost and charge">
+              {value.observed_cost} / {value.observed_charge}
+            </td>
+            <td aria-label="Unresolved cost and charge">
+              {value.remaining_cost} / {value.remaining_charge}
+            </td>
             <td>{formatDate(value.started_at)}</td>
           </tr>
         {/each}
@@ -159,8 +157,9 @@
     disabled={!$filters.cursor || calls.isFetching}
     onclick={() =>
       filters.update((current) => ({ ...current, cursor: undefined }))}
-    >Newest</button
   >
+    Newest
+  </button>
   <button
     class="button button-secondary"
     type="button"
@@ -169,12 +168,16 @@
       filters.update((current) => ({
         ...current,
         cursor: calls.data?.nextCursor ?? undefined
-      }))}>Older</button
+      }))}
   >
+    Older
+  </button>
   <button
     class="button button-secondary"
     type="button"
     disabled={calls.isFetching}
-    onclick={() => calls.refetch()}>Refresh</button
+    onclick={() => calls.refetch()}
   >
+    Refresh
+  </button>
 </nav>

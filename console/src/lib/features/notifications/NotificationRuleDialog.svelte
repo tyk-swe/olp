@@ -68,12 +68,14 @@
               );
               if (selected) draft = newRuleDraft(selected.event, draft);
             }}
-            >{#each Object.values(notificationEvents) as definition (definition.event)}<option
+          >
+            {#each Object.values(notificationEvents) as definition (definition.event)}<option
                 value={definition.event}
                 disabled={!installationWide && definition.scope !== 'project'}
-                >{definition.label}</option
-              >{/each}</select
-          >
+              >
+                {definition.label}
+              </option>{/each}
+          </select>
         </div>
         {#if ruleProjectScoped}
           <ProjectScopeField
@@ -88,32 +90,41 @@
               id="rule-subject-kind"
               disabled={watchesKey}
               bind:value={draft.subjectKind}
-              ><option value="api_key">API key</option><option
-                value="budget_group">Budget group</option
-              ></select
             >
+              <option value="api_key">API key</option><option
+                value="budget_group"
+              >
+                Budget group
+              </option>
+            </select>
           </div>
           <div class="form-field">
             <label for="rule-subject">
-              {draft.subjectKind === 'api_key'
-                ? 'API key'
-                : 'Budget group'}</label
-            ><select id="rule-subject" bind:value={draft.subjectId} required
-              ><option value="" disabled>Choose a subject</option
-              >{#each subjectOptions as subject (subject.id)}<option
-                  value={subject.id}>{subject.name}</option
-                >{/each}</select
+              {draft.subjectKind === 'api_key' ? 'API key' : 'Budget group'}
+            </label><select
+              id="rule-subject"
+              bind:value={draft.subjectId}
+              required
             >
+              <option value="" disabled>
+                Choose a subject
+              </option>{#each subjectOptions as subject (subject.id)}<option
+                  value={subject.id}
+                >
+                  {subject.name}
+                </option>{/each}
+            </select>
           </div>
           {#if draft.event === 'budget.threshold'}
             <div class="form-field">
               <label for="rule-window">Window</label><select
                 id="rule-window"
                 bind:value={draft.window}
-                ><option value="day">Budget day</option><option value="week"
-                  >Budget week</option
-                ><option value="month">Budget month</option></select
               >
+                <option value="day">Budget day</option><option value="week">
+                  Budget week
+                </option><option value="month">Budget month</option>
+              </select>
             </div>
             <div class="form-field">
               <label for="rule-threshold">Threshold %</label><input
@@ -145,10 +156,13 @@
             <label for="rule-metric">Metric</label><select
               id="rule-metric"
               bind:value={draft.metric}
-              ><option value="ttft">Time to first token</option><option
-                value="latency">Total latency</option
-              ></select
             >
+              <option value="ttft">Time to first token</option><option
+                value="latency"
+              >
+                Total latency
+              </option>
+            </select>
           </div>
         {/if}
         {#if draft.event === 'report.spend'}
@@ -156,10 +170,11 @@
             <label for="rule-period">Period</label><select
               id="rule-period"
               bind:value={draft.period}
-              ><option value="daily">Daily</option><option value="weekly"
-                >Weekly</option
-              ><option value="monthly">Monthly</option></select
             >
+              <option value="daily">Daily</option><option value="weekly">
+                Weekly
+              </option><option value="monthly">Monthly</option>
+            </select>
           </div>
         {/if}
         <div class="form-field">
@@ -167,11 +182,15 @@
             id="rule-destination"
             bind:value={draft.destinationId}
             required
-            ><option value="" disabled>Choose a destination</option
-            >{#each destinationOptions as destination (destination.id)}<option
-                value={destination.id}>{destination.name}</option
-              >{/each}</select
           >
+            <option value="" disabled>
+              Choose a destination
+            </option>{#each destinationOptions as destination (destination.id)}<option
+                value={destination.id}
+              >
+                {destination.name}
+              </option>{/each}
+          </select>
         </div>
       </div>
       <div class="form-actions">
@@ -181,8 +200,10 @@
           disabled={busy ||
             !draft.name.trim() ||
             ('subjectId' in draft && !draft.subjectId) ||
-            !draft.destinationId}>{busy ? 'Creating…' : 'Create rule'}</button
+            !draft.destinationId}
         >
+          {busy ? 'Creating…' : 'Create rule'}
+        </button>
       </div>
       <p class="section-help">
         {#if draft.event === 'budget.threshold'}A delivery is sent when a

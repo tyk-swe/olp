@@ -43,9 +43,9 @@
   {:else if failed}
     <p class="field-error" role="alert">
       Linked identities are unavailable.
-      <button class="text-button" type="button" onclick={onRetry}
-        >Try again</button
-      >
+      <button class="text-button" type="button" onclick={onRetry}>
+        Try again
+      </button>
     </p>
   {:else}
     {#if identities?.items.length}
@@ -55,11 +55,11 @@
             <div>
               <strong>{identity.email_at_link ?? 'OIDC identity'}</strong>
               <small>{identity.issuer}</small>
-              <small
-                >{identity.last_login_at
+              <small>
+                {identity.last_login_at
                   ? `Last used ${formatDate(identity.last_login_at)}`
-                  : `Linked ${formatDate(identity.created_at)}`}</small
-              >
+                  : `Linked ${formatDate(identity.created_at)}`}
+              </small>
             </div>
             <button
               class="button button-secondary"
@@ -69,8 +69,9 @@
               title={identity.can_unlink
                 ? 'Unlink this identity'
                 : 'Add another authentication method before unlinking'}
-              >{busy === identity.id ? 'Unlinking…' : 'Unlink'}</button
             >
+              {busy === identity.id ? 'Unlinking…' : 'Unlink'}
+            </button>
           </article>
         {/each}
       </div>
@@ -87,10 +88,9 @@
         type="button"
         onclick={onCompletePending}
         disabled={Boolean(busy)}
-        >{busy === 'link'
-          ? 'Redirecting…'
-          : 'Confirm OIDC identity link'}</button
       >
+        {busy === 'link' ? 'Redirecting…' : 'Confirm OIDC identity link'}
+      </button>
     {/if}
     {#if pendingAction?.purpose === 'oidc_unlink'}
       <p class="security-note">
@@ -102,18 +102,20 @@
         type="button"
         onclick={onCompletePending}
         disabled={Boolean(busy)}
-        >{busy === pendingAction.resourceId
-          ? 'Unlinking…'
-          : 'Confirm OIDC identity unlink'}</button
       >
+        {busy === pendingAction.resourceId
+          ? 'Unlinking…'
+          : 'Confirm OIDC identity unlink'}
+      </button>
     {/if}
     {#if identities?.linking_available}<button
         class="button button-secondary"
         type="button"
         onclick={onLink}
         disabled={Boolean(busy)}
-        >{busy === 'link' ? 'Redirecting…' : 'Link an OIDC identity'}</button
-      >{/if}
+      >
+        {busy === 'link' ? 'Redirecting…' : 'Link an OIDC identity'}
+      </button>{/if}
   {/if}
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
   <p class="security-note">

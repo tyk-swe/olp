@@ -19,11 +19,11 @@
   {#each ordered as row (row.key)}
     <article class:excluded={!row.eligible || row.attempt === null}>
       <div class="decision-heading">
-        <strong
-          >{row.attempt !== null ? `Attempt ${row.attempt}` : 'Excluded'} · {row.title}</strong
-        >{#if row.vendorId || row.strategy}<span class="badge"
-            >{row.vendorId ?? 'Custom'}</span
-          >{/if}
+        <strong>
+          {row.attempt !== null ? `Attempt ${row.attempt}` : 'Excluded'} · {row.title}
+        </strong>{#if row.vendorId || row.strategy}<span class="badge">
+            {row.vendorId ?? 'Custom'}
+          </span>{/if}
       </div>
       <p>
         {row.reason

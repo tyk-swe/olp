@@ -232,8 +232,9 @@
           class="button button-secondary"
           disabled={busy}
           onclick={() => beginReview(item.action as Action)}
-          >{item.label}</button
-        >{/each}
+        >
+          {item.label}
+        </button>{/each}
     </div>
     {#if preview}<p>
         Review {selected.map((provider) => provider.name).join(', ')} before applying
@@ -242,9 +243,9 @@
       {#if routes.isPending}<p class="inline-status" role="status">
           Checking affected routes…
         </p>{:else if routes.isError}<p class="inline-problem" role="alert">
-          Route preview unavailable. <button onclick={() => routes.refetch()}
-            >Retry</button
-          >
+          Route preview unavailable. <button onclick={() => routes.refetch()}>
+            Retry
+          </button>
         </p>{:else}<p>
           {affected.length
             ? `Published routes referencing these connections: ${affected.map((route) => route.slug).join(', ')}.`
@@ -261,18 +262,19 @@
           class="button button-primary"
           disabled={busy || refreshPending}
           onclick={apply}
-          >{busy
-            ? 'Applying…'
-            : `Apply ${preview} to reviewed connections`}</button
-        >{/if}
+        >
+          {busy ? 'Applying…' : `Apply ${preview} to reviewed connections`}
+        </button>{/if}
     {/if}
   </section>
 {/if}
 {#if refreshPending && !busy}<button
     class="button button-secondary"
     type="button"
-    onclick={retryRefresh}>Retry refresh</button
-  >{/if}
+    onclick={retryRefresh}
+  >
+    Retry refresh
+  </button>{/if}
 {#if outcomes.length}<ul role="status">
     {#each outcomes as outcome (outcome)}<li>{outcome}</li>{/each}
   </ul>{/if}

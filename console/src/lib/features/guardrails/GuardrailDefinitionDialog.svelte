@@ -210,77 +210,87 @@
 >
   {#if error}<Callout tone="danger">{error}</Callout>{/if}
   <form onsubmit={saveDefinition}>
-    <label class="form-field"
-      >Name<input required maxlength="100" bind:value={name} /></label
-    >
-    <label class="form-field"
-      >Project<select required bind:value={project} disabled={!!selected}
-        ><option value="">Choose a project</option
-        >{#each projects as value (value.id)}<option value={value.id}
-            >{value.name}</option
-          >{/each}</select
-      ></label
-    >
-    <label class="form-field"
-      >Type<select bind:value={type} disabled={!!selected}
-        >{#each guardrailTypes as value (value)}<option {value}>{value}</option
-          >{/each}</select
-      ></label
-    >
-    <label class="form-field"
-      >Configuration (JSON)<textarea
+    <label class="form-field">
+      Name<input required maxlength="100" bind:value={name} />
+    </label>
+    <label class="form-field">
+      Project<select required bind:value={project} disabled={!!selected}>
+        <option value="">
+          Choose a project
+        </option>{#each projects as value (value.id)}<option value={value.id}>
+            {value.name}
+          </option>{/each}
+      </select>
+    </label>
+    <label class="form-field">
+      Type<select bind:value={type} disabled={!!selected}>
+        {#each guardrailTypes as value (value)}<option {value}>
+            {value}
+          </option>{/each}
+      </select>
+    </label>
+    <label class="form-field">
+      Configuration (JSON)<textarea
         required
         rows="8"
         spellcheck="false"
-        bind:value={configuration}></textarea></label
-    >
+        bind:value={configuration}></textarea>
+    </label>
     {#if external}
-      <label class="form-field"
-        >Credential<select bind:value={credentialID}
-          ><option value="">Use configuration reference</option
-          >{#each credentials.filter((item) => item.project_id === project) as item (item.id)}<option
-              value={item.id}>{item.name}</option
-            >{/each}</select
-        ></label
-      >
+      <label class="form-field">
+        Credential<select bind:value={credentialID}>
+          <option value="">
+            Use configuration reference
+          </option>{#each credentials.filter((item) => item.project_id === project) as item (item.id)}<option
+              value={item.id}
+            >
+              {item.name}
+            </option>{/each}
+        </select>
+      </label>
       <button
         class="button button-secondary"
         type="button"
         disabled={!project}
         onclick={() => {
           creatingCredential = !creatingCredential;
-        }}>Create replacement credential</button
+        }}
       >
-      <label class="check-field"
-        ><input type="checkbox" required bind:checked={egress} />I acknowledge
-        that this guardrail sends inspected content to its configured endpoint.</label
-      >{/if}
-    <label class="form-field"
-      >Timeout (milliseconds)<input
+        Create replacement credential
+      </button>
+      <label class="check-field">
+        <input type="checkbox" required bind:checked={egress} />I acknowledge
+        that this guardrail sends inspected content to its configured endpoint.
+      </label>{/if}
+    <label class="form-field">
+      Timeout (milliseconds)<input
         type="number"
         min="1"
         max="300000"
         required
         bind:value={timeout}
-      /></label
-    >
-    <label class="form-field"
-      >On evaluation error<select bind:value={onError}
-        ><option value="fail_closed">Block the request</option><option
-          value="fail_open">Continue and record the failure</option
-        ></select
-      ></label
-    >
-    <button class="button button-primary" disabled={busy} type="submit"
-      >Save draft</button
-    >
+      />
+    </label>
+    <label class="form-field">
+      On evaluation error<select bind:value={onError}>
+        <option value="fail_closed">Block the request</option><option
+          value="fail_open"
+        >
+          Continue and record the failure
+        </option>
+      </select>
+    </label>
+    <button class="button button-primary" disabled={busy} type="submit">
+      Save draft
+    </button>
     {#if selected}<button
         class="button button-secondary"
         disabled={busy}
         type="button"
         onclick={activateDefinitionRevision}
-        >Activate revision {selected.revision}</button
-      >{/if}
+      >
+        Activate revision {selected.revision}
+      </button>{/if}
   </form>
   {#if creatingCredential}<CredentialsPanel
       {projects}

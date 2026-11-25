@@ -19,9 +19,9 @@
     {/each}
   </ol>
   {#if timeline.expiry}<p>
-      Retention deadline: <time datetime={timeline.expiry}
-        >{formatDate(timeline.expiry)}</time
-      >. This is a scheduled boundary, not a completion event.
+      Retention deadline: <time datetime={timeline.expiry}>
+        {formatDate(timeline.expiry)}
+      </time>. This is a scheduled boundary, not a completion event.
     </p>{/if}
   <p>
     Native media bytes, codecs, frame timing and masks stay with the authorized

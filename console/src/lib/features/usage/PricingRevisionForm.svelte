@@ -40,24 +40,30 @@
           form.vendorId = '';
         }}
         disabled={!canEdit || kindsPending || kindsError}
-        >{#each kinds ?? [] as option (option.kind)}<option value={option.kind}
-            >{option.label}</option
-          >{/each}</select
-      >{#if kindsPending}<small>Loading provider capabilities…</small
-        >{:else if kindsError}<small class="inline-problem"
-          >Provider capabilities are unavailable; pricing changes are disabled.</small
-        >{/if}
+      >
+        {#each kinds ?? [] as option (option.kind)}<option value={option.kind}>
+            {option.label}
+          </option>{/each}
+      </select>{#if kindsPending}<small>
+          Loading provider capabilities…
+        </small>{:else if kindsError}<small class="inline-problem">
+          Provider capabilities are unavailable; pricing changes are disabled.
+        </small>{/if}
     </div>
     <div class="form-field">
       <label for="price-vendor">Vendor scope</label><select
         id="price-vendor"
         bind:value={form.vendorId}
         disabled={!canEdit}
-        ><option value="">All vendors using this connector</option
-        >{#each vendors.filter((vendor) => vendor.connector === form.providerKind) as vendor (vendor.id)}<option
-            value={vendor.id}>{vendor.name}</option
-          >{/each}</select
       >
+        <option value="">
+          All vendors using this connector
+        </option>{#each vendors.filter((vendor) => vendor.connector === form.providerKind) as vendor (vendor.id)}<option
+            value={vendor.id}
+          >
+            {vendor.name}
+          </option>{/each}
+      </select>
     </div>
     <div class="form-field">
       <label for="provider-id">Only for provider</label><EntityPicker
@@ -81,10 +87,11 @@
         id="price-operation"
         bind:value={form.operation}
         disabled={!canEdit}
-        >{#each operationKinds as option (option)}<option value={option}
-            >{option}</option
-          >{/each}</select
       >
+        {#each operationKinds as option (option)}<option value={option}>
+            {option}
+          </option>{/each}
+      </select>
     </div>
     <PriceFields
       idPrefix="price"
@@ -140,8 +147,10 @@
       !limitsEnforced ||
       busy ||
       !form.providerKind ||
-      kindsError}>{busy ? 'Creating…' : 'Create pricing revision'}</button
+      kindsError}
   >
+    {busy ? 'Creating…' : 'Create pricing revision'}
+  </button>
 </form>
 
 <style>

@@ -29,8 +29,10 @@
           class="button button-secondary"
           type="button"
           disabled={busy}
-          onclick={() => onEdit(budget)}>Edit budget</button
-        >{/if}
+          onclick={() => onEdit(budget)}
+        >
+          Edit budget
+        </button>{/if}
     </div>
     <dl>
       <dt>Budget</dt>

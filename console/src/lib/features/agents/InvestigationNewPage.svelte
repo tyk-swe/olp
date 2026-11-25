@@ -100,8 +100,8 @@
   </p>{/if}
 {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 <form onsubmit={save}>
-  <label class="form-field"
-    >Project
+  <label class="form-field">
+    Project
     <select name="project_id" required value={initialProject}>
       <option value="">Choose a project</option>
       {#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as project (project.id)}
@@ -112,25 +112,25 @@
   <fieldset>
     <legend>Filters</legend>
     <div class="fields">
-      <label class="form-field"
-        >From <input type="datetime-local" name="from" /></label
-      >
-      <label class="form-field"
-        >To <input type="datetime-local" name="to" /></label
-      >
-      <label class="form-field"
-        >Run ID <input name="run_id" value={initialRun} /></label
-      >
-      <label class="form-field"
-        >Minimum duration (ms) <input
+      <label class="form-field">
+        From <input type="datetime-local" name="from" />
+      </label>
+      <label class="form-field">
+        To <input type="datetime-local" name="to" />
+      </label>
+      <label class="form-field">
+        Run ID <input name="run_id" value={initialRun} />
+      </label>
+      <label class="form-field">
+        Minimum duration (ms) <input
           type="number"
           name="min_duration_ms"
           min="0"
           step="1"
-        /></label
-      >
-      <label class="form-field"
-        >Maximum duration (ms) <input
+        />
+      </label>
+      <label class="form-field">
+        Maximum duration (ms) <input
           type="number"
           name="max_duration_ms"
           min="0"
@@ -148,9 +148,9 @@
         </select>
       </label>
 
-      <label class="form-field"
-        >Tool <input name="tool" maxlength="256" /></label
-      >
+      <label class="form-field">
+        Tool <input name="tool" maxlength="256" />
+      </label>
     </div>
   </fieldset>
   <fieldset>
@@ -170,47 +170,54 @@
               aria-label={`Remove ${item.kind} ${item.id}`}
               onclick={() =>
                 (evidence = evidence.filter((_, i) => i !== index))}
-              >Remove</button
             >
+              Remove
+            </button>
           </li>
         {/each}
       </ul>
     {/if}
     <div class="fields">
-      <label class="form-field"
-        >Evidence kind
+      <label class="form-field">
+        Evidence kind
         <select bind:value={evidenceKind}>
-          <option value="run">Run</option><option value="step">Step</option
-          ><option value="approval">Approval</option><option value="span"
-            >Span</option
-          ><option value="task">Task</option><option value="delegation"
-            >Delegation</option
+          <option value="run">Run</option><option value="step">
+            Step
+          </option><option value="approval">Approval</option><option
+            value="span"
           >
+            Span
+          </option><option value="task">Task</option><option value="delegation">
+            Delegation
+          </option>
         </select>
       </label>
-      <label class="form-field"
-        >Evidence ID <input bind:value={evidenceID} /></label
-      >
+      <label class="form-field">
+        Evidence ID <input bind:value={evidenceID} />
+      </label>
       <button
         class="button button-secondary"
         type="button"
-        onclick={addEvidence}>Add evidence</button
+        onclick={addEvidence}
       >
+        Add evidence
+      </button>
     </div>
     {#if evidenceError}<p class="inline-problem" role="alert">
         {evidenceError}
       </p>{/if}
   </fieldset>
-  <label class="form-field"
-    >Summary <textarea name="summary" required maxlength="4096" rows="5"
-    ></textarea></label
-  >
+  <label class="form-field">
+    Summary <textarea name="summary" required maxlength="4096" rows="5"
+    ></textarea>
+  </label>
   <button
     class="button button-primary"
     type="submit"
     disabled={saveAction.busy || projects.isFetching}
-    >{saveAction.busy ? 'Saving…' : 'Save investigation'}</button
   >
+    {saveAction.busy ? 'Saving…' : 'Save investigation'}
+  </button>
 </form>
 
 <style>

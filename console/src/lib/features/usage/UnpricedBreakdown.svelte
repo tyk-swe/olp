@@ -79,9 +79,9 @@
               <td>{formatInteger(row.attempt_count)}</td>
               <td>
                 {#if row.sample_request_id && access.allows('GET /api/v1/requests/{request_id}')}
-                  <a href={resolve(`requests/${row.sample_request_id}`)}
-                    >View request</a
-                  >
+                  <a href={resolve(`requests/${row.sample_request_id}`)}>
+                    View request
+                  </a>
                 {:else if (row.cause === 'no_applicable_price' || row.cause === 'missing_price_component') && access.globalScope && access.allows('GET /api/v1/pricing/revisions')}
                   <a href={resolve('pricing/revisions')}>View pricing</a>
                 {:else}

@@ -36,9 +36,13 @@
   {:else if services.error}
     <div class="inline-problem" role="alert">
       Request history capabilities are unavailable.
-      <button class="text-button" type="button" onclick={() => services.retry()}
-        >Try again</button
+      <button
+        class="text-button"
+        type="button"
+        onclick={() => services.retry()}
       >
+        Try again
+      </button>
     </div>
   {:else if !services.retentionEnforced}
     <div class="empty-state" role="status">
@@ -62,8 +66,10 @@
       <button
         class="text-button"
         type="button"
-        onclick={() => recentRequests.refetch()}>Try again</button
+        onclick={() => recentRequests.refetch()}
       >
+        Try again
+      </button>
     </div>
   {:else if !recentRequests.data?.items.length}
     <div class="empty-state">
@@ -82,13 +88,13 @@
       aria-label="Five most recent requests"
     >
       <table class="data-table">
-        <thead
-          ><tr
-            ><th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th
-              >Latency</th
-            ><th><span class="sr-only">Details</span></th></tr
-          ></thead
-        >
+        <thead>
+          <tr>
+            <th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th>
+              Latency
+            </th><th><span class="sr-only">Details</span></th>
+          </tr>
+        </thead>
         <tbody>
           {#each recentRequests.data.items as request (request.id)}
             <tr>
@@ -102,20 +108,21 @@
                     request.status_code,
                     request.error_class
                   )}"
-                  >{statusLabel(request.status_code, request.error_class)}</span
                 >
+                  {statusLabel(request.status_code, request.error_class)}
+                </span>
               </td>
 
-              <td
-                >{request.total_latency_ms == null
+              <td>
+                {request.total_latency_ms == null
                   ? '—'
-                  : `${request.total_latency_ms} ms`}</td
-              >
+                  : `${request.total_latency_ms} ms`}
+              </td>
 
               <td>
-                <a class="row-link" href={resolve(`requests/${request.id}`)}
-                  >View timeline</a
-                >
+                <a class="row-link" href={resolve(`requests/${request.id}`)}>
+                  View timeline
+                </a>
               </td>
             </tr>
           {/each}

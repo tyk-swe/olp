@@ -11,9 +11,9 @@
 {:else if services.error}
   <div class="inline-problem" role="alert">
     {errorMessage(services.error)}
-    <button class="button button-secondary" onclick={() => services.retry()}
-      >Retry</button
-    >
+    <button class="button button-secondary" onclick={() => services.retry()}>
+      Retry
+    </button>
   </div>
 {:else if services.gatewayAvailable}
   <Overview />

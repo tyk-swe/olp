@@ -40,12 +40,12 @@
         : 'profile-name-help'}
       aria-invalid={Boolean(displayNameError)}
     />
-    <small id="profile-name-help"
-      >Your email and fixed role are managed by an owner.</small
-    >
-    {#if displayNameError}<small id="profile-name-error" class="field-error"
-        >{displayNameError}</small
-      >{/if}
+    <small id="profile-name-help">
+      Your email and fixed role are managed by an owner.
+    </small>
+    {#if displayNameError}<small id="profile-name-error" class="field-error">
+        {displayNameError}
+      </small>{/if}
   </div>
   <dl>
     <div>
@@ -60,9 +60,9 @@
   {#if profileError}<p id="profile-error" class="field-error" role="alert">
       {profileError}
     </p>{/if}
-  <button class="button button-primary" type="submit" disabled={saving}
-    >{saving ? 'Saving…' : 'Save profile'}</button
-  >
+  <button class="button button-primary" type="submit" disabled={saving}>
+    {saving ? 'Saving…' : 'Save profile'}
+  </button>
 </form>
 
 <style>

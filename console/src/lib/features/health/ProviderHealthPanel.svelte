@@ -40,30 +40,32 @@
       <h2 id="providers-title">Providers</h2>
     </div>
     <div class="heading-controls">
-      <label class="window-select" for="provider-window"
-        >Window <select id="provider-window" bind:value={windowMinutes}
-          >{#each windowOptions as option (option.minutes)}<option
-              value={option.minutes}>{option.label}</option
-            >{/each}</select
-        ></label
-      >{#if providers.data}<span class="badge"
-          >{providers.data.items.length} configured</span
-        >{/if}
+      <label class="window-select" for="provider-window">
+        Window <select id="provider-window" bind:value={windowMinutes}>
+          {#each windowOptions as option (option.minutes)}<option
+              value={option.minutes}
+            >
+              {option.label}
+            </option>{/each}
+        </select>
+      </label>{#if providers.data}<span class="badge">
+          {providers.data.items.length} configured
+        </span>{/if}
     </div>
   </div>
   {#if providers.isError}
     <div class="inline-problem" role="alert">
       {errorMessage(providers.error, 'Provider outcomes are unavailable.')}
-      <button class="text-button" onclick={() => providers.refetch()}
-        >Try again</button
-      >
+      <button class="text-button" onclick={() => providers.refetch()}>
+        Try again
+      </button>
     </div>
   {:else if !providers.data}
     <div class="loading-state" role="status">Loading provider outcomes…</div>
   {:else if providers.data.items.length === 0}
-    <EmptyState title="No providers yet"
-      >Health appears here once a provider is connected.</EmptyState
-    >
+    <EmptyState title="No providers yet">
+      Health appears here once a provider is connected.
+    </EmptyState>
   {:else}
     <div class="provider-grid">
       {#each providers.data.items as provider (provider.provider_id)}
@@ -73,9 +75,9 @@
               <h3>{provider.provider_name}</h3>
               <p>{provider.provider_kind} · {provider.provider_state}</p>
             </div>
-            <span class="badge {healthTone(provider.status)}"
-              >{provider.status}</span
-            >
+            <span class="badge {healthTone(provider.status)}">
+              {provider.status}
+            </span>
           </div>
           <dl>
             <div>
@@ -107,14 +109,14 @@
             <strong>Last probe:</strong>
             {provider.last_probe_detail ??
               provider.last_probe_status ??
-              'Not probed'}<br /><span
-              >{formatDate(provider.last_probe_at)}</span
-            ><br /><strong>Last live attempt:</strong>
-            <span
-              >{provider.last_attempt_at
+              'Not probed'}<br /><span>
+              {formatDate(provider.last_probe_at)}
+            </span><br /><strong>Last live attempt:</strong>
+            <span>
+              {provider.last_attempt_at
                 ? formatDate(provider.last_attempt_at)
-                : 'No traffic in this window'}</span
-            >
+                : 'No traffic in this window'}
+            </span>
           </p>
         </article>
       {/each}

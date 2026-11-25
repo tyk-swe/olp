@@ -45,8 +45,10 @@
         class="button button-secondary"
         onclick={() => {
           form = form.filter((item) => item.id !== row.id);
-        }}>Remove attribution budget</button
+        }}
       >
+        Remove attribution budget
+      </button>
     </div>
   {/each}
   <button
@@ -58,8 +60,10 @@
         ...form,
         { id: crypto.randomUUID(), label: '', value: '', limits: limitForm() }
       ];
-    }}>Add attribution budget</button
+    }}
   >
+    Add attribution budget
+  </button>
 </fieldset>
 
 <style>

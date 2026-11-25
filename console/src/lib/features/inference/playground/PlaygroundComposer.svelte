@@ -69,17 +69,20 @@
           bind:value={playground.operation}
         >
           {#each operations as option (option.value)}<option
-              value={option.value}>{option.label}</option
-            >{/each}
+              value={option.value}
+            >
+              {option.label}
+            </option>{/each}
         </select>
-        {#if !playground.operationKnown}<small class="field-error" role="alert"
-            >The selected route does not offer this operation.</small
-          >{:else if playground.routeOperations == null}<small
+        {#if !playground.operationKnown}<small class="field-error" role="alert">
+            The selected route does not offer this operation.
+          </small>{:else if playground.routeOperations == null}<small
             class="policy-note"
             role="status"
-            >Route capabilities are unknown until a matching active route is
-            entered — the route enforces the final decision.</small
-          >{/if}
+          >
+            Route capabilities are unknown until a matching active route is
+            entered — the route enforces the final decision.
+          </small>{/if}
       </div>
       {#if playground.operation === 'realtime'}
         <p class="policy-note">
@@ -95,11 +98,13 @@
               playground.applyTemplate(event.currentTarget.value)}
           >
             {#each playgroundTemplates as template (template.key)}<option
-                value={template.key}>{template.label}</option
-              >{/each}
-          </select><small
-            >Loads a request document; tools are never executed.</small
-          >
+                value={template.key}
+              >
+                {template.label}
+              </option>{/each}
+          </select><small>
+            Loads a request document; tools are never executed.
+          </small>
         </div>
       {/if}
     </div>
@@ -130,14 +135,14 @@
           <option value={route.slug}></option>
         {/each}
       </datalist>
-      <small id="model-help"
-        >Choose an active route suggestion or enter its public slug.</small
-      >
+      <small id="model-help">
+        Choose an active route suggestion or enter its public slug.
+      </small>
       <div id="route-status">
         {#if playground.routes.isPending}
-          <small class="inline-status" role="status"
-            >Loading active routes…</small
-          >
+          <small class="inline-status" role="status">
+            Loading active routes…
+          </small>
         {:else if playground.routes.isError}
           <p class="field-error" role="alert">
             {errorMessage(
@@ -150,12 +155,14 @@
             type="button"
             class="button button-secondary"
             onclick={() => playground.routes.refetch()}
-            disabled={playground.routes.isFetching}>Retry routes</button
+            disabled={playground.routes.isFetching}
           >
+            Retry routes
+          </button>
         {:else if playground.routes.data?.length === 0}
-          <small
-            >No active routes are available. Activate a route to get started.</small
-          >
+          <small>
+            No active routes are available. Activate a route to get started.
+          </small>
         {/if}
       </div>
     </div>
@@ -170,11 +177,13 @@
           }
         }
         disabled={surfaceLocked}
-        ><option value="openai">OpenAI</option><option value="anthropic"
-          >Anthropic</option
-        ><option value="gemini">Gemini</option>
-        {#if clientSurface === 'native'}<option value="native">Native</option
-          >{/if}
+      >
+        <option value="openai">OpenAI</option><option value="anthropic">
+          Anthropic
+        </option><option value="gemini">Gemini</option>
+        {#if clientSurface === 'native'}<option value="native">
+            Native
+          </option>{/if}
       </select>
       {#if !surfaceLocked}
         <small>Capability filtering uses this originating protocol.</small>
@@ -236,31 +245,35 @@
         class="mono"
         spellcheck="false"
         aria-describedby="raw-help"></textarea>
-      <small id="raw-help"
-        >Raw public request body. The route slug above replaces its model field
-        — provider addresses cannot be set here.</small
-      >
+      <small id="raw-help">
+        Raw public request body. The route slug above replaces its model field —
+        provider addresses cannot be set here.
+      </small>
     </div>
   {/if}
   {#if playground.activeOperation === 'generation'}
     <div class="form-field stream-toggle">
-      <label class="checkbox-label"
-        ><input
+      <label class="checkbox-label">
+        <input
           type="checkbox"
           checked={playground.streamEnabled}
           disabled={!playground.streamSelectable || playground.streaming}
           onchange={(event) =>
             playground.toggleStream(event.currentTarget.checked)}
         />
-        Stream the response</label
-      >
+        Stream the response
+      </label>
       {#if playground.streamEnabled && playground.streamCheck === 'checking'}<small
           class="inline-status"
-          role="status">Checking streaming eligibility…</small
-        >{:else if playground.streamEnabled && playground.streamCheckMessage}<small
+          role="status"
+        >
+          Checking streaming eligibility…
+        </small>{:else if playground.streamEnabled && playground.streamCheckMessage}<small
           class="policy-note"
-          role="status">{playground.streamCheckMessage}</small
-        >{/if}
+          role="status"
+        >
+          {playground.streamCheckMessage}
+        </small>{/if}
     </div>
   {/if}
   {#if playground.validationError}<p class="field-error" role="alert">
@@ -283,20 +296,25 @@
       disabled={playground.mutation.isPending ||
         playground.streaming ||
         Boolean(playground.plan.submissionError)}
-      >{playground.mutation.isPending || playground.streaming
-        ? 'Running…'
-        : 'Run test'}</button
     >
+      {playground.mutation.isPending || playground.streaming
+        ? 'Running…'
+        : 'Run test'}
+    </button>
     {#if playground.streaming}<button
         class="button button-secondary"
         type="button"
-        onclick={playground.cancelStream}>Cancel</button
-      >{/if}
+        onclick={playground.cancelStream}
+      >
+        Cancel
+      </button>{/if}
     {#if playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem || playground.mutation.data}<button
         class="button button-secondary"
         type="button"
-        onclick={playground.clearResult}>Clear</button
-      >{/if}
+        onclick={playground.clearResult}
+      >
+        Clear
+      </button>{/if}
   </div>
 </form>
 

@@ -71,8 +71,10 @@
       <button
         class="button button-primary"
         type="button"
-        onclick={() => select('')}>New template</button
+        onclick={() => select('')}
       >
+        New template
+      </button>
     {/if}
   </div>
 </div>
@@ -84,9 +86,9 @@
 {:else if templates.isPending}
   <div class="loading-state" role="status">Loading templates…</div>
 {:else if !templates.data?.length}
-  <EmptyState title="No route templates yet"
-    >Save a route as a template to reuse its targets and settings.</EmptyState
-  >
+  <EmptyState title="No route templates yet">
+    Save a route as a template to reuse its targets and settings.
+  </EmptyState>
 {:else}
   <ScrollTable label="Route templates">
     <table class="data-table">
@@ -111,8 +113,9 @@
                   class="button button-secondary"
                   type="button"
                   onclick={() => select(value.id)}
-                  >{canEdit ? 'Inspect and edit' : 'Inspect'}</button
                 >
+                  {canEdit ? 'Inspect and edit' : 'Inspect'}
+                </button>
                 {#if access.allows('POST /api/v1/route-templates/{template_id}/apply')}
                   <ConfirmAction
                     label="Apply template"

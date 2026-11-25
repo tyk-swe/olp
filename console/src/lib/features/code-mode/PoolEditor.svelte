@@ -126,11 +126,15 @@
     <select id="code-owner" bind:value={owner} required disabled={!!current}>
       <option value="">Choose a project member</option>
       {#each members.data ?? [] as member (member.user_id)}<option
-          value={member.user_id}>{member.email}</option
-        >{/each}
+          value={member.user_id}
+        >
+          {member.email}
+        </option>{/each}
       {#if owner && !members.data?.some((m) => m.user_id === owner)}<option
-          value={owner}>{owner}</option
-        >{/if}
+          value={owner}
+        >
+          {owner}
+        </option>{/if}
     </select>
     <p>
       Personal pools accept only keys issued by their owner. Pool kind and owner
@@ -141,19 +145,19 @@
     </p>{/if}
   <fieldset>
     <legend>Assigned accounts</legend>
-    {#each accounts as account (account.id)}<label class="choice"
-        ><input
+    {#each accounts as account (account.id)}<label class="choice">
+        <input
           type="checkbox"
           bind:group={accountIds}
           value={account.id}
         />{account.name} · {adapterLabel(account.adapter)} · {account.eligible
           ? 'eligible'
-          : 'ineligible'}</label
-      >
+          : 'ineligible'}
+      </label>
       {#if accountIds.includes(account.id)}
-        <label for={`code-weight-${account.id}`}
-          >Weight for {account.name}</label
-        >
+        <label for={`code-weight-${account.id}`}>
+          Weight for {account.name}
+        </label>
         <input
           id={`code-weight-${account.id}`}
           type="number"
@@ -171,10 +175,10 @@
         />
       {/if}
     {/each}
-    {#each selectedUnavailableAccounts as id (id)}<label class="choice"
-        ><input type="checkbox" bind:group={accountIds} value={id} />{id} · unavailable
-        selection</label
-      >{/each}
+    {#each selectedUnavailableAccounts as id (id)}<label class="choice">
+        <input type="checkbox" bind:group={accountIds} value={id} />{id} · unavailable
+        selection
+      </label>{/each}
     {#if !accounts.length}<p>No accounts in this project yet.</p>{/if}
   </fieldset>
   <fieldset>

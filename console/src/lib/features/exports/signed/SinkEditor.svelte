@@ -98,64 +98,68 @@
 </script>
 
 <form class="form-card" onsubmit={submit}>
-  <label class="form-field"
-    >Name<input required maxlength="100" bind:value={name} /></label
-  >
-  <label class="form-field"
-    >Scope<select
+  <label class="form-field">
+    Name<input required maxlength="100" bind:value={name} />
+  </label>
+  <label class="form-field">
+    Scope<select
       required={!access.can('settings.update')}
       disabled={Boolean(current)}
       bind:value={project}
-      >{#if access.can('settings.update')}<option value="">Installation</option
-        >{:else}<option value="">Choose project</option
-        >{/if}{#each projects as item (item.id)}<option value={item.id}
-          >{item.name}</option
-        >{/each}</select
-    ></label
-  >
-  <label class="form-field"
-    >HTTPS destination<input
+    >
+      {#if access.can('settings.update')}<option value="">
+          Installation
+        </option>{:else}<option value="">
+          Choose project
+        </option>{/if}{#each projects as item (item.id)}<option value={item.id}>
+          {item.name}
+        </option>{/each}
+    </select>
+  </label>
+  <label class="form-field">
+    HTTPS destination<input
       type="url"
       required
       pattern="https://.*"
       bind:value={destination}
-    /></label
-  >
+    />
+  </label>
   <fieldset>
-    <legend>Streams, maximum four</legend
-    >{#each SINK_STREAMS as stream (stream)}<label class="check-field"
-        ><input
+    <legend>
+      Streams, maximum four
+    </legend>{#each SINK_STREAMS as stream (stream)}<label class="check-field">
+        <input
           type="checkbox"
           value={stream}
           bind:group={streams}
           disabled={stream === 'audit' && Boolean(project)}
-        />{stateLabel(stream)}</label
-      >{/each}
+        />{stateLabel(stream)}
+      </label>{/each}
   </fieldset>
-  <label class="form-field"
-    >Replacement signing credential<input
+  <label class="form-field">
+    Replacement signing credential<input
       type="password"
       autocomplete="new-password"
       bind:value={credential}
       disabled={removeCredential}
-    /></label
-  >
+    />
+  </label>
   <p class="inline-status">
     Blank retains the current credential. {baseline?.has_credential
       ? 'A signing credential is configured'
       : 'No signing credential is configured'}
   </p>
-  {#if baseline?.has_credential}<label class="check-field"
-      ><input type="checkbox" bind:checked={removeCredential} />Remove signing
-      credential</label
-    >{/if}
-  <label class="check-field"
-    ><input type="checkbox" bind:checked={enabled} />Enabled</label
-  >
+  {#if baseline?.has_credential}<label class="check-field">
+      <input type="checkbox" bind:checked={removeCredential} />Remove signing
+      credential
+    </label>{/if}
+  <label class="check-field">
+    <input type="checkbox" bind:checked={enabled} />Enabled
+  </label>
   <div class="page-actions">
-    <button class="button button-primary" disabled={action.busy}
-      >Save export</button
-    >
+    <button class="button button-primary" disabled={action.busy}>
+      Save export
+    </button>
   </div>
   {#if reload && current?.etag !== baseline?.etag}
     <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />

@@ -275,8 +275,10 @@
         onclick={() => {
           create.error = '';
           creating = true;
-        }}>New rule</button
+        }}
       >
+        New rule
+      </button>
     </div>
   </div>{/if}
 {#if creating}
@@ -299,23 +301,27 @@
   emptyWhen={!(rules.data ?? []).length}
 >
   {#snippet empty()}
-    <EmptyState title="No alert rules yet"
-      >Rules decide which events send an alert, and to which destination.</EmptyState
-    >
+    <EmptyState title="No alert rules yet">
+      Rules decide which events send an alert, and to which destination.
+    </EmptyState>
   {/snippet}
   <ScrollTable label="Notification rules">
     <table class="data-table">
-      <thead
-        ><tr
-          ><th scope="col">Name</th><th scope="col">Event</th><th scope="col"
-            >Subject</th
-          ><th scope="col">Window</th><th scope="col">Configuration</th><th
-            scope="col">Destination</th
-          ><th scope="col">Enabled</th>{#if canManage || installationWide}<th
-              scope="col"><span class="sr-only">Actions</span></th
-            >{/if}</tr
-        ></thead
-      >
+      <thead>
+        <tr>
+          <th scope="col">Name</th><th scope="col">Event</th><th scope="col">
+            Subject
+          </th><th scope="col">Window</th><th scope="col">Configuration</th><th
+            scope="col"
+          >
+            Destination
+          </th><th scope="col">
+            Enabled
+          </th>{#if canManage || installationWide}<th scope="col">
+              <span class="sr-only">Actions</span>
+            </th>{/if}
+        </tr>
+      </thead>
       <tbody>
         {#each rules.data ?? [] as rule (rule.id)}
           {#if editRuleId === rule.id}
@@ -342,30 +348,33 @@
               {windowLabel}
             />
           {:else}
-            <tr
-              ><td
-                ><strong>{rule.name}</strong><br /><small
-                  >{rule.project_name ?? 'Installation-wide'}</small
-                ></td
-              ><td>{notificationEvents[rule.event].label}</td><td
-                >{subjectLabel(rule)}</td
-              ><td>{windowLabel(rule.window_kind)}</td><td
-                ><span class="mono">{configurationLabel(rule)}</span></td
-              ><td>{rule.destination_name}</td><td
-                >{rule.enabled ? 'Yes' : 'No'}</td
-              >{#if canManage || installationWide}<td
-                  >{#if canChange(rule)}<button
+            <tr>
+              <td>
+                <strong>{rule.name}</strong><br /><small>
+                  {rule.project_name ?? 'Installation-wide'}
+                </small>
+              </td><td>{notificationEvents[rule.event].label}</td><td>
+                {subjectLabel(rule)}
+              </td><td>{windowLabel(rule.window_kind)}</td><td>
+                <span class="mono">{configurationLabel(rule)}</span>
+              </td><td>{rule.destination_name}</td><td>
+                {rule.enabled ? 'Yes' : 'No'}
+              </td>{#if canManage || installationWide}<td>
+                  {#if canChange(rule)}<button
                       class="text-button"
                       type="button"
                       disabled={edit.busy}
-                      onclick={() => startRuleEdit(rule)}>Edit</button
-                    ><button
+                      onclick={() => startRuleEdit(rule)}
+                    >
+                      Edit
+                    </button><button
                       class="text-button"
                       type="button"
                       disabled={toggle.busy}
                       onclick={() => toggleRule(rule)}
-                      >{rule.enabled ? 'Disable' : 'Enable'}</button
                     >
+                      {rule.enabled ? 'Disable' : 'Enable'}
+                    </button>
                     {#if canDelete}<ConfirmAction
                         danger
                         label="Delete rule"
@@ -378,9 +387,9 @@
                             queryKey: notificationKeys.root
                           });
                         }}
-                      />{/if}{/if}</td
-                >{/if}</tr
-            >
+                      />{/if}{/if}
+                </td>{/if}
+            </tr>
           {/if}
         {/each}
       </tbody>
