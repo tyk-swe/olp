@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -91,7 +92,7 @@ func (f geminiFields) inputFile() string {
 			names = append(names, input.FileName, input.FileNameSnake)
 		}
 	}
-	return firstNonEmpty(names...)
+	return cmp.Or(names...)
 }
 
 func (f geminiFields) outputs() []geminiOutput {
@@ -157,7 +158,7 @@ func geminiOutputFile(f geminiFields) string {
 	for _, output := range f.outputs() {
 		files = append(files, output.ResponsesFile)
 	}
-	return firstNonEmpty(files...)
+	return cmp.Or(files...)
 }
 
 func geminiCreatedAt(f geminiFields) time.Time {

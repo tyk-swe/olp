@@ -59,25 +59,22 @@ type Result struct {
 	Usage     *operations.Usage
 }
 
-func fail(code, field, requirement, message string) error {
-	return operations.Error(code, field, requirement, message)
-}
 func Compile(config Config) (*Template, error) {
 	config.Provider = config.Provider.Clone()
 	p, err := config.Provider.Profile()
 	if err != nil || config.Provider.ValidateProfile() != nil {
-		return nil, fail("target_capability", "/profile", "explicit_profile", "A registered versioned operation profile is required.")
+		return nil, operations.Error("target_capability", "/profile", "explicit_profile", "A registered versioned operation profile is required.")
 	}
 	codec, ok := operationregistry.Lookup(p.OperationDialect(config.Operation))
 	if !ok || !slices.Contains(p.Operations, config.Operation) || codec.Operation.ID != config.Operation {
-		return nil, fail("target_capability", "/operation", "operation_contract", "The profile has no registered unary operation contract.")
+		return nil, operations.Error("target_capability", "/operation", "operation_contract", "The profile has no registered unary operation contract.")
 	}
 	if !config.Provider.ValidModel(config.Provider.Model(config.Model)) {
-		return nil, fail("resource_affinity", "/model", "serving_binding", "The configured serving model is invalid.")
+		return nil, operations.Error("resource_affinity", "/model", "serving_binding", "The configured serving model is invalid.")
 	}
 	defaults, origins, err := config.Provider.DefaultsFor(config.Operation, config.Model)
 	if err != nil {
-		return nil, fail("target_capability", "/defaults", "native_defaults", "The operation defaults are invalid.")
+		return nil, operations.Error("target_capability", "/defaults", "native_defaults", "The operation defaults are invalid.")
 	}
 	serving := config.Provider.ServingIdentity(config.ProviderID, config.RevisionID, config.Model)
 	var schema struct {
@@ -93,7 +90,7 @@ func Compile(config Config) (*Template, error) {
 func Parse(dialect string, body []byte, maxBytes int) (oif.Request, error) {
 	d, ok := operationregistry.Lookup(dialect)
 	if !ok {
-		return oif.Request{}, fail("target_capability", "/dialect", "registered_dialect", "The native dialect is not registered.")
+		return oif.Request{}, operations.Error("target_capability", "/dialect", "registered_dialect", "The native dialect is not registered.")
 	}
 	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
 		return oif.Request{}, operations.Invalid("request", "The native request must be one JSON object.")
@@ -106,7 +103,7 @@ func Parse(dialect string, body []byte, maxBytes int) (oif.Request, error) {
 }
 func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if ctx.ClientContract != "" && ctx.ClientContract != operations.RawVectorClient {
-		return nil, fail("state_carrier", "/client_contract", "registered_client_contract", "The requested client contract is not registered.")
+		return nil, operations.Error("state_carrier", "/client_contract", "registered_client_contract", "The requested client contract is not registered.")
 	}
 	sourceCodec, sourceView, err := t.validateSource(source, ctx)
 	if err != nil {
@@ -123,7 +120,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	if sourceCodec.Identity != t.codec.Identity {
 		m, ok := operationregistry.Catalog().Mapping(sourceCodec.Identity, t.codec.Identity)
 		if !ok {
-			return nil, fail("target_capability", "/dialect", "qualified_mapping", "No complete qualified mapping links these operation dialects.")
+			return nil, operations.Error("target_capability", "/dialect", "qualified_mapping", "No complete qualified mapping links these operation dialects.")
 		}
 		document, provenance, err = m.Lower(source, sourceView)
 		if err != nil {
@@ -150,11 +147,11 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 	}
 	if t.codec.DocumentLocation != nil {
 		if location, external := t.codec.DocumentLocation(effective); external && !t.config.Provider.AllowsDocumentURI(location) {
-			return nil, fail("storage_scope", "/document", "document_location_prefix", "The document location is outside the connection's configured document URI prefixes.")
+			return nil, operations.Error("storage_scope", "/document", "document_location_prefix", "The document location is outside the connection's configured document URI prefixes.")
 		}
 	}
 	if t.codec.FetchedDocument != nil && t.codec.FetchedDocument(effective) && !t.config.AllowProviderFetchedDocuments {
-		return nil, fail("content_egress", "/document", "provider_fetched_documents", "This route does not allow the provider to fetch document URLs. Enable provider-fetched documents on the route or send the document inline.")
+		return nil, operations.Error("content_egress", "/document", "provider_fetched_documents", "This route does not allow the provider to fetch document URLs. Enable provider-fetched documents on the route or send the document inline.")
 	}
 	query, wireBody, err := t.operationWire(effective, view)
 	if err != nil {
@@ -167,7 +164,7 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 		if pair.codec.RequiredClient != nil {
 			required := pair.codec.RequiredClient(pair.view)
 			if required != "" && ctx.ClientContract != required {
-				return nil, fail("state_carrier", "/client_contract", "raw_vector_storage", "This native vector storage requires the explicit versioned raw-storage client contract.")
+				return nil, operations.Error("state_carrier", "/client_contract", "raw_vector_storage", "This native vector storage requires the explicit versioned raw-storage client contract.")
 			}
 		}
 	}
@@ -200,10 +197,10 @@ func (t *Template) Bind(source oif.Request, ctx Context) (*Plan, error) {
 func (t *Template) validateSource(source oif.Request, ctx Context) (operations.Dialect, oif.View, error) {
 	sourceCodec, ok := operationregistry.Lookup(source.Descriptor().Dialect.ID)
 	if !ok || sourceCodec.Identity != source.Descriptor().Dialect || source.Descriptor().Operation != t.codec.Operation {
-		return operations.Dialect{}, nil, fail("target_capability", "/operation", "matching_operation", "Source and target operation contracts differ.")
+		return operations.Dialect{}, nil, operations.Error("target_capability", "/operation", "matching_operation", "Source and target operation contracts differ.")
 	}
 	if len(source.Provenance()) != 0 {
-		return operations.Dialect{}, nil, fail("policy_conflict", "/request", "source_identity", "Strict operations require the original caller source.")
+		return operations.Dialect{}, nil, operations.Error("policy_conflict", "/request", "source_identity", "Strict operations require the original caller source.")
 	}
 	if sourceCodec.ValidateRoute != nil {
 		if err := sourceCodec.ValidateRoute(source, ctx.Route); err != nil {
@@ -217,7 +214,7 @@ func (t *Template) validateSource(source oif.Request, ctx Context) (operations.D
 	if model := operations.Member(source.Document().Root(), "model"); model.Kind() != oif.Absent {
 		text, ok := model.Text()
 		if !ok || strings.TrimPrefix(text, "models/") != strings.TrimPrefix(ctx.Route, "models/") {
-			return operations.Dialect{}, nil, fail("resource_affinity", "/model", "route_identity", "The native model must agree with the selected route.")
+			return operations.Dialect{}, nil, operations.Error("resource_affinity", "/model", "route_identity", "The native model must agree with the selected route.")
 		}
 	}
 	return sourceCodec, sourceView, nil
@@ -256,7 +253,7 @@ func (t *Template) effectiveRequest(descriptor oif.Descriptor, document oif.Docu
 		}
 		for _, change := range bound {
 			if change.Origin != oif.IdentityBinding || change.Remove {
-				return oif.Request{}, nil, fail("target_capability", "/model", "identity_binding", "The registered model overlay is invalid.")
+				return oif.Request{}, nil, operations.Error("target_capability", "/model", "identity_binding", "The registered model overlay is invalid.")
 			}
 		}
 		effective, err = effective.WithChanges(bound...)
@@ -288,7 +285,7 @@ func (t *Template) operationWire(effective oif.Request, view oif.View) (url.Valu
 			return nil, nil, err
 		}
 		if len(wire.Body) == 0 {
-			return nil, nil, fail("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
+			return nil, nil, operations.Error("fidelity_protocol_violation", "/transport", "poll_submit_body", "A polling transport submits a body.")
 		}
 		query, wireBody = wire.Query, wire.Body
 	}
@@ -296,20 +293,20 @@ func (t *Template) operationWire(effective oif.Request, view oif.View) (url.Valu
 }
 func validateQuery(values url.Values) error {
 	if len(values) == 0 || len(values) > 32 {
-		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+		return operations.Error("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 	}
 	for name, list := range values {
 		if !operations.ValidLabel(name) || len(list) == 0 || len(list) > 8 {
-			return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+			return operations.Error("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 		}
 		for _, value := range list {
 			if len(value) > 2048 {
-				return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+				return operations.Error("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 			}
 		}
 	}
 	if len(values.Encode()) > 8192 {
-		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
+		return operations.Error("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 	}
 	return nil
 }

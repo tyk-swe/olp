@@ -249,13 +249,13 @@ func document(r record) (contract.BillingImport, error) {
 		Scope:                scope,
 		Source:               r.Source,
 		Status: importStatus{
-			ImportedFrom:    nullableOf(dateOf(r.ImportedFrom)),
-			ImportedThrough: nullableOf(dateOf(r.ImportedThrough)),
-			LastErrorCode:   nullableOf(r.LastErrorCode),
-			LastImportAt:    nullableOf(r.LastImportAt),
-			LastSuccessAt:   nullableOf(r.LastSuccessAt),
-			NextImportAt:    nullableOf(r.NextImportAt),
-			SourceRevision:  nullableOf(r.SourceRevision),
+			ImportedFrom:    valueOrNull(dateOf(r.ImportedFrom)),
+			ImportedThrough: valueOrNull(dateOf(r.ImportedThrough)),
+			LastErrorCode:   valueOrNull(r.LastErrorCode),
+			LastImportAt:    valueOrNull(r.LastImportAt),
+			LastSuccessAt:   valueOrNull(r.LastSuccessAt),
+			NextImportAt:    valueOrNull(r.NextImportAt),
+			SourceRevision:  valueOrNull(r.SourceRevision),
 		},
 	}, nil
 }
@@ -267,7 +267,7 @@ func dateOf(value *time.Time) *openapi_types.Date {
 	return &openapi_types.Date{Time: *value}
 }
 
-func nullableOf[T any](value *T) nullable.Nullable[T] {
+func valueOrNull[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nullable.NewNullNullable[T]()
 	}

@@ -226,7 +226,7 @@ func (r *priceRates) finalizeEvaluation(total *big.Int, u usage.AttemptUsage, wi
 		Cost:     cost,
 	}
 	if acc != nil {
-		result.Components = sortedUniqueStrings(acc.components)
+		result.Components = slices.Compact(slices.Sorted(slices.Values(acc.components)))
 		result.Lines = buildPriceLines(acc.lines, window, batch, discount)
 	}
 	return result
@@ -442,13 +442,4 @@ func trimDecimalString(d decimal.Decimal) string {
 	}
 	s = strings.TrimRight(s, "0")
 	return strings.TrimRight(s, ".")
-}
-
-func sortedUniqueStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := slices.Clone(values)
-	slices.Sort(out)
-	return slices.Compact(out)
 }

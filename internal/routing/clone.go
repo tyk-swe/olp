@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
@@ -135,7 +134,7 @@ func cloneSlot(s Slot) Slot {
 func cloneProvider(provider Provider) Provider {
 	p := provider
 	p.applyProviderOptions(p.providerOptions().Clone())
-	p.BatchStorage = providerconfig.CloneBatchStorage(p.BatchStorage)
+	p.BatchStorage = ptr.Clone(p.BatchStorage)
 	p.Plugin = ptr.Clone(p.Plugin)
 	p.metadata = nil
 	p.ActiveCredential = ptr.Clone(p.ActiveCredential)
@@ -253,7 +252,7 @@ func cloneCodeRoute(route codemode.Route) codemode.Route {
 }
 func cloneConfiguration(c Configuration) Configuration {
 	out := c
-	out.BatchStorage = providerconfig.CloneBatchStorage(c.BatchStorage)
+	out.BatchStorage = ptr.Clone(c.BatchStorage)
 	out.Options = ConfigurationOptionsFrom(
 		c.Options.ProviderOptions().Clone(),
 		cloneLimits(c.Options.Limits),

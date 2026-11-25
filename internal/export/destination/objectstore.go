@@ -2,6 +2,7 @@ package destination
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -195,7 +196,7 @@ func (s *Sender) authorize(ctx context.Context, request *http.Request, store Sto
 	credential := store.credential
 	switch store.provider {
 	case contract.CreateExportSinkRequestTypeS3:
-		region := firstNonEmpty(credential.Region, s3EndpointRegion(endpoint), s.getenv("AWS_REGION"), s.getenv("AWS_DEFAULT_REGION"))
+		region := cmp.Or(credential.Region, s3EndpointRegion(endpoint), s.getenv("AWS_REGION"), s.getenv("AWS_DEFAULT_REGION"))
 		if region == "" {
 			return sendError("credential", errors.New("s3 requires a region in the credential, the endpoint or the workload environment"))
 		}
@@ -210,15 +211,6 @@ func (s *Sender) authorize(ctx context.Context, request *http.Request, store Sto
 	request.Header.Set("X-Ms-Date", time.Now().UTC().Format(http.TimeFormat))
 	_, err := s.auth.ApplyAzureStorage(ctx, request, credential.AuthMode, credential.Secret)
 	return err
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func s3EndpointRegion(endpoint *url.URL) string {

@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 
@@ -47,9 +48,9 @@ func decodeManagedJob(adapter connectors.BatchAdapter, body []byte) (managedJob,
 		return managedJob{}, errors.New("provider batch status is unknown")
 	}
 	job.state = state
-	job.InputFileID = firstNonEmpty(job.InputFileID, first(job.InputFiles))
-	job.OutputFileID = firstNonEmpty(job.OutputFileID, job.OutputFile)
-	job.ErrorFileID = firstNonEmpty(job.ErrorFileID, job.ErrorFile)
+	job.InputFileID = cmp.Or(job.InputFileID, first(job.InputFiles))
+	job.OutputFileID = cmp.Or(job.OutputFileID, job.OutputFile)
+	job.ErrorFileID = cmp.Or(job.ErrorFileID, job.ErrorFile)
 	if len(job.ID) > 512 || job.Endpoint == "" || job.InputFileID == "" || len(job.InputFileID) > 512 ||
 		len(job.OutputFileID) > 512 || len(job.ErrorFileID) > 512 {
 		return managedJob{}, errors.New("provider batch object is malformed")
@@ -103,15 +104,6 @@ func ProjectManagedBatch(adapter connectors.BatchAdapter, body []byte, window st
 	}
 	encoded, err := json.Marshal(projected)
 	return encoded, job.ID, err
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func first(values []string) string {
