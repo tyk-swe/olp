@@ -230,13 +230,33 @@ var (
 		"anthropic-count-tokens", "gemini-count-tokens", "bedrock-count-tokens",
 		"gemini-embeddings", "vertex-embeddings", "bedrock-embeddings", "vertex-document-processing-ocr",
 	}
-	openAIOperationDialects = []string{"openai-embeddings", "openai-moderation", "openai-input-tokens", "openai-decisions"}
-	keyOnlyDialects         = []string{
-		"cohere-embed-v2", "cohere-rerank-v2", "mistral-ocr", "azure-document-intelligence-ocr",
-		"perplexity-search", "tavily-search", "exa-search", "parallel-search", "brave-search",
+	compatibleHost = operationHost{kind: KindOpenAICompatible, hosting: "direct-compatible", authentication: keyHeadersOrNone}
+	openAIHost     = operationHost{kind: KindOpenAI, hosting: "direct-openai", authentication: keyHeadersOrNone}
+	keyedHost      = operationHost{kind: KindOpenAICompatible, hosting: "direct-compatible", authentication: keyOnly}
+	cohereHost     = operationHost{kind: KindOpenAICompatible, hosting: "direct-compatible", authentication: keyOnly, revision: "v2"}
+	operationHosts = map[string]operationHost{
+		"openai-embeddings": openAIHost, "openai-moderation": openAIHost, "openai-input-tokens": openAIHost, "openai-decisions": openAIHost,
+		"gemini-batch-embeddings": {kind: KindGemini, hosting: "direct-gemini", authentication: keyHeadersOrNone},
+		"gemini-decisions":        {kind: KindGemini, hosting: "direct-gemini", authentication: keyOnly, revision: "v1beta"},
+		"cohere-embed-v2":         cohereHost, "cohere-rerank-v2": cohereHost,
+		"mistral-ocr": keyedHost, "azure-document-intelligence-ocr": keyedHost,
+		"perplexity-search": keyedHost, "tavily-search": keyedHost, "exa-search": keyedHost, "parallel-search": keyedHost, "brave-search": keyedHost,
 	}
-	cohereDialects = []string{"cohere-embed-v2", "cohere-rerank-v2"}
 )
+
+type operationHost struct {
+	kind           Kind
+	hosting        string
+	authentication []AuthMode
+	revision       string
+}
+
+func operationHostOf(dialect string) operationHost {
+	if host, ok := operationHosts[dialect]; ok {
+		return host
+	}
+	return compatibleHost
+}
 
 const completionsDialect = "openai-completions"
 
@@ -265,24 +285,12 @@ func (p Profile) vendorFamily() string {
 }
 
 func operationProfile(d operations.Dialect) Profile {
-	p := Profile{
-		ID: d.Identity.ID, Label: d.Label, Kind: KindOpenAICompatible, Dialect: d.Identity.ID, DialectRevision: d.Identity.Revision,
-		Hosting: "direct-compatible", Authentication: keyHeadersOrNone, Operations: []string{d.Operation.ID},
+	host := operationHostOf(d.Identity.ID)
+	return Profile{
+		ID: d.Identity.ID, Label: d.Label, Kind: host.kind, Dialect: d.Identity.ID, DialectRevision: cmp.Or(host.revision, d.Identity.Revision),
+		Hosting: host.hosting, Authentication: host.authentication, Operations: []string{d.Operation.ID},
 		OperationDialects: map[string]string{d.Operation.ID: d.Identity.ID}, Documentation: d.Documentation, Strict: true,
 	}
-	switch {
-	case slices.Contains(openAIOperationDialects, p.ID):
-		p.Kind, p.Hosting = KindOpenAI, "direct-openai"
-	case p.ID == "gemini-batch-embeddings":
-		p.Kind, p.Hosting = KindGemini, "direct-gemini"
-	case p.ID == "gemini-decisions":
-		p.Kind, p.Hosting, p.Authentication, p.DialectRevision = KindGemini, "direct-gemini", keyOnly, "v1beta"
-	case slices.Contains(cohereDialects, p.ID):
-		p.Authentication, p.DialectRevision = keyOnly, "v2"
-	case slices.Contains(keyOnlyDialects, p.ID):
-		p.Authentication = keyOnly
-	}
-	return p
 }
 
 func operationProfiles() []Profile {
