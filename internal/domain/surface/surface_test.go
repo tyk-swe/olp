@@ -33,3 +33,20 @@ func TestStripNonSemanticQuery(t *testing.T) {
 		t.Fatalf("anthropic beta=false was altered: %v", anthropicFalse)
 	}
 }
+
+func TestPathPrefixRoutesBackToTheSurfaceItWasAskedFor(t *testing.T) {
+	t.Parallel()
+	for _, reserved := range Reserved() {
+		name := reserved.Surface.Name
+		prefix := PathPrefix(name)
+		if !reserved.Surface.Inference || prefix == "" {
+			continue
+		}
+		if got := Of(prefix + "/models"); got.Name != name {
+			t.Errorf("PathPrefix(%q) = %q, which routes to the %s surface", name, prefix, got.Name)
+		}
+	}
+	if prefix := PathPrefix("no-such-surface"); prefix != "" {
+		t.Errorf("an unknown surface has the path prefix %q", prefix)
+	}
+}
