@@ -20,7 +20,6 @@ type planner uint8
 const (
 	canonicalPlanner planner = iota
 	unaryPlanner
-	mediaPlanner
 )
 
 // bind makes x.route the request's primary route: its deadline and attempt
@@ -73,13 +72,28 @@ func (s *Server) replan(ctx context.Context, x *Call) *fault.Error {
 	if e := x.CheckBody(x.Route); e != nil {
 		return e
 	}
-	switch x.planner {
-	case unaryPlanner:
+	if x.customPlanner != nil {
+		return x.customPlanner(ctx, x)
+	}
+	if x.planner == unaryPlanner {
 		return s.planUnary(ctx, x)
-	case mediaPlanner:
-		return s.planMedia(ctx, x)
 	}
 	return s.planCanonical(ctx, x)
+}
+
+func (s *Server) PlanSurfaceRoute(ctx context.Context, x *Call, authority keyauthority.Authority, slug string, fixed bool, plan func(context.Context, *Call) *fault.Error) *fault.Error {
+	route, ok := x.Snapshot().FindRoute(slug)
+	if !ok {
+		return fault.ModelNotFound(slug)
+	}
+	x.Route = &route
+	authorize := s.keyAuthorizer(authority)
+	if e := authorize(&route); e != nil {
+		return e
+	}
+	x.bind(canonicalPlanner, authorize, fixed)
+	x.customPlanner = plan
+	return s.planNamed(ctx, x)
 }
 
 // adoptPlan takes the plan of the route the request is on. The primary

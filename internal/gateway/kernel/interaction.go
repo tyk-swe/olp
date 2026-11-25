@@ -16,11 +16,9 @@ func (x *Call) servingAllowed(provider *routing.Provider, targetID, model string
 		return true
 	}
 	var serving oif.ServingIdentity
-	if x.media != nil {
-		template, found := x.Snapshot().MediaTemplate(x.Route.Slug, targetID, string(x.media.Op()))
-		if found {
-			serving = template.Serving()
-		}
+	if x.strictServing != nil {
+		var found bool
+		serving, found = x.strictServing(targetID)
 		if !found {
 			return false
 		}

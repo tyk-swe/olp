@@ -62,9 +62,44 @@ type planningKind uint8
 const (
 	canonicalPlanning planningKind = iota
 	unaryPlanning
-	mediaPlanning
+	surfacePlanning
 	pinnedPlanning
 )
+
+type SurfacePlanRequest struct {
+	Operation  string
+	Surface    string
+	Mode       string
+	Parameters []string
+	Eligible   func(routing.Provider, routing.Target) error
+	Prepare    func(routing.Provider, routing.Target) (*routing.CandidatePreparation, error)
+}
+
+func (s *Server) SelectSurfacePlan(ctx context.Context, x *Call, req SurfacePlanRequest) *fault.Error {
+	session := s.planning(x, surfacePlanning, x.Route, req.Operation, req.Surface, req.Mode)
+	options := s.selectionOptions(ctx, x)
+	options.Parameters = routing.Listed(req.Parameters)
+	if req.Eligible != nil || req.Prepare != nil {
+		options.Prepare = func(p routing.Provider, t routing.Target) (*routing.CandidatePreparation, error) {
+			if req.Eligible != nil {
+				if err := req.Eligible(p, t); err != nil {
+					return nil, err
+				}
+			}
+			if req.Prepare == nil {
+				return &routing.CandidatePreparation{Parameters: options.Parameters}, nil
+			}
+			prep, err := req.Prepare(p, t)
+			if err != nil {
+				session.semantic = err
+				return nil, err
+			}
+			return prep, nil
+		}
+	}
+	_, _, failure := session.selectPlan(ctx, options)
+	return failure
+}
 
 type planningSession struct {
 	server    *Server
@@ -86,7 +121,7 @@ func (p *planningSession) selectPlan(ctx context.Context, options routing.Option
 	x := p.call
 	plan, err := routing.Select(x.Snapshot(), p.route.Slug, p.operation, p.surface, p.mode, x.affinity, options)
 	if err != nil {
-		if p.kind == canonicalPlanning || p.kind == mediaPlanning {
+		if p.kind == canonicalPlanning || p.kind == surfacePlanning {
 			var selection *routing.SelectionError
 			if errors.As(err, &selection) && selection.Code != routing.NoEligibleTargets && selection.Code != "attempt_budget_increase_forbidden" {
 				return plan, false, selectionError(err, p.route.Slug)

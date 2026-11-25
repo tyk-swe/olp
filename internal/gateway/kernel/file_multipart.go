@@ -10,11 +10,35 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
+	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 )
+
+const multipartParseDeadline = 60 * time.Second
+
+func (s *Server) ParseMultipartForm(w http.ResponseWriter, r *http.Request, keyID string, maxFileBytes int64, maxFiles int) (*staging.Form, *fault.Error) {
+	limit := s.Config.MaxMediaBodyBytes
+	if r.ContentLength > limit {
+		return nil, ingress.BodyTooLarge()
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(multipartParseDeadline)); err != nil {
+		return nil, fault.ServerError(http.StatusInternalServerError, "internal_error", "The request could not be read.")
+	}
+	defer rc.SetReadDeadline(time.Time{})
+	lease := s.Deps.Uploads.TryAdmit(keyID, min(limit, maxFileBytes*int64(maxFiles)))
+	form, failure := staging.ParseMultipart(r.Context(), r, s.Deps.Staging, lease, maxFileBytes, maxFiles)
+	if failure != nil {
+		return nil, fault.StagingError(failure)
+	}
+	return form, nil
+}
 
 func (s *Server) UploadMultipart(ctx context.Context, x *Call, p *Pin, endpoint, purpose string, extra map[string]string, file *staging.Part, fileFirst bool) (*PinnedResponse, *AttemptFailure) {
 	pipeR, pipeW := io.Pipe()

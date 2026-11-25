@@ -45,6 +45,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
@@ -637,10 +638,10 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Egress: policy, Spool: spool, MaxResponseBytes: 1 << 20, Log: quiet,
 	})
 	jobStore := jobs.NewStore(pool)
+	mediaDeps := surfacemedia.Deps{Transport: mediaTransport, Store: jobStore, Jobs: jobs.New(jobs.Deps{
+		Store: jobStore, Transport: mediaTransport, Credentials: g.runtime, Gaps: &atomic.Uint64{}, Log: quiet, Now: time.Now,
+	})}
 	server := kernel.New(kernel.Dependencies{
-		Media: &kernel.MediaDeps{Transport: mediaTransport, Store: jobStore, Jobs: jobs.New(jobs.Deps{
-			Store: jobStore, Transport: mediaTransport, Credentials: g.runtime, Gaps: &atomic.Uint64{}, Log: quiet, Now: time.Now,
-		})},
 		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
 		Sink:      plan.sink,
@@ -657,7 +658,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	}, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 	g.kernel = server
 	g.mux = http.NewServeMux()
-	gateway.Register(server, g.mux)
+	gateway.Register(server, g.mux, gateway.WithMedia(mediaDeps))
 	g.server = httptest.NewServer(plan.served(g.mux))
 	t.Cleanup(g.server.Close)
 	return g

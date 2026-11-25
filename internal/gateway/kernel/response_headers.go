@@ -114,3 +114,7 @@ func (h streamedHeaders) Opening(header http.Header) { h.x.ResponseHeaders(heade
 func (h streamedHeaders) Closing(header http.Header, committed bool) {
 	h.x.guardrailHeaders(header, true, committed)
 }
+
+func (x *Call) StreamWriter(w http.ResponseWriter) *fault.StreamWriter {
+	return &fault.StreamWriter{W: w, Family: x.family, Headers: streamedHeaders{x}}
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -91,7 +92,11 @@ func newServing(f foundation) (serving, error) {
 	gw = f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, overlaps: overlaps, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
-		gateway.Register(gw, f.public)
+		gateway.Register(gw, f.public, gateway.WithMedia(surfacemedia.Deps{
+			Transport: f.media.transport,
+			Jobs:      f.media.service,
+			Store:     jobs.NewStore(stores.pool),
+		}))
 	}
 	return built, nil
 }
@@ -191,7 +196,6 @@ func (f foundation) inferenceDependencies(templates kernel.Dependencies) kernel.
 	pool, core, media := f.stores.pool, f.core, f.media
 	deps := templates
 	deps.Capture = core.capturer
-	deps.Media = &kernel.MediaDeps{Transport: media.transport, Jobs: media.service, Store: jobs.NewStore(pool)}
 	deps.Staging = media.spool
 	deps.Uploads = staging.NewAdmission(media.spool.CapacityBytes())
 	if pool == nil {

@@ -27,6 +27,7 @@ const (
 	classRateLimit      = string(upstream.RateLimit)
 	ClassUpstreamServer = string(upstream.ServerError)
 	classUpstreamClient = string(upstream.ClientError)
+	ClassUpstreamClient = classUpstreamClient
 	ClassCredential     = string(upstream.Credential)
 	ClassProtocol       = string(upstream.Protocol)
 	classPolicy         = "policy"
@@ -35,6 +36,7 @@ const (
 	// gateway cannot prove; it never fails over.
 	ClassAmbiguous         = string(upstream.Ambiguous)
 	classLimitsUnavailable = "limits_unavailable"
+	ClassLimitsUnavailable = classLimitsUnavailable
 	classContextWindow     = string(upstream.ContextWindow)
 	classContentFilter     = string(upstream.ContentFilter)
 	// classBudget marks an attempt a spend cap on its connection, credential
@@ -50,6 +52,7 @@ const (
 
 const (
 	maxStreamDuration = time.Hour
+	MaxStreamDuration = maxStreamDuration
 	ErrorBodyLimit    = 64 * 1024
 )
 
@@ -161,6 +164,38 @@ type AttemptFailure struct {
 	// exceeded the response size limit.
 	aggregateTooLarge bool
 }
+
+type AttemptFailureSpec struct {
+	Class      string
+	Status     int
+	Committed  bool
+	RetryAfter time.Duration
+	Upstream   *wire.UpstreamError
+	Acceptance upstream.Acceptance
+	Accepted   bool
+	Overall    bool
+	Dispatched bool
+}
+
+func NewAttemptFailure(spec AttemptFailureSpec) *AttemptFailure {
+	return &AttemptFailure{
+		class:      spec.Class,
+		Status:     spec.Status,
+		committed:  spec.Committed,
+		retryAfter: spec.RetryAfter,
+		upstream:   spec.Upstream,
+		Acceptance: spec.Acceptance,
+		accepted:   spec.Accepted,
+		overall:    spec.Overall,
+		dispatched: spec.Dispatched,
+	}
+}
+
+func (f *AttemptFailure) Class() string          { return f.class }
+func (f *AttemptFailure) Committed() bool        { return f.committed }
+func (f *AttemptFailure) Dispatched() bool       { return f.dispatched }
+func (f *AttemptFailure) Quota() string          { return f.quota }
+func (f *AttemptFailure) BillingUncertain() bool { return f.billingUncertain() }
 
 func (f *AttemptFailure) rejectedWithoutWork() bool {
 	if f == nil {

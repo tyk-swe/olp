@@ -157,8 +157,8 @@ func (s *Server) newFact(x *Call, a routing.Attempt, slot routing.Slot, ordinal 
 			}
 			return fact
 		}
-		if x.media != nil {
-			if _, ok := x.Snapshot().MediaTemplate(x.Route.Slug, a.TargetID, string(x.media.Op())); ok {
+		if x.strictServing != nil {
+			if _, ok := x.strictServing(a.TargetID); ok {
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: routing.FidelityStrict, PlanClass: "native_identity", UpstreamState: upstream.NotSent, ClientState: usage.ClientUnobserved}
 			}
 		} else if evidence.planClass != "" {

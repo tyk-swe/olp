@@ -17,8 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -270,24 +268,20 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		t.Fatalf("routeChargeBound = %s, want %s (two dispatches of dearest explicit rate)", got, want)
 	}
 
-	video, failure := media.DecodeVideoCreate(staging.FormOf([]staging.Field{
-		{Name: "model", Value: staging.Text("team-chat")},
-		{Name: "prompt", Value: staging.Text("A cat.")},
-		{Name: "seconds", Value: staging.Text("4")},
-	}, false))
-	if failure != nil {
-		t.Fatal(failure.Message)
-	}
+	seconds := "4"
 	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
 		Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}})}
 	videoExec := &Call{
 		family:             wire.Format("video_create"),
-		media:              video,
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
 		callPricing: callPricing{
 			cardPinned: true,
 			cardRev:    loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+			fixedUsage: &FixedUsageBound{
+				Bounded: true,
+				Usage:   usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}},
+			},
 		},
 	}
 	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.Amount != "1" || hold.Charge != "1.5" {

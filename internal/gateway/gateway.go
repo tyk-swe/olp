@@ -21,7 +21,23 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/surface/retrieval"
 )
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
+type Option func(*options)
+
+type options struct {
+	media *media.Deps
+}
+
+func WithMedia(deps media.Deps) Option {
+	return func(o *options) { o.media = &deps }
+}
+
+func Register(k *kernel.Server, mux *http.ServeMux, opts ...Option) {
+	var cfg options
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
 	k.RegisterKernel(mux, geministate.Actions(k))
 	anthropicstate.Register(k, mux)
 	cloudbatches.Register(k, mux)
@@ -31,7 +47,7 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 	geminilive.Register(k, mux)
 	retrieval.Register(k, mux)
 	retained.Register(k, mux, retrieval.Handler(k))
-	media.Register(k, mux)
+	media.Register(k, mux, cfg.media)
 	nativeduplex.Register(k, mux)
 	openaistate.Register(k, mux)
 	passthrough.Register(k, mux)
