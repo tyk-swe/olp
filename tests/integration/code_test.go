@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1546,7 +1546,7 @@ func TestCodeAccountExtraUsageRoundTripsAndRefusesNonKimiAccounts(t *testing.T) 
 			t.Fatal(err)
 		}
 		defer tx.Rollback(t.Context())
-		body, err := codeaccounts.Save(t.Context(), tx, operator, id, httpkit.NewID(), input, existing)
+		body, err := codeaccounts.Save(t.Context(), tx, operator, id, ids.New(), input, existing)
 		if err != nil {
 			return nil, err
 		}

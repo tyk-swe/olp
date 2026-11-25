@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
@@ -58,7 +58,7 @@ func WritePolicies(ctx context.Context, tx pgx.Tx, id string, desired Policies) 
 	if err := EnsureAttributionBudgetAccounts(ctx, tx, id, desired.AttributionBudgets); err != nil {
 		return "", err
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	_, writeErr := tx.Exec(ctx, `UPDATE olp.projects SET end_user_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now(),attribution_policy=NULLIF($4::jsonb,'null'::jsonb),route_groups=$5::jsonb,budget_policy=NULLIF($6::jsonb,'null'::jsonb),limit_templates=$7::jsonb,attribution_budgets=$8::jsonb WHERE id=$1`, id, endUser, etag, labels, desired.RouteGroups.JSON(), budget, desired.Templates.JSON(), desired.AttributionBudgets.JSON())
 	return etag, writeErr
 }

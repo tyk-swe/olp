@@ -7,12 +7,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 // CreateProject creates a project managed by its creator, so every project
 // starts with the manager it must keep however it is created.
 func CreateProject(ctx context.Context, tx pgx.Tx, name, creator string) (id, etag string, err error) {
-	id, etag = httpkit.NewID(), httpkit.NewID()
+	id, etag = ids.New(), ids.New()
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,$2,$3,$4)", id, name, etag, creator); err != nil {
 		if duplicateName(err) {
 			return "", "", httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
@@ -36,7 +37,7 @@ func CreateProjectInOrganization(ctx context.Context, tx pgx.Tx, name, creator s
 	if organization == nil {
 		return CreateProject(ctx, tx, name, creator)
 	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
+	id, etag := ids.New(), ids.New()
 	_, err := tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by,organization_id) VALUES($1,$2,$3,$4,$5)", id, name, etag, creator, organization)
 	if duplicateName(err) {
 		err = httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")

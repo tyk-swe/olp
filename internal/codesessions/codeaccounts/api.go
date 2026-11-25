@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type API struct {
@@ -72,7 +73,7 @@ func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 		}
 		return project, httpkit.Match(r, oldETag)
 	}, func(tx pgx.Tx, _ authz.Principal, project string) (httpkit.Reply, access.Event, error) {
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET draining=$2,etag=$3 WHERE id=$1`, id, *input.Draining, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

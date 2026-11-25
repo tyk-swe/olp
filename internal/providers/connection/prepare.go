@@ -10,10 +10,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
@@ -177,7 +176,7 @@ func canonicalNetworkCredential(p Prepared) error {
 	if network == nil || network.CredentialID == "" {
 		return nil
 	}
-	if id, err := uuid.Parse(network.CredentialID); err != nil || id.String() != network.CredentialID {
+	if !ids.CanonicalOrNil(network.CredentialID) {
 		return invalid("configuration.options.network.credential_id", "Use a canonical network credential UUID.")
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5"
@@ -113,7 +114,7 @@ func (s *Server) updateProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 		if err = httpkit.ValidText("name", input.Name, 100); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag = httpkit.NewID()
+		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, input.Name, etag); duplicateName(err) {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
 		} else if err != nil {
@@ -258,7 +259,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 		if err = identity.EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag = httpkit.NewID()
+		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET etag=$2,updated_at=now() WHERE id=$1", projectID, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -75,7 +76,7 @@ func (a *API) createWorkloadIssuer(r *http.Request, _ authz.Principal) (httpkit.
 			}
 		}
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	return access.Mutate(a.server, r, input, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		reply, event, err := a.writeWorkloadIssuer(r, tx, p, id, input, true)
 		if err != nil {
@@ -204,12 +205,12 @@ func StoreWorkloadIssuer(ctx context.Context, server *access.Server, tx pgx.Tx, 
 		}
 		for _, mapping := range input.Mappings {
 			policy, _ := json.Marshal(keyauthority.WorkloadPolicy(mapping))
-			if _, err := tx.Exec(ctx, "UPDATE olp.api_keys SET policy=$3,etag=$4 WHERE workload_issuer_id=$1 AND workload_mapping=$2", id, mapping.Name, policy, httpkit.NewID()); err != nil {
+			if _, err := tx.Exec(ctx, "UPDATE olp.api_keys SET policy=$3,etag=$4 WHERE workload_issuer_id=$1 AND workload_mapping=$2", id, mapping.Name, policy, ids.New()); err != nil {
 				return "", err
 			}
 		}
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	data, _ := json.Marshal(input)
 	if create {
 		var count int

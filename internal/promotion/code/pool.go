@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -165,7 +166,7 @@ func poolChange(ctx context.Context, q database.Queryer, p resolved[codeadmin.Po
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodePool, Key: p.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, principal authz.Principal) error {
-			_, err := codeadmin.SavePool(ctx, tx, principal, p.to.id, httpkit.NewID(), p.input, p.to.existing)
+			_, err := codeadmin.SavePool(ctx, tx, principal, p.to.id, ids.New(), p.input, p.to.existing)
 			return err
 		},
 	}, err

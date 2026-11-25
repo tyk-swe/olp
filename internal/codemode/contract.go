@@ -5,7 +5,6 @@ package codemode
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"maps"
 	"math"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 const BasePath = "/code/"
@@ -188,8 +189,7 @@ func (r Route) ValidatePaidTargets() error {
 			return Refuse(400, "code_paid_model_invalid")
 		}
 		for _, id := range []string{target.ProviderID, target.SlotID} {
-			parsed, err := uuid.Parse(id)
-			if err != nil || parsed == uuid.Nil || parsed.String() != id {
+			if !ids.Canonical(id) {
 				return Refuse(400, "code_paid_target_invalid")
 			}
 		}

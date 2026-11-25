@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -175,7 +176,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (httpkit.Reply, error
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		previous := etag
-		etag = httpkit.NewID()
+		etag = ids.New()
 		data, _ := json.Marshal(policy)
 		if remove {
 			data = []byte(`{}`)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -61,7 +62,7 @@ func NewSyncer(store *Store, runner scripts.Runner) *Syncer {
 }
 
 func (y *Syncer) SyncOwner(ctx context.Context, owner string) error {
-	if !canonicalID(owner) {
+	if !ids.Canonical(owner) {
 		return ErrAuthority
 	}
 	return y.store.inTx(ctx, func(tx pgx.Tx) error {
@@ -191,7 +192,7 @@ func (y *Syncer) Admit(ctx context.Context, id, claim string, boundaries []limit
 }
 
 func (y *Syncer) admitTx(ctx context.Context, tx pgx.Tx, owner limits.Owner, budget limits.CostBudget) error {
-	if budget.Owner.ID != owner.ID || budget.Owner.Basis.Normalized() != owner.Basis.Normalized() || !canonicalID(owner.ID) || budget.Validate() != nil {
+	if budget.Owner.ID != owner.ID || budget.Owner.Basis.Normalized() != owner.Basis.Normalized() || !ids.Canonical(owner.ID) || budget.Validate() != nil {
 		return ErrConflict
 	}
 	if err := y.syncFreshTx(ctx, tx, owner); err != nil {

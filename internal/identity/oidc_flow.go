@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
 )
@@ -93,7 +94,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (httpkit.Reply, error) 
 		if err := s.bindOIDCFlowPrincipal(r, tx, kind, c.Issuer, &flow); err != nil {
 			return httpkit.Reply{}, false, err
 		}
-		id, cookieToken := httpkit.NewID(), secrets.Token()
+		id, cookieToken := ids.New(), secrets.Token()
 		expires := time.Now().Add(10 * time.Minute)
 		data, err := json.Marshal(flow)
 		if err != nil {
@@ -338,7 +339,7 @@ func (s *Server) completeOIDCLink(r *http.Request, tx pgx.Tx, c oidcConfiguratio
 	if existingUserID != "" {
 		return "", "", httpkit.Reply{}, httpkit.Fail(409, "oidc_identity_linked", "This identity is already linked.")
 	}
-	identityID := httpkit.NewID()
+	identityID := ids.New()
 	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, p.ID, c.Issuer, verified.subject, verified.email, verified.roleClaims); err != nil {
 		return "", "", httpkit.Reply{}, err
 	}
@@ -384,13 +385,13 @@ func (s *Server) completeOIDCLogin(r *http.Request, tx pgx.Tx, c oidcConfigurati
 		if !complete {
 			return "", "", httpkit.Reply{}, httpkit.Fail(403, "setup_required", "Complete owner setup before OIDC sign-in.")
 		}
-		userID = httpkit.NewID()
-		identityID = httpkit.NewID()
+		userID = ids.New()
+		identityID = ids.New()
 		var name string
 		if raw := verified.claims["name"]; len(raw) == 0 || json.Unmarshal(raw, &name) != nil || httpkit.ValidText("display_name", name, 100) != nil {
 			name = verified.email
 		}
-		if _, err := tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, verified.email, name, role, httpkit.NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, verified.email, name, role, ids.New()); err != nil {
 			return "", "", httpkit.Reply{}, err
 		}
 		if _, err := tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.Issuer, verified.subject, verified.email, verified.roleClaims); err != nil {

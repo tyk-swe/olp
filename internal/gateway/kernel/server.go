@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -290,7 +290,7 @@ func (r *request) accountingID() string {
 		return r.id
 	}
 	if r.durableID == "" {
-		r.durableID = uuid.Must(uuid.NewV7()).String()
+		r.durableID = ids.New()
 	}
 	return r.durableID
 }
@@ -301,7 +301,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	id := r.Header.Get("X-Request-Id")
 	minted := !requestIDPattern.MatchString(id)
 	if minted {
-		id = uuid.Must(uuid.NewV7()).String()
+		id = ids.New()
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)

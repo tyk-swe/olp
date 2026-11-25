@@ -7,10 +7,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/debits"
@@ -27,14 +27,6 @@ type DurableLedger struct {
 
 func NewDurableLedger(pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer, auth *secrets.AuthKey) *DurableLedger {
 	return &DurableLedger{pool: pool, store: store, syncer: syncer, auth: auth}
-}
-
-func newID() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", err
-	}
-	return id.String(), nil
 }
 
 func (l *DurableLedger) currency(ctx context.Context) (string, error) {
@@ -59,21 +51,13 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if in.UnitPrice != nil {
 		bound = *in.UnitPrice
 	}
-	ids := make([]string, 5)
-	for i := range ids {
-		id, err := newID()
-		if err != nil {
-			return ReserveResult{}, err
-		}
-		ids[i] = id
-	}
 	currency, err := l.currency(ctx)
 	if err != nil || currency == "" {
 		return ReserveResult{}, debits.ErrAuthority
 	}
 	reservation := &Reservation{
 		Approval: in.Approval, Authority: in.Authority,
-		DispatchID: ids[0], ClaimID: ids[1], RunID: ids[2], StepID: ids[3], AttemptID: ids[4],
+		DispatchID: ids.New(), ClaimID: ids.New(), RunID: ids.New(), StepID: ids.New(), AttemptID: ids.New(),
 		APIKeyID: in.Authority.ID, ProjectID: *in.Authority.ProjectID,
 		ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
 		ToolAlias: in.ToolAlias, InputDigest: in.InputDigest, CallDigest: in.CallDigest,
@@ -81,7 +65,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		UnitPrice: ptr.Clone(in.UnitPrice), Currency: currency,
 	}
 	if in.RunID != "" {
-		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {
+		if !ids.Canonical(in.RunID) || in.Ordinal < 0 {
 			return ReserveResult{}, debits.ErrAuthority
 		}
 		reservation.RunID = in.RunID

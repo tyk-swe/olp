@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -39,7 +39,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		return Published{}, err
 	}
 	now := time.Now().UTC()
-	snapshot.Generation = routing.Generation{ID: uuid.Must(uuid.NewV7()).String(), Ordinal: sequence, ActivatedAt: now}
+	snapshot.Generation = routing.Generation{ID: ids.New(), Ordinal: sequence, ActivatedAt: now}
 	if err = snapshot.Compile(); err != nil {
 		return Published{}, fmt.Errorf("release rejected: %w", err)
 	}

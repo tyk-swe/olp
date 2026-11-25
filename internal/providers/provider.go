@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -87,14 +88,14 @@ func visibleProvider(ctx context.Context, q database.Queryer, p authz.Principal,
 }
 
 func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := httpkit.NewID()
+	etag := ids.New()
 	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
 	return etag, err
 }
 
 func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := httpkit.NewID()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, httpkit.NewID())
+	etag := ids.New()
+	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, ids.New())
 	return etag, err
 }
 

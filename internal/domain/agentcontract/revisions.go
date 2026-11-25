@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/prompts"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
@@ -48,7 +49,7 @@ func ValidateRevisions(values []Revision) error {
 	seen := map[string]bool{}
 	current := map[string]bool{}
 	for _, v := range values {
-		if !validID(v.ID) || !validID(v.PublicationID) || seen[v.ID] || v.ProjectID != v.Definition.ProjectID || v.Digest != DraftDigest(v.Definition) {
+		if !ids.Canonical(v.ID) || !ids.Canonical(v.PublicationID) || seen[v.ID] || v.ProjectID != v.Definition.ProjectID || v.Digest != DraftDigest(v.Definition) {
 			return fmt.Errorf("invalid published agent revision")
 		}
 		seen[v.ID] = true

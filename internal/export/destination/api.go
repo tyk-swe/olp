@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -149,7 +150,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if count >= maxSinks {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", fmt.Sprintf("This installation already has %d export sinks.", maxSinks))
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if _, err := tx.Exec(ctx, createSinkSQL, id, name, projectID, input.Type, input.Destination, input.Streams, input.Format, filter, settings, enabled, etag, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -227,7 +228,7 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err := tx.Exec(ctx, updateSinkSQL, current.ID, name, destination, filter, enabled, etag, settings); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -492,7 +493,7 @@ func (a *API) storeCredential(ctx context.Context, tx pgx.Tx, raw json.RawMessag
 	if !present(raw) {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	return &id, a.server.Keys.Store(ctx, tx, a.server.Installation, id, secrets.SinkCredential, raw, nil)
 }
 

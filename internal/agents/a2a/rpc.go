@@ -11,10 +11,10 @@ import (
 	"net/http"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -150,7 +150,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func releaseAffinity(snapshot *release.Release) string {
-	if id, err := uuid.Parse(snapshot.ID); err == nil && id != uuid.Nil && id.String() == snapshot.ID {
+	if ids.Canonical(snapshot.ID) {
 		return snapshot.ID
 	}
 	return snapshot.Snapshot().Generation().ID

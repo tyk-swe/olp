@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -71,26 +72,26 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d D
 }
 
 func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Definition, d Draft) (Saved, int64, error) {
-	saved := Saved{ID: httpkit.NewID(), RevisionID: httpkit.NewID()}
+	saved := Saved{ID: ids.New(), RevisionID: ids.New()}
 	if current == nil {
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrails(id,project_id,name,type,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.ID, guardrails.ProjectPointer(d.project), d.name, d.kind, saved.RevisionID, httpkit.NewID(), actor)
+		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrails(id,project_id,name,type,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", saved.ID, guardrails.ProjectPointer(d.project), d.name, d.kind, saved.RevisionID, ids.New(), actor)
 		return saved, 1, err
 	}
 	if current.ProjectID != d.project || current.Type != d.kind {
 		return Saved{}, 0, httpkit.Invalid("guardrail", "The owning boundary and type are immutable.")
 	}
 	saved.ID = current.ID
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, httpkit.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, ids.New())
 	return saved, current.Revision + 1, err
 }
 
 func retire(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET retired_at=now(),etag=$2 WHERE id=$1", id, ids.New())
 	return err
 }
 
 func Activate(ctx context.Context, tx pgx.Tx, actor, id, revisionID string) error {
-	tag, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_revisions WHERE id=$2 AND guardrail_id=$1)", id, revisionID, httpkit.NewID())
+	tag, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_revisions WHERE id=$2 AND guardrail_id=$1)", id, revisionID, ids.New())
 	if err != nil {
 		return err
 	}

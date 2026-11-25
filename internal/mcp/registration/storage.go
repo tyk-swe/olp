@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -79,10 +80,10 @@ func prepareRevision(current *Definition, candidate Definition) (Definition, err
 		if current != nil {
 			return current.ID, current.Revision + 1
 		}
-		return httpkit.NewID(), 1
+		return ids.New(), 1
 	}()
 	return Definition{
-		ID: id, ETag: httpkit.NewID(), RevisionID: httpkit.NewID(), Revision: revision,
+		ID: id, ETag: ids.New(), RevisionID: ids.New(), Revision: revision,
 		ProjectID: candidate.ProjectID, Name: candidate.Name, Endpoint: candidate.Endpoint, Transport: candidate.Transport,
 		Enabled: candidate.Enabled, HasCredential: candidate.CredentialID != nil, CredentialID: candidate.CredentialID,
 		Catalog: candidate.Catalog, CertifiedAt: candidate.CertifiedAt, RetiredAt: candidate.RetiredAt,

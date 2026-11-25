@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
@@ -317,7 +318,7 @@ func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -354,7 +355,7 @@ func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if err = StageDraft(r.Context(), tx, ExistingDraft{ID: id}, etag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

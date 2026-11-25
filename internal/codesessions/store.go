@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -342,7 +343,7 @@ func (s *Store) RecordRefusal(ctx context.Context, route codemode.Route, keyID, 
 	if !codeRefusalReason.MatchString(code) {
 		return codemode.Refuse(400, "code_refusal_invalid")
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, httpkit.NewID(), route.ProjectID, route.ID, keyID, code, digest)
+	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, ids.New(), route.ProjectID, route.ID, keyID, code, digest)
 	return err
 }
 
@@ -364,7 +365,7 @@ func commitCodeAdmission(ctx context.Context, tx pgx.Tx, in Admission, out Permi
 		return out, tx.Commit(ctx)
 	}
 	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
-	out.Attempt = codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
+	out.Attempt = codemode.Attempt{ID: ids.New(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
 			return out, err

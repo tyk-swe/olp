@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -181,7 +182,7 @@ func (a *API) run(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	return access.Mutate(a.server, r, nil, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ provider) (httpkit.Reply, access.Event, error) {
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if err := scheduleNow(r.Context(), tx, id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

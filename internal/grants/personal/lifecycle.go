@@ -12,6 +12,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -155,7 +156,7 @@ func (s *Store) saveDevice(ctx context.Context, item flowRecord, deviceCode stri
 		return encodeErr
 	}
 	defer clear(session)
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.keys.Store(ctx, tx, s.installation, id, secrets.MCPGrantEnrollment, session, &expires); err != nil {
 		return err
 	}
@@ -203,7 +204,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 	if subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
 		return Authorization{}, httpkit.Invalid("state", "This callback belongs to another authorization.")
 	}
-	attempt := httpkit.NewID()
+	attempt := ids.New()
 	tag, claimErr := tx.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET exchange_attempt_id=$2 WHERE id=$1 AND exchange_attempt_id IS NULL AND outcome IS NULL`, id, attempt)
 	if claimErr != nil {
 		return Authorization{}, claimErr
@@ -257,7 +258,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	if tag.RowsAffected() != 1 {
 		return ErrRequired
 	}
-	accessID := httpkit.NewID()
+	accessID := ids.New()
 	if err := s.keys.Store(record, tx, s.installation, accessID, item.Binding.accessPurpose(), []byte(token.AccessToken), nil); err != nil {
 		return err
 	}
@@ -265,7 +266,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	if refreshErr != nil {
 		return refreshErr
 	}
-	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,agent_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, httpkit.NewID(), item.ID, item.Binding.ServerID, item.Binding.AgentID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
+	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,agent_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, ids.New(), item.ID, item.Binding.ServerID, item.Binding.AgentID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
 	if insertErr != nil {
 		return insertErr
 	}
@@ -284,7 +285,7 @@ func (s *Store) storeRefresh(ctx context.Context, tx pgx.Tx, binding Binding, to
 	if token == "" {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.keys.Store(ctx, tx, s.installation, id, binding.refreshPurpose(), []byte(token), nil); err != nil {
 		return nil, err
 	}
@@ -300,7 +301,7 @@ func (s *Store) sealFlow(ctx context.Context, tx pgx.Tx, item flowRecord, flow F
 		return nil, err
 	}
 	defer clear(encoded)
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.keys.Store(ctx, tx, s.installation, id, secrets.MCPGrantEnrollment, encoded, &item.ExpiresAt); err != nil {
 		return nil, err
 	}

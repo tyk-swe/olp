@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 func provisioningID(r *http.Request, name, field string, max int) (string, error) {
@@ -77,15 +78,15 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "email_unavailable", "Another account already uses this email address.")
 		}
 		if !mapped {
-			userID = httpkit.NewID()
-			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,etag,role_management) VALUES($1,$2,$3,$4,$5,$6,'provisioned')", userID, address, strings.TrimSpace(input.DisplayName), input.Role, *input.Active, httpkit.NewID()); err != nil {
+			userID = ids.New()
+			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,etag,role_management) VALUES($1,$2,$3,$4,$5,$6,'provisioned')", userID, address, strings.TrimSpace(input.DisplayName), input.Role, *input.Active, ids.New()); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provisioned_users(source,external_id,user_id) VALUES($1,$2,$3)", source, external, userID); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 		} else {
-			if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$1,display_name=$2,role=$3,active=$4,etag=$5,updated_at=now() WHERE id=$6", address, strings.TrimSpace(input.DisplayName), input.Role, *input.Active, httpkit.NewID(), userID); err != nil {
+			if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$1,display_name=$2,role=$3,active=$4,etag=$5,updated_at=now() WHERE id=$6", address, strings.TrimSpace(input.DisplayName), input.Role, *input.Active, ids.New(), userID); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if _, err = tx.Exec(r.Context(), "UPDATE olp.provisioned_users SET updated_at=now() WHERE source=$1 AND external_id=$2", source, external); err != nil {
@@ -128,7 +129,7 @@ func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Re
 		if management != "provisioned" {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provisioning_ownership_changed", "This identity is now managed locally and cannot be reconciled.")
 		}
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$1,updated_at=now() WHERE id=$2", httpkit.NewID(), userID); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$1,updated_at=now() WHERE id=$2", ids.New(), userID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {

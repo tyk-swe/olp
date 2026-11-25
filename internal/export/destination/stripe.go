@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -77,7 +77,7 @@ func parseStripeMeter(_ Type, settings json.RawMessage) (Spec, error) {
 		return nil, httpkit.Invalid("settings.customers", "customers must map from 1 to 1000 projects")
 	}
 	for project, customer := range spec.Customers {
-		if parsed, err := uuid.Parse(project); err != nil || parsed.String() != project {
+		if !ids.CanonicalOrNil(project) {
 			return nil, httpkit.Invalid("settings.customers", "customers keys must be canonical project UUIDs")
 		}
 		if !stripeCustomerID.MatchString(customer) {

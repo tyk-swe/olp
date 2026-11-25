@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -94,7 +95,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 		if current.ETag != c.ETag || !current.Enabled {
 			return httpkit.Reply{}, false, httpkit.Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
 		}
-		flow := samlFlow{ID: httpkit.NewID(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.ResourceID, RequestID: request.ID, ETag: c.ETag, Expires: time.Now().Add(samlFlowTTL)}
+		flow := samlFlow{ID: ids.New(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.ResourceID, RequestID: request.ID, ETag: c.ETag, Expires: time.Now().Add(samlFlowTTL)}
 		if kind != "login" {
 			p, e := s.access.Reauthorize(r, tx)
 			if e != nil {
@@ -368,8 +369,8 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 		if role == "" {
 			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
 		}
-		userID = httpkit.NewID()
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, httpkit.NewID()); err != nil {
+		userID = ids.New()
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, ids.New()); err != nil {
 			return "", "", authz.Principal{}, err
 		}
 	}
@@ -378,7 +379,7 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 		return "", "", authz.Principal{}, err
 	}
 	if identityID == "" {
-		identityID = httpkit.NewID()
+		identityID = ids.New()
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, userID, c.EntityID, flow.Subject, flow.Facts.Email, facts); err != nil {
 			return "", "", authz.Principal{}, err
 		}
@@ -400,7 +401,7 @@ func (s *Server) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p 
 		return response, nil
 	}
 	if flow.Kind == "link" {
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, httpkit.NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, ids.New()); err != nil {
 			return httpkit.Reply{}, err
 		}
 		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {

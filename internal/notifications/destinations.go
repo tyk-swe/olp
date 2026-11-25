@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -332,7 +333,7 @@ func (s *Server) storeSecret(ctx context.Context, tx pgx.Tx, secret []byte) (*st
 	if secret == nil {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.NotificationSecret, secret, nil); err != nil {
 		return nil, err
 	}

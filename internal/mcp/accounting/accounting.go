@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -160,9 +159,4 @@ func parseEvidenceDigest(digest string) ([]byte, bool) {
 		return nil, false
 	}
 	return decoded, true
-}
-
-func canonicalUUID(raw string) bool {
-	id, err := uuid.Parse(raw)
-	return err == nil && id != uuid.Nil && id.String() == raw
 }

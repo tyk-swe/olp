@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -182,7 +183,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 	if err != nil {
 		return activatedProvider{}, err
 	}
-	revisionID, etag := httpkit.NewID(), httpkit.NewID()
+	revisionID, etag := ids.New(), ids.New()
 	var revision int
 	if err = tx.QueryRow(ctx, "INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) VALUES($1,$2,(SELECT coalesce(max(revision),0)+1 FROM olp.provider_revisions WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9) RETURNING revision", revisionID, current.ID, current.Name, configurationJSON, modelsJSON, slotsJSON, credentialVersion, current.ETag, p.UserID()).Scan(&revision); err != nil {
 		return activatedProvider{}, err
@@ -204,7 +205,7 @@ func (s *Server) disable(ctx context.Context, tx pgx.Tx, p authz.Principal, curr
 	if current.State != stateActive {
 		return activatedProvider{}, httpkit.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
 		return activatedProvider{}, err
 	}

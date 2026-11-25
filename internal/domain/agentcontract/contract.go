@@ -13,8 +13,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/google/uuid"
 	grantconfig "github.com/tyk-swe/olp/internal/domain/grantconfig"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/prompts"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
@@ -66,17 +66,12 @@ type Publication struct {
 
 var hexDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-func validID(raw string) bool {
-	id, err := uuid.Parse(raw)
-	return err == nil && id != uuid.Nil && id.String() == raw
-}
-
 func ToolAlias(server, name string) string {
 	return toolidentity.Alias(server, name)
 }
 
 func (d Draft) Validate(kind string) error {
-	if !validID(d.ProjectID) {
+	if !ids.Canonical(d.ProjectID) {
 		return invalid("project_id", "Choose an owning project.")
 	}
 	if err := validName(d.Name); err != nil {
@@ -101,7 +96,7 @@ func (d Draft) Validate(kind string) error {
 			if t.Classification != "" && t.Classification != "read_only" && t.Classification != "approval_required" {
 				return invalid("toolset", "Use a supported operator classification for each tool.")
 			}
-			if !validID(t.ServerID) || !validID(t.RevisionID) || !toolidentity.ValidCatalogDigest(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
+			if !ids.Canonical(t.ServerID) || !ids.Canonical(t.RevisionID) || !toolidentity.ValidCatalogDigest(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
 				return invalid("toolset", "Use unique aliases and exact certified server revisions.")
 			}
 			seen[t.Alias] = true
@@ -111,7 +106,7 @@ func (d Draft) Validate(kind string) error {
 			return invalid("agent", "Supply an agent definition.")
 		}
 		a := d.Agent
-		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !validID(a.PricingRevisionID) || !validCost(a.MaxCost) {
+		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !ids.Canonical(a.PricingRevisionID) || !validCost(a.MaxCost) {
 			return invalid("agent", "Supply pinned protocol, card, pricing and a finite positive cost bound.")
 		}
 		if a.MessagePrice != "" && (!pricingpolicy.ValidAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
@@ -126,7 +121,7 @@ func (d Draft) Validate(kind string) error {
 		if a.TaskDeadlineSeconds != nil && (*a.TaskDeadlineSeconds < 1 || *a.TaskDeadlineSeconds > 3600) {
 			return invalid("task_deadline_seconds", "Use a task deadline between one second and one hour.")
 		}
-		if a.CredentialID != nil && !validID(*a.CredentialID) {
+		if a.CredentialID != nil && !ids.Canonical(*a.CredentialID) {
 			return invalid("credential_id", "Use an agent credential reference.")
 		}
 		if a.OAuth != nil && (!a.OAuth.Valid() || (a.OAuth.EntraOBO == nil && a.CredentialID != nil)) {
@@ -138,13 +133,13 @@ func (d Draft) Validate(kind string) error {
 				return invalid("oauth", "Supply the exact registered workload issuer URL.")
 			}
 		}
-		for _, ids := range [][]string{a.ToolsetRevisions, a.RouteRevisions} {
-			if len(ids) > 100 {
+		for _, revisions := range [][]string{a.ToolsetRevisions, a.RouteRevisions} {
+			if len(revisions) > 100 {
 				return invalid("agent", "Use at most 100 revision references.")
 			}
 			seen := map[string]bool{}
-			for _, id := range ids {
-				if !validID(id) || seen[id] {
+			for _, id := range revisions {
+				if !ids.Canonical(id) || seen[id] {
 					return invalid("agent", "Use unique immutable revision UUIDs.")
 				}
 				seen[id] = true

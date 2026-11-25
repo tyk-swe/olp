@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -61,7 +61,7 @@ func (l *Limiter) holdCost(ctx context.Context, budget *limits.CostBudget, ttl t
 }
 
 func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error) {
-	id := uuid.Must(uuid.NewV7()).String()
+	id := ids.New()
 	reservation := scripts.RateReservation{
 		Lookup: r.Lookup, LeaseID: id, TTL: r.LeaseTTL,
 		Tokens: r.Rate.Tokens, InputTokens: r.Rate.InputTokens, OutputTokens: r.Rate.OutputTokens,

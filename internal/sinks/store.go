@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -87,7 +88,7 @@ func (c Credentials) store(ctx context.Context, tx pgx.Tx, secret *string) (*str
 	if secret == nil {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	material := []byte(*secret)
 	defer clear(material)
 	if err := c.Keys.Store(ctx, tx, c.Installation, id, secrets.SinkCredential, material, nil); err != nil {

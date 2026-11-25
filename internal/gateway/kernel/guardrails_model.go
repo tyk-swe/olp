@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -108,7 +108,7 @@ func (s *Server) admitGuardrailEvaluation(r *http.Request) error {
 }
 
 func (s *Server) evaluatePinnedGuardrails(r *http.Request, member Member, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: member.UserID, family: wire.Chat, operationOverride: "guardrail"}
+	x := &Call{request: request{id: ids.New(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: member.UserID, family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = member.Admit
 	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
 		return pinned.Compile()
@@ -219,7 +219,7 @@ func (s *Server) newEvaluatorCall(parent *Call, d guardrails.Revision, route *ro
 		origin = usage.OriginPlayground
 	}
 	return &Call{
-		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
+		request:              request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
 		actor:                parent.actor,
 		keyID:                parent.keyID,
 		budgetGroupID:        parent.budgetGroupID,

@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -94,11 +95,11 @@ func resolveAccount(ctx context.Context, q database.Queryer, a Account, director
 	if !found {
 		return resolved[codeaccounts.Input]{}, httpkit.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
 	}
-	ids, err := codeaccounts.AccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
+	existing, err := codeaccounts.AccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
 	if err != nil {
 		return resolved[codeaccounts.Input]{}, err
 	}
-	to, err := lookup(httpkit.NewID(), ids)
+	to, err := lookup(ids.New(), existing)
 	return resolved[codeaccounts.Input]{ref: a.ID, to: to, identity: promotion.TupleKey(projectID, granted.ProviderID, granted.Principal), input: a.input(projectID, granted.ProviderID, credential)}, err
 }
 
@@ -107,7 +108,7 @@ func accountChange(ctx context.Context, q database.Queryer, a resolved[codeaccou
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeAccount, Key: a.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
-			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, httpkit.NewID(), a.input, a.to.existing)
+			_, err := codeaccounts.Save(ctx, tx, p, a.to.id, ids.New(), a.input, a.to.existing)
 			return err
 		},
 	}, err

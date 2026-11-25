@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/release"
 
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
@@ -286,8 +287,8 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id s
 	if err != nil {
 		return nil, err
 	}
-	route.RevisionID = httpkit.NewID()
-	route.ETag = httpkit.NewID()
+	route.RevisionID = ids.New()
+	route.ETag = ids.New()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	route.PublishedAt = &now
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {

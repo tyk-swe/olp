@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -80,10 +81,10 @@ func loadToolCall(ctx context.Context, q database.Queryer, id string) (ToolCall,
 }
 
 func validateToolCallFilters(apiKeyID, toolsetID string) error {
-	if apiKeyID != "" && !canonicalUUID(apiKeyID) {
+	if apiKeyID != "" && !ids.Canonical(apiKeyID) {
 		return httpkit.Invalid("api_key_id", "Use a canonical UUID.")
 	}
-	if toolsetID != "" && !canonicalUUID(toolsetID) {
+	if toolsetID != "" && !ids.Canonical(toolsetID) {
 		return httpkit.Invalid("toolset_id", "Use a canonical UUID.")
 	}
 	return nil
@@ -263,7 +264,7 @@ func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		return httpkit.Reply{}, err
 	}
 	if project != "" {
-		if !canonicalUUID(project) {
+		if !ids.Canonical(project) {
 			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
 		}
 		if err := p.Project(&project, authz.View); err != nil {

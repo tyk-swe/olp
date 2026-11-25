@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
@@ -23,7 +24,7 @@ func NewWorkflowStore(pool *pgxpool.Pool, auth *secrets.AuthKey, keys *secrets.K
 }
 
 func (s *WorkflowStore) Start(ctx context.Context, authority keyauthority.Authority, routeID, revisionID string) (string, error) {
-	if s == nil || s.pool == nil || s.auth == nil || authority.ProjectID == nil || !validApprovalID(routeID) || !validApprovalID(revisionID) {
+	if s == nil || s.pool == nil || s.auth == nil || authority.ProjectID == nil || !ids.Canonical(routeID) || !ids.Canonical(revisionID) {
 		return "", debits.ErrAuthority
 	}
 	id, err := uuid.NewV7()

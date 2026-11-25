@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -197,7 +198,7 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			}
 			in := t.input(projectID)
 			if !found {
-				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
+				return routes.WriteTemplate(ctx, tx, ids.New(), ids.New(), p.UserID(), &in, false)
 			}
 			if ptr.Value(stored.ProjectID) != ptr.Value(projectID) {
 				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
@@ -206,7 +207,7 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			if err != nil || same {
 				return err
 			}
-			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
+			return routes.WriteTemplate(ctx, tx, stored.ID, ids.New(), p.UserID(), &in, true)
 		})
 	}
 }

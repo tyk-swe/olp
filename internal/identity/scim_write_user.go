@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
@@ -173,7 +173,7 @@ func provisionSCIMUser(r *http.Request, tx pgx.Tx, id string, user parsedSCIMUse
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return "", e
 	}
-	if _, e = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,access_scope,role_management,etag) VALUES($1,$2,$3,$4,$5,$6,'provisioned',$7)", id, user.address, user.display, user.extension["role"], user.active, user.extension["accessScope"], httpkit.NewID()); e != nil {
+	if _, e = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,role,active,access_scope,role_management,etag) VALUES($1,$2,$3,$4,$5,$6,'provisioned',$7)", id, user.address, user.display, user.extension["role"], user.active, user.extension["accessScope"], ids.New()); e != nil {
 		return "", e
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO olp.provisioned_users(source,external_id,user_id) VALUES('scim',$1::uuid::text,$1::uuid)", id); e != nil {
@@ -196,7 +196,7 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.scim_users SET deleted_at=now() WHERE user_id=$1", id); err != nil {
 			return "", err
 		}
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$2,updated_at=now() WHERE id=$1", id, httpkit.NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET active=false,etag=$2,updated_at=now() WHERE id=$1", id, ids.New()); err != nil {
 			return "", err
 		}
 		_, err := tx.Exec(r.Context(), "DELETE FROM olp.scim_group_members WHERE user_id=$1", id)
@@ -216,6 +216,6 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_users(user_id,document) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET document=excluded.document,deleted_at=NULL", id, data); err != nil {
 		return "", err
 	}
-	_, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$2,display_name=$3,active=$4,updated_at=now(),etag=$5 WHERE id=$1", id, user.address, user.display, user.active, httpkit.NewID())
+	_, err = tx.Exec(r.Context(), "UPDATE olp.users SET email=$2,display_name=$3,active=$4,updated_at=now(),etag=$5 WHERE id=$1", id, user.address, user.display, user.active, ids.New())
 	return id, err
 }

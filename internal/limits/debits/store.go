@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
@@ -179,7 +180,7 @@ func (s *Store) PreviousRecovery(ctx context.Context, runID, keyID string, ids [
 }
 
 func (s *Store) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDispatch time.Duration) (bool, error) {
-	if !canonicalID(apiKeyID) {
+	if !ids.Canonical(apiKeyID) {
 		return false, ErrConflict
 	}
 	window := maxDispatch

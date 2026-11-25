@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -97,7 +98,7 @@ func (s *Server) saveCredential(ctx context.Context, tx pgx.Tx, in Input, curren
 	if len(material) == 0 {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.MCPCredential, material, nil); err != nil {
 		return nil, err
 	}
@@ -123,11 +124,11 @@ func definitionFromInput(in Input, current *Definition, catalog *upstream.Catalo
 
 func (s *Server) saveChange(ctx context.Context, tx pgx.Tx, actor string, in Input, current *Definition, catalog *upstream.Catalog, material []byte, retire, limitsOnly bool) (registrationChange, error) {
 	if limitsOnly {
-		change := registrationChange{id: current.ID, etag: httpkit.NewID(), action: "mcp_server.update"}
+		change := registrationChange{id: current.ID, etag: ids.New(), action: "mcp_server.update"}
 		return change, UpdateLimits(ctx, tx, change.id, inputLimits(in), change.etag)
 	}
 	if retire {
-		change := registrationChange{id: current.ID, etag: httpkit.NewID(), action: "mcp_server.retire"}
+		change := registrationChange{id: current.ID, etag: ids.New(), action: "mcp_server.retire"}
 		_, err := tx.Exec(ctx, "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,delegation_key_id=NULL,entra_client_secret_id=NULL,etag=$2 WHERE id=$1", change.id, change.etag)
 		return change, err
 	}

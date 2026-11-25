@@ -1,9 +1,11 @@
 package authz
 
 import (
+	"net/http"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 // Need is how a principal uses a project-bound resource.
@@ -21,6 +23,20 @@ const (
 // outside p's scope answers 404 exactly like one that does not exist, so no
 // response reveals another project; a visible resource p may not change
 // answers 403.
+func (p Principal) ProjectFilter(r *http.Request) (string, error) {
+	project := r.URL.Query().Get("project_id")
+	if project == "" {
+		return "", nil
+	}
+	if !ids.Canonical(project) {
+		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
+	}
+	if err := p.Project(&project, View); err != nil {
+		return "", err
+	}
+	return project, nil
+}
+
 func (p Principal) Project(projectID *string, need Need) error {
 	if p.AllProjects {
 		return nil

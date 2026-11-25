@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -179,11 +180,11 @@ func resolveRoute(ctx context.Context, q database.Queryer, r Route, in scope) (r
 	if taken {
 		return resolved[routeInput]{}, httpkit.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
 	}
-	ids, err := routes.CodeRouteIDs(ctx, q, r.Slug, projectID)
+	existing, err := routes.CodeRouteIDs(ctx, q, r.Slug, projectID)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
-	to, err := lookup(httpkit.NewID(), ids)
+	to, err := lookup(ids.New(), existing)
 	if err != nil {
 		return resolved[routeInput]{}, err
 	}
@@ -231,7 +232,7 @@ func routeAction(ctx context.Context, q database.Queryer, r resolved[routeInput]
 func saveRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, r resolved[routeInput], republished bool) error {
 	published := r.input.published
 	if republished && published != nil {
-		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, httpkit.NewID(), published.Policy, r.to.existing)
+		saved, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, ids.New(), published.Policy, r.to.existing)
 		if err != nil {
 			return err
 		}
@@ -239,7 +240,7 @@ func saveRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, r resolved[rou
 			return err
 		}
 	}
-	if _, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, httpkit.NewID(), r.input.draft, r.to.existing || republished && published != nil); err != nil {
+	if _, err := routes.SaveCodeRoute(ctx, tx, p, r.to.id, ids.New(), r.input.draft, r.to.existing || republished && published != nil); err != nil {
 		return err
 	}
 	if republished && published == nil {
