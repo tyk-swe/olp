@@ -7,7 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
-	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 type durableContractConfig struct {
@@ -71,10 +70,7 @@ func (t *DurableTemplate) BindBatch(source oif.Document, route, localFile, upstr
 	}
 	endpoint, ok := source.Root().Lookup("endpoint")
 	path, valid := endpoint.Text()
-	classificationPath := path
-	if t.provider.BatchesByDeployment() {
-		classificationPath = wire.CanonicalBatchEndpoint(path)
-	}
+	classificationPath := t.provider.BatchLineEndpoint(path)
 	if !ok || !valid || !slices.Contains([]string{"/v1/chat/completions", "/v1/responses", "/v1/embeddings"}, classificationPath) {
 		return BoundDurableBatch{}, durableRefusal("/endpoint", "native_batch_endpoint", "This batch endpoint has no qualified strict item contract.")
 	}

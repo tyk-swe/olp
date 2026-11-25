@@ -59,7 +59,7 @@ func mediaByCall(kind connectors.Kind, vendor, operation string) bool {
 
 func (p *Prober) certifyMediaCall(ctx context.Context, t Target, model, operation string) error {
 	transport := t.Connection.Transport()
-	if t.Connection.Document().Kind == connectors.KindAzureOpenAI && transport.Hosting() == "azure-v1" {
+	if t.Connection.Document().Kind == connectors.KindAzureOpenAI && !transport.AddressesDeployments() {
 		return &Failure{Reason: CapabilityUnavailable, Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
 	probeRequest, failure := mediaProbeRequest(t.Connection.Document().Kind, operation)

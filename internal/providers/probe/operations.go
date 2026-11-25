@@ -70,7 +70,7 @@ func DefaultTuple(transport connectors.Config) connection.Capability {
 		}
 	}
 	operation := Operation(transport)
-	if transport.Kind == connectors.KindVertexAI && transport.Hosting() != "vertex-anthropic" {
+	if transport.Kind == connectors.KindVertexAI && !transport.EnvelopsMessages() {
 		operation = "token_count"
 	}
 	tuple := connection.Capability{Operation: operation, Surface: "openai", Mode: "unary"}

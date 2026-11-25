@@ -62,6 +62,8 @@ func envelopsMessages(hosting string) bool {
 
 func (c Config) EnvelopsMessages() bool { return envelopsMessages(c.Hosting()) }
 
+func (c Config) AddressesDeployments() bool { return c.traits().deployment }
+
 func (p Profile) HostsRealtime(mode string) bool {
 	return slices.Contains(hostings[p.Hosting].openAIRealtime, mode)
 }
