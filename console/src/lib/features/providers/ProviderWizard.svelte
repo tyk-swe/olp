@@ -51,15 +51,15 @@
       Your role can view providers but not connect or activate them.
     </ReadOnlyNote>
   {/if}
-  {#if wizard.errorMessage}<div
+  {#if wizard.action.error}<div
       class="inline-problem"
       role="alert"
       tabindex="-1"
       data-error-summary
       use:focusErrorSummary
     >
-      {wizard.errorMessage}
-      <ProviderValidationIssues issues={wizard.validationIssues} />
+      {wizard.action.error}
+      <ProviderValidationIssues issues={wizard.action.issues} />
     </div>{/if}
   {#if wizard.notice}<Callout tone="success">
       {wizard.notice}
@@ -95,59 +95,60 @@
           selectedSpec={wizard.selectedSpec}
           busy={wizard.busy}
           lockKind={Boolean(wizard.wizardProvider)}
-          issues={wizard.validationIssues}
-          grantEnrolled={wizard.grantEnrolled}
+          issues={wizard.action.issues}
+          grantEnrolled={wizard.connection.grantEnrolled}
           onSubmit={async (event) => {
             const root = (event.currentTarget as HTMLFormElement).closest(
               'main'
             );
-            await wizard.createDraft(event);
+            await wizard.connection.save(event);
             if (root) await focusFormError(root);
           }}
         />
-        {#if wizard.grantEnrollment}<GrantEnrollmentPanel
+        {#if wizard.connection.grant.enrollment}<GrantEnrollmentPanel
             profileId={wizard.wizardProvider?.configuration.profile_id}
-            enrollment={wizard.grantEnrollment}
-            bind:input={wizard.grantInput}
+            enrollment={wizard.connection.grant.enrollment}
+            bind:input={wizard.connection.grant.input}
             busy={wizard.busy}
-            onContinue={wizard.continueGrantEnrollment}
-            onPoll={wizard.pollGrantEnrollment}
-            onCancel={wizard.cancelGrantEnrollment}
+            onContinue={() => wizard.connection.grant.continue()}
+            onPoll={() => wizard.connection.grant.poll()}
+            onCancel={() => wizard.connection.grant.cancel()}
           />{/if}
       {/if}
     {:else if wizard.wizardStep === 2 && wizard.wizardProvider}
       <ProviderDiscoveryStage
         provider={wizard.wizardProvider}
         probe={wizard.probe}
-        bind:manualModelNames={wizard.manualModelNames}
+        bind:manualModelNames={wizard.models.manualModelNames}
         busy={wizard.busy}
-        onDiscover={wizard.discoverWizardProvider}
-        onDeclareModels={wizard.declareWizardModels}
+        onDiscover={wizard.models.discover}
+        onDeclareModels={wizard.models.declare}
       />
       <ProviderBulkModels
         provider={wizard.wizardProvider}
         canManage={wizard.canManage}
         onChanged={async () => {
-          await wizard.refetchWizardModels();
+          await wizard.models.refetch();
         }}
       />
       <section class="card stage" aria-labelledby="capability-heading">
         <ProviderCapabilityReviewStage
           provider={wizard.wizardProvider}
-          models={wizard.wizardModels.data?.items ?? []}
-          modelsPending={wizard.wizardModels.isPending}
-          modelsError={wizard.wizardModels.isError}
-          capabilityOptions={wizard.capabilityOptions.data?.capabilities ?? []}
-          optionsPending={wizard.capabilityOptions.isPending}
-          optionsError={wizard.capabilityOptions.isError}
+          models={wizard.models.page.data?.items ?? []}
+          modelsPending={wizard.models.page.isPending}
+          modelsError={wizard.models.page.isError}
+          capabilityOptions={wizard.models.capabilityOptions.data
+            ?.capabilities ?? []}
+          optionsPending={wizard.models.capabilityOptions.isPending}
+          optionsError={wizard.models.capabilityOptions.isError}
           busy={wizard.busy}
-          reloadVersion={wizard.wizardModelReloadVersion}
-          certificationResults={wizard.certificationResults}
-          pagination={wizard.wizardModelPagination}
-          nextCursor={wizard.wizardModels.data?.nextCursor}
-          onSave={wizard.reviewWizardModel}
-          onCertify={wizard.certifyWizardModel}
-          onRetryModels={() => wizard.refetchWizardModels()}
+          reloadVersion={wizard.models.reloadVersion}
+          certificationResults={wizard.models.certificationResults}
+          pagination={wizard.models.pagination}
+          nextCursor={wizard.models.page.data?.nextCursor}
+          onSave={wizard.models.review}
+          onCertify={wizard.models.certify}
+          onRetryModels={() => wizard.models.refetch()}
         />
       </section>
       <div class="wizard-actions">
@@ -170,8 +171,8 @@
         activated={wizard.wizardProvider.state === 'active'}
         busy={wizard.busy}
         onBack={wizard.goBack}
-        onTest={wizard.testWizardDraftForActivation}
-        onActivate={wizard.activateWizardProvider}
+        onTest={wizard.activation.test}
+        onActivate={wizard.activation.activate}
         onAddAnother={wizard.startAnother}
       />
     {/if}

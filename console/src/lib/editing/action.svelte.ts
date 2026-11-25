@@ -82,13 +82,15 @@ export function useAction(options: ActionOptions = {}) {
     },
     set error(value: string) {
       error = value;
-      issues = [];
     },
     get conflict() {
       return conflict;
     },
     get issues() {
       return issues;
+    },
+    set issues(value: FieldIssue[]) {
+      issues = value;
     },
     reset() {
       error = '';

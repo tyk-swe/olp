@@ -131,9 +131,11 @@ describe('provider wizard', () => {
     draft.useExternalCredential = true;
     draft.externalCredentialReference = '{broken';
 
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
 
-    expect(state.errorMessage).toBe(
+    expect(state.action.error).toBe(
       'Enter a JSON object with store, secret_id and immutable version.'
     );
     expect(create).not.toHaveBeenCalled();
@@ -150,7 +152,9 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
 
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
 
     expect(create).toHaveBeenCalledOnce();
     expect(probe).toHaveBeenCalledOnce();
@@ -173,15 +177,19 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
 
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    expect(state.errorMessage).toBe('Connection failed');
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
+    expect(state.action.error).toBe('Connection failed');
     expect(state.wizardStep).toBe(1);
     expect(draft.credential).toBe('');
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
 
     expect(create).toHaveBeenCalledOnce();
     expect(probe).toHaveBeenCalledTimes(2);
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.wizardStep).toBe(2);
   });
   it('retries an uncertain save with the original values and request identity', async () => {
@@ -197,15 +205,21 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
 
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    expect(state.errorMessage).toBe('Unavailable');
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
+    expect(state.action.error).toBe('Unavailable');
     draft.name = 'Edited';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    expect(state.errorMessage).toContain('Retry its original fields');
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
+    expect(state.action.error).toContain('Retry its original fields');
     expect(create).toHaveBeenCalledOnce();
 
     draft.name = 'Service';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0][0].headers.get('Idempotency-Key')).toBeTruthy();
     expect(create.mock.calls[1][0].headers.get('Idempotency-Key')).toBe(
@@ -227,10 +241,14 @@ describe('provider wizard', () => {
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'invalid';
 
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    expect(state.errorMessage).toBe('Invalid credential');
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
+    expect(state.action.error).toBe('Invalid credential');
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
 
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0][0].headers.get('Idempotency-Key')).toBeTruthy();
@@ -249,7 +267,9 @@ describe('provider wizard', () => {
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
     flushSync();
 
     state.goBack();
@@ -297,13 +317,15 @@ describe('provider wizard', () => {
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
     await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
 
-    await state.discoverWizardProvider();
-    expect(state.errorMessage).toContain('Use the manual identifier fallback');
-    state.manualModelNames = 'model-a\nmodel-b';
-    await state.declareWizardModels();
+    await state.models.discover();
+    expect(state.action.error).toContain('Use the manual identifier fallback');
+    state.models.manualModelNames = 'model-a\nmodel-b';
+    await state.models.declare();
 
     expect(discovery).toHaveBeenCalledTimes(2);
     expect(payload).toHaveBeenNthCalledWith(1, { models: [] });
@@ -313,8 +335,8 @@ describe('provider wizard', () => {
         { upstream_model: 'model-b', display_name: 'model-b' }
       ]
     });
-    expect(state.errorMessage).toBe('');
-    expect(state.manualModelNames).toBe('');
+    expect(state.action.error).toBe('');
+    expect(state.models.manualModelNames).toBe('');
     expect(state.wizardStep).toBe(2);
   });
 
@@ -337,17 +359,19 @@ describe('provider wizard', () => {
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
     await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
 
-    await state.activateWizardProvider();
-    expect(state.errorMessage).toBe('Unavailable');
+    await state.activation.activate();
+    expect(state.action.error).toBe('Unavailable');
     state.goBack();
-    expect(state.errorMessage).toContain(
+    expect(state.action.error).toContain(
       'Activation may already have committed'
     );
     expect(state.wizardStep).toBe(2);
-    await state.activateWizardProvider();
+    await state.activation.activate();
 
     expect(activate).toHaveBeenCalledTimes(2);
     const firstId = activate.mock.calls[0][0].headers.get('Idempotency-Key');
@@ -379,14 +403,16 @@ describe('provider wizard', () => {
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
-    await state.activateWizardProvider();
-    expect(state.errorMessage).toContain('Refresh unavailable');
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
+    await state.activation.activate();
+    expect(state.action.error).toContain('Refresh unavailable');
     refreshUnavailable = false;
-    await state.activateWizardProvider();
+    await state.activation.activate();
     expect(activate).toHaveBeenCalledTimes(1);
     expect(state.wizardStep).toBe(3);
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
   });
 
   async function connectedWizard(discovery: () => Promise<Response>) {
@@ -401,7 +427,9 @@ describe('provider wizard', () => {
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.credential = 'secret';
-    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await state.connection.save(
+      new SubmitEvent('submit', { cancelable: true })
+    );
     await eventually(() => expect(state.wizardProvider?.id).toBe(provider.id));
     return state;
   }
@@ -416,12 +444,12 @@ describe('provider wizard', () => {
     );
     const state = await connectedWizard(discovery);
 
-    const first = state.discoverWizardProvider();
+    const first = state.models.discover();
     await eventually(() => expect(discovery).toHaveBeenCalledOnce());
     expect(state.busy).toBe('discover');
     expect(state.notice).toBe('');
-    state.manualModelNames = 'model-a';
-    await state.declareWizardModels();
+    state.models.manualModelNames = 'model-a';
+    await state.models.declare();
     expect(discovery).toHaveBeenCalledOnce();
     answers[0].resolve(
       problem('validation_failed', 422, {
@@ -433,19 +461,19 @@ describe('provider wizard', () => {
     );
     await first;
     expect(state.busy).toBe('');
-    expect(state.errorMessage).toBe('The endpoint is not reachable');
-    expect(state.validationIssues).toEqual([
+    expect(state.action.error).toBe('The endpoint is not reachable');
+    expect(state.action.issues).toEqual([
       expect.objectContaining({ message: 'Endpoint is invalid' })
     ]);
 
-    const second = state.discoverWizardProvider();
+    const second = state.models.discover();
     await eventually(() => expect(discovery).toHaveBeenCalledTimes(2));
-    expect(state.errorMessage).toBe('');
-    expect(state.validationIssues).toEqual([]);
+    expect(state.action.error).toBe('');
+    expect(state.action.issues).toEqual([]);
     answers[1].resolve(json({ ...provider, model_count: 2 }));
     await second;
     expect(state.busy).toBe('');
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
   });
 
   it('flags a saved provider changed elsewhere without an error until it reloads', async () => {
@@ -453,9 +481,9 @@ describe('provider wizard', () => {
       problem('etag_mismatch', 412)
     );
 
-    await state.discoverWizardProvider();
+    await state.models.discover();
     expect(state.wizardConflict).toBe(true);
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.busy).toBe('');
     await state.reloadWizard();
     expect(state.wizardConflict).toBe(false);
@@ -467,7 +495,7 @@ describe('provider wizard', () => {
     const discovery = vi.fn(() => answer.promise);
     const state = await connectedWizard(discovery);
 
-    const discovering = state.discoverWizardProvider();
+    const discovering = state.models.discover();
     await eventually(() => expect(discovery).toHaveBeenCalledOnce());
     authLifecycle.establishSession({
       user: {
@@ -484,7 +512,7 @@ describe('provider wizard', () => {
     expect(state.busy).toBe('');
     answer.resolve(json({ message: 'Refused' }, 500));
     await discovering;
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.busy).toBe('');
   });
 
@@ -493,13 +521,13 @@ describe('provider wizard', () => {
     const discovery = vi.fn(() => answer.promise);
     const state = await connectedWizard(discovery);
 
-    const discovering = state.discoverWizardProvider();
+    const discovering = state.models.discover();
     await eventually(() => expect(discovery).toHaveBeenCalledOnce());
     state.startAnother();
     expect(state.busy).toBe('');
     answer.resolve(problem('etag_mismatch', 412));
     await discovering;
-    expect(state.errorMessage).toBe('');
+    expect(state.action.error).toBe('');
     expect(state.wizardConflict).toBe(false);
     expect(state.wizardStep).toBe(1);
     expect(state.busy).toBe('');

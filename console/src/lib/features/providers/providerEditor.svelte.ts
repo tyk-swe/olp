@@ -135,6 +135,7 @@ export class ProviderEditor {
   };
   readonly reportError = (message: string) => {
     this.action.error = message;
+    this.action.issues = [];
     this.notice = '';
   };
   readonly reportNotice = (message: string) => {
