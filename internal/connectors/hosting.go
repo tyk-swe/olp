@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +20,7 @@ type hostingTraits struct {
 	vertexPath        string
 	misplaced         string
 	messages          upstreamPath
+	openAIRealtime    []string
 }
 
 const (
@@ -33,7 +35,8 @@ var hostings = map[string]hostingTraits{
 	"bedrock-knowledge-bases":  {awsService: "bedrock"},
 	"azure-deployment":         {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"azure-responses-legacy":   {deployment: true, apiVersion: true, resourceResponses: true, azureScope: cognitiveServicesScope},
-	"azure-v1":                 {baseSuffix: "/openai/v1", azureScope: "https://ai.azure.com/.default"},
+	"azure-v1":                 {baseSuffix: "/openai/v1", azureScope: "https://ai.azure.com/.default", openAIRealtime: []string{"realtime"}},
+	"direct-openai":            {openAIRealtime: []string{"realtime", "webrtc"}},
 	"bedrock-converse":         {awsService: "bedrock", eventStream: true},
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true, messages: bedrockInvokePath},
 	"bedrock-invoke":           {awsService: "bedrock"},
@@ -58,6 +61,10 @@ func envelopsMessages(hosting string) bool {
 }
 
 func (c Config) EnvelopsMessages() bool { return envelopsMessages(c.Hosting()) }
+
+func (p Profile) HostsRealtime(mode string) bool {
+	return slices.Contains(hostings[p.Hosting].openAIRealtime, mode)
+}
 
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {

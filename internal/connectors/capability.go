@@ -110,16 +110,14 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 }
 
 func supportsNativeSurface(kind Kind, vendor, operation, mode string, generates bool) (matched, supported bool) {
-	cloud := slices.Contains(nativeClouds, kind) && vendors.DefaultFor(string(kind)) == vendor
 	switch operation {
 	case "batch":
-		return true, mode == "unary" && cloud
+		return true, mode == "unary" && slices.Contains(nativeClouds, kind) && vendors.DefaultFor(string(kind)) == vendor
 	case "realtime":
-		nativeHost := kind == KindOpenAICompatible && vendor == "xai" || cloud
-		return true, mode == "realtime" && nativeHost && vendors.Serves(vendor, operation)
+		connector, _ := vendors.Kind(vendor)
+		return true, mode == "realtime" && Kind(connector) == kind && speaks(vendor, nativeRealtime) && vendors.Serves(vendor, operation)
 	case "generation":
-		nativeGen := kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2"))
-		return true, generates && nativeGen
+		return true, generates && (kind == KindPlugin || kind == KindOpenAICompatible && speaks(vendor, nativeGeneration))
 	default:
 		return false, false
 	}
@@ -225,16 +223,8 @@ func (c Config) servesBatches(surface string) bool {
 }
 
 func (c Config) servesThrough(p Profile, operation, surface, mode string) bool {
-	if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
-		return surface == "native" && (mode == "unary" || mode == "streaming") && vendors.Serves(c.VendorID, operation)
-	}
-	switch p.Dialect {
-	case "gemini-interactions":
-		return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
-	case "gemini-live":
-		return operation == "realtime" && surface == "gemini" && mode == "realtime"
-	case "xai-realtime", "vertex-realtime", "bedrock-realtime":
-		return operation == "realtime" && surface == "native" && mode == "realtime"
+	if own := p.served(); own.only == operation {
+		return surface == own.surface && slices.Contains(own.modes(), mode) && (own != nativeGeneration || vendors.Serves(c.VendorID, operation))
 	}
 	codec, ok := operationregistry.Lookup(p.OperationDialect(operation))
 	if ok && codec.Operation.ID == operation {

@@ -91,7 +91,7 @@ func (p Profile) OperationDialect(operation string) string {
 	case "bedrock_invoke":
 		return "bedrock-invoke"
 	case "realtime":
-		if (p.Kind == KindOpenAI && p.Hosting == "direct-openai") || (p.Kind == KindAzureOpenAI && p.Hosting == "azure-v1") {
+		if p.HostsRealtime("realtime") {
 			return "openai-realtime"
 		}
 		switch p.Dialect {
