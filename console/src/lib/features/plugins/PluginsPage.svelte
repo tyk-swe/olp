@@ -8,7 +8,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { pluginKeys } from '#lib/features/plugins/pluginKeys.js';
   import UnconfinedPlugins from '#lib/features/plugins/UnconfinedPlugins.svelte';

@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 var geminiMediaCodec = codec{imageGeneration: encodeGeminiImage, speech: encodeGeminiSpeech, transcription: encodeGeminiTranscription}
@@ -156,7 +157,7 @@ func encodeGeminiSpeech(r *Request, p Speech, _ connectors.Config, model string)
 	if failure := refuseSpeechControls(r, p, "Gemini"); failure != nil {
 		return nil, failure
 	}
-	format := valueOr(p.Format, "mp3")
+	format := ptr.Or(p.Format, "mp3")
 	if format != "wav" && format != "pcm" || p.Speed != nil {
 		return nil, invalidMedia("Gemini speech is served as wav or pcm, at its natural pace.")
 	}
@@ -217,7 +218,7 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 }
 
 func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
-	format := valueOr(p.Format, "json")
+	format := ptr.Or(p.Format, "json")
 	switch {
 	case format != "json" && format != "text":
 		return nil, invalidMedia("Gemini transcripts are served as json or text.")

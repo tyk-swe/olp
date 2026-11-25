@@ -6,10 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
-	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 var ErrUnpricedToolCall = errors.New("tool call has no price for an enforced budget ceiling")
@@ -105,7 +104,7 @@ type AttemptEvidence struct {
 	ResultDigest       string
 	StartedAt          time.Time
 	CompletedAt        time.Time
-	GuardrailDecisions []guardrails.Evidence
+	GuardrailDecisions []guardrailpolicy.Evidence
 }
 
 type Ledger interface {
@@ -135,13 +134,6 @@ type IdentityDecision struct {
 	Outcome IdentityOutcome `json:"outcome"`
 }
 
-func identityEvidence(decisions []IdentityDecision) []IdentityDecision {
-	if decisions == nil {
-		return []IdentityDecision{}
-	}
-	return decisions
-}
-
 type RetainedCall struct {
 	AttemptID  string
 	DispatchID string
@@ -160,15 +152,4 @@ func parseEvidenceDigest(digest string) ([]byte, bool) {
 		return nil, false
 	}
 	return decoded, true
-}
-
-func cloneUnitPrice(price *string) *string {
-	if price == nil {
-		return nil
-	}
-	return new(*price)
-}
-func canonicalUUID(raw string) bool {
-	id, err := uuid.Parse(raw)
-	return err == nil && id != uuid.Nil && id.String() == raw
 }

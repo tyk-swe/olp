@@ -1,9 +1,12 @@
 package guardrails
 
-import "slices"
+import (
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"slices"
+)
 
 type Placement struct {
-	Scope                                          Scope
+	Scope                                          guardrailpolicy.Scope
 	ScopeID, ProjectID, PolicyID, PolicyRevisionID string
 }
 
@@ -28,14 +31,14 @@ const (
 )
 
 type PreviewEntry struct {
-	PolicyID         string              `json:"policy_id"`
-	PolicyRevisionID string              `json:"policy_revision_id"`
-	GuardrailID      string              `json:"guardrail_id"`
-	RevisionID       string              `json:"revision_id"`
-	Scope            Scope               `json:"scope"`
-	Phase            Phase               `json:"phase"`
-	Mode             string              `json:"mode"`
-	Notes            []CompatibilityNote `json:"notes"`
+	PolicyID         string                `json:"policy_id"`
+	PolicyRevisionID string                `json:"policy_revision_id"`
+	GuardrailID      string                `json:"guardrail_id"`
+	RevisionID       string                `json:"revision_id"`
+	Scope            guardrailpolicy.Scope `json:"scope"`
+	Phase            guardrailpolicy.Phase `json:"phase"`
+	Mode             string                `json:"mode"`
+	Notes            []CompatibilityNote   `json:"notes"`
 }
 
 func (e *Engine) Preview(c Compatibility, visible func(Placement) bool) []PreviewEntry {
@@ -93,21 +96,21 @@ func (r compiledEntry) notes(c Compatibility, uninspected bool) []CompatibilityN
 }
 
 func (r compiledEntry) enforcesUnavailable() bool {
-	return !r.entry.Monitor && r.entry.Action != Annotate
+	return !r.entry.Monitor && r.entry.Action != guardrailpolicy.Annotate
 }
 
 func (r compiledEntry) rewriteConflict() bool {
-	return !r.entry.Monitor && r.entry.Phase != InputParallel && (r.entry.Action == Redact || r.entry.Action == Mask)
+	return !r.entry.Monitor && r.entry.Phase != guardrailpolicy.InputParallel && (r.entry.Action == guardrailpolicy.Redact || r.entry.Action == guardrailpolicy.Mask)
 }
 
 func (r compiledEntry) streamTextRewriteConflict() bool {
-	return !r.entry.Monitor && (r.entry.Phase == Input && r.entry.Action == Mask ||
-		r.entry.Phase == OutputStream && r.entry.Action == Redact && r.definition.Type != "builtin.tools")
+	return !r.entry.Monitor && (r.entry.Phase == guardrailpolicy.Input && r.entry.Action == guardrailpolicy.Mask ||
+		r.entry.Phase == guardrailpolicy.OutputStream && r.entry.Action == guardrailpolicy.Redact && r.definition.Type != "builtin.tools")
 }
 
 func (r compiledEntry) retainedOutputConflict() bool {
-	return r.entry.Phase == Output || r.entry.Phase == OutputStream ||
-		r.entry.Phase == Input && !r.entry.Monitor && r.entry.Action == Mask
+	return r.entry.Phase == guardrailpolicy.Output || r.entry.Phase == guardrailpolicy.OutputStream ||
+		r.entry.Phase == guardrailpolicy.Input && !r.entry.Monitor && r.entry.Action == guardrailpolicy.Mask
 }
 
 func (e *Engine) ValidateRewrites() error {

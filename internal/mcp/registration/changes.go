@@ -10,6 +10,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -85,8 +87,8 @@ func (s *Server) loadForWrite(ctx context.Context, tx pgx.Tx, principal authz.Pr
 
 func inputLimits(in Input) routing.ToolLimits {
 	return routing.EffectiveToolLimits(
-		routing.ToolLimitOr(in.CallsPerMinute, routing.DefaultToolCallsPerMinute), routing.ToolLimitOr(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
-		routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute), routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
+		ptr.Or(in.CallsPerMinute, routing.DefaultToolCallsPerMinute), ptr.Or(in.MaxConcurrency, routing.DefaultToolMaxConcurrency),
+		ptr.Or(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute), ptr.Or(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 }
 
 func (s *Server) saveCredential(ctx context.Context, tx pgx.Tx, in Input, current *Definition, material []byte) (*string, error) {
@@ -96,7 +98,7 @@ func (s *Server) saveCredential(ctx context.Context, tx pgx.Tx, in Input, curren
 	if len(material) == 0 {
 		return nil, nil
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.MCPCredential, material, nil); err != nil {
 		return nil, err
 	}
@@ -115,18 +117,18 @@ func definitionFromInput(in Input, current *Definition, catalog *upstream.Catalo
 		ProjectID: project, Name: in.Name, Endpoint: in.Endpoint, Enabled: *in.Enabled,
 		Transport: string(definitionTransport(in, current)), Stdio: definitionStdio(in, current), Catalog: catalog,
 		CredentialID: credentialID, DelegationKeyID: signingID, EntraClientSecretID: entraID,
-		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), UnitPrice: clonePrice(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
+		Delegation: in.Delegation.Clone(), OAuth: in.OAuth.Clone(), UnitPrice: ptr.Clone(in.UnitPrice), ToolPrices: cloneToolPrices(in.ToolPrices),
 		CallsPerMinute: limits.CallsPerMinute, MaxConcurrency: limits.MaxConcurrency, PerKeyCallsPerMinute: limits.PerKeyCallsPerMinute, PerKeyMaxConcurrency: limits.PerKeyMaxConcurrency,
 	}
 }
 
 func (s *Server) saveChange(ctx context.Context, tx pgx.Tx, actor string, in Input, current *Definition, catalog *upstream.Catalog, material []byte, retire, limitsOnly bool) (registrationChange, error) {
 	if limitsOnly {
-		change := registrationChange{id: current.ID, etag: httpkit.NewID(), action: "mcp_server.update"}
+		change := registrationChange{id: current.ID, etag: ids.New(), action: "mcp_server.update"}
 		return change, UpdateLimits(ctx, tx, change.id, inputLimits(in), change.etag)
 	}
 	if retire {
-		change := registrationChange{id: current.ID, etag: httpkit.NewID(), action: "mcp_server.retire"}
+		change := registrationChange{id: current.ID, etag: ids.New(), action: "mcp_server.retire"}
 		_, err := tx.Exec(ctx, "UPDATE olp.mcp_servers SET enabled=false,retired_at=now(),credential_id=NULL,delegation_key_id=NULL,entra_client_secret_id=NULL,etag=$2 WHERE id=$1", change.id, change.etag)
 		return change, err
 	}

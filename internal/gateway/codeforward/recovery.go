@@ -77,7 +77,7 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 		if rejection.Class != upstream.RateLimit {
 			return true
 		}
-		_, ok := a.observeCooldownClass(codemode.Observation{Status: response.StatusCode, RejectionBody: body, RetryAfter: response.Header.Values("Retry-After")})
+		_, ok := a.observeCooldownClass(ctx, codemode.Observation{Status: response.StatusCode, RejectionBody: body, RetryAfter: response.Header.Values("Retry-After")})
 		if ok {
 			a.pendingHealth = nil
 		}

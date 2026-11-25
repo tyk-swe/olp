@@ -11,9 +11,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -34,7 +35,7 @@ func NamesOf(document contract.ConfigurationDocument) Names {
 	return Names{
 		projects:      folded(slices.Values(document.Projects), func(entry contract.ConfigurationProjectEntry) string { return entry.Name }),
 		providers:     folded(slices.Values(document.Providers), func(entry contract.ConfigurationProviderEntry) string { return entry.Name }),
-		organizations: folded(slices.Values(ValueOf(document.Organizations)), func(entry contract.ConfigurationOrganizationEntry) string { return entry.Name }),
+		organizations: folded(slices.Values(ptr.Value(document.Organizations)), func(entry contract.ConfigurationOrganizationEntry) string { return entry.Name }),
 	}
 }
 

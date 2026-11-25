@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 // epochLockSeed serializes the checkpoints of one gateway instance. Two
@@ -25,9 +26,6 @@ const epochLockSeed = int64(0x4f4c505f5545)
 // for it: a request is served, its event is buffered, and this loop is what
 // later admits whatever the buffer could not deliver.
 const lossReporterInterval = time.Second
-
-// uuid7 mints a time ordered identifier for a row this package inserts.
-func uuid7() string { return uuid.Must(uuid.NewV7()).String() }
 
 // ErrInvalidGap marks a gap that cannot be recorded as described.
 var ErrInvalidGap = errors.New("invalid request metadata gap")
@@ -65,7 +63,7 @@ func insertGap(ctx context.Context, q execer, g Gap, dedupeKey *string) (bool, e
 		strings.TrimSpace(g.Reason) == "" || g.LastObservedAt.Before(g.FirstObservedAt) {
 		return false, fmt.Errorf("%w: %s", ErrInvalidGap, g.Reason)
 	}
-	tag, err := q.Exec(ctx, insertGapSQL, uuid7(), g.GatewayInstance,
+	tag, err := q.Exec(ctx, insertGapSQL, ids.New(), g.GatewayInstance,
 		g.EventCount, g.Reason, g.FirstObservedAt, g.LastObservedAt, dedupeKey)
 	if err != nil {
 		return false, fmt.Errorf("record request metadata gap: %w", err)
@@ -128,7 +126,7 @@ type unclean struct {
 // the events this epoch accepted and never accounted for are claimed.
 func recordUnclean(ctx context.Context, tx pgx.Tx, epoch unclean) (int64, error) {
 	lowerBound := max(epoch.accepted-epoch.persisted-epoch.abandoned, 0)
-	gapID := uuid7()
+	gapID := ids.New()
 	lastObserved := epoch.detectedAt
 	if epoch.lastCheckpoint.After(lastObserved) {
 		lastObserved = epoch.lastCheckpoint
@@ -324,7 +322,7 @@ func CheckpointEpoch(ctx context.Context, pool *pgxpool.Pool, gatewayInstance st
 		if first.After(last) {
 			first = last
 		}
-		if _, err = tx.Exec(ctx, bufferLossGapSQL, uuid7(), instance,
+		if _, err = tx.Exec(ctx, bufferLossGapSQL, ids.New(), instance,
 			events, first, last, now); err != nil {
 			return LossReport{}, fmt.Errorf("record gateway buffer loss: %w", err)
 		}

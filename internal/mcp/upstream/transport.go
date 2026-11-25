@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -255,7 +256,7 @@ func decodeToolResult(raw json.RawMessage) (ToolResult, error) {
 	}
 	content := slices.Collect(func(yield func(ToolContent) bool) {
 		for _, part := range result.Content {
-			if !yield(ToolContent{Type: part.Type, Text: resultString(part.Text), Data: resultString(part.Data), MimeType: resultString(part.MimeType)}) {
+			if !yield(ToolContent{Type: part.Type, Text: ptr.Value(part.Text), Data: ptr.Value(part.Data), MimeType: ptr.Value(part.MimeType)}) {
 				return
 			}
 		}
@@ -264,12 +265,6 @@ func decodeToolResult(raw json.RawMessage) (ToolResult, error) {
 		return ToolResult{Content: []ToolContent{}, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
 	}
 	return ToolResult{Content: content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
-}
-func resultString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }
 func (c ToolContent) MarshalJSON() ([]byte, error) {
 	if c.Type == "text" {

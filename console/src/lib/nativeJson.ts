@@ -2,18 +2,14 @@
  * is immutable and non-plain, so Svelte and query-cache structural sharing do
  * not turn the platform's raw JSON internal slot into an ordinary object. */
 type SourceJSON = typeof JSON & {
-  rawJSON(source: string): unknown;
-  parse(
-    source: string,
-    reviver: (
-      key: string,
-      value: unknown,
-      context: { source?: string }
-    ) => unknown
-  ): unknown;
+  rawJSON?: (source: string) => unknown;
 };
 const sourceJSON = JSON as SourceJSON;
+const utf8 = new TextEncoder();
 const numberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+const literalPattern =
+  /true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+const unpairedSurrogatePattern = /[\uD800-\uDFFF]/u;
 const defaultMaxBytes = 4 * 1024 * 1024;
 
 export class NativeNumber {
@@ -24,6 +20,10 @@ export class NativeNumber {
     Object.freeze(this);
   }
   toJSON(): unknown {
+    if (typeof sourceJSON.rawJSON !== 'function')
+      throw new Error(
+        'NativeNumber cannot be serialized with JSON.stringify in this runtime; use stringifyNativeJSON.'
+      );
     return sourceJSON.rawJSON(this.source);
   }
   toString(): string {
@@ -48,17 +48,23 @@ export type NativeValue =
 export type NativeObject = { [name: string]: NativeValue };
 export type NativePath = readonly string[];
 
-/** Reject duplicate *decoded* names before JSON.parse can collapse them.
- * This bounded grammar check evaluates no code and delegates string decoding
- * to the platform JSON parser. In particular, __proto__ is ordinary JSON data. */
-type SourceOrder = {
-  keys?: string[];
-  children: Map<string | number, SourceOrder>;
-};
 const memberOrders = new WeakMap<object, readonly string[]>();
 
 function rememberOrder(value: object, keys: readonly string[]): void {
   memberOrders.set(value, Object.freeze([...keys]));
+}
+
+function defineDataProperty(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
 }
 
 export function nativeEntries(value: object): [string, NativeValue][] {
@@ -74,158 +80,225 @@ export function nativeEntries(value: object): [string, NativeValue][] {
   return keys.map((key) => [key, (value as NativeObject)[key]!]);
 }
 
+function cloneNativeTree(
+  value: unknown,
+  options: { wrapNumbers: boolean; omitUndefined: boolean }
+): unknown {
+  const ancestors = new Set<object>();
+  const copy = (node: unknown): unknown => {
+    if (node === null || typeof node === 'string' || typeof node === 'boolean')
+      return node;
+    if (typeof node === 'number') {
+      if (!Number.isFinite(node))
+        throw new Error('Non-finite values are not JSON numbers.');
+      return options.wrapNumbers
+        ? new NativeNumber(Object.is(node, -0) ? '-0' : String(node))
+        : node;
+    }
+    if (node === undefined) return undefined;
+    if (typeof node !== 'object')
+      throw new Error('A JSON submission must contain JSON values.');
+    if (node instanceof NativeNumber || node instanceof IncompleteJSON)
+      return node;
+    if (ancestors.has(node))
+      throw new Error('JSON cannot contain a cyclic reference.');
+    ancestors.add(node);
+    try {
+      if (Array.isArray(node)) {
+        return Object.freeze(
+          Array.from(node, (item) =>
+            options.omitUndefined && item === undefined ? null : copy(item)
+          )
+        );
+      }
+      const prototype = Object.getPrototypeOf(node);
+      if (
+        prototype !== Object.prototype &&
+        prototype !== null &&
+        !(node instanceof NativeConfiguration)
+      ) {
+        throw new Error('A JSON submission must contain JSON values.');
+      }
+      const entries = nativeEntries(node).filter(
+        ([, entry]) => !options.omitUndefined || entry !== undefined
+      );
+      const result: Record<string, unknown> = {};
+      for (const [key, entry] of entries) {
+        defineDataProperty(result, key, copy(entry));
+      }
+      rememberOrder(
+        result,
+        entries.map(([key]) => key)
+      );
+      return Object.freeze(result);
+    } finally {
+      ancestors.delete(node);
+    }
+  };
+  return copy(value);
+}
+
 /** Own a JSON submission without coercing native number spellings or losing
  * remembered object-member order. Immutable number wrappers are safe to share. */
 export function snapshotNativeJSON<T>(value: T): T {
-  const copy = (node: unknown): unknown => {
-    if (node === null || typeof node !== 'object') return node;
-    if (node instanceof NativeNumber || node instanceof IncompleteJSON)
-      return node;
-    if (Array.isArray(node)) return Object.freeze(node.map(copy));
-    const prototype = Object.getPrototypeOf(node);
-    if (prototype !== Object.prototype && prototype !== null)
-      throw new Error('A JSON submission must contain JSON values.');
-    const entries = nativeEntries(node);
-    const result = Object.fromEntries(
-      entries.map(([key, entry]) => [key, copy(entry)])
-    );
-    rememberOrder(
-      result,
-      entries.map(([key]) => key)
-    );
-    return Object.freeze(result);
-  };
-  return copy(value) as T;
+  return cloneNativeTree(value, {
+    wrapNumbers: false,
+    omitUndefined: false
+  }) as T;
 }
 
-function checkUnambiguous(
-  source: string,
-  maxBytes: number
-): SourceOrder | undefined {
-  if (
-    source.length > maxBytes ||
-    new TextEncoder().encode(source).byteLength > maxBytes
-  )
-    throw new Error(`Native JSON must fit within ${maxBytes / 1024 ** 2} MiB.`);
-  let cursor = 0;
-  let nodes = 0;
-  const fail = (message = 'Invalid JSON'): never => {
-    throw new Error(`${message} at character ${cursor + 1}.`);
-  };
-  const space = () => {
-    while (/[\t\n\r ]/.test(source[cursor] ?? '\0')) cursor += 1;
-  };
-  const string = (): string => {
-    const start = cursor++;
-    while (cursor < source.length) {
-      const character = source[cursor++];
-      if (character === '\\') cursor += 1;
-      else if (character === '"') {
-        let decoded: string;
-        try {
-          decoded = JSON.parse(source.slice(start, cursor));
-        } catch {
-          return fail('Invalid JSON string');
-        }
-        if (/[\uD800-\uDFFF]/u.test(decoded))
-          fail('Unpaired Unicode surrogate');
-        return decoded;
-      }
-    }
-    return fail('Unterminated JSON string');
-  };
-  const value = (depth: number): SourceOrder | undefined => {
-    space();
-    if (depth > 128 || ++nodes > 1_000_000)
-      fail('Native JSON exceeds its nesting or value limit');
-    const character = source[cursor];
-    if (character === '"') {
-      string();
-      return;
-    }
-    if (character === '{' || character === '[') {
-      const object = character === '{';
-      const end = object ? '}' : ']';
-      const names = new Set<string>();
-      const order: SourceOrder = {
-        keys: object ? [] : undefined,
-        children: new Map()
-      };
-      let index = 0;
-      cursor += 1;
-      space();
-      if (source[cursor] === end) {
-        cursor += 1;
-        return object ? order : undefined;
-      }
-      while (cursor < source.length) {
-        let key: string | number = index++;
-        if (object) {
-          if (source[cursor] !== '"') fail('Expected an object member name');
-          key = string();
-          if (names.has(key)) fail('Duplicate object member');
-          names.add(key);
-          order.keys!.push(key);
-          space();
-          if (source[cursor++] !== ':') fail('Expected a colon');
-        }
-        const child = value(depth + 1);
-        if (child) order.children.set(key, child);
-        space();
-        if (source[cursor] === end) {
-          cursor += 1;
-          return object || order.children.size ? order : undefined;
-        }
-        if (source[cursor++] !== ',') fail('Expected a comma');
-        space();
-      }
-      fail('Unterminated JSON container');
-    }
-    const literal =
-      /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
-        source.slice(cursor)
-      )?.[0];
-    if (!literal) fail();
-    cursor += literal!.length;
-  };
-  const order = value(0);
-  space();
-  if (cursor !== source.length) fail('Expected one JSON document');
-  return order;
+/** Clone a plain or native value into a frozen native JSON tree, preserving
+ * member order and wrapping finite numbers as exact NativeNumber tokens. */
+export function normalizeNativeJSON(value: unknown): NativeValue {
+  if (value === undefined) throw new Error('A JSON value is required.');
+  return cloneNativeTree(value, {
+    wrapNumbers: true,
+    omitUndefined: true
+  }) as NativeValue;
 }
 
-function attachOrder(value: NativeValue, order: SourceOrder | undefined): void {
-  if (!order || value === null || typeof value !== 'object') return;
-  if (order.keys) rememberOrder(value, order.keys);
-  for (const [key, child] of order.children) {
-    const nested = Array.isArray(value)
-      ? value[Number(key)]
-      : (value as NativeObject)[String(key)];
-    if (nested !== undefined) attachOrder(nested, child);
-  }
-}
-
+/** Single-pass bounded RFC 8259 parser that preserves exact numeric tokens and
+ * object member order while rejecting duplicate decoded member names. */
 export function parseNativeJSON(
   source: string,
   maxBytes = defaultMaxBytes
 ): NativeValue {
-  if (typeof sourceJSON.rawJSON !== 'function')
-    throw new Error(
-      'This browser does not support lossless native JSON editing.'
-    );
-  const order = checkUnambiguous(source, maxBytes);
-  const parsed = sourceJSON.parse(
-    source,
-    (_key: string, value: unknown, context: { source?: string }) => {
-      if (typeof value !== 'number') return value;
-      if (!context?.source)
-        throw new Error(
-          'This browser cannot preserve native JSON number precision.'
-        );
-      return new NativeNumber(context.source);
+  if (source.length > maxBytes || utf8.encode(source).byteLength > maxBytes)
+    throw new Error(`Native JSON must fit within ${maxBytes / 1024 ** 2} MiB.`);
+
+  let cursor = 0;
+  let nodes = 0;
+
+  const fail = (message = 'Invalid JSON'): never => {
+    throw new Error(`${message} at character ${cursor + 1}.`);
+  };
+
+  const skipSpace = (): void => {
+    while (cursor < source.length) {
+      const code = source.charCodeAt(cursor);
+      if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) {
+        cursor += 1;
+      } else {
+        break;
+      }
     }
-  ) as NativeValue;
-  attachOrder(parsed, order);
+  };
+
+  const readString = (): string => {
+    const start = cursor++;
+    let hasEscape = false;
+    while (cursor < source.length) {
+      const code = source.charCodeAt(cursor++);
+      if (code === 0x5c) {
+        hasEscape = true;
+        cursor += 1;
+        if (cursor > source.length) return fail('Unterminated JSON string');
+      } else if (code === 0x22) {
+        let decoded: string;
+        if (hasEscape) {
+          try {
+            decoded = JSON.parse(source.slice(start, cursor)) as string;
+          } catch {
+            return fail('Invalid JSON string');
+          }
+        } else {
+          decoded = source.slice(start + 1, cursor - 1);
+        }
+        if (unpairedSurrogatePattern.test(decoded))
+          fail('Unpaired Unicode surrogate');
+        return decoded;
+      } else if (code < 0x20) {
+        return fail('Invalid JSON string');
+      }
+    }
+    return fail('Unterminated JSON string');
+  };
+
+  const readObject = (depth: number): NativeObject => {
+    cursor += 1;
+    skipSpace();
+    const result: NativeObject = {};
+    const keys: string[] = [];
+    const seen = new Set<string>();
+    if (source.charCodeAt(cursor) === 0x7d) {
+      cursor += 1;
+      rememberOrder(result, keys);
+      return result;
+    }
+    while (cursor < source.length) {
+      if (source.charCodeAt(cursor) !== 0x22)
+        fail('Expected an object member name');
+      const key = readString();
+      if (seen.has(key)) fail('Duplicate object member');
+      seen.add(key);
+      keys.push(key);
+      skipSpace();
+      if (source.charCodeAt(cursor++) !== 0x3a) fail('Expected a colon');
+      const child = readValue(depth + 1);
+      defineDataProperty(result, key, child);
+      skipSpace();
+      const delimiter = source.charCodeAt(cursor);
+      if (delimiter === 0x7d) {
+        cursor += 1;
+        rememberOrder(result, keys);
+        return result;
+      }
+      if (delimiter !== 0x2c) fail('Expected a comma');
+      cursor += 1;
+      skipSpace();
+    }
+    return fail('Unterminated JSON container');
+  };
+
+  const readArray = (depth: number): NativeValue[] => {
+    cursor += 1;
+    skipSpace();
+    const items: NativeValue[] = [];
+    if (source.charCodeAt(cursor) === 0x5d) {
+      cursor += 1;
+      return items;
+    }
+    while (cursor < source.length) {
+      items.push(readValue(depth + 1));
+      skipSpace();
+      const delimiter = source.charCodeAt(cursor);
+      if (delimiter === 0x5d) {
+        cursor += 1;
+        return items;
+      }
+      if (delimiter !== 0x2c) fail('Expected a comma');
+      cursor += 1;
+      skipSpace();
+    }
+    return fail('Unterminated JSON container');
+  };
+
+  const readLiteral = (): NativeValue => {
+    literalPattern.lastIndex = cursor;
+    const match = literalPattern.exec(source);
+    if (!match) return fail();
+    const token = match[0];
+    cursor += token.length;
+    if (token === 'true') return true;
+    if (token === 'false') return false;
+    if (token === 'null') return null;
+    return new NativeNumber(token);
+  };
+
+  const readValue = (depth: number): NativeValue => {
+    skipSpace();
+    if (depth > 128 || ++nodes > 1_000_000)
+      fail('Native JSON exceeds its nesting or value limit');
+    const code = source.charCodeAt(cursor);
+    if (code === 0x22) return readString();
+    if (code === 0x7b) return readObject(depth);
+    if (code === 0x5b) return readArray(depth);
+    return readLiteral();
+  };
+
+  const parsed = readValue(0);
+  skipSpace();
+  if (cursor !== source.length) fail('Expected one JSON document');
   return parsed;
 }
 
@@ -273,31 +346,15 @@ export function replaceNative(
   const object: NativeObject = Object.create(null);
   if (nativeObject(value)) {
     for (const [name, entry] of nativeEntries(value))
-      Object.defineProperty(object, name, {
-        value: entry,
-        writable: true,
-        enumerable: true,
-        configurable: true
-      });
+      defineDataProperty(object, name, entry);
   } else if (value !== undefined && value !== null) {
     throw new Error('An object is required at this configuration path.');
   }
   if (rest.length) {
     const child = Object.hasOwn(object, key!) ? object[key!]! : null;
-    Object.defineProperty(object, key!, {
-      value: replaceNative(child, rest, next),
-      writable: true,
-      enumerable: true,
-      configurable: true
-    });
+    defineDataProperty(object, key!, replaceNative(child, rest, next));
   } else if (next === undefined) delete object[key!];
-  else
-    Object.defineProperty(object, key!, {
-      value: next,
-      writable: true,
-      enumerable: true,
-      configurable: true
-    });
+  else defineDataProperty(object, key!, next);
   rememberOrder(object, [
     ...(nativeObject(value)
       ? nativeEntries(value)

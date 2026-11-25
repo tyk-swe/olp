@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -63,21 +63,21 @@ var (
 // steered to, how a failed attempt is retried, which requests stay together
 // and how much the route may spend. The zero value adds nothing to a route.
 type Behavior struct {
-	RunLimits                *limits.WorkflowBounds `json:"run_limits,omitempty"`
-	ToolExecution            string                 `json:"tool_execution,omitempty"`
-	Toolsets                 []string               `json:"toolsets,omitempty"`
-	ResponsesMCPItems        bool                   `json:"responses_mcp_items,omitempty"`
-	Cache                    *cache.Policy          `json:"cache,omitempty"`
-	PromptCache              *cache.PromptPolicy    `json:"prompt_cache,omitempty"`
-	CallerCostExempt         bool                   `json:"caller_cost_exempt,omitempty"`
-	ProviderFetchedDocuments bool                   `json:"provider_fetched_documents,omitempty"`
-	MaxBodyBytes             *int64                 `json:"max_body_bytes,omitempty"`
-	Fallbacks                []Fallback             `json:"fallbacks,omitempty"`
-	Selectors                []Selector             `json:"selectors,omitempty"`
-	Retry                    Retry                  `json:"retry,omitempty"`
-	Affinity                 *Affinity              `json:"affinity,omitempty"`
-	Budget                   *CostLimits            `json:"budget,omitempty"`
-	Passthrough              *PassthroughConfig     `json:"passthrough,omitempty"`
+	RunLimits                *limits.WorkflowBounds    `json:"run_limits,omitempty"`
+	ToolExecution            string                    `json:"tool_execution,omitempty"`
+	Toolsets                 []string                  `json:"toolsets,omitempty"`
+	ResponsesMCPItems        bool                      `json:"responses_mcp_items,omitempty"`
+	Cache                    *cachepolicy.Policy       `json:"cache,omitempty"`
+	PromptCache              *cachepolicy.PromptPolicy `json:"prompt_cache,omitempty"`
+	CallerCostExempt         bool                      `json:"caller_cost_exempt,omitempty"`
+	ProviderFetchedDocuments bool                      `json:"provider_fetched_documents,omitempty"`
+	MaxBodyBytes             *int64                    `json:"max_body_bytes,omitempty"`
+	Fallbacks                []Fallback                `json:"fallbacks,omitempty"`
+	Selectors                []Selector                `json:"selectors,omitempty"`
+	Retry                    Retry                     `json:"retry,omitempty"`
+	Affinity                 *Affinity                 `json:"affinity,omitempty"`
+	Budget                   *CostLimits               `json:"budget,omitempty"`
+	Passthrough              *PassthroughConfig        `json:"passthrough,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends

@@ -1,7 +1,7 @@
 package quota
 
 import (
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 // RequestRateAuthority limits work that consumes requests without inference

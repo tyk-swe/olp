@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 func recordCodeDecision(ctx context.Context, tx pgx.Tx, in Admission, binding codemode.Binding, attemptID *string, selection codeSelection, reason codemode.DecisionReason) error {
@@ -25,7 +25,7 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in Admission, binding co
 		return &in.Recovery.Envelope, &in.Recovery.Number
 	}()
 	decision := codemode.Decision{
-		ID:               httpkit.NewID(),
+		ID:               ids.New(),
 		AttemptID:        attemptID,
 		ProjectID:        in.Route.ProjectID,
 		RouteID:          in.Route.ID,

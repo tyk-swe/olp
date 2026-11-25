@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/panics"
@@ -107,8 +108,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 }
 
 func canonicalSessionID(id string) string {
-	parsed, err := uuid.Parse(id)
-	if err != nil || parsed == uuid.Nil || parsed.String() != id {
+	if !ids.Canonical(id) {
 		return ""
 	}
 	return id
@@ -213,7 +213,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *Call, authority key
 	for _, owner := range capped {
 		cap := quota.CapRequest(owner, time.Hour).Cost
 		owners = append(owners, cap.Owner)
-		admissions = append(admissions, debits.Boundary{Owner: cap.Owner, Budget: cap})
+		admissions = append(admissions, limits.Boundary{Owner: cap.Owner, Budget: cap})
 	}
 	var state debits.State
 	if x.workflow != nil {

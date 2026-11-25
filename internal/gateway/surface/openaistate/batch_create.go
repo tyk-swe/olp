@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -20,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -66,7 +66,7 @@ func (s surface) createBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	p, route, e := s.kernel.ResolveResource(r.Context(), x, authority, file, "batch", kernel.RetainedNewWork)
 	if e != nil {
-		if refusal := fireworksBatchRefusal(x, x.Route); refusal != nil {
+		if refusal := vendorBatchRefusal(x, x.Route); refusal != nil {
 			e = refusal
 		}
 		s.kernel.Refuse(x, w, e)
@@ -143,7 +143,7 @@ func (s surface) planBatch(ctx context.Context, x *kernel.Call, authority keyaut
 	if !ok {
 		return batchPlan{}, fault.InvalidRequest("target_capability", "The selected target does not support batches.", nil)
 	}
-	if e := managedBatchShape(request.source, p.Provider.VendorID, adapter); e != nil {
+	if e := managedBatchShape(request.source, adapter); e != nil {
 		return batchPlan{}, e
 	}
 	if x.Strict() {
@@ -174,8 +174,8 @@ func (s surface) planBatch(ctx context.Context, x *kernel.Call, authority keyaut
 	return planFilesBatch(request, file, p, plan)
 }
 
-func managedBatchShape(source oif.Document, vendor string, adapter connectors.BatchAdapter) *fault.Error {
-	if vendor != "together" && vendor != "mistral" && adapter != connectors.BatchGeminiManaged {
+func managedBatchShape(source oif.Document, adapter connectors.BatchAdapter) *fault.Error {
+	if !adapter.Managed() {
 		return nil
 	}
 	allowed := []string{"input_file_id", "endpoint", "completion_window", "metadata"}

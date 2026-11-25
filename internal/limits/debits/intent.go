@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -80,12 +80,7 @@ const (
 	Conflict    State = "conflict"
 )
 
-func canonicalID(id string) bool {
-	u, err := uuid.Parse(id)
-	return err == nil && u != uuid.Nil && u.String() == id
-}
-
-func optionalID(id string) bool { return id == "" || canonicalID(id) }
+func optionalID(id string) bool { return id == "" || ids.Canonical(id) }
 
 func digestText(digest string) bool {
 	if digest == "" {
@@ -97,7 +92,7 @@ func digestText(digest string) bool {
 
 func (a Affinity) valid() bool {
 	optional := []string{a.RouteRevisionID, a.ProviderID, a.ProviderRevisionID, a.TargetID, a.SlotID, a.CredentialID, a.PricingRevisionID, a.RateCardRevisionID}
-	return canonicalID(a.ReleaseID) && canonicalID(a.RevisionID) && !slices.ContainsFunc(optional, invalidOptionalID) &&
+	return ids.Canonical(a.ReleaseID) && ids.Canonical(a.RevisionID) && !slices.ContainsFunc(optional, invalidOptionalID) &&
 		digestText(a.InputDigest) && digestText(a.TranscriptDigest) &&
 		(a.ToolAlias == "" || toolidentity.ValidAlias(a.ToolAlias))
 }
@@ -105,7 +100,7 @@ func (a Affinity) valid() bool {
 func invalidOptionalID(id string) bool { return !optionalID(id) }
 
 func (i Intent) validate() error {
-	identified := canonicalID(i.ID) && canonicalID(i.APIKeyID) && canonicalID(i.ClaimID) &&
+	identified := ids.Canonical(i.ID) && ids.Canonical(i.APIKeyID) && ids.Canonical(i.ClaimID) &&
 		optionalID(i.ProjectID) && optionalID(i.RunID) && optionalID(i.StepID) &&
 		(!i.Kind.priced() || i.ProjectID != "") && (i.RunID == "") == (i.StepID == "")
 	bounded := i.Kind.valid() && pricingpolicy.ValidCurrency(i.Currency) &&
@@ -146,7 +141,7 @@ func normalizedOwners(owners []limits.Owner) ([]limits.Owner, error) {
 	for _, o := range owners {
 		pair := limits.Owner{ID: o.ID, Basis: o.Basis.Normalized()}
 		kind, known := kinds[o.ID]
-		if !canonicalID(o.ID) || !o.Basis.Valid() || !o.Kind.Valid() || known && kind != o.Kind || seen[pair] {
+		if !ids.Canonical(o.ID) || !o.Basis.Valid() || !o.Kind.Valid() || known && kind != o.Kind || seen[pair] {
 			return nil, ErrConflict
 		}
 		kinds[o.ID], seen[pair] = o.Kind, true

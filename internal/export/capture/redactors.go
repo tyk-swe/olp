@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -78,9 +79,9 @@ func compile(project string, names []string, pins []Redactor, definitions map[st
 		if !ok || project == "" || d.ProjectID != project || d.GuardrailID != b.GuardrailID || b.Name != names[i] || d.Type != b.Type || !d.Type.Redacts() {
 			return nil, errUnbound
 		}
-		d.OnError = guardrails.FailClosed
+		d.OnError = guardrailpolicy.FailClosed
 		pinned[d.ID] = d
-		entries[i] = guardrails.Entry{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrails.Input, Action: guardrails.Redact}
+		entries[i] = guardrails.Entry{GuardrailID: d.GuardrailID, RevisionID: d.ID, Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact}
 	}
 	return guardrails.Compile(entries, pinned)
 }

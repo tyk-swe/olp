@@ -298,7 +298,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 	}
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
-	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })
+	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(ctx, a.observer.Event(data)) })
 	var observed []byte
 	overflow := false
 	buffer := make([]byte, 32<<10)
@@ -333,7 +333,7 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					if streaming {
 						events.Write(decoded)
 					} else {
-						a.observeUnary(decoded)
+						a.observeUnary(ctx, decoded)
 					}
 				}
 			}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	signin "github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/oapi-codegen/nullable"
@@ -161,7 +162,7 @@ func (s server) apply(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 				ConfigurationPlanResponse: result,
 			}
 		}
-		for _, step := range s.appliers(d, promotion.ValueOf(ready), r) {
+		for _, step := range s.appliers(d, ptr.Value(ready), r) {
 			if err := step(ctx, tx, p); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}

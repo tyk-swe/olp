@@ -18,8 +18,8 @@
     emptyCursorHistory,
     cursorPaginationProps
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import LoadError from './LoadError.svelte';
   import { codeKeys } from './codeKeys';
   import { mutationError, type CodeEditing } from './presentation';

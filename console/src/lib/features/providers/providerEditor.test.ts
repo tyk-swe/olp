@@ -331,6 +331,37 @@ describe('provider editing', () => {
       keep: 'value'
     });
   });
+
+  it('submits the selected preset configuration and clears it on a kind change', () => {
+    const selected = { ...preset, auth_mode: 'none' as const };
+    const presetSpec = { ...spec, presets: [selected] };
+    const draft = createProviderDraft(presetSpec);
+    draft.name = 'Service';
+
+    selectProviderPreset(draft, presetSpec, selected.id);
+    expect(
+      buildCreateProviderInput(draft, presetSpec).configuration
+    ).toMatchObject({
+      kind: presetSpec.kind,
+      endpoint: selected.endpoint,
+      auth_mode: selected.auth_mode,
+      profile_id: selected.profile_id,
+      profile_revision: selected.profile_revision,
+      options: { vendor_id: selected.id }
+    });
+
+    setProviderDraftKind(draft, 'anthropic');
+    const nextSpec = { ...spec, kind: 'anthropic' as const, presets: [] };
+    const { name, configuration } = buildCreateProviderInput(draft, nextSpec);
+    expect(name).toBe('Service');
+    expect(configuration).toMatchObject({
+      kind: nextSpec.kind,
+      endpoint: null
+    });
+    expect(configuration.profile_id).toBeUndefined();
+    expect(configuration.profile_revision).toBeUndefined();
+    expect(configuration.options?.vendor_id).toBeUndefined();
+  });
 });
 
 const ready: ProviderReadiness = {

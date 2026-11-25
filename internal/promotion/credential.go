@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -34,8 +35,8 @@ type Claim struct {
 }
 
 func ParseBindings(request contract.ConfigurationPromotionRequest) (Bindings, error) {
-	sealed := ValueOf(request.SecretBindings)
-	external := ValueOf(request.ExternalCredentialBindings)
+	sealed := ptr.Value(request.SecretBindings)
+	external := ptr.Value(request.ExternalCredentialBindings)
 	if slices.ContainsFunc(slices.Collect(maps.Keys(external)), func(ref string) bool { _, ok := sealed[ref]; return ok }) {
 		return nil, httpkit.Invalid("external_credential_bindings", "A reference cannot also have a plaintext binding.")
 	}
@@ -133,7 +134,7 @@ func storeReference(reference contract.ExternalCredentialReference) secretstore.
 		Store:    string(reference.Store),
 		SecretID: reference.SecretId,
 		Version:  reference.Version,
-		Region:   ValueOf(reference.Region),
-		Field:    ValueOf(reference.Field),
+		Region:   ptr.Value(reference.Region),
+		Field:    ptr.Value(reference.Field),
 	}
 }

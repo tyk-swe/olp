@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -189,12 +190,12 @@ func (s *Server) generate(ctx context.Context, tx pgx.Tx, t *template, m certifi
 	if err != nil {
 		return result, err
 	}
-	id, etag := httpkit.NewID(), httpkit.NewID()
+	id, etag := ids.New(), ids.New()
 	if err = StageDraft(ctx, tx, NewDraft{ID: id, CreatedBy: actor, ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 		return result, err
 	}
 	if t.RoutingPolicy != nil {
-		if err = StageDraftPolicy(ctx, tx, id, httpkit.NewID(), actor, t.RoutingPolicy); err != nil {
+		if err = StageDraftPolicy(ctx, tx, id, ids.New(), actor, t.RoutingPolicy); err != nil {
 			return result, err
 		}
 	}
@@ -250,7 +251,7 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 	}
 	added[0].Position = len(d.Targets)
 	encoded, _ := json.Marshal(append(d.Targets, added[0]))
-	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET targets=$2,state='draft',etag=$3,updated_at=now() WHERE id=$1", d.ID, encoded, httpkit.NewID()); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET targets=$2,state='draft',etag=$3,updated_at=now() WHERE id=$1", d.ID, encoded, ids.New()); err != nil {
 		return result, err
 	}
 	result.DraftID, result.Outcome = &d.ID, TemplateDraft

@@ -32,10 +32,6 @@ type Template struct {
 	serving   oif.ServingIdentity
 }
 
-func reject(code, field, requirement, message string) error {
-	return operations.Error(code, field, requirement, message)
-}
-
 // Compile qualifies direct native media operations. The video create contract
 // has a durable local resource mapping; list remains an owner-scoped local
 // collection and cannot claim equivalence with a provider project-wide list.
@@ -43,25 +39,25 @@ func Compile(c Config) (*Template, error) {
 	c.Provider = c.Provider.Clone()
 	p, err := c.Provider.Profile()
 	if err != nil || c.Provider.ValidateProfile() != nil {
-		return nil, reject("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
+		return nil, operations.Error("target_capability", "/profile", "explicit_profile", "Strict media requires a registered versioned profile.")
 	}
 	if !slices.Contains([]string{"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation", "video_create", "video_get", "video_content", "video_delete"}, c.Operation) ||
 		!slices.Contains(p.Operations, c.Operation) ||
 		!slices.Contains([]string{"direct-openai", "direct-compatible", "azure-v1", "azure-deployment"}, p.Hosting) {
-		return nil, reject("target_capability", "/operation", "native_media_contract", "This media operation and hosting combination has no strict native contract.")
+		return nil, operations.Error("target_capability", "/operation", "native_media_contract", "This media operation and hosting combination has no strict native contract.")
 	}
 	if vendors.MediaWire(c.Provider.VendorID, c.Operation) != "" {
-		return nil, reject("target_capability", "/operation", "native_media_contract", "This vendor's media API is translated; it serves transformed routes only.")
+		return nil, operations.Error("target_capability", "/operation", "native_media_contract", "This vendor's media API is translated; it serves transformed routes only.")
 	}
 	if strings.HasPrefix(c.Operation, "video_") && !slices.Contains([]string{"direct-openai", "direct-compatible"}, p.Hosting) {
-		return nil, reject("target_capability", "/profile", "video_hosting", "This video hosting has no qualified native lifecycle contract.")
+		return nil, operations.Error("target_capability", "/profile", "video_hosting", "This video hosting has no qualified native lifecycle contract.")
 	}
 	if !c.Provider.ValidModel(c.Provider.Model(c.Model)) {
-		return nil, reject("resource_affinity", "/model", "serving_binding", "The configured media model is invalid.")
+		return nil, operations.Error("resource_affinity", "/model", "serving_binding", "The configured media model is invalid.")
 	}
 	defaults, provenance, err := c.Provider.DefaultsFor(c.Operation, c.Model)
 	if err != nil {
-		return nil, reject("target_capability", "/defaults", "native_defaults", "The media defaults are invalid.")
+		return nil, operations.Error("target_capability", "/defaults", "native_defaults", "The media defaults are invalid.")
 	}
 	serving := c.Provider.ServingIdentity(c.ProviderID, c.RevisionID, c.Model)
 	origins := map[string]oif.Origin{}
@@ -154,22 +150,22 @@ func (t *Template) descriptor(mode string) oif.Descriptor {
 func (t *Template) Bind(in Input) (Bound, error) {
 	d := t.descriptor(in.Mode)
 	if in.Mode != "unary" && in.Mode != "streaming" && !(t.op == "video_create" && in.Mode == "async") {
-		return Bound{}, reject("target_capability", "/mode", "media_delivery", "The media delivery mode has no native contract.")
+		return Bound{}, operations.Error("target_capability", "/mode", "media_delivery", "The media delivery mode has no native contract.")
 	}
 	if t.op == "video_create" && in.Mode != "async" {
-		return Bound{}, reject("target_capability", "/mode", "video_submission", "Video creation requires an asynchronous durable job.")
+		return Bound{}, operations.Error("target_capability", "/mode", "video_submission", "Video creation requires an asynchronous durable job.")
 	}
 	if len(in.JSON) != 0 {
 		if !in.Source.Valid() || len(in.Parts) != 0 {
-			return Bound{}, reject("target_capability", "/request", "native_media_source", "The native JSON source is missing or mixed with multipart input.")
+			return Bound{}, operations.Error("target_capability", "/request", "native_media_source", "The native JSON source is missing or mixed with multipart input.")
 		}
 		if t.op != "image_generation" && t.op != "speech" {
-			return Bound{}, reject("target_capability", "/request", "native_media_source", "This operation requires multipart input.")
+			return Bound{}, operations.Error("target_capability", "/request", "native_media_source", "This operation requires multipart input.")
 		}
 		return t.bindJSON(d, in)
 	}
 	if in.Source.Valid() || len(in.Parts) == 0 || t.op == "image_generation" || t.op == "speech" {
-		return Bound{}, reject("target_capability", "/request", "native_media_source", "This media operation has no matching source representation.")
+		return Bound{}, operations.Error("target_capability", "/request", "native_media_source", "This media operation has no matching source representation.")
 	}
 	return t.bindMultipart(d, in)
 }
@@ -177,17 +173,17 @@ func (t *Template) Bind(in Input) (Bound, error) {
 func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 	effective, err := oif.ParseJSON(in.JSON, oif.Limits{MaxBytes: maxDocumentBytes})
 	if err != nil || in.Source.Root().Kind() != oif.Object || effective.Root().Kind() != oif.Object {
-		return Bound{}, reject("target_capability", "/request", "unambiguous_media_json", "The native media JSON is malformed or ambiguous.")
+		return Bound{}, operations.Error("target_capability", "/request", "unambiguous_media_json", "The native media JSON is malformed or ambiguous.")
 	}
 	model, ok := in.Source.Root().Lookup("model")
 	route, valid := model.Text()
 	if !ok || !valid || route != in.Route {
-		return Bound{}, reject("resource_affinity", "/model", "route_identity", "The media model must name the selected route.")
+		return Bound{}, operations.Error("resource_affinity", "/model", "route_identity", "The media model must name the selected route.")
 	}
 	effectiveModel, ok := effective.Root().Lookup("model")
 	upstreamModel, valid := effectiveModel.Text()
 	if !ok || !valid || upstreamModel != t.model {
-		return Bound{}, reject("resource_affinity", "/model", "serving_binding", "The outbound model differs from the selected serving model.")
+		return Bound{}, operations.Error("resource_affinity", "/model", "serving_binding", "The outbound model differs from the selected serving model.")
 	}
 	previous := -1
 	for _, member := range in.Source.Root().Members() {
@@ -198,16 +194,16 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 			}
 			found = true
 			if index <= previous {
-				return Bound{}, reject("target_capability", "/request", "source_order", "Media source member order changed.")
+				return Bound{}, operations.Error("target_capability", "/request", "source_order", "Media source member order changed.")
 			}
 			previous = index
 			if member.Name != "model" && member.Value.Raw() != outbound.Value.Raw() {
-				return Bound{}, reject("target_capability", "/request", "source_identity", "A native media field changed without an admitted overlay.")
+				return Bound{}, operations.Error("target_capability", "/request", "source_identity", "A native media field changed without an admitted overlay.")
 			}
 			break
 		}
 		if !found {
-			return Bound{}, reject("target_capability", "/request", "source_identity", "A native media field was dropped.")
+			return Bound{}, operations.Error("target_capability", "/request", "source_identity", "A native media field was dropped.")
 		}
 	}
 	for _, member := range effective.Root().Members() {
@@ -215,7 +211,7 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 			continue
 		}
 		if !bytes.Equal([]byte(member.Value.Raw()), t.defaults[member.Name]) {
-			return Bound{}, reject("target_capability", "/defaults", "absent_only_default", "An outbound media field has no admitted default.")
+			return Bound{}, operations.Error("target_capability", "/defaults", "absent_only_default", "An outbound media field has no admitted default.")
 		}
 	}
 	source, _ := oif.NewRequest(d, in.Source)
@@ -235,7 +231,7 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 	}
 	effectiveRequest, err := source.WithChanges(changes...)
 	if err != nil || effectiveRequest.Document().Raw() != effective.Raw() {
-		return Bound{}, reject("target_capability", "/request", "exact_media_overlay", "The native media request differs from its admitted source overlays.")
+		return Bound{}, operations.Error("target_capability", "/request", "exact_media_overlay", "The native media request differs from its admitted source overlays.")
 	}
 	return Bound{Descriptor: d, Source: source, Effective: effectiveRequest, Receipt: t.receipt(d, dispositions)}, nil
 }
@@ -250,17 +246,17 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	copy(parts, in.Parts)
 	for _, part := range parts {
 		if part.Name == "" || (part.Text == nil) == !part.Blob.Valid() {
-			return Bound{}, reject("target_capability", "/request", "multipart_member", "A multipart member has no unambiguous text or staged blob.")
+			return Bound{}, operations.Error("target_capability", "/request", "multipart_member", "A multipart member has no unambiguous text or staged blob.")
 		}
 		if part.Name == "model" {
 			if modelSeen || part.Text == nil || *part.Text != t.model {
-				return Bound{}, reject("resource_affinity", "/model", "serving_binding", "Multipart model binding is invalid.")
+				return Bound{}, operations.Error("resource_affinity", "/model", "serving_binding", "Multipart model binding is invalid.")
 			}
 			modelSeen = true
 		}
 		if part.Blob.Valid() {
 			if part.ContentType == "" {
-				return Bound{}, reject("target_capability", "/request", "asset_media_type", "Strict multipart cannot introduce a missing file Content-Type.")
+				return Bound{}, operations.Error("target_capability", "/request", "asset_media_type", "Strict multipart cannot introduce a missing file Content-Type.")
 			}
 			fileCount++
 			switch t.op {
@@ -268,31 +264,31 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 				if part.Name == "mask" {
 					maskCount++
 				} else if part.Name != "image" && !strings.HasPrefix(part.Name, "image[") {
-					return Bound{}, reject("target_capability", "/request", "image_input", "Image edit file field is not qualified.")
+					return Bound{}, operations.Error("target_capability", "/request", "image_input", "Image edit file field is not qualified.")
 				} else {
 					imageCount++
 				}
 			case "image_variation":
 				if part.Name != "image" {
-					return Bound{}, reject("target_capability", "/request", "image_input", "Image variation file field is not qualified.")
+					return Bound{}, operations.Error("target_capability", "/request", "image_input", "Image variation file field is not qualified.")
 				}
 				imageCount++
 			case "transcription", "translation":
 				if part.Name != "file" {
-					return Bound{}, reject("target_capability", "/request", "audio_input", "Audio file field is not qualified.")
+					return Bound{}, operations.Error("target_capability", "/request", "audio_input", "Audio file field is not qualified.")
 				}
 			case "video_create":
 				if part.Name != "input_reference" || !strings.HasPrefix(part.ContentType, "image/") {
-					return Bound{}, reject("target_capability", "/request", "video_reference", "Video creation requires one original image reference.")
+					return Bound{}, operations.Error("target_capability", "/request", "video_reference", "Video creation requires one original image reference.")
 				}
 			}
 		}
 	}
 	if !modelSeen || t.op != "video_create" && fileCount == 0 || maskCount > 1 || t.op == "image_edit" && imageCount == 0 {
-		return Bound{}, reject("target_capability", "/request", "media_assets", "The multipart source is incomplete.")
+		return Bound{}, operations.Error("target_capability", "/request", "media_assets", "The multipart source is incomplete.")
 	}
 	if t.op != "image_edit" && t.op != "video_create" && fileCount != 1 || t.op == "video_create" && fileCount > 1 {
-		return Bound{}, reject("target_capability", "/request", "media_assets", "The operation requires exactly one staged source asset.")
+		return Bound{}, operations.Error("target_capability", "/request", "media_assets", "The operation requires exactly one staged source asset.")
 	}
 	bound := Bound{Parts: parts}
 	dispositions := []oif.Disposition{{Field: "/request", Disposition: "preserved", Rule: "ordered_multipart_source", Evidence: "media/native-openai/1"}, {Field: "/model", Disposition: "bound", Rule: "serving_model", Evidence: "media/native-openai/1"}}
@@ -315,22 +311,22 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 
 func (t *Template) multipartDefaults(in Input) ([]Part, error) {
 	if len(in.CallerParts) == 0 || len(in.Parts) < len(in.CallerParts) {
-		return nil, reject("target_capability", "/request", "multipart_source", "The ordered caller multipart source is missing.")
+		return nil, operations.Error("target_capability", "/request", "multipart_source", "The ordered caller multipart source is missing.")
 	}
 	seen := map[string]bool{}
 	for index, caller := range in.CallerParts {
 		outbound := in.Parts[index]
 		seen[caller.Name] = true
 		if caller.Name != outbound.Name || caller.Blob != outbound.Blob || caller.Filename != outbound.Filename || caller.ContentType != outbound.ContentType || (caller.Text == nil) != (outbound.Text == nil) {
-			return nil, reject("target_capability", "/request", "source_order", "A caller multipart member changed position or identity.")
+			return nil, operations.Error("target_capability", "/request", "source_order", "A caller multipart member changed position or identity.")
 		}
 		if caller.Text != nil {
 			if caller.Name == "model" {
 				if *caller.Text != in.Route || *outbound.Text != t.model {
-					return nil, reject("resource_affinity", "/model", "serving_binding", "The multipart model binding is invalid.")
+					return nil, operations.Error("resource_affinity", "/model", "serving_binding", "The multipart model binding is invalid.")
 				}
 			} else if *caller.Text != *outbound.Text {
-				return nil, reject("target_capability", "/request", "source_identity", "A caller multipart text value changed.")
+				return nil, operations.Error("target_capability", "/request", "source_identity", "A caller multipart text value changed.")
 			}
 		}
 	}
@@ -342,12 +338,12 @@ func (t *Template) multipartDefaults(in Input) ([]Part, error) {
 		defaultParts = append(defaultParts, multipartDefaultParts(name, t.defaults[name])...)
 	}
 	if len(defaultParts) != len(in.Parts)-len(in.CallerParts) {
-		return nil, reject("target_capability", "/defaults", "absent_only_default", "Multipart defaults are incomplete or unexpected.")
+		return nil, operations.Error("target_capability", "/defaults", "absent_only_default", "Multipart defaults are incomplete or unexpected.")
 	}
 	for i, want := range defaultParts {
 		got := in.Parts[len(in.CallerParts)+i]
 		if got.Name != want.Name || got.Text == nil || *got.Text != *want.Text || got.Blob.Valid() {
-			return nil, reject("target_capability", "/defaults", "absent_only_default", "A multipart default changed its native value.")
+			return nil, operations.Error("target_capability", "/defaults", "absent_only_default", "A multipart default changed its native value.")
 		}
 	}
 	return defaultParts, nil
@@ -385,12 +381,12 @@ func multipartDefaultParts(name string, raw json.RawMessage) []Part {
 // categories and exact numeric lexemes, rather than a typed projection of it.
 func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result, error) {
 	if !source.Valid() || source.Root().Kind() != oif.Object {
-		return oif.Result{}, reject("protocol_violation", "/result", "media_result", "The native media result is not a JSON object.")
+		return oif.Result{}, operations.Error("protocol_violation", "/result", "media_result", "The native media result is not a JSON object.")
 	}
 	if t.op == "image_generation" || t.op == "image_edit" || t.op == "image_variation" {
 		data, ok := source.Root().Lookup("data")
 		if !ok || data.Kind() != oif.Array {
-			return oif.Result{}, reject("protocol_violation", "/result/data", "image_set", "The image result has no image set.")
+			return oif.Result{}, operations.Error("protocol_violation", "/result/data", "image_set", "The image result has no image set.")
 		}
 	}
 	if t.op == "video_create" || t.op == "video_get" {
@@ -406,7 +402,7 @@ func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result
 		if !idOK || !idText || upstreamID == "" || !modelOK || !modelText || modelName != t.model ||
 			!kindOK || !kindText || objectName != "video" || !statusOK || !statusText ||
 			!validStatus {
-			return oif.Result{}, reject("protocol_violation", "/result", "video_job_identity", "The native video job identity or status is invalid.")
+			return oif.Result{}, operations.Error("protocol_violation", "/result", "video_job_identity", "The native video job identity or status is invalid.")
 		}
 	}
 	if t.op == "video_delete" {
@@ -414,7 +410,7 @@ func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result
 		deleted, deletedOK := source.Root().Lookup("deleted")
 		name, textOK := kind.Text()
 		if !kindOK || !textOK || name != "video.deleted" || !deletedOK || deleted.Raw() != "true" {
-			return oif.Result{}, reject("protocol_violation", "/result", "video_delete_receipt", "The native video deletion receipt is invalid.")
+			return oif.Result{}, operations.Error("protocol_violation", "/result", "video_delete_receipt", "The native video deletion receipt is invalid.")
 		}
 	}
 	return oif.NewResult(d, source, oif.Complete)
@@ -425,12 +421,12 @@ func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result
 func (t *Template) Event(d oif.Descriptor, data string, event string, sequence uint64) (oif.Event, error) {
 	doc, err := oif.ParseJSON([]byte(data), oif.Limits{MaxBytes: maxDocumentBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return oif.Event{}, reject("protocol_violation", "/event", "media_event", "The native media event is malformed or ambiguous.")
+		return oif.Event{}, operations.Error("protocol_violation", "/event", "media_event", "The native media event is malformed or ambiguous.")
 	}
 	kind, ok := doc.Root().Lookup("type")
 	name, valid := kind.Text()
 	if !ok || !valid || name == "" || event != "" && event != name {
-		return oif.Event{}, reject("protocol_violation", "/event/type", "media_event", "The native media event type is inconsistent.")
+		return oif.Event{}, operations.Error("protocol_violation", "/event/type", "media_event", "The native media event type is inconsistent.")
 	}
 	return oif.NewEvent(d, doc, name, sequence)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 )
 
@@ -124,13 +125,6 @@ type ToolLimits struct {
 	MaxConcurrency       int64
 	PerKeyCallsPerMinute int64
 	PerKeyMaxConcurrency int64
-}
-
-func ToolLimitOr(value *int64, fallback int64) int64 {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }
 
 func EffectiveToolLimits(callsPerMinute, maxConcurrency, perKeyCallsPerMinute, perKeyMaxConcurrency int64) ToolLimits {
@@ -314,7 +308,7 @@ func (s *Snapshot) compileMCP() {
 				continue
 			}
 			effective := EffectiveToolLimits(server.CallsPerMinute, server.MaxConcurrency, server.PerKeyCallsPerMinute, server.PerKeyMaxConcurrency)
-			price := copyPointer(server.UnitPrice)
+			price := ptr.Clone(server.UnitPrice)
 			if toolPrice, ok := server.ToolPrices[pin.Name]; ok {
 				price = &toolPrice
 			}
@@ -323,7 +317,7 @@ func (s *Snapshot) compileMCP() {
 				Alias:          pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
-				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
+				Delegation: server.Delegation.Clone(), CredentialID: ptr.Clone(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
 				CallsPerMinute:       effective.CallsPerMinute,
 				MaxConcurrency:       effective.MaxConcurrency,
 				PerKeyCallsPerMinute: effective.PerKeyCallsPerMinute,
@@ -350,7 +344,7 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 				Alias:          tool.Alias, Name: tool.Name, Description: tool.Description,
 				InputSchema: slices.Clone(tool.InputSchema), ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 				CatalogDigest: tool.CatalogDigest, Endpoint: tool.Endpoint, Transport: tool.Transport,
-				UnitPrice: copyPointer(tool.UnitPrice), CredentialID: copyPointer(tool.CredentialID),
+				UnitPrice: ptr.Clone(tool.UnitPrice), CredentialID: ptr.Clone(tool.CredentialID),
 				OAuth: tool.OAuth.Clone(), Delegation: tool.Delegation.Clone(), Stdio: tool.Stdio.Clone(),
 				CallsPerMinute: tool.CallsPerMinute, MaxConcurrency: tool.MaxConcurrency,
 				PerKeyCallsPerMinute: tool.PerKeyCallsPerMinute, PerKeyMaxConcurrency: tool.PerKeyMaxConcurrency,

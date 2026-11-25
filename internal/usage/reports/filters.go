@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 

@@ -13,8 +13,8 @@
   import { focusErrorSummary } from '#lib/editing/focusError.js';
   import { providerKeys } from './providerKeys';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
-  import ConflictNotice from '#lib/shell/ConflictNotice.svelte';
-  import ReadOnlyNote from '#lib/shell/ReadOnlyNote.svelte';
+  import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { errorMessage as providerDetailError } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import ProviderConfigurationSection from './ProviderConfigurationSection.svelte';

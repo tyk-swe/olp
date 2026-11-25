@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contracts/media"
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -116,13 +117,13 @@ func (v *View) CommitmentAt(providerID string, at time.Time) *Commitment {
 	if commitment == nil {
 		return nil
 	}
-	return &Commitment{ID: commitment.ID, Amount: commitment.Amount, Period: commitment.Period, EffectiveAt: copyPointer(commitment.EffectiveAt), EndsAt: copyPointer(commitment.EndsAt)}
+	return &Commitment{ID: commitment.ID, Amount: commitment.Amount, Period: commitment.Period, EffectiveAt: ptr.Clone(commitment.EffectiveAt), EndsAt: ptr.Clone(commitment.EndsAt)}
 }
 func (v *View) GuardrailEngine(slug, key string) *guardrails.Engine {
-	return copyPointer(v.snapshot.GuardrailEngine(slug, key))
+	return ptr.Clone(v.snapshot.GuardrailEngine(slug, key))
 }
 func (v *View) ToolGuardrailEngine(toolsetID, key string) *guardrails.Engine {
-	return copyPointer(v.snapshot.ToolGuardrailEngine(toolsetID, key))
+	return ptr.Clone(v.snapshot.ToolGuardrailEngine(toolsetID, key))
 }
 func (v *View) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	return v.snapshot.MCPToolset(revisionID)
@@ -185,37 +186,37 @@ func (v *View) selectionPolicies(key string) (*Policy, *Policy) {
 
 func (v *View) InteractionTemplate(slug, target string) (*interaction.Template, bool) {
 	template, ok := v.snapshot.InteractionTemplate(slug, target)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) RealtimeTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := v.snapshot.RealtimeTemplate(slug, target)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) WebRTCTemplate(slug, target string) (*RealtimeTemplate, bool) {
 	template, ok := v.snapshot.WebRTCTemplate(slug, target)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) DuplexTemplate(slug, target string) (*duplex.Template, bool) {
 	template, ok := v.snapshot.DuplexTemplate(slug, target)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) MediaTemplate(slug, target, operation string) (*media.Template, bool) {
 	template, ok := v.snapshot.MediaTemplate(slug, target, operation)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) DurableTemplate(slug, target string) (*DurableTemplate, bool) {
 	template, ok := v.snapshot.DurableTemplate(slug, target)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) OperationTemplate(slug, target, operation string) (*unary.Template, bool) {
 	template, ok := v.snapshot.OperationTemplate(slug, target, operation)
-	return copyPointer(template), ok
+	return ptr.Clone(template), ok
 }
 
 func (v *View) WithRoute(route Route) *View {

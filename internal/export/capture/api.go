@@ -15,6 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -80,7 +82,7 @@ type createRequest struct {
 func (c createRequest) settings() Settings {
 	return Settings{
 		ProjectID: c.ProjectID, Route: c.Route, SinkID: c.SinkID, SampleRatio: c.SampleRatio, Include: c.Include,
-		Redact: orEmpty(c.Redact), KeyIDs: orEmpty(c.KeyIDs), EndUsers: orEmpty(c.EndUsers), MaxBytes: c.MaxBytes,
+		Redact: ptr.NonNil(c.Redact), KeyIDs: ptr.NonNil(c.KeyIDs), EndUsers: ptr.NonNil(c.EndUsers), MaxBytes: c.MaxBytes,
 		Enabled: c.Enabled == nil || *c.Enabled, ExpiresAt: c.ExpiresAt,
 	}
 }
@@ -99,9 +101,9 @@ type updateRequest struct {
 
 func (u updateRequest) apply(s Settings) Settings {
 	return Settings{
-		ProjectID: s.ProjectID, Route: s.Route, SinkID: valueOr(u.SinkID, s.SinkID), SampleRatio: valueOr(u.SampleRatio, s.SampleRatio),
+		ProjectID: s.ProjectID, Route: s.Route, SinkID: ptr.Or(u.SinkID, s.SinkID), SampleRatio: ptr.Or(u.SampleRatio, s.SampleRatio),
 		Include: patched(u.Include, s.Include), Redact: patched([]string(u.Redact), s.Redact), KeyIDs: patched(u.KeyIDs, s.KeyIDs),
-		EndUsers: patched(u.EndUsers, s.EndUsers), MaxBytes: valueOr(u.MaxBytes, s.MaxBytes), Enabled: valueOr(u.Enabled, s.Enabled),
+		EndUsers: patched(u.EndUsers, s.EndUsers), MaxBytes: ptr.Or(u.MaxBytes, s.MaxBytes), Enabled: ptr.Or(u.Enabled, s.Enabled),
 		ExpiresAt: u.expiry(s.ExpiresAt),
 	}
 }
@@ -175,7 +177,7 @@ func (a *API) updateConfiguration(r *http.Request, _ authz.Principal) (httpkit.R
 		if err := httpkit.Match(r, current.ETag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		next := configuration{Enabled: *input.Enabled, ETag: httpkit.NewID()}
+		next := configuration{Enabled: *input.Enabled, ETag: ids.New()}
 		if _, err := tx.Exec(r.Context(), updateConfigurationSQL, next.Enabled, next.ETag, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -240,9 +242,9 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		if count >= maxPolicies {
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("capture_policies", "This installation already has 1000 capture policies.")
 		}
-		id := httpkit.NewID()
+		id := ids.New()
 		if _, err := tx.Exec(r.Context(), createPolicySQL, id, scope.project, settings.Route, scope.sink, settings.SampleRatio, settings.Include,
-			settings.Redact, settings.MaxBytes, settings.Enabled, httpkit.NewID(), p.UserID(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
+			settings.Redact, settings.MaxBytes, settings.Enabled, ids.New(), p.UserID(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := storePins(r.Context(), tx, id, pins); err != nil {
@@ -273,7 +275,7 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err := tx.Exec(r.Context(), updatePolicySQL, current.ID, sink, settings.SampleRatio, settings.Include, settings.Redact,
-			settings.MaxBytes, settings.Enabled, httpkit.NewID(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
+			settings.MaxBytes, settings.Enabled, ids.New(), settings.KeyIDs, settings.EndUsers, settings.ExpiresAt); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		policy, err := readPolicy(r.Context(), tx, getPolicySQL, current.ID)
@@ -491,23 +493,9 @@ func pinFor(ctx context.Context, q database.Queryer, scope resolved, names []str
 	return pin(ctx, q, *scope.detectors, names)
 }
 
-func orEmpty[T any](values []T) []T {
-	if values == nil {
-		return []T{}
-	}
-	return values
-}
-
 func patched[T any](patch, current []T) []T {
 	if patch == nil {
 		return current
 	}
 	return patch
-}
-
-func valueOr[T any](value *T, fallback T) T {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 const MaxTemplateBytes = 64 << 10
@@ -48,14 +50,6 @@ type Definition struct {
 	DefaultParameters *Parameters     `json:"default_parameters,omitempty"`
 }
 
-func clonePointer[T any](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
-}
-
 func (d Definition) Clone() Definition {
 	return Definition{
 		Template:          d.Template,
@@ -77,7 +71,7 @@ func cloneParameters(parameters *Parameters) *Parameters {
 	if parameters == nil {
 		return nil
 	}
-	return &Parameters{Temperature: clonePointer(parameters.Temperature), TopP: clonePointer(parameters.TopP), MaxOutputTokens: clonePointer(parameters.MaxOutputTokens)}
+	return &Parameters{Temperature: ptr.Clone(parameters.Temperature), TopP: ptr.Clone(parameters.TopP), MaxOutputTokens: ptr.Clone(parameters.MaxOutputTokens)}
 }
 
 func (d Definition) variableNames() ([]string, error) {

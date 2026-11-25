@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   namedLimitRow,
   namedLimitsError
-} from '#lib/features/access/budgets/namedLimits.js';
+} from '#lib/features/budgets/namedLimits.js';
 import {
   policyError,
   policyForm

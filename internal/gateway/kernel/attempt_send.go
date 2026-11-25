@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/anthropicbeta"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -90,7 +91,7 @@ func (run attemptRun) sendingConfig(plan attemptPlan, header http.Header) connec
 	if plan.contract != nil {
 		return plan.config
 	}
-	return forwardAnthropicBeta(header, run.x, plan.format, plan.config)
+	return anthropicbeta.Forward(header, run.x.generation.parsed.Family, plan.format, run.x.semanticHeaders, plan.config)
 }
 
 func (run attemptRun) authenticate(plan attemptPlan, exchange *boundExchange, req *http.Request) *attemptEnd {

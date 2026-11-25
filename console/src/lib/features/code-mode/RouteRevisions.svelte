@@ -5,7 +5,7 @@
     emptyCursorHistory,
     cursorPaginationProps
   } from '#lib/listing/pagination.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import LoadError from './LoadError.svelte';
   import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';

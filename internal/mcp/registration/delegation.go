@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -35,7 +36,7 @@ func (s *Server) saveDelegationKey(ctx context.Context, tx pgx.Tx, in Input, pre
 		return nil, nil
 	}
 	if in.DelegationPrivateKey != nil {
-		id := httpkit.NewID()
+		id := ids.New()
 		material := []byte(*in.DelegationPrivateKey)
 		defer clear(material)
 		if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.MCPDelegationSigning, material, nil); err != nil {

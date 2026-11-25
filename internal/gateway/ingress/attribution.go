@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"slices"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func ParseAttribution(r *http.Request, authority keyauthority.Authority) (map[string]string, *fault.Error) {

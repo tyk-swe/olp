@@ -24,9 +24,10 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
-	"github.com/tyk-swe/olp/internal/samlidentity"
 )
 
 // SAMLDefinition is portable public trust and role-mapping policy. Installation
@@ -226,9 +227,9 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Pri
 	}
 	c.ID = old.ID
 	if c.ID == "" {
-		c.ID = httpkit.NewID()
+		c.ID = ids.New()
 	}
-	c.ETag = httpkit.NewID()
+	c.ETag = ids.New()
 	c.Certificate = old.Certificate
 	if old.ID == "" || rotate {
 		key, e := newSAMLSigningKey()

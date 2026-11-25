@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -375,7 +375,14 @@ func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
 	digest := "workload"
 	agent := keyauthority.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
 	key := keyauthority.Authority{ID: "key", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
-	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, nil, agent, "", "pair", "grant", time.Now().Add(time.Minute))
+	delegated := *key.Delegated(keyauthority.DelegationDerivation{
+		Scopes:      []string{"tools"},
+		Toolsets:    []string{toolset},
+		Agent:       agent,
+		PairDigest:  "pair",
+		TokenDigest: "grant",
+		ExpiresAt:   time.Now().Add(time.Minute),
+	})
 	for _, test := range []struct {
 		name     string
 		agent    keyauthority.Authority

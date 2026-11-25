@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/svelte-query';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { json, serve } from '#lib/management/test/transport.js';
+import { json, serve } from '#lib/session/test/transport.js';
 import CodeDiagnosticsProbe from './test/CodeDiagnosticsProbe.svelte';
 import { eventually } from '../../../../tests/unit/support/eventually.js';
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 // ResearchTools binds research to one subscription independently of inference
@@ -18,7 +18,7 @@ func (t *ResearchTools) Validate() error {
 	if t == nil {
 		return nil
 	}
-	if id, err := uuid.Parse(t.AccountID); err != nil || id.String() != t.AccountID {
+	if !ids.CanonicalOrNil(t.AccountID) {
 		return fmt.Errorf("choose a research account")
 	}
 	if len(t.Services) < 1 || len(t.Services) > 3 {

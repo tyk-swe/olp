@@ -2,7 +2,7 @@ package access
 
 import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 )
 
 func ValidateAttributionPolicy(p *attribution.Policy) error {

@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type DelegationRecord struct {
@@ -38,18 +39,11 @@ type delegationRow struct {
 	ProjectRole          *string `db:"project_role"`
 }
 
-func projectRole(role *string) string {
-	if role == nil {
-		return ""
-	}
-	return *role
-}
-
 func (r delegationRow) memberAuthorized() bool {
 	if r.MemberActive == nil || !*r.MemberActive || r.MemberOIDCAuthorized == nil || !*r.MemberOIDCAuthorized || r.MemberRole == nil || r.MemberScope == nil {
 		return false
 	}
-	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
+	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: ptr.Value(r.ProjectRole)}}
 	return principal.Authorize(authz.Keys) == nil && principal.Project(&r.ProjectID, authz.Change) == nil
 }
 
@@ -98,16 +92,13 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 	if pageErr != nil {
 		return httpkit.Reply{}, pageErr
 	}
-	project, projectErr := delegationProjectFilter(r, p)
+	project, projectErr := p.ProjectFilter(r)
 	if projectErr != nil {
 		return httpkit.Reply{}, projectErr
 	}
 	delegation := r.URL.Query().Get("delegation_id")
-	if delegation != "" {
-		id, err := uuid.Parse(delegation)
-		if err != nil || id == uuid.Nil || id.String() != delegation {
-			return httpkit.Reply{}, httpkit.Invalid("delegation_id", "Use a canonical delegation UUID.")
-		}
+	if delegation != "" && !ids.Canonical(delegation) {
+		return httpkit.Reply{}, httpkit.Invalid("delegation_id", "Use a canonical delegation UUID.")
 	}
 	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
  d.agent_id::text AS agent_id,d.consenting_user_id::text AS member_id,(d.consent_digest IS NOT NULL) AS consent_pending,
@@ -128,7 +119,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 		}
 		return delegationPairRecord{
 			Record: data.record(), ProjectID: data.ProjectID,
-			Digest: attribution.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
+			Digest: secrets.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
 		}, nil
 	})
 	if collectErr != nil {
@@ -173,19 +164,4 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 		return httpkit.Reply{}, budgetCollectErr
 	}
 	return httpkit.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
-}
-
-func delegationProjectFilter(r *http.Request, p authz.Principal) (string, error) {
-	project := r.URL.Query().Get("project_id")
-	if project == "" {
-		return "", nil
-	}
-	id, err := uuid.Parse(project)
-	if err != nil || id == uuid.Nil || id.String() != project {
-		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
-	}
-	if err := p.Project(&project, authz.View); err != nil {
-		return "", err
-	}
-	return project, nil
 }

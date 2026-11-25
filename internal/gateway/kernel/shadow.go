@@ -5,10 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -129,7 +128,7 @@ func (s *Server) mirror(x *Call) {
 // no longer written once the caller's response is complete; everything the
 // attempt prepares from it is built afresh.
 func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
-	id := uuid.Must(uuid.NewV7()).String()
+	id := ids.New()
 	route := parent.Route
 	x := &Call{
 		request: request{
@@ -143,25 +142,23 @@ func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
 		family:  parent.family,
 		ingress: parent.ingress,
 
-		semanticHeaders: parent.semanticHeaders,
-		semanticQuery:   parent.semanticQuery,
-		actor:           "system",
-		keyID:           parent.keyID,
-		authority:       parent.authority,
-		cardPinned:      parent.cardPinned,
-		cardRevisionID:  parent.cardRevisionID,
-		cardRev:         parent.cardRev,
-		routingInputs:   parent.routingInputs,
-		attribution:     parent.attribution,
+		callSemantics: callSemantics{
+			semanticHeaders: parent.semanticHeaders,
+			semanticQuery:   parent.semanticQuery,
+		},
+		actor:       "system",
+		keyID:       parent.keyID,
+		authority:   parent.authority,
+		callPricing: parent.callPricing,
+		attribution: parent.attribution,
 
 		primary: route,
 		mode:    parent.mode,
 
-		allowance: 1,
-		fixed:     true,
-		origin:    usage.OriginShadow,
-		parent:    parent.request.accountingID(),
-		priority:  routing.PriorityLow, routeLeg: routeLeg{affinity: parent.affinity,
+		callBudget: callBudget{allowance: 1, fixed: true},
+		origin:     usage.OriginShadow,
+		parent:     parent.request.accountingID(),
+		priority:   routing.PriorityLow, routeLeg: routeLeg{affinity: parent.affinity,
 			Route: route,
 
 			policy:   parent.policy,

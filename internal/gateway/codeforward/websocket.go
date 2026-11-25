@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode/codewire"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -161,10 +161,10 @@ func (f *Forwarder) codeWebSocket(w http.ResponseWriter, r *http.Request, releas
 	loop := &codeWSLoop{
 		f: f, r: r, release: release, route: route, authority: authority, inbound: inbound,
 		handshake: handshake, client: client, upstream: upstream,
-		ctx: ctx, generation: ctx, identity: handshake.identity, account: handshake.connection.permit.Account.ID,
+		identity: handshake.identity, account: handshake.connection.permit.Account.ID,
 	}
-	defer loop.cleanup()
-	loop.run()
+	defer loop.cleanup(ctx)
+	loop.run(ctx)
 }
 
 func (f *Forwarder) connectCodeWebSocket(w http.ResponseWriter, r *http.Request, route codemode.Route, handshake codeWebSocketHandshake, reject func(error)) (*websocket.Conn, *websocket.Conn, bool) {
@@ -216,31 +216,29 @@ type codeWSLoop struct {
 	handshake      codeWebSocketHandshake
 	client         *websocket.Conn
 	upstream       *websocket.Conn
-	ctx            context.Context
-	generation     context.Context
 	stopGeneration context.CancelFunc
-	generationDone <-chan struct{}
 	active         *codeAttempt
 	identity       codemode.Identity
 	account        string
 }
 
-func (l *codeWSLoop) cleanup() {
+func (l *codeWSLoop) cleanup(ctx context.Context) {
 	if l.stopGeneration != nil {
 		l.stopGeneration()
+		l.stopGeneration = nil
 	}
 	if l.active != nil {
 		_ = l.upstream.CloseNow()
-		l.active.finish(l.ctx)
+		l.active.finish(ctx)
 	}
 }
 
-func (l *codeWSLoop) refuse(err error) {
+func (l *codeWSLoop) refuse(ctx context.Context, err error) {
 	if l.active != nil {
-		l.active.outcome(l.ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
+		l.active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 	}
 	refusal := codeRefusal(err)
-	l.f.recordCodeRefusal(l.ctx, l.route, l.authority.ID, l.authority.EndUserDigest, refusal.Code)
+	l.f.recordCodeRefusal(ctx, l.route, l.authority.ID, l.authority.EndUserDigest, refusal.Code)
 	if refusal.Code == "code_account_busy" {
 		_ = l.client.Close(websocket.StatusTryAgainLater, refusal.Code)
 		return
@@ -248,120 +246,126 @@ func (l *codeWSLoop) refuse(err error) {
 	_ = l.client.Close(websocket.StatusPolicyViolation, refusal.Code)
 }
 
-func (l *codeWSLoop) run() {
-	clientMessages := codeRead(l.ctx, l.client)
-	upstreamMessages := codeRead(l.ctx, l.upstream)
+func (l *codeWSLoop) run(ctx context.Context) {
+	clientMessages := codeRead(ctx, l.client)
+	upstreamMessages := codeRead(ctx, l.upstream)
 	var authorityTick <-chan time.Time
 	if l.authority.WorkloadIssuerID != nil {
 		ticker := time.NewTicker(ingress.ReauthInterval)
 		defer ticker.Stop()
 		authorityTick = ticker.C
 	}
+	genCtx := ctx
+	var generationDone <-chan struct{}
 	for {
 		select {
 		case <-authorityTick:
 			fresh, problem := l.f.gate.Authenticate(l.r, "inference")
 			if problem != nil || fresh.ID != l.authority.ID || fresh.EndUserDigest != l.authority.EndUserDigest || !fresh.Allows("inference", l.route.Slug, &l.route.ProjectID, l.f.now()) || !fresh.AllowsAttribution(l.handshake.labels) {
-				l.refuse(codemode.Refuse(403, "code_authority_revoked"))
+				l.refuse(ctx, codemode.Refuse(403, "code_authority_revoked"))
 				return
 			}
-		case <-l.ctx.Done():
+		case <-ctx.Done():
 			return
-		case <-l.generationDone:
+		case <-generationDone:
 			return
 		case message, open := <-clientMessages:
-			if !l.handleClient(message, open) {
+			nextGen, ok := l.handleClient(ctx, message, open)
+			if !ok {
 				return
 			}
+			genCtx, generationDone = nextGen, nextGen.Done()
 		case message, open := <-upstreamMessages:
-			if !l.handleUpstream(message, open) {
+			finished, ok := l.handleUpstream(ctx, genCtx, message, open)
+			if !ok {
 				return
+			}
+			if finished {
+				genCtx, generationDone = ctx, nil
 			}
 		}
 	}
 }
 
-func (l *codeWSLoop) handleClient(message codeMessage, open bool) bool {
+func (l *codeWSLoop) handleClient(ctx context.Context, message codeMessage, open bool) (context.Context, bool) {
 	if !open || message.err != nil {
 		if l.active != nil {
-			l.active.outcome(l.ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
+			l.active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 		}
 		codeClosePeer(l.upstream, message.err)
-		return false
+		return nil, false
 	}
 	if message.kind != websocket.MessageText {
-		l.refuse(codemode.Refuse(400, "code_operation_unsupported"))
-		return false
+		l.refuse(ctx, codemode.Refuse(400, "code_operation_unsupported"))
+		return nil, false
 	}
 	if l.active != nil {
-		l.refuse(codemode.Refuse(409, "code_generation_pending"))
-		return false
+		l.refuse(ctx, codemode.Refuse(409, "code_generation_pending"))
+		return nil, false
 	}
 	observation, err := classifyCode(l.inbound, message.body, l.r.Header, true)
 	if err != nil {
-		l.refuse(err)
-		return false
+		l.refuse(ctx, err)
+		return nil, false
 	}
 	if l.identity.Conversation != "" && observation.Operation.Identity != l.identity {
-		l.refuse(codemode.Refuse(409, "code_identity_changed"))
-		return false
+		l.refuse(ctx, codemode.Refuse(409, "code_identity_changed"))
+		return nil, false
 	}
-	requestContext, stop := context.WithTimeout(l.ctx, codeGenerationTimeout)
-	l.generation, l.stopGeneration, l.generationDone = requestContext, stop, requestContext.Done()
+	genCtx, stop := context.WithTimeout(ctx, codeGenerationTimeout)
+	l.stopGeneration = stop
 	l.active, err = l.f.prepareCode(codeRequest{
-		r: l.r.WithContext(l.generation), release: l.release, route: l.route, observation: observation,
+		r: l.r.WithContext(genCtx), release: l.release, route: l.route, observation: observation,
 		inbound: l.inbound, transport: codeadapter.WebSocket, body: message.body,
 	}, nil)
 	if err != nil {
-		l.refuse(err)
-		return false
+		l.refuse(ctx, err)
+		return nil, false
 	}
 	if l.account != "" && l.active.permit.Account.ID != l.account {
-		l.refuse(codemode.Refuse(409, "code_pin_changed"))
-		return false
+		l.refuse(ctx, codemode.Refuse(409, "code_pin_changed"))
+		return nil, false
 	}
 	l.identity, l.account = observation.Operation.Identity, l.active.permit.Account.ID
-	// The socket still uses the authorization sent at its handshake,
-	// even if this generation'f admission reads a refreshed credential.
 	connection := l.handshake.connection
 	l.active.auth = connection.auth
 	if l.f.runtime.Eligibility(connection.auth.CredentialID) != routing.Eligible {
-		l.refuse(codemode.Refuse(503, "code_account_unavailable"))
-		return false
+		l.refuse(ctx, codemode.Refuse(503, "code_account_unavailable"))
+		return nil, false
 	}
 	if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && l.f.runtime.Eligibility(network.CredentialID) != routing.Eligible {
-		l.refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
-		return false
+		l.refuse(ctx, codemode.Refuse(503, "code_network_credential_unavailable"))
+		return nil, false
 	}
 	body := message.body
 	if l.active.model != l.active.publicModel {
 		body, err = codewire.RewriteRequestModel(message.body, l.active.publicModel, l.active.model)
 		if err != nil {
-			l.refuse(err)
-			return false
+			l.refuse(ctx, err)
+			return nil, false
 		}
 	}
-	if err := l.active.dispatch(l.generation); err != nil {
-		l.refuse(err)
-		return false
+	if err := l.active.dispatch(genCtx); err != nil {
+		l.refuse(ctx, err)
+		return nil, false
 	}
-	if err := codeWrite(l.generation, l.upstream, message.kind, body); err != nil {
-		l.active.transportFailed(l.ctx, err)
-		return false
+	if err := codeWrite(genCtx, l.upstream, message.kind, body); err != nil {
+		l.active.transportFailed(ctx, err)
+		return nil, false
 	}
-	return true
+	return genCtx, true
 }
 
-func (l *codeWSLoop) handleUpstream(message codeMessage, open bool) bool {
+func (l *codeWSLoop) handleUpstream(ctx, genCtx context.Context, message codeMessage, open bool) (finished bool, ok bool) {
 	if !open {
-		return false
+		return false, false
 	}
 	if message.err != nil {
 		if l.active != nil {
-			l.active.transportFailed(l.ctx, message.err)
+			l.active.transportFailed(ctx, message.err)
 		}
 		codeClosePeer(l.client, message.err)
-		return false
+		return false, false
 	}
 	observer := l.handshake.connection.observer
 	if l.active != nil {
@@ -369,27 +373,28 @@ func (l *codeWSLoop) handleUpstream(message codeMessage, open bool) bool {
 	}
 	observation := observer.Event(message.body)
 	if l.active != nil {
-		l.active.observe(observation)
+		l.active.observe(ctx, observation)
 	} else if observation.Allowance != nil {
-		l.handshake.connection.observeAllowance(l.ctx, *observation.Allowance)
+		l.handshake.connection.observeAllowance(ctx, *observation.Allowance)
 	}
 	body := message.body
 	if l.active != nil && l.active.model != l.active.publicModel {
 		body = codeModelEvent(message.body, l.active.endpoint.Protocol, l.active.model, l.active.publicModel)
 	}
-	if err := codeWrite(l.generation, l.client, message.kind, body); err != nil {
+	if err := codeWrite(genCtx, l.client, message.kind, body); err != nil {
 		if l.active != nil {
-			l.active.outcome(l.ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
+			l.active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 		}
-		return false
+		return false, false
 	}
 	if observation.Terminal && l.active != nil {
-		l.active.finish(l.ctx)
+		l.active.finish(ctx)
 		l.active = nil
 		l.stopGeneration()
-		l.generation, l.generationDone = l.ctx, nil
+		l.stopGeneration = nil
+		return true, true
 	}
-	return true
+	return false, true
 }
 
 func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, attempt *codeAttempt, response *http.Response) {
@@ -404,7 +409,7 @@ func forwardCodeHandshakeRejection(ctx context.Context, w http.ResponseWriter, a
 	body, readErr := io.ReadAll(io.TeeReader(io.LimitReader(response.Body, codewire.MaxBody+1), writer))
 	if readErr == nil {
 		if _, err := io.Copy(writer, response.Body); err == nil && response.StatusCode >= 400 {
-			attempt.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+			attempt.observeEncodedUnary(ctx, body, response.Header.Get("Content-Encoding"))
 		}
 	}
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {

@@ -25,8 +25,10 @@ import (
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/media/transport"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/tests/harness/money"
 )
 
 type recordedEnvelope struct {
@@ -53,6 +55,8 @@ type surfaceRecord struct {
 	Body        any                `json:"body"`
 	Upstream    int                `json:"upstream_calls"`
 	Envelopes   []recordedEnvelope `json:"envelopes,omitempty"`
+	Cost        string             `json:"cost,omitempty"`
+	Holds       []money.Hold       `json:"holds,omitempty"`
 }
 
 var surfaceRefusalHeaders = []string{"Allow", "Retry-After", "Www-Authenticate", "X-Should-Retry", "Anthropic-Ratelimit-Requests-Reset"}
@@ -62,6 +66,7 @@ var volatileSurfaceText = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4
 type surfaceHarness struct {
 	*harness
 	returned chan struct{}
+	ledger   *money.Ledger
 }
 
 func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
@@ -70,7 +75,8 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dependencies := Dependencies{Resources: resources.NewEncrypted(nil, "surface-golden", keys)}
+	admission, ledger := money.Scripted(t)
+	dependencies := Dependencies{Resources: resources.NewEncrypted(nil, "surface-golden", keys), Admission: admission}
 	if limited {
 		runner, err := scripts.NewRunner(unreachableValkey{}, "test")
 		if err != nil {
@@ -108,7 +114,18 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	}))
 	t.Cleanup(server.Close)
 	h.server = server
-	return &surfaceHarness{harness: h, returned: returned}
+	return &surfaceHarness{harness: h, returned: returned, ledger: ledger}
+}
+
+func (h *surfaceHarness) price(t *testing.T, budgeted bool) {
+	t.Helper()
+	h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
+		if budgeted {
+			h.rt.keys[fullKey] = h.ledger.Budget(h.rt.keys[fullKey])
+			h.ledger.Cap(snapshot, routeSlug)
+		}
+		h.rt.inputs = money.Inputs(t, snapshot, money.Operations...)
+	})
 }
 
 func (h *surfaceHarness) record(t *testing.T, response *http.Response) surfaceRecord {
@@ -135,6 +152,7 @@ func (h *surfaceHarness) record(t *testing.T, response *http.Response) surfaceRe
 		record.Headers = headers
 	}
 	record.Envelopes = h.envelopes()
+	record.Cost, record.Holds = response.Header.Get(money.CostHeader), h.ledger.Drain()
 	return record
 }
 
@@ -159,7 +177,7 @@ func (h *surfaceHarness) envelopes() []recordedEnvelope {
 		attempts := make([]settledAttempt, 0, len(envelope.Attempts))
 		for _, attempt := range envelope.Attempts {
 			settled := settledAttempt{
-				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed},
+				recordedAttempt: recordedAttempt{Mode: attempt.Mode, Status: attempt.Status, Class: attempt.Class, Committed: attempt.Committed, Price: money.AttemptPrice(envelope.Operation, &attempt)},
 				UsageComplete:   attempt.UsageComplete, BillingUncertain: attempt.BillingUncertain,
 			}
 			if attempt.Usage != nil {

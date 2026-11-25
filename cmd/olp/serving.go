@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
@@ -29,9 +28,10 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
 	"github.com/tyk-swe/olp/internal/usage/delivery"
@@ -53,8 +53,8 @@ type foundation struct {
 	public *http.ServeMux
 	// The inference pool is shared with the gateway so middleware and direct
 	// handler calls bound one capacity.
-	inferencePool  *admission.Pool
-	managementPool *admission.Pool
+	inferencePool  *concurrency.Pool
+	managementPool *concurrency.Pool
 	health         *observability.Cache
 	loss           *completeness.LossCounters
 	mediaGaps      *atomic.Uint64
@@ -81,15 +81,14 @@ func newServing(f foundation) (serving, error) {
 	plane := f.agentPlane()
 	accounting := f.accounting()
 	overlaps := f.overlapRecorder()
-	baseGW := f.baseGateway(assembly, accounting, overlaps)
-	inference, err := f.inference(plane, baseGW)
+	var gw *kernel.Server
+	inference, err := f.inference(plane, func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
+		return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
+	})
 	if err != nil {
 		return serving{}, err
 	}
-	gw := baseGW
-	if inference.workflowTools != nil {
-		gw = baseGW.WithWorkflow(inference.workflowRuns, inference.workflowTools)
-	}
+	gw = f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, overlaps: overlaps, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
 		gateway.Register(gw, f.public)
@@ -104,7 +103,7 @@ func (f foundation) overlapRecorder() *apikeys.OverlapRecorder {
 	return apikeys.NewOverlapRecorder(f.stores.pool, f.log)
 }
 
-func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder) *kernel.Server {
+func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder, runs kernel.WorkflowRunStore, tools kernel.WorkflowToolRunner) *kernel.Server {
 	if !f.config.Mode.Management() && !f.config.Mode.Inference() {
 		return nil
 	}
@@ -113,6 +112,10 @@ func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.D
 		deps = f.inferenceDependencies(deps)
 		if overlaps != nil {
 			deps.ObserveOverlap = overlaps.Observe
+		}
+		if tools != nil {
+			deps.WorkflowRuns = runs
+			deps.WorkflowTools = tools
 		}
 	}
 	return kernel.New(f.accounted(deps, accounting), assembly.config)
@@ -152,7 +155,7 @@ type inferencePlane struct {
 	monitor       *agents.TaskMonitor
 }
 
-func (f foundation) inference(plane agentPlane, evaluator *kernel.Server) (inferencePlane, error) {
+func (f foundation) inference(plane agentPlane, evaluateGuardrails func(context.Context, mcp.GuardrailEvaluation) (guardrails.Result, error)) (inferencePlane, error) {
 	c, stores, core := f.config, f.stores, f.core
 	if !c.Mode.Inference() {
 		return inferencePlane{}, nil
@@ -170,9 +173,7 @@ func (f foundation) inference(plane agentPlane, evaluator *kernel.Server) (infer
 		Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
 			return core.keys.Read(ctx, stores.pool, stores.installation, credentialID, secrets.MCPCredential)
 		},
-		Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
-			return evaluator.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
-		},
+		Guardrails: evaluateGuardrails,
 	})
 	toolServer := mcp.New(mcp.ServerOptions{Runtime: core.rt, Executor: toolExecutor, Auth: core.auth, Grants: plane.grants, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
 	toolServer.Register(f.public)

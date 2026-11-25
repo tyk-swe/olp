@@ -8,6 +8,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -81,20 +83,20 @@ func requirePolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, t target) 
 		return err
 	}
 	ownedBy := func(id *string) bool { return project != nil && id != nil && *project == *id }
-	if t.Scope == guardrails.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
+	if t.Scope == guardrailpolicy.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
 		return httpkit.Invalid("scope_id", "The policy must belong to this project.")
 	}
 	return nil
 }
 
 func create(ctx context.Context, tx pgx.Tx, actor string, a guardrails.Attachment) (guardrails.Attachment, error) {
-	created := guardrails.Attachment{ID: httpkit.NewID(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
-	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, guardrails.ProjectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, httpkit.NewID(), actor)
+	created := guardrails.Attachment{ID: ids.New(), Scope: a.Scope, ScopeID: a.ScopeID, PolicyRevisionID: a.PolicyRevisionID, Order: a.Order}
+	_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", created.ID, created.Scope, guardrails.ProjectPointer(created.ScopeID), created.PolicyRevisionID, created.Order, ids.New(), actor)
 	return created, err
 }
 
 func repoint(ctx context.Context, tx pgx.Tx, id, policyRevisionID string) (string, error) {
-	etag := httpkit.NewID()
+	etag := ids.New()
 	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_attachments SET policy_revision_id=$2,etag=$3 WHERE id=$1", id, policyRevisionID, etag)
 	return etag, err
 }

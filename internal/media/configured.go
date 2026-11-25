@@ -11,7 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contracts/media"
 	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*UpstreamCall, *Request, *Error) {

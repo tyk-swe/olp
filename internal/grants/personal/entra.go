@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -79,8 +79,8 @@ func (s *Store) resolveEntra(ctx context.Context, bound Binding, assertion workl
 			return nil, clientErr
 		}
 		defer client.client.CloseIdleConnections()
-		item := flowRecord{Enrollment: Enrollment{ID: httpkit.NewID(), Binding: bound, ExpiresAt: time.Now().Add(10 * time.Minute)}}
-		attempt := httpkit.NewID()
+		item := flowRecord{Enrollment: Enrollment{ID: ids.New(), Binding: bound, ExpiresAt: time.Now().Add(10 * time.Minute)}}
+		attempt := ids.New()
 		if _, err := conn.Exec(ctx, `INSERT INTO olp.mcp_grant_enrollments(id,server_id,agent_id,project_id,binding,binding_digest,handoff_digest,expires_at,exchange_attempt_id) VALUES($1,NULLIF($2,'')::uuid,NULLIF($3,'')::uuid,$4,$5,$6,$7,$8,$9)`, item.ID, bound.ServerID, bound.AgentID, bound.ProjectID, bound, bound.Digest(), s.auth.Digest(secrets.MCPEnrollmentDigest, rand.Text()), item.ExpiresAt, attempt); err != nil {
 			return nil, err
 		}

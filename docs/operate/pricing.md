@@ -286,7 +286,7 @@ the future falls through to the next scope; revisions never layer.
 
 | Case | Charge |
 | --- | --- |
-| Card's explicit price matches (vendor-scoped first) | `price_usage` on the card price at discount 1. Commitments and discounts never apply |
+| Card's explicit price matches (vendor-scoped first) | Evaluated directly on the card price at discount 1. Commitments and discounts never apply |
 | No explicit match, card markup | `round(cost × markup, 12)`, NULL when cost is NULL |
 | No card | cost itself, `rate_card_revision_id` NULL |
 | Not billable | NULL |

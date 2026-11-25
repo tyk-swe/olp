@@ -300,8 +300,8 @@ func (s *Server) settlementTemplate(x *Call, p *Pin, surface, lineOperation stri
 	x.attemptCount, x.attemptVendor, x.routingInputs = attemptCount, attemptVendor, routingInputs
 	pricingCall := Call{
 		request: request{release: x.request.release}, authority: x.authority,
-		cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs,
-		routeLeg: routeLeg{Route: x.Route},
+		callPricing: callPricing{cardPinned: x.cardPinned, cardRev: x.cardRev, routingInputs: inputs},
+		routeLeg:    routeLeg{Route: x.Route},
 	}
 	fact.CardRev = pricingCall.attemptCardRevision(p.Provider.ID, now)
 	fact.StartedAt = now

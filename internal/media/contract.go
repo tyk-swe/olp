@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/tyk-swe/olp/internal/contracts/media"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 func ContractInput(request *Request, call *UpstreamCall, effective *Request) (media.Input, error) {

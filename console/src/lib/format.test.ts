@@ -10,6 +10,7 @@ import {
   formatInteger,
   formatSignedPercent,
   formatTime,
+  shortDigest,
   stateLabel,
   statusLabel,
   statusTone
@@ -87,6 +88,11 @@ describe('number and amount presentation', () => {
 });
 
 describe('byte and status presentation', () => {
+  it('shortens a digest to its first twelve characters', () => {
+    const digest = 'abcdef0123456789abcdef';
+    expect(shortDigest(digest)).toBe(digest.substring(0, 12));
+  });
+
   it.each([
     [0, '0 B'],
     [512, '512 B'],

@@ -18,7 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/staging"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
 type API struct {
@@ -300,7 +300,7 @@ func first(errs ...error) error {
 	return nil
 }
 
-func nullableOf[T any](value *T) nullable.Nullable[T] {
+func valueOrOmitted[T any](value *T) nullable.Nullable[T] {
 	if value == nil {
 		return nil
 	}
@@ -329,14 +329,14 @@ func jobItem(record Record) (contract.MediaJobItem, error) {
 		Etag:                record.ETag,
 		CreatedAt:           record.CreatedAt,
 		UpdatedAt:           record.UpdatedAt,
-		UpstreamJobId:       nullableOf(record.UpstreamJobID),
-		ProgressPercent:     nullableOf(record.ProgressPercent),
-		ExpiresAt:           nullableOf(record.ExpiresAt),
-		ErrorClass:          nullableOf(record.ErrorClass),
-		CompletedAt:         nullableOf(record.CompletedAt),
-		LastPolledAt:        nullableOf(record.LastPolledAt),
-		ReconciliationError: nullableOf(record.ReconciliationError),
-		DeletedAt:           nullableOf(record.DeletedAt),
+		UpstreamJobId:       valueOrOmitted(record.UpstreamJobID),
+		ProgressPercent:     valueOrOmitted(record.ProgressPercent),
+		ExpiresAt:           valueOrOmitted(record.ExpiresAt),
+		ErrorClass:          valueOrOmitted(record.ErrorClass),
+		CompletedAt:         valueOrOmitted(record.CompletedAt),
+		LastPolledAt:        valueOrOmitted(record.LastPolledAt),
+		ReconciliationError: valueOrOmitted(record.ReconciliationError),
+		DeletedAt:           valueOrOmitted(record.DeletedAt),
 	}, nil
 }
 

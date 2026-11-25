@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
@@ -89,17 +89,6 @@ func TestResolvedToolsetListingFailure(t *testing.T) {
 	missingOnly := resolvedToolset{missing: []routing.MCPDriftedTool{{Alias: "c"}}}
 	if got := missingOnly.listingFailure(); got != nil {
 		t.Errorf("missing-only listingFailure = %v, want nil", got)
-	}
-}
-
-func TestCanonicalUUID(t *testing.T) {
-	if !canonicalUUID("123e4567-e89b-12d3-a456-426614174000") {
-		t.Error("canonicalUUID rejected a canonical UUID")
-	}
-	for _, raw := range []string{"", "123e4567e89b12d3a456426614174000", "123E4567-E89B-12D3-A456-426614174000", "not-a-uuid"} {
-		if canonicalUUID(raw) {
-			t.Errorf("canonicalUUID accepted %q", raw)
-		}
 	}
 }
 

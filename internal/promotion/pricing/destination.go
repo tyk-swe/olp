@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -47,17 +48,17 @@ func readProviders(ctx context.Context, q database.Queryer) (promotion.Directory
 }
 
 func resolves(d promotion.Directory, name *string) bool {
-	_, ok := d.ID(promotion.ValueOf(name))
+	_, ok := d.ID(ptr.Value(name))
 	return name == nil || ok
 }
 
 func idOf(d promotion.Directory, name *string) *string {
-	id, ok := d.ID(promotion.ValueOf(name))
+	id, ok := d.ID(ptr.Value(name))
 	return promotion.PointerIf(id, name != nil && ok)
 }
 
 func nameOf(d promotion.Directory, id *string) *string {
-	name, ok := d.Name(promotion.ValueOf(id))
+	name, ok := d.Name(ptr.Value(id))
 	return promotion.PointerIf(name, id != nil && ok)
 }
 
@@ -71,7 +72,7 @@ func declared(document func(string) bool, destination func(string) (string, bool
 
 func checkNames(desired Desired, names promotion.Names, at destination) error {
 	providerDeclared := func(name *string) bool { return declared(names.Provider, at.providers.ID, name) }
-	if i := slices.IndexFunc(promotion.ValueOf(desired.Pricing).Prices, func(price Price) bool { return !providerDeclared(price.Provider) }); i >= 0 {
+	if i := slices.IndexFunc(ptr.Value(desired.Pricing).Prices, func(price Price) bool { return !providerDeclared(price.Provider) }); i >= 0 {
 		return undeclaredPrice(i)
 	}
 	if i := slices.IndexFunc(desired.Discounts, func(discount Discount) bool { return !providerDeclared(discount.Provider) }); i >= 0 {

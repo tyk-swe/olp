@@ -12,11 +12,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-var cachePolicy = cache.Policy{Mode: "exact", TTLSeconds: 60}
+var cachePolicy = cachepolicy.Policy{Mode: "exact", TTLSeconds: 60}
 
 func keyRing(t *testing.T, key string) *secrets.KeyRing {
 	t.Helper()
@@ -46,13 +47,13 @@ func remember(t *testing.T, store *cache.Store, space cache.Space, request, answ
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Put(t.Context(), ticket, cache.Entry{Body: []byte(answer)}, cachePolicy, cache.Controls{}, nil); err != nil {
+	if err := store.Put(t.Context(), ticket, cache.Entry{Body: []byte(answer)}, cachePolicy, cachepolicy.Controls{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	return ticket
 }
 
-func recall(t *testing.T, store *cache.Store, space cache.Space, request string, controls cache.Controls) string {
+func recall(t *testing.T, store *cache.Store, space cache.Space, request string, controls cachepolicy.Controls) string {
 	t.Helper()
 	_, entry, err := store.Lookup(t.Context(), space, []byte(request), controls)
 	if err != nil {
@@ -69,17 +70,17 @@ func TestResponseCacheAnswersOnlyTheSpaceAndRequestThatStoredIt(t *testing.T) {
 	store := newCache(t)
 	space := newSpace()
 	remember(t, store, space, "request", "answer")
-	if got := recall(t, store, space, "request", cache.Controls{}); got != "answer" {
+	if got := recall(t, store, space, "request", cachepolicy.Controls{}); got != "answer" {
 		t.Fatalf("got %q for the stored request, want its answer", got)
 	}
 	otherInstallation := *store
 	otherInstallation.Installation = uuid.NewString()
 	for name, got := range map[string]string{
-		"another request":      recall(t, store, space, "another request", cache.Controls{}),
-		"another project":      recall(t, store, cache.Space{Project: uuid.NewString(), Route: space.Route, NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: space.Fingerprint}, "request", cache.Controls{}),
-		"another route":        recall(t, store, cache.Space{Project: space.Project, Route: uuid.NewString(), NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: space.Fingerprint}, "request", cache.Controls{}),
-		"another caller":       recall(t, store, cache.Space{Project: space.Project, Route: space.Route, NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: "another caller"}, "request", cache.Controls{}),
-		"another installation": recall(t, &otherInstallation, space, "request", cache.Controls{}),
+		"another request":      recall(t, store, space, "another request", cachepolicy.Controls{}),
+		"another project":      recall(t, store, cache.Space{Project: uuid.NewString(), Route: space.Route, NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: space.Fingerprint}, "request", cachepolicy.Controls{}),
+		"another route":        recall(t, store, cache.Space{Project: space.Project, Route: uuid.NewString(), NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: space.Fingerprint}, "request", cachepolicy.Controls{}),
+		"another caller":       recall(t, store, cache.Space{Project: space.Project, Route: space.Route, NamedRoute: space.NamedRoute, Scope: space.Scope, Fingerprint: "another caller"}, "request", cachepolicy.Controls{}),
+		"another installation": recall(t, &otherInstallation, space, "request", cachepolicy.Controls{}),
 	} {
 		if got != "" {
 			t.Errorf("%s was answered %q from the cache", name, got)
@@ -91,12 +92,12 @@ func TestResponseCacheStoresNothingTheCallerOrPolicyRefuses(t *testing.T) {
 	t.Parallel()
 	store := newCache(t)
 	for name, put := range map[string]struct {
-		policy   cache.Policy
-		controls cache.Controls
+		policy   cachepolicy.Policy
+		controls cachepolicy.Controls
 	}{
-		"no-store":                     {cachePolicy, cache.Controls{NoStore: true}},
-		"a zero lifetime":              {cachePolicy, cache.Controls{TTL: new(0)}},
-		"an entry over the size limit": {cache.Policy{Mode: "exact", TTLSeconds: 60, MaxEntryBytes: 64}, cache.Controls{}},
+		"no-store":                     {cachePolicy, cachepolicy.Controls{NoStore: true}},
+		"a zero lifetime":              {cachePolicy, cachepolicy.Controls{TTL: new(0)}},
+		"an entry over the size limit": {cachepolicy.Policy{Mode: "exact", TTLSeconds: 60, MaxEntryBytes: 64}, cachepolicy.Controls{}},
 	} {
 		space := newSpace()
 		ticket, err := store.Begin(t.Context(), space, []byte("request"))
@@ -107,7 +108,7 @@ func TestResponseCacheStoresNothingTheCallerOrPolicyRefuses(t *testing.T) {
 		if err := store.Put(t.Context(), ticket, entry, put.policy, put.controls, nil); !errors.Is(err, cache.ErrNotStored) {
 			t.Errorf("%s: got %v, want %v", name, err, cache.ErrNotStored)
 		}
-		if got := recall(t, store, space, "request", cache.Controls{}); got != "" {
+		if got := recall(t, store, space, "request", cachepolicy.Controls{}); got != "" {
 			t.Errorf("%s: the refused entry was answered from the cache", name)
 		}
 	}
@@ -123,13 +124,13 @@ func TestResponseCacheStopsAnsweringWhenAnEntryIsTooOld(t *testing.T) {
 		later.Now = func() time.Time { return time.Now().Add(age) }
 		return &later
 	}
-	if got := recall(t, after(30*time.Second), space, "request", cache.Controls{MaxAge: new(40)}); got != "answer" {
+	if got := recall(t, after(30*time.Second), space, "request", cachepolicy.Controls{MaxAge: new(40)}); got != "answer" {
 		t.Errorf("got %q for a 30 second old entry under a 40 second max-age, want its answer", got)
 	}
-	if got := recall(t, after(30*time.Second), space, "request", cache.Controls{MaxAge: new(10)}); got != "" {
+	if got := recall(t, after(30*time.Second), space, "request", cachepolicy.Controls{MaxAge: new(10)}); got != "" {
 		t.Error("a 30 second old entry was answered under a 10 second max-age")
 	}
-	if got := recall(t, after(61*time.Second), space, "request", cache.Controls{}); got != "" {
+	if got := recall(t, after(61*time.Second), space, "request", cachepolicy.Controls{}); got != "" {
 		t.Error("an entry was answered after its 60 second lifetime")
 	}
 	expiring := newSpace()
@@ -166,14 +167,14 @@ func TestPurgeMakesStoredEntriesUnreachable(t *testing.T) {
 		if err := store.Purge(t.Context(), "project", uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
-		if got := recall(t, store, space, "request", cache.Controls{}); got != "answer" {
+		if got := recall(t, store, space, "request", cachepolicy.Controls{}); got != "answer" {
 			t.Fatalf("got %q after purging an unrelated project, want the stored answer", got)
 		}
 		if err := store.Purge(t.Context(), purge.kind, purge.id); err != nil {
 			t.Fatal(err)
 		}
 		assertGenerationLifetimes(ticket)
-		if got := recall(t, store, space, "request", cache.Controls{}); got != "" {
+		if got := recall(t, store, space, "request", cachepolicy.Controls{}); got != "" {
 			t.Errorf("purging %s left the entry answering %q", name, got)
 		}
 	}
@@ -195,12 +196,12 @@ func TestResponseCacheRefusesEntriesItDidNotSealForThatRequest(t *testing.T) {
 	if _, err := store.Client.Do(t.Context(), "HSET", target.Key, "sealed", sealed.(string)); err != nil {
 		t.Fatal(err)
 	}
-	if _, entry, err := store.Lookup(t.Context(), space, []byte("another request"), cache.Controls{}); entry != nil || !errors.Is(err, cache.ErrUnavailable) {
+	if _, entry, err := store.Lookup(t.Context(), space, []byte("another request"), cachepolicy.Controls{}); entry != nil || !errors.Is(err, cache.ErrUnavailable) {
 		t.Errorf("got entry %v and %v for an entry copied from another request, want %v", entry, err, cache.ErrUnavailable)
 	}
 	rotated := *store
 	rotated.Keys = keyRing(t, "02")
-	if _, entry, err := rotated.Lookup(t.Context(), space, []byte("request"), cache.Controls{}); entry != nil || !errors.Is(err, cache.ErrUnavailable) {
+	if _, entry, err := rotated.Lookup(t.Context(), space, []byte("request"), cachepolicy.Controls{}); entry != nil || !errors.Is(err, cache.ErrUnavailable) {
 		t.Errorf("got entry %v and %v under a different master key, want %v", entry, err, cache.ErrUnavailable)
 	}
 }

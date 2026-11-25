@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -45,24 +45,8 @@ type Task struct {
 	Binding    string
 }
 
-func newID() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", err
-	}
-	return id.String(), nil
-}
-
-func newReservation(price string) (reservation, error) {
-	dispatch, dispatchErr := newID()
-	claim, claimErr := newID()
-	run, runErr := newID()
-	step, stepErr := newID()
-	event, eventErr := newID()
-	if err := errors.Join(dispatchErr, claimErr, runErr, stepErr, eventErr); err != nil {
-		return reservation{}, err
-	}
-	return reservation{DispatchID: dispatch, ClaimID: claim, RunID: run, StepID: step, EventID: event, Price: price}, nil
+func newReservation(price string) reservation {
+	return reservation{DispatchID: ids.New(), ClaimID: ids.New(), RunID: ids.New(), StepID: ids.New(), EventID: ids.New(), Price: price}
 }
 
 func (l *Store) reserve(ctx context.Context, authority keyauthority.Authority, revision agentcontract.Revision, releaseID string) (reservation, error) {
@@ -73,10 +57,7 @@ func (l *Store) reserve(ctx context.Context, authority keyauthority.Authority, r
 	if !boundaries.Resolved {
 		return reservation{}, limitdebits.ErrAuthority
 	}
-	res, err := newReservation(revision.Definition.Agent.MessagePrice)
-	if err != nil {
-		return reservation{}, err
-	}
+	res := newReservation(revision.Definition.Agent.MessagePrice)
 	var currency string
 	if err := l.pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency); err != nil || currency == "" {
 		return reservation{}, limitdebits.ErrAuthority
@@ -119,8 +100,7 @@ func (l *Store) Find(ctx context.Context, authority keyauthority.Authority, publ
 	if l == nil || l.pool == nil || authority.ProjectID == nil {
 		return Task{}, pgx.ErrNoRows
 	}
-	id, err := uuid.Parse(rawID)
-	if err != nil || id == uuid.Nil || id.String() != rawID {
+	if !ids.Canonical(rawID) {
 		return Task{}, pgx.ErrNoRows
 	}
 	var found Task
@@ -180,10 +160,7 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority keyau
 	if upstreamID == "" {
 		return "", nil
 	}
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
+	id := ids.New()
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state,oauth_binding_digest,delegation_pair_digest,delegation_agent_id,delegation_member_id,delegation_token_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12,NULLIF($13,''),$14,NULLIF($15,'')::uuid,NULLIF($16,'')::uuid,$17) ON CONFLICT DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state, binding, authority.DelegationPairDigest, authority.DelegationAgentID, authority.DelegationMemberID, authority.DelegationTokenDigest); err != nil {
 		return "", err
 	}

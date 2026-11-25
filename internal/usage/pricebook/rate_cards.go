@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -261,7 +261,7 @@ func createCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
                 (SELECT COALESCE(MAX(revision),0)+1 FROM olp.rate_card_revisions WHERE rate_card_id=$2::uuid),
                 $3::text::numeric, $4, $5::uuid)
         RETURNING id::text, rate_card_id::text, revision`,
-		httpkit.NewID(), cardID, markup, effectiveAt, actor).
+		ids.New(), cardID, markup, effectiveAt, actor).
 		Scan(&revision.ID, &revision.RateCardID, &revision.Revision)
 	if err != nil {
 		return revision, fmt.Errorf("store rate card revision: %w", err)
@@ -322,7 +322,7 @@ func loadCardRevisionSummariesByCards(ctx context.Context, q database.Queryer, c
 }
 
 func CreateRateCard(ctx context.Context, tx pgx.Tx, actor string, owner Owner) (string, error) {
-	id := httpkit.NewID()
+	id := ids.New()
 	organizationID, projectID := owner.columns()
 	_, err := tx.Exec(ctx, `INSERT INTO olp.rate_cards
         (id, organization_id, project_id, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,

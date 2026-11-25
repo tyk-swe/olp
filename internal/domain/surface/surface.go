@@ -5,6 +5,7 @@
 package surface
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -69,3 +70,25 @@ func Of(path string) Surface {
 
 // Reserved lists every prefix the console must never answer.
 func Reserved() []Prefix { return slices.Clone(prefixes) }
+
+// StripNonSemanticQuery removes surface-carried ingress query parameters that
+// do not represent upstream API semantics. Returns a non-empty badParam and
+// message when a surface parameter is malformed.
+func StripNonSemanticQuery(surfaceName string, query url.Values) (badParam, message string) {
+	switch surfaceName {
+	case "gemini":
+		keys, present := query["key"]
+		if !present {
+			return "", ""
+		}
+		if len(keys) != 1 || keys[0] == "" {
+			return "key", "Provide one non-empty API key query parameter."
+		}
+		delete(query, "key")
+	case "anthropic":
+		if values := query["beta"]; len(values) == 1 && values[0] == "true" {
+			delete(query, "beta")
+		}
+	}
+	return "", ""
+}

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -32,7 +33,7 @@ func parsePublication(e contract.ConfigurationCodePublication, names promotion.N
 	if err != nil {
 		return Publication{}, err
 	}
-	paid, err := promotion.TryMapValues(promotion.ValueOf(e.PaidConnections), func(_ string, c contract.ConfigurationCodePaidConnection) (PaidConnection, error) {
+	paid, err := promotion.TryMapValues(ptr.Value(e.PaidConnections), func(_ string, c contract.ConfigurationCodePaidConnection) (PaidConnection, error) {
 		return parsePaidConnection(c, names, deps)
 	})
 	if err != nil {

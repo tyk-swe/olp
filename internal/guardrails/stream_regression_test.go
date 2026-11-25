@@ -2,15 +2,16 @@ package guardrails
 
 import (
 	"errors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"strings"
 	"testing"
 )
 
 func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
-	for _, action := range []Action{Block, Redact} {
+	for _, action := range []guardrailpolicy.Action{guardrailpolicy.Block, guardrailpolicy.Redact} {
 		for _, suffix := range []string{"alogue", "é", "_name", "1", ""} {
 			t.Run(string(action)+"/"+suffix, func(t *testing.T) {
-				engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, OutputStream, action, false, nil)
+				engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, guardrailpolicy.OutputStream, action, false, nil)
 				stream, err := NewStream(engine, Evaluation{}, 1024)
 				if err != nil {
 					t.Fatal(err)
@@ -30,7 +31,7 @@ func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
 					}
 				}
 				out, err := stream.Finish(t.Context())
-				if suffix == "" && action == Block {
+				if suffix == "" && action == guardrailpolicy.Block {
 					if !errors.Is(err, ErrBlocked) {
 						t.Fatalf("did not block final word: %v", err)
 					}
@@ -52,7 +53,7 @@ func TestStreamKeywordWaitsForWordBoundary(t *testing.T) {
 			})
 		}
 	}
-	engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, OutputStream, Block, false, nil)
+	engine := testEngine(t, "builtin.keywords", `{"words":["cat"]}`, guardrailpolicy.OutputStream, guardrailpolicy.Block, false, nil)
 	stream, _ := NewStream(engine, Evaluation{}, 1024)
 	_, _ = stream.PushSegments(t.Context(), []byte("cat"), []Delta{{ID: "stream", Text: "cat"}})
 	if _, err := stream.PushSegments(t.Context(), []byte(" "), []Delta{{ID: "stream", Text: " "}}); !errors.Is(err, ErrBlocked) {

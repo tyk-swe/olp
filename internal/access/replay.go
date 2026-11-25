@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -78,7 +79,7 @@ func (s *Server) completeReplay(r *http.Request, tx pgx.Tx, c replayClaim, resul
 	// Feature request and collection limits bound replies. Aggregated responses
 	// (such as a 64-slot credential pool) can exceed a single request's byte limit
 	// and must remain replayable in full for an otherwise valid write to commit.
-	id := httpkit.NewID()
+	id := ids.New()
 	expires := time.Now().Add(24 * time.Hour)
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MutationReplay, data, &expires); err != nil {
 		return err

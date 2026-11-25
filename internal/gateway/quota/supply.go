@@ -108,6 +108,6 @@ func AttemptCaps(route *routing.Route, provider *routing.Provider, slot *routing
 func CapRequest(owner CappedOwner, ttl time.Duration) admission.Request {
 	return admission.Request{
 		Lookup: owner.lookup, LeaseTTL: ttl,
-		Cost: admission.Budget(limits.Owner{ID: owner.ID, Kind: limits.OwnerSupply, Basis: limits.BasisCost}, owner.Limits.DailyCostLimit, nil, owner.Limits.MonthlyCostLimit, ""),
+		Cost: limits.Budget(limits.Owner{ID: owner.ID, Kind: limits.OwnerSupply, Basis: limits.BasisCost}, owner.Limits.DailyCostLimit, nil, owner.Limits.MonthlyCostLimit, ""),
 	}
 }

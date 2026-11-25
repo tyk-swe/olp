@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/contracts/interaction"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/guardstream"
-	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -80,7 +80,7 @@ func (run attemptRun) stream(sent attemptSent, clock attemptClock) (attemptReply
 
 func (run attemptRun) guardedStream() (*guardstream.Stream, error) {
 	x := run.x
-	if !x.guard.engine.HasPhase(guardrails.OutputStream) && !x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.OutputStream) && !x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		return nil, nil
 	}
 	return x.guardrailStream()

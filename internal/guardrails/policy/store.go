@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -79,17 +79,17 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Policy, d Draft
 
 func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Policy, d Draft) (Saved, int64, error) {
 	if current == nil {
-		saved := Saved{ID: httpkit.NewID(), RevisionID: httpkit.NewID()}
-		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.ID, guardrails.ProjectPointer(d.project), d.name, saved.RevisionID, httpkit.NewID(), actor)
+		saved := Saved{ID: ids.New(), RevisionID: ids.New()}
+		_, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", saved.ID, guardrails.ProjectPointer(d.project), d.name, saved.RevisionID, ids.New(), actor)
 		return saved, 1, err
 	}
-	saved := Saved{ID: current.ID, RevisionID: httpkit.NewID()}
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, httpkit.NewID())
+	saved := Saved{ID: current.ID, RevisionID: ids.New()}
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, ids.New())
 	return saved, current.Revision + 1, err
 }
 
 func Activate(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string) error {
-	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, httpkit.NewID())
+	tag, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1 AND EXISTS(SELECT 1 FROM olp.guardrail_policy_revisions WHERE id=$2 AND policy_id=$1)", policyID, revisionID, ids.New())
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func Activate(ctx context.Context, tx pgx.Tx, actor, policyID, revisionID string
 }
 
 func retire(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET retired_at=now(),etag=$2 WHERE id=$1", id, httpkit.NewID())
+	_, err := tx.Exec(ctx, "UPDATE olp.guardrail_policies SET retired_at=now(),etag=$2 WHERE id=$1", id, ids.New())
 	return err
 }
 

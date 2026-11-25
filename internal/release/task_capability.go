@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -52,7 +52,14 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	}
 	boundedExpiry := boundDelegationExpiry(record.Expires, principalExpires)
 	capability := &keyauthority.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(record.Definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(record.Definition.Agent.ToolsetRevisions)}
-	callback := currentPolicy.TaskAuthority(principal, snapshot, record.WorkloadRevision, &boundedExpiry, record.EndUser, capability)
+	callback := currentPolicy.TaskAuthority(keyauthority.TaskDerivation{
+		Identity:         principal,
+		SnapshotID:       snapshot,
+		WorkloadRevision: record.WorkloadRevision,
+		ExpiresAt:        &boundedExpiry,
+		EndUserDigest:    record.EndUser,
+		Capability:       capability,
+	})
 	return &callback, nil
 }
 
@@ -97,8 +104,7 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 	if authority.TaskCapability == nil {
 		return ErrInvalidKey
 	}
-	id, err := uuid.Parse(accountingID)
-	if err != nil || id == uuid.Nil || id.String() != accountingID {
+	if !ids.Canonical(accountingID) {
 		return ErrInvalidKey
 	}
 	digest, err := hex.DecodeString(authority.TaskCapability.Digest)

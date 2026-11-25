@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -87,7 +88,7 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 		if exists {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "user_exists", "This email already belongs to a member.")
 		}
-		id, token := httpkit.NewID(), secrets.Token()
+		id, token := ids.New(), secrets.Token()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -166,8 +167,8 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	userID := httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,$5,$6)", userID, address, strings.TrimSpace(input.DisplayName), hash, role, httpkit.NewID()); err != nil {
+	userID := ids.New()
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,$5,$6)", userID, address, strings.TrimSpace(input.DisplayName), hash, role, ids.New()); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET accepted_at=now(),accepted_by=$2 WHERE id=$1", id, userID); err != nil {

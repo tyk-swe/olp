@@ -4,7 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 

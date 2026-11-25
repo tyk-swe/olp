@@ -10,6 +10,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -65,7 +66,7 @@ type entry struct {
 }
 
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Sink, error) {
-	raw := promotion.ValueOf(document.Sinks)
+	raw := ptr.Value(document.Sinks)
 	if len(raw) > maxSinks {
 		return nil, httpkit.Invalid("sinks", "Declare at most 64 export sinks.")
 	}
@@ -148,7 +149,7 @@ func readStored(ctx context.Context, q database.Queryer) ([]stored, error) {
 	}
 	return promotion.Map(active, func(s sinks.ActiveSink) stored {
 		return stored{id: s.ID, credential: s.CredentialID, sink: Sink{
-			Owner:       ownerOf(promotion.ValueOf(s.Project), s.Project != nil),
+			Owner:       ownerOf(ptr.Value(s.Project), s.Project != nil),
 			Name:        s.Name,
 			Destination: s.Destination,
 			Streams:     slices.Sorted(slices.Values(s.Streams)),
@@ -179,7 +180,7 @@ func render(s Sink) contract.ConfigurationSink {
 		Destination:   s.Destination,
 		Enabled:       s.Enabled,
 		Name:          s.Name,
-		Project:       present(promotion.ValueOf(scope(s.Owner)), scope(s.Owner) != nil),
+		Project:       present(ptr.Value(scope(s.Owner)), scope(s.Owner) != nil),
 		Streams: promotion.Map(s.Streams, func(stream string) contract.ConfigurationSinkStreams {
 			return contract.ConfigurationSinkStreams(stream)
 		}),

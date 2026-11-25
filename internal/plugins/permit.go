@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -116,7 +117,7 @@ func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 		}
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,executable,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$7,now())",
-			file.Digest, abi.Version, data, file.Name, file.Size, httpkit.NewID(), p.ID); err != nil {
+			file.Digest, abi.Version, data, file.Name, file.Size, ids.New(), p.ID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		plugin, err := loadPlugin(r.Context(), tx, file.Digest)

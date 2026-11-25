@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type pauseChange struct {
@@ -90,7 +91,7 @@ func (a *API) changePause(r *http.Request, change pauseChange) (httpkit.Reply, e
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		var pausedAt *time.Time
 		if err := tx.QueryRow(r.Context(), `UPDATE olp.api_keys SET paused_at=CASE WHEN $1 THEN now() END,
  paused_authority_sequence=CASE WHEN $1 THEN $2::bigint END,etag=$3 WHERE id=$4 RETURNING paused_at`, change.paused, generation.Sequence, etag, id).Scan(&pausedAt); err != nil {

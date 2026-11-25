@@ -1,11 +1,14 @@
 import { resolve } from '$app/paths';
+import {
+  activeTab,
+  isAtOrBelow,
+  type TabLink
+} from '#lib/components/tabLinks.js';
 import { allows, type Grant } from '#lib/session/authorization.js';
 import type { ManagementRoute } from '#lib/management/requirements.js';
-import type { IconName } from '#lib/shell/icons.js';
+import type { IconName } from '#lib/components/icons.js';
 
-export type NavigationLeaf = {
-  readonly label: string;
-  readonly href: string;
+export type NavigationLeaf = TabLink & {
   readonly route?: ManagementRoute;
   readonly controlPlane?: true;
 };
@@ -591,11 +594,6 @@ const CREATE_ACTIONS: readonly (PaletteEntry & NavigationLeaf)[] = [
   }
 ];
 
-const isAtOrBelow = (path: string, ancestor: string) =>
-  ancestor === resolve('')
-    ? path === ancestor
-    : path === ancestor || path.startsWith(`${ancestor}/`);
-
 const leafVisible = (
   leaf: NavigationLeaf,
   grant: Grant,
@@ -652,18 +650,6 @@ export function owningItem(path: string): NavigationItem | undefined {
     (best, entry) => (!best || entry.depth > best.depth ? entry : best),
     undefined
   )?.item;
-}
-
-export function activeTab(
-  path: string,
-  tabs: readonly NavigationLeaf[]
-): NavigationLeaf | undefined {
-  return tabs
-    .filter((tab) => isAtOrBelow(path, tab.href))
-    .reduce<NavigationLeaf | undefined>(
-      (best, tab) => (!best || tab.href.length > best.href.length ? tab : best),
-      undefined
-    );
 }
 
 export type Crumb = { readonly label: string; readonly href?: string };

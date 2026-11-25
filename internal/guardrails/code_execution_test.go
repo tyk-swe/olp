@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"strings"
 	"testing"
 )
@@ -11,15 +12,15 @@ import (
 func TestCodeExecutionFindingLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		phase    Phase
+		phase    guardrailpolicy.Phase
 		segments []Segment
 		wantErr  bool
 	}{
-		{"at limit", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings)}}, false},
-		{"over limit", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings+1)}}, true},
-		{"escaped over limit", Output, []Segment{{Text: strings.Repeat("```\\n```", MaxFindings+1)}}, true},
-		{"across segments", Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings/2)}, {Text: strings.Repeat("```\n```", MaxFindings/2+1)}}, true},
-		{"plain intent after limit", Input, []Segment{{Text: "Run this code:\n" + strings.Repeat("```\n```", MaxFindings)}, {Text: "Execute this program"}}, true},
+		{"at limit", guardrailpolicy.Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings)}}, false},
+		{"over limit", guardrailpolicy.Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings+1)}}, true},
+		{"escaped over limit", guardrailpolicy.Output, []Segment{{Text: strings.Repeat("```\\n```", MaxFindings+1)}}, true},
+		{"across segments", guardrailpolicy.Output, []Segment{{Text: strings.Repeat("```\n```", MaxFindings/2)}, {Text: strings.Repeat("```\n```", MaxFindings/2+1)}}, true},
+		{"plain intent after limit", guardrailpolicy.Input, []Segment{{Text: "Run this code:\n" + strings.Repeat("```\n```", MaxFindings)}, {Text: "Execute this program"}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			detector, err := compileCodeExecution([]byte(`{}`))
@@ -41,30 +42,30 @@ func TestCodeExecutionFindingLimit(t *testing.T) {
 func TestCodeExecutionBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name, config string
-		phase        Phase
+		phase        guardrailpolicy.Phase
 		text         string
 		blocked      bool
 	}{
-		{"input execution", `{}`, Input, "Run this code:\n```py\nprint(1)\n```", true},
-		{"explanation", `{}`, Input, "Explain:\n```py\nprint(1)\n```", false},
-		{"negated execution", `{}`, Input, "Don't execute:\n```py\nprint(1)\n```", false},
-		{"plain execution", `{}`, Input, "Execute this program", true},
-		{"output code", `{}`, Output, "```python\nprint(1)\n```", true},
-		{"CRLF output code", `{}`, Output, "```python\r\nprint(1)\r\n```", true},
-		{"escaped output code", `{}`, Output, "```python\\nprint(1)\\n```", true},
-		{"escaped fence after real newline", `{}`, Output, "example:\n```python\\nprint(1)\\n```", true},
-		{"C++ output code", `{}`, Output, "```c++\nint main() {}\n```", true},
-		{"C# output code", `{}`, Output, "```c#\nConsole.WriteLine(1);\n```", true},
-		{"escaped C++ output code", `{}`, Output, "```c++\\nint main() {}\\n```", true},
-		{"info string metadata", `{"blocked_languages":["python"]}`, Output, "```python title=example.py\nprint(1)\n```", true},
-		{"punctuated language filter", `{"blocked_languages":["c++"]}`, Output, "```c++\nint main() {}\n```", true},
-		{"language alias", `{"blocked_languages":["python"]}`, Output, "```py\nprint(1)\n```", true},
-		{"other language", `{"blocked_languages":["python"]}`, Output, "```js\n1+1\n```", false},
-		{"low confidence", `{"confidence_threshold":0.8}`, Output, "```text\nhello\n```", false},
-		{"intent disabled", `{"detect_execution_intent":false}`, Input, "Explain:\n```py\nprint(1)\n```", true},
+		{"input execution", `{}`, guardrailpolicy.Input, "Run this code:\n```py\nprint(1)\n```", true},
+		{"explanation", `{}`, guardrailpolicy.Input, "Explain:\n```py\nprint(1)\n```", false},
+		{"negated execution", `{}`, guardrailpolicy.Input, "Don't execute:\n```py\nprint(1)\n```", false},
+		{"plain execution", `{}`, guardrailpolicy.Input, "Execute this program", true},
+		{"output code", `{}`, guardrailpolicy.Output, "```python\nprint(1)\n```", true},
+		{"CRLF output code", `{}`, guardrailpolicy.Output, "```python\r\nprint(1)\r\n```", true},
+		{"escaped output code", `{}`, guardrailpolicy.Output, "```python\\nprint(1)\\n```", true},
+		{"escaped fence after real newline", `{}`, guardrailpolicy.Output, "example:\n```python\\nprint(1)\\n```", true},
+		{"C++ output code", `{}`, guardrailpolicy.Output, "```c++\nint main() {}\n```", true},
+		{"C# output code", `{}`, guardrailpolicy.Output, "```c#\nConsole.WriteLine(1);\n```", true},
+		{"escaped C++ output code", `{}`, guardrailpolicy.Output, "```c++\\nint main() {}\\n```", true},
+		{"info string metadata", `{"blocked_languages":["python"]}`, guardrailpolicy.Output, "```python title=example.py\nprint(1)\n```", true},
+		{"punctuated language filter", `{"blocked_languages":["c++"]}`, guardrailpolicy.Output, "```c++\nint main() {}\n```", true},
+		{"language alias", `{"blocked_languages":["python"]}`, guardrailpolicy.Output, "```py\nprint(1)\n```", true},
+		{"other language", `{"blocked_languages":["python"]}`, guardrailpolicy.Output, "```js\n1+1\n```", false},
+		{"low confidence", `{"confidence_threshold":0.8}`, guardrailpolicy.Output, "```text\nhello\n```", false},
+		{"intent disabled", `{"detect_execution_intent":false}`, guardrailpolicy.Input, "Explain:\n```py\nprint(1)\n```", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := testEngine(t, "builtin.code_execution", tc.config, tc.phase, Block, false, nil)
+			engine := testEngine(t, "builtin.code_execution", tc.config, tc.phase, guardrailpolicy.Block, false, nil)
 			result, err := evaluateText(t, engine, tc.text, tc.phase, nil)
 			if errors.Is(err, ErrBlocked) != tc.blocked {
 				t.Fatalf("result=%+v error=%v", result, err)
@@ -75,10 +76,10 @@ func TestCodeExecutionBoundaries(t *testing.T) {
 
 func TestCodeExecutionMixedNewlines(t *testing.T) {
 	for _, newline := range []string{"\n", "\r\n"} {
-		engine := testEngine(t, "builtin.code_execution", `{}`, Output, Redact, false, nil)
+		engine := testEngine(t, "builtin.code_execution", `{}`, guardrailpolicy.Output, guardrailpolicy.Redact, false, nil)
 		input := "é" + newline + "```c++\\nfirst\\n```" + newline + "middle" + newline + "```python" + newline + "second" + newline + "```" + newline + "終"
 		want := "é" + newline + "[CODE BLOCKED]" + newline + "middle" + newline + "[CODE BLOCKED]" + newline + "終"
-		result, err := evaluateText(t, engine, input, Output, nil)
+		result, err := evaluateText(t, engine, input, guardrailpolicy.Output, nil)
 		if err != nil || len(result.Segments) != 1 || result.Segments[0].Text != want || !result.Changed {
 			t.Fatalf("mixed-newline code escaped: %+v error=%v", result, err)
 		}
@@ -88,10 +89,10 @@ func TestCodeExecutionMixedNewlines(t *testing.T) {
 func TestCodeExecutionRedaction(t *testing.T) {
 	for _, tc := range []struct{ name, newline string }{{"LF", "\n"}, {"CRLF", "\r\n"}, {"escaped", `\n`}} {
 		t.Run(tc.name, func(t *testing.T) {
-			engine := testEngine(t, "builtin.code_execution", `{}`, Output, Redact, false, nil)
+			engine := testEngine(t, "builtin.code_execution", `{}`, guardrailpolicy.Output, guardrailpolicy.Redact, false, nil)
 			input := "é" + tc.newline + "```c++ title=example.cpp" + tc.newline + "secret" + tc.newline + "```" + tc.newline + "終"
 			want := "é" + tc.newline + "[CODE BLOCKED]" + tc.newline + "終"
-			result, err := evaluateText(t, engine, input, Output, nil)
+			result, err := evaluateText(t, engine, input, guardrailpolicy.Output, nil)
 			if err != nil || len(result.Segments) != 1 || result.Segments[0].Text != want || !result.Changed {
 				t.Fatalf("invalid fenced redaction: %+v %v", result, err)
 			}
@@ -105,12 +106,12 @@ func TestCodeExecutionRedaction(t *testing.T) {
 func TestCodeExecutionNativeIntentAndUnlabelledFence(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		phase Phase
+		phase guardrailpolicy.Phase
 		text  string
 	}{
-		{"shell_request", Input, "please run `whoami`"},
-		{"shell_request_with_fence", Input, "run `python` with this code:\n```python\nprint(1)\n```"},
-		{"unlabelled_output", Output, "```\nprint(1)\n```"},
+		{"shell_request", guardrailpolicy.Input, "please run `whoami`"},
+		{"shell_request_with_fence", guardrailpolicy.Input, "run `python` with this code:\n```python\nprint(1)\n```"},
+		{"unlabelled_output", guardrailpolicy.Output, "```\nprint(1)\n```"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			detector, err := compileCodeExecution(json.RawMessage(`{"confidence_threshold":0.8}`))

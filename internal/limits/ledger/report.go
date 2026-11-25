@@ -3,7 +3,7 @@ package ledger
 import (
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 )
 
 type budgetOwnership struct{ raw, hourly, tool string }

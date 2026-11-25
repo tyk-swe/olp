@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
@@ -133,18 +132,15 @@ func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.Cl
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	x := &Call{
-		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
-		actor:          parent.actor,
-		keyID:          parent.keyID,
-		budgetGroupID:  parent.budgetGroupID,
-		attribution:    parent.attribution,
-		endUserDigest:  parent.endUserDigest,
-		userID:         parent.userID,
-		authority:      parent.authority,
-		cardPinned:     parent.cardPinned,
-		cardRevisionID: parent.cardRevisionID,
-		cardRev:        parent.cardRev,
-		routingInputs:  parent.routingInputs,
+		request:       request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
+		actor:         parent.actor,
+		keyID:         parent.keyID,
+		budgetGroupID: parent.budgetGroupID,
+		attribution:   parent.attribution,
+		endUserDigest: parent.endUserDigest,
+		userID:        parent.userID,
+		authority:     parent.authority,
+		callPricing:   parent.callPricing,
 
 		origin:   usage.OriginClassifier,
 		parent:   parent.request.accountingID(),

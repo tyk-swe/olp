@@ -10,11 +10,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -125,7 +126,7 @@ func validateCodeAdmission(in Admission) error {
 	if err := attribution.Validate(in.Attribution); err != nil {
 		return codemode.Refuse(400, "code_invalid_attribution")
 	}
-	if in.EndUserDigest != "" && !keyauthority.ValidEndUserDigest(in.EndUserDigest) {
+	if in.EndUserDigest != "" && !attribution.ValidEndUserDigest(in.EndUserDigest) {
 		return codemode.Refuse(400, "code_end_user_invalid")
 	}
 	if err := in.Operation.Identity.Validate(); err != nil {
@@ -336,13 +337,13 @@ func (s *Store) ObserveReference(ctx context.Context, attemptID, externalID stri
 }
 
 func (s *Store) RecordRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) error {
-	if digest != "" && !keyauthority.ValidEndUserDigest(digest) {
+	if digest != "" && !attribution.ValidEndUserDigest(digest) {
 		return codemode.Refuse(400, "code_end_user_invalid")
 	}
 	if !codeRefusalReason.MatchString(code) {
 		return codemode.Refuse(400, "code_refusal_invalid")
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, httpkit.NewID(), route.ProjectID, route.ID, keyID, code, digest)
+	_, err := s.pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, ids.New(), route.ProjectID, route.ID, keyID, code, digest)
 	return err
 }
 
@@ -364,7 +365,7 @@ func commitCodeAdmission(ctx context.Context, tx pgx.Tx, in Admission, out Permi
 		return out, tx.Commit(ctx)
 	}
 	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
-	out.Attempt = codemode.Attempt{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
+	out.Attempt = codemode.Attempt{ID: ids.New(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
 			return out, err

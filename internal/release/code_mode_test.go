@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/providerconfig"
+	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 
 	"fmt"
 	"slices"

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 )
@@ -62,7 +62,7 @@ func NewSyncer(store *Store, runner scripts.Runner) *Syncer {
 }
 
 func (y *Syncer) SyncOwner(ctx context.Context, owner string) error {
-	if !canonicalID(owner) {
+	if !ids.Canonical(owner) {
 		return ErrAuthority
 	}
 	return y.store.inTx(ctx, func(tx pgx.Tx) error {
@@ -152,12 +152,7 @@ func (y *Syncer) CheckOwnerAccounting(ctx context.Context, owner string) error {
 	return y.SyncOwner(ctx, owner)
 }
 
-type Boundary struct {
-	Owner  limits.Owner
-	Budget *admission.CostBudget
-}
-
-func (y *Syncer) Admit(ctx context.Context, id, claim string, boundaries []Boundary) error {
+func (y *Syncer) Admit(ctx context.Context, id, claim string, boundaries []limits.Boundary) error {
 	return y.store.inTx(ctx, func(tx pgx.Tx) error {
 		var state State
 		if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 AND claim_id=$2 AND prepared_until>clock_timestamp() FOR UPDATE`, id, claim).Scan(&state); err != nil || state != Prepared {
@@ -196,14 +191,14 @@ func (y *Syncer) Admit(ctx context.Context, id, claim string, boundaries []Bound
 	})
 }
 
-func (y *Syncer) admitTx(ctx context.Context, tx pgx.Tx, owner limits.Owner, budget admission.CostBudget) error {
-	if budget.Owner.ID != owner.ID || budget.Owner.Basis.Normalized() != owner.Basis.Normalized() || !canonicalID(owner.ID) || budget.Validate() != nil {
+func (y *Syncer) admitTx(ctx context.Context, tx pgx.Tx, owner limits.Owner, budget limits.CostBudget) error {
+	if budget.Owner.ID != owner.ID || budget.Owner.Basis.Normalized() != owner.Basis.Normalized() || !ids.Canonical(owner.ID) || budget.Validate() != nil {
 		return ErrConflict
 	}
 	if err := y.syncFreshTx(ctx, tx, owner); err != nil {
 		return err
 	}
-	return y.scripts.VerifyCost(ctx, budget.Caps())
+	return y.scripts.VerifyCost(ctx, scripts.BudgetCaps(budget))
 }
 
 func (y *Syncer) syncFreshTx(ctx context.Context, tx pgx.Tx, owner limits.Owner) error {

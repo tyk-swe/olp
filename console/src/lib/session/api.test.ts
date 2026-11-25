@@ -1,7 +1,7 @@
 import { login, acceptInvitation } from './authentication';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { components } from '#lib/management/schema.js';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
 import {
   authenticationCapabilities,

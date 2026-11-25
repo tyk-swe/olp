@@ -8,10 +8,10 @@ import (
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 type dispatchFixture struct {

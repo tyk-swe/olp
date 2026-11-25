@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
@@ -207,34 +208,27 @@ func (event Event) WithFinalUsage(evidence AttemptUsage) *Event {
 	return &owned
 }
 
-func clonePendingQuantity[T int64 | string](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	return new(*value)
-}
-
 func clonePendingUsage(evidence AttemptUsage) AttemptUsage {
 	return AttemptUsage{Evidence: evidence.Evidence, Deferred: evidence.Deferred,
 		UsageQuantities: UsageQuantities{
-			InvocationCount:         clonePendingQuantity(evidence.InvocationCount),
-			TrainingTokens:          clonePendingQuantity(evidence.TrainingTokens),
-			StorageByteSeconds:      clonePendingQuantity(evidence.StorageByteSeconds),
-			CacheTokenSeconds:       clonePendingQuantity(evidence.CacheTokenSeconds),
+			InvocationCount:         ptr.Clone(evidence.InvocationCount),
+			TrainingTokens:          ptr.Clone(evidence.TrainingTokens),
+			StorageByteSeconds:      ptr.Clone(evidence.StorageByteSeconds),
+			CacheTokenSeconds:       ptr.Clone(evidence.CacheTokenSeconds),
 			ContainerSessions:       maps.Clone(evidence.ContainerSessions),
-			InputTokens:             clonePendingQuantity(evidence.InputTokens),
-			OutputTokens:            clonePendingQuantity(evidence.OutputTokens),
-			CachedInputTokens:       clonePendingQuantity(evidence.CachedInputTokens),
-			CacheWriteInputTokens:   clonePendingQuantity(evidence.CacheWriteInputTokens),
-			CacheWrite5MInputTokens: clonePendingQuantity(evidence.CacheWrite5MInputTokens),
-			CacheWrite1HInputTokens: clonePendingQuantity(evidence.CacheWrite1HInputTokens),
-			AudioInputTokens:        clonePendingQuantity(evidence.AudioInputTokens),
-			CachedAudioInputTokens:  clonePendingQuantity(evidence.CachedAudioInputTokens),
-			AudioOutputTokens:       clonePendingQuantity(evidence.AudioOutputTokens),
-			ImageInputTokens:        clonePendingQuantity(evidence.ImageInputTokens),
-			CachedImageInputTokens:  clonePendingQuantity(evidence.CachedImageInputTokens),
-			ImageOutputTokens:       clonePendingQuantity(evidence.ImageOutputTokens),
-			MediaUnits:              clonePendingQuantity(evidence.MediaUnits),
+			InputTokens:             ptr.Clone(evidence.InputTokens),
+			OutputTokens:            ptr.Clone(evidence.OutputTokens),
+			CachedInputTokens:       ptr.Clone(evidence.CachedInputTokens),
+			CacheWriteInputTokens:   ptr.Clone(evidence.CacheWriteInputTokens),
+			CacheWrite5MInputTokens: ptr.Clone(evidence.CacheWrite5MInputTokens),
+			CacheWrite1HInputTokens: ptr.Clone(evidence.CacheWrite1HInputTokens),
+			AudioInputTokens:        ptr.Clone(evidence.AudioInputTokens),
+			CachedAudioInputTokens:  ptr.Clone(evidence.CachedAudioInputTokens),
+			AudioOutputTokens:       ptr.Clone(evidence.AudioOutputTokens),
+			ImageInputTokens:        ptr.Clone(evidence.ImageInputTokens),
+			CachedImageInputTokens:  ptr.Clone(evidence.CachedImageInputTokens),
+			ImageOutputTokens:       ptr.Clone(evidence.ImageOutputTokens),
+			MediaUnits:              ptr.Clone(evidence.MediaUnits),
 			ToolCalls:               maps.Clone(evidence.ToolCalls), Batch: evidence.Batch,
 		},
 	}

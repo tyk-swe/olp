@@ -13,7 +13,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -152,7 +154,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 			return err
 		}
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	dirty := current.ActiveRevisionID == nil || *current.ActiveRevisionID != v.ID
 	if !dirty {
 		// Restore retains the draft slots, including unpublished credentials
@@ -233,7 +235,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 	case !configuration.CredentialRequired() && credential != nil:
 		return createdProvider{}, httpkit.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
-	displayName := cmp.Or(deref(input.DisplayName), deref(input.Model))
+	displayName := cmp.Or(ptr.Value(input.DisplayName), ptr.Value(input.Model))
 	if input.Model != nil {
 		if err = connection.ValidModelName("model", *input.Model); err != nil {
 			return createdProvider{}, err
@@ -258,7 +260,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 		}
 		credentialID = &stored
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", httpkit.NewID(), id, credentialID); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,credential_id) VALUES($1,$2,true,0,'default',$3)", ids.New(), id, credentialID); err != nil {
 		return createdProvider{}, err
 	}
 	if input.Model != nil {
@@ -303,7 +305,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: operation, Surface: surface, Mode: "streaming"}, Source: "declared"})
 		}
 		declared, _ := json.Marshal(capabilities)
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", httpkit.NewID(), id, *input.Model, displayName, declared); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", ids.New(), id, *input.Model, displayName, declared); err != nil {
 			return createdProvider{}, err
 		}
 	}
@@ -349,7 +351,7 @@ func (s *Server) StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, nam
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, after, httpkit.NewID())
+	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, after, ids.New())
 	return err
 }
 
@@ -396,7 +398,7 @@ type CreatedDraft struct {
 }
 
 func (s *Server) CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (CreatedDraft, error) {
-	created := CreatedDraft{ID: httpkit.NewID(), ETag: httpkit.NewID()}
+	created := CreatedDraft{ID: ids.New(), ETag: ids.New()}
 	configuration := draft.Configuration.Document()
 	if err := validateNetworkReference(ctx, tx, created.ID, configuration.Options.Network); err != nil {
 		return CreatedDraft{}, err
@@ -405,7 +407,7 @@ func (s *Server) CreateDraft(ctx context.Context, tx pgx.Tx, draft Draft) (Creat
 	if err != nil {
 		return CreatedDraft{}, err
 	}
-	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", created.ID, draft.Name, configuration.Kind, encoded, created.ETag, httpkit.NewID(), draft.CreatedBy, draft.ProjectID); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,$3,'draft',$4,$5,$6,$7,$8)", created.ID, draft.Name, configuration.Kind, encoded, created.ETag, ids.New(), draft.CreatedBy, draft.ProjectID); err != nil {
 		return CreatedDraft{}, err
 	}
 	return created, nil
@@ -457,7 +459,7 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,$5,$6)
-   ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,enabled=excluded.enabled,capabilities=excluded.capabilities`, httpkit.NewID(), providerID, model.UpstreamModel, display, model.Enabled, encoded); err != nil {
+   ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,enabled=excluded.enabled,capabilities=excluded.capabilities`, ids.New(), providerID, model.UpstreamModel, display, model.Enabled, encoded); err != nil {
 			return err
 		}
 	}
@@ -477,9 +479,9 @@ func (s *Server) StageDraftInventory(ctx context.Context, tx pgx.Tx, providerID 
 		return err
 	}
 	for _, slot := range slots {
-		slot.Restrictions.AllowedAPIKeys = orEmpty(slot.Restrictions.AllowedAPIKeys)
-		slot.Restrictions.AllowedModels = orEmpty(slot.Restrictions.AllowedModels)
-		slot.Restrictions.AllowedRoutes = orEmpty(slot.Restrictions.AllowedRoutes)
+		slot.Restrictions.AllowedAPIKeys = ptr.NonNil(slot.Restrictions.AllowedAPIKeys)
+		slot.Restrictions.AllowedModels = ptr.NonNil(slot.Restrictions.AllowedModels)
+		slot.Restrictions.AllowedRoutes = ptr.NonNil(slot.Restrictions.AllowedRoutes)
 		restrictions, err := json.Marshal(slot.Restrictions)
 		if err != nil {
 			return err

@@ -4,10 +4,10 @@ import (
 	"context"
 	"slices"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/consumerscope"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -46,14 +46,13 @@ func ConsumerScopes() []string {
 	return consumerscope.All()
 }
 
-func validateResourceAllowlist(field string, ids []string) error {
-	if len(ids) > 100 {
+func validateResourceAllowlist(field string, allowed []string) error {
+	if len(allowed) > 100 {
 		return httpkit.Invalid(field, "Use at most 100 unique resource UUIDs.")
 	}
 	seen := map[string]bool{}
-	for _, raw := range ids {
-		id, err := uuid.Parse(raw)
-		if err != nil || id == uuid.Nil || id.String() != raw || seen[raw] {
+	for _, raw := range allowed {
+		if !ids.Canonical(raw) || seen[raw] {
 			return httpkit.Invalid(field, "Use unique canonical resource UUIDs.")
 		}
 		seen[raw] = true

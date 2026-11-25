@@ -12,13 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
-	"github.com/tyk-swe/olp/internal/admission"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -33,15 +31,17 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/platform/telemetry"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 )
 
@@ -60,7 +60,7 @@ type Config struct {
 	// the server falls back to for direct handler calls; process composition
 	// shares it with the public admission middleware so both bound the same
 	// capacity and the metrics endpoint reads one truth.
-	AdmissionPool *admission.Pool
+	AdmissionPool *concurrency.Pool
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
 	// Predicates runs the route_predicate hooks of confined plugins that
@@ -211,19 +211,9 @@ func New(deps Dependencies, cfg Config) *Server {
 	}
 }
 
-func (s *Server) WithWorkflow(runs WorkflowRunStore, tools WorkflowToolRunner) *Server {
-	if s == nil {
-		return nil
-	}
-	next := *s
-	next.Deps.WorkflowRuns = runs
-	next.Deps.WorkflowTools = tools
-	return &next
-}
-
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
-func (s *Server) AdmissionPool() *admission.Pool { return s.Gate.Pool() }
+func (s *Server) AdmissionPool() *concurrency.Pool { return s.Gate.Pool() }
 
 // RunFleetHealth shares this gateway's circuit transitions with the fleet
 // and follows the fleet's, until ctx ends. Without shared state it returns at
@@ -300,7 +290,7 @@ func (r *request) accountingID() string {
 		return r.id
 	}
 	if r.durableID == "" {
-		r.durableID = uuid.Must(uuid.NewV7()).String()
+		r.durableID = ids.New()
 	}
 	return r.durableID
 }
@@ -311,7 +301,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	id := r.Header.Get("X-Request-Id")
 	minted := !requestIDPattern.MatchString(id)
 	if minted {
-		id = uuid.Must(uuid.NewV7()).String()
+		id = ids.New()
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)

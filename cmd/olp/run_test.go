@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/admission"
+	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 )
 
@@ -115,11 +115,11 @@ func TestPanickingWorkerCancelsTheProcessWithItsCause(t *testing.T) {
 }
 
 func TestA2AUsesInferenceAdmissionAndPerimeter(t *testing.T) {
-	management := admission.NewPool(1)
+	management := concurrency.NewPool(1)
 	occupied := management.AcquirePermit()
 	defer occupied.Release()
-	inference := admission.NewPool(1)
-	public := &admission.Public{Inference: inference, Management: management, InferenceEnabled: true, Reject: rejectPublic}
+	inference := concurrency.NewPool(1)
+	public := &concurrency.Public{Inference: inference, Management: management, InferenceEnabled: true, Reject: rejectPublic}
 	handler := Perimeter("https://example.invalid", public.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
 	for path, method := range map[string]string{"/a2a/agent": http.MethodPost, "/a2a/agent/.well-known/agent-card.json": http.MethodGet} {
 		recorder := httptest.NewRecorder()

@@ -15,6 +15,7 @@ type offer struct {
 	kinds      []Kind
 	vendors    []string
 	vendorKind bool
+	batchAPI   bool
 }
 
 var (
@@ -28,8 +29,9 @@ var (
 	openAIUnary      = []offer{{surface: "openai", modes: unary, kinds: openAIKinds}}
 	openAIGenerating = []offer{{surface: "openai", modes: generating, kinds: openAIKinds}}
 	vendorUnary      = []offer{{surface: "openai", modes: unary, vendorKind: true}}
+	nativeClouds     = []Kind{KindVertexAI, KindBedrock}
 
-	nativeCloudVendors = map[Kind]string{KindVertexAI: "google-vertex", KindBedrock: "amazon-bedrock"}
+	openAIEndpoint = DefaultEndpoint(KindOpenAI, "", "")
 )
 
 var offers = map[string][]offer{
@@ -62,9 +64,9 @@ var offers = map[string][]offer{
 	"batch": {
 		{surface: "anthropic", modes: unary, kinds: []Kind{KindAnthropic}},
 		{surface: "gemini", modes: unary, kinds: []Kind{KindGemini}},
-		{surface: "openai", modes: unary, kinds: []Kind{KindGemini}, vendors: []string{"google"}},
+		{surface: "openai", modes: unary, kinds: []Kind{KindGemini}, vendors: []string{vendors.DefaultFor(string(KindGemini))}},
 		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAI, KindAzureOpenAI}},
-		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible}, vendors: filesBatchesVendors()},
+		{surface: "openai", modes: unary, kinds: []Kind{KindOpenAICompatible}, batchAPI: true},
 	},
 }
 
@@ -73,6 +75,9 @@ func (o offer) serves(kind Kind, vendor, surface, mode string) bool {
 		return false
 	}
 	if o.kinds != nil && !slices.Contains(o.kinds, kind) || o.vendors != nil && !slices.Contains(o.vendors, vendor) {
+		return false
+	}
+	if _, served := vendors.BatchAPIFor(vendor); o.batchAPI && !served {
 		return false
 	}
 	if !o.vendorKind {
@@ -84,38 +89,60 @@ func (o offer) serves(kind Kind, vendor, surface, mode string) bool {
 
 func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
-		return (operation != "agent_resource" || vendor == "google") && retainedapi.Supports(string(kind), operation, surface, mode)
+		return (operation != "agent_resource" || vendor == vendors.DefaultFor(string(KindGemini))) && retainedapi.Supports(string(kind), operation, surface, mode)
 	}
 	if !slices.Contains(surfaces, surface) {
 		return false
 	}
 	generates := operation == "generation" && slices.Contains(generating, mode)
 	if surface == "native" {
-		cloud, hosted := nativeCloudVendors[kind]
-		switch operation {
-		case "batch":
-			return mode == "unary" && hosted && cloud == vendor
-		case "realtime":
-			return mode == "realtime" && (kind == KindOpenAICompatible && vendor == "xai" || hosted && cloud == vendor) && vendors.Serves(vendor, operation)
-		case "generation":
-			return generates && (kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2")))
+		if matched, supported := supportsNativeSurface(kind, vendor, operation, mode, generates); matched {
+			return supported
 		}
 	}
 	if !slices.Contains(modes, mode) {
 		return false
 	}
+	if matched, supported := supportsSpecialKind(kind, vendor, operation, surface, generates); matched {
+		return supported
+	}
+	return supportsReviewedOffer(kind, vendor, operation, surface, mode)
+}
+
+func supportsNativeSurface(kind Kind, vendor, operation, mode string, generates bool) (matched, supported bool) {
+	cloud := slices.Contains(nativeClouds, kind) && vendors.DefaultFor(string(kind)) == vendor
+	switch operation {
+	case "batch":
+		return true, mode == "unary" && cloud
+	case "realtime":
+		nativeHost := kind == KindOpenAICompatible && vendor == "xai" || cloud
+		return true, mode == "realtime" && nativeHost && vendors.Serves(vendor, operation)
+	case "generation":
+		nativeGen := kind == KindPlugin || kind == KindOpenAICompatible && (vendors.Speaks(vendor, "mistral-fim") || vendors.Speaks(vendor, "cohere-chat-v2"))
+		return true, generates && nativeGen
+	default:
+		return false, false
+	}
+}
+
+func supportsSpecialKind(kind Kind, vendor, operation, surface string, generates bool) (matched, supported bool) {
 	switch kind {
 	case KindPlugin:
-		return generates && surface != "bedrock"
+		return true, generates && surface != "bedrock"
 	case KindSageMaker:
-		return generates && surface == "openai" && vendors.Serves(vendor, operation)
+		return true, generates && surface == "openai" && vendors.Serves(vendor, operation)
 	case KindWatsonx:
-		return generates && surface != "bedrock" && vendors.Serves(vendor, operation)
+		return true, generates && surface != "bedrock" && vendors.Serves(vendor, operation)
+	default:
+		return false, false
 	}
+}
+
+func supportsReviewedOffer(kind Kind, vendor, operation, surface, mode string) bool {
 	if !slices.Contains(reviewed, kind) {
 		return false
 	}
-	if kind == KindOpenAICompatible && (surface != "openai" || operation == "generation" && !vendors.Speaks(vendor, "openai-chat") && !vendors.Speaks(vendor, "openai-responses")) {
+	if kind == KindOpenAICompatible && !supportsOpenAICompatible(vendor, operation, surface) {
 		return false
 	}
 	if surface == "bedrock" && kind != KindBedrock {
@@ -133,6 +160,16 @@ func Supports(kind Kind, vendor, operation, surface, mode string) bool {
 		return Kind(connector) == kind && surface == "openai" && (mode == "unary" || creates)
 	}
 	return slices.ContainsFunc(offers[operation], func(o offer) bool { return o.serves(kind, vendor, surface, mode) })
+}
+
+func supportsOpenAICompatible(vendor, operation, surface string) bool {
+	if surface != "openai" {
+		return false
+	}
+	if operation != "generation" {
+		return true
+	}
+	return vendors.Speaks(vendor, "openai-chat") || vendors.Speaks(vendor, "openai-responses")
 }
 
 var (
@@ -217,7 +254,7 @@ func (c Config) SupportsRetainedResponses() bool {
 		return true
 	case KindOpenAI:
 		endpoint := strings.TrimSuffix(strings.TrimSpace(c.Endpoint), "/")
-		return endpoint == "" || endpoint == "https://api.openai.com/v1"
+		return endpoint == "" || endpoint == openAIEndpoint
 	}
 	return false
 }
@@ -229,22 +266,12 @@ func (c Config) SupportsFilesBatches() bool {
 	case KindOpenAI:
 		return c.SupportsRetainedResponses()
 	case KindOpenAICompatible:
-		_, ok := c.filesBatchesService()
+		_, ok := c.vendorBatchAdapter()
 		return ok
 	case KindGemini:
 		return c.ProfileID == "" && c.ProfileRevision == "" || c.selects("gemini-generation")
 	}
 	return false
-}
-
-func (c Config) filesBatchesService() (filesBatchesService, bool) {
-	i := slices.IndexFunc(filesBatchesServices, func(s filesBatchesService) bool {
-		return s.profile() == c.ProfileID && s.vendor == c.VendorID
-	})
-	if i < 0 || c.Kind != KindOpenAICompatible || c.ProfileRevision != ProfileRevision {
-		return filesBatchesService{}, false
-	}
-	return filesBatchesServices[i], true
 }
 
 func (c Config) NativeOpenAI() bool { return c.Kind == KindOpenAI || c.Kind == KindAzureOpenAI }

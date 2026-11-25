@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
 	"github.com/tyk-swe/olp/internal/guardrails/vendor"
 )
@@ -36,7 +37,7 @@ func (ModelSpec) References() vendor.References   { return vendor.References{} }
 func (PluginSpec) References() vendor.References  { return vendor.References{} }
 
 type kind struct {
-	phases     func(Phase) bool
+	phases     func(guardrailpolicy.Phase) bool
 	transforms bool
 	model      bool
 	compresses bool
@@ -44,7 +45,7 @@ type kind struct {
 	parse      func(json.RawMessage) (Spec, error)
 }
 
-func (k kind) supports(phase Phase) bool { return k.phases == nil || k.phases(phase) }
+func (k kind) supports(phase guardrailpolicy.Phase) bool { return k.phases == nil || k.phases(phase) }
 
 var natives = map[Kind]kind{
 	"builtin.regex":           {transforms: true, redacts: true, parse: builtin(compileRegex)},
@@ -122,7 +123,7 @@ func parsePlugin(raw json.RawMessage) (Spec, error) {
 	if err := decodeConfig(raw, &p); err != nil {
 		return nil, err
 	}
-	if !identifier.MatchString(p.ID) || !pluginidentity.ValidDigest(p.Version) {
+	if !guardrailpolicy.ValidIdentifier(p.ID) || !pluginidentity.ValidDigest(p.Version) {
 		return nil, errors.New("pin an approved plugin version")
 	}
 	return p, nil
@@ -136,7 +137,7 @@ func parseModel(raw json.RawMessage) (Spec, error) {
 	if err := decodeConfig(raw, &c); err != nil {
 		return nil, err
 	}
-	if !identifier.MatchString(c.Route) || c.Rule == nil || !categoryID.MatchString(c.Rule.Category) || !json.Valid(c.Rule.Equals) || len(c.Rule.Pointer) > 512 || len(c.Rule.Prompt) > 8192 {
+	if !guardrailpolicy.ValidIdentifier(c.Route) || c.Rule == nil || !guardrailpolicy.ValidCategory(c.Rule.Category) || !json.Valid(c.Rule.Equals) || len(c.Rule.Pointer) > 512 || len(c.Rule.Prompt) > 8192 {
 		return nil, errors.New("invalid model guardrail route or verdict rule")
 	}
 	return ModelSpec{Route: c.Route, Judge: *c.Rule}, nil
@@ -150,7 +151,7 @@ func parseSemantic(raw json.RawMessage) (Spec, error) {
 	if err := decodeConfig(raw, &c); err != nil {
 		return nil, err
 	}
-	if !identifier.MatchString(c.Route) || c.Semantic == nil {
+	if !guardrailpolicy.ValidIdentifier(c.Route) || c.Semantic == nil {
 		return nil, errors.New("semantic guardrails require an embedding route and semantic rule")
 	}
 	if err := validateSemantic(*c.Semantic); err != nil {

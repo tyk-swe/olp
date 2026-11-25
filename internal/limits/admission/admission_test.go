@@ -117,7 +117,7 @@ func limiterOn(t *testing.T, client scripts.Commander) *Limiter {
 }
 
 func costRequest(basis limits.Basis, rate bool) Request {
-	budget := Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey, Basis: basis}, pointer("10"), nil, nil, "")
+	budget := limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey, Basis: basis}, pointer("10"), nil, nil, "")
 	r := Request{Lookup: "lookup_one_abc", LeaseTTL: 5 * time.Second, Cost: budget.Holding("0.25", requestID)}
 	if rate {
 		r.Rate.RequestsPerMinute = pointer(int64(10))
@@ -252,7 +252,7 @@ func TestLeaseEndingGivesBackOnlyWhatTheOutcomeKept(t *testing.T) {
 }
 
 func tokenCostRequest() Request {
-	budget := Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey, Basis: limits.BasisCost}, pointer("10"), nil, nil, "")
+	budget := limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey, Basis: limits.BasisCost}, pointer("10"), nil, nil, "")
 	return Request{Lookup: "lookup_one_abc", LeaseTTL: 5 * time.Second, Rate: RateLimits{TokensPerMinute: pointer(int64(1000)), Tokens: 40}, Cost: budget.Holding("0.25", requestID)}
 }
 
@@ -299,7 +299,7 @@ func TestReserveRejectsBypassableLimits(t *testing.T) {
 		return Request{
 			Lookup: "lookup_one_abc", LeaseTTL: 5 * time.Second,
 			Rate: RateLimits{RequestsPerMinute: pointer(int64(10)), TokensPerMinute: pointer(int64(1000)), MaxConcurrency: pointer(int64(10)), Tokens: 5},
-			Cost: Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey}, pointer("10"), nil, pointer("100"), ""),
+			Cost: limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey}, pointer("10"), nil, pointer("100"), ""),
 		}
 	}
 	reserve := func(r Request) error {
@@ -351,7 +351,7 @@ func TestReserveRejectsBypassableLimits(t *testing.T) {
 		{"zero daily cost limit", func(r *Request) { r.Cost.Daily = pointer("0.000") }},
 		{"negative monthly cost limit", func(r *Request) { r.Cost.Monthly = pointer("-1") }},
 		{"cost limit in scientific notation", func(r *Request) { r.Cost.Daily = pointer("1e3") }},
-		{"an estimate without the request it is accounted under", func(r *Request) { r.Cost.Estimate = &Estimate{Amount: "1"} }},
+		{"an estimate without the request it is accounted under", func(r *Request) { r.Cost.Estimate = &limits.Estimate{Amount: "1"} }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -401,7 +401,7 @@ func TestDurableAdmissionRebuildsOnlyAMissingProjection(t *testing.T) {
 				synced++
 				return test.sync
 			}))
-			budget := Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey}, pointer("10"), nil, nil, "")
+			budget := limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerKey}, pointer("10"), nil, nil, "")
 			_, err = limiter.Reserve(t.Context(), Request{Lookup: "lookup_one_abc", LeaseTTL: time.Second, Cost: budget})
 			if !errors.Is(err, test.want) || (test.want == nil) != (err == nil) {
 				t.Fatalf("Reserve error = %v, want %v", err, test.want)

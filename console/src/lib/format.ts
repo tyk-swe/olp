@@ -220,3 +220,8 @@ export function formatBytes(value?: number | string | null): string {
   const digits = unit === 0 || size >= 100 ? 0 : size >= 10 ? 1 : 2;
   return `${sign}${fixedFormats[digits].format(size)} ${BYTE_UNITS[unit]}`;
 }
+
+/** The first twelve digest characters, enough to tell installs apart. */
+export function shortDigest(digest: string): string {
+  return digest.slice(0, 12);
+}

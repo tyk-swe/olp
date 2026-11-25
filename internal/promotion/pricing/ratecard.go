@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -78,16 +79,16 @@ func parseCard(entry contract.ConfigurationRateCardEntry) RateCard {
 	return RateCard{
 		Owner:  parseOwner(entry.Owner),
 		Markup: strings.TrimSpace(entry.Markup),
-		Prices: promotion.Map(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) rates.Price { return parsePrice(price).Rate }),
+		Prices: promotion.Map(ptr.Value(entry.Prices), func(price contract.ConfigurationPriceEntry) rates.Price { return parsePrice(price).Rate }),
 	}
 }
 
 func parseOwner(owner contract.ConfigurationRateCardOwner) Owner {
 	switch owner.Kind {
 	case contract.ConfigurationRateCardOwnerKindOrganization:
-		return Organization{Name: strings.TrimSpace(promotion.ValueOf(owner.Organization))}
+		return Organization{Name: strings.TrimSpace(ptr.Value(owner.Organization))}
 	case contract.ConfigurationRateCardOwnerKindProject:
-		return Project{Name: strings.TrimSpace(promotion.ValueOf(owner.Project))}
+		return Project{Name: strings.TrimSpace(ptr.Value(owner.Project))}
 	default:
 		return Installation{}
 	}
@@ -104,7 +105,7 @@ func validateCard(i int, entry contract.ConfigurationRateCardEntry, card RateCar
 	if duplicate {
 		return httpkit.Invalid(field+".owner", "The document owns this card twice.")
 	}
-	if j := slices.IndexFunc(promotion.ValueOf(entry.Prices), func(price contract.ConfigurationPriceEntry) bool { return promotion.Pointer(price.Provider) != nil }); j >= 0 {
+	if j := slices.IndexFunc(ptr.Value(entry.Prices), func(price contract.ConfigurationPriceEntry) bool { return promotion.Pointer(price.Provider) != nil }); j >= 0 {
 		return httpkit.Invalid(field+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
 	}
 	return nil
@@ -139,7 +140,7 @@ func readCards(ctx context.Context, q database.Queryer) ([]storedCard, error) {
 		return storedCard{
 			id:   card.ID,
 			live: card.RevisionID != nil,
-			card: RateCard{Owner: storedOwner(card.Organization, card.Project), Markup: promotion.ValueOf(card.Markup), Prices: prices[promotion.ValueOf(card.RevisionID)]},
+			card: RateCard{Owner: storedOwner(card.Organization, card.Project), Markup: ptr.Value(card.Markup), Prices: prices[ptr.Value(card.RevisionID)]},
 		}
 	}), nil
 }

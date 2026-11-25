@@ -10,7 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/scim"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
 const scimGroupJSON = `jsonb_build_object('id',g.id,'display_name',g.document->>'displayName','external_id',g.document->>'externalId','mapping',g.document->'` + scim.GroupExtension + `','etag',g.etag,'member_count',(SELECT count(*) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id WHERE m.group_id=g.id AND u.role_management='provisioned'))`
@@ -120,7 +121,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Princi
 	var document scim.Document
 	method := "PUT"
 	if create {
-		id = httpkit.NewID()
+		id = ids.New()
 		method = "POST"
 		document = scim.Document{"schemas": []any{scim.GroupSchema}, "displayName": name}
 	} else {

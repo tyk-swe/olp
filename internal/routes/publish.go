@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
@@ -156,7 +157,7 @@ func (s *Server) validateDraft(r *http.Request, _ authz.Principal) (httpkit.Repl
 		if err = compileDraftExecution(r.Context(), tx, current); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -241,11 +242,11 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	var revision int
 	var routeProject *string
 	err = tx.QueryRow(ctx, "SELECT id::text,latest_revision,project_id::text FROM olp.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision, &routeProject)
-	revisionID := httpkit.NewID()
+	revisionID := ids.New()
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		routeID, revision = httpkit.NewID(), 1
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, actor, revisionID, httpkit.NewID(), current.ProjectID); err != nil {
+		routeID, revision = ids.New(), 1
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, actor, revisionID, ids.New(), current.ProjectID); err != nil {
 			return promotion{}, err
 		}
 	case err != nil:
@@ -265,7 +266,7 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	if _, err = tx.Exec(ctx, "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,fidelity,behavior) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, actor, encodedPolicy, current.Fidelity, current.Behavior); err != nil {
 		return promotion{}, err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, httpkit.NewID()); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, ids.New()); err != nil {
 		return promotion{}, err
 	}
 	if err = guardrailattachment.Promote(ctx, tx, actor, current.ID, routeID); err != nil {
@@ -276,14 +277,14 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 		return promotion{}, err
 	}
 	if exposure != nil {
-		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, httpkit.NewID()); err != nil {
+		if err = SetCatalogExposure(ctx, tx, routeID, *exposure, ids.New()); err != nil {
 			return promotion{}, err
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET catalog_expose_upstream_models=NULL WHERE id=$1", current.ID); err != nil {
 			return promotion{}, err
 		}
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", current.ID, targets, etag, revisionID); err != nil {
 		return promotion{}, err
 	}
@@ -316,7 +317,7 @@ func (s *Server) retireRoute(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if state == "retired" {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "route_retired", "This route is already retired.")
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET state='retired',retired_at=now(),retired_by=$2,etag=$3 WHERE id=$1", id, p.UserID(), etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

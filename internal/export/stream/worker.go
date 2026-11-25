@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/export/destination"
+	"github.com/tyk-swe/olp/internal/export/eligibility"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 )
@@ -169,7 +169,7 @@ func (w *Worker) claim(ctx context.Context, p pair) (step, claim, error) {
 	if err != nil {
 		return idle, claim{}, err
 	}
-	admitted, err := evidence.Admit(claimCtx, tx, p.stream, c.sourceID, c.projectID, creatorID)
+	admitted, err := eligibility.Admit(claimCtx, tx, p.stream, c.sourceID, c.projectID, creatorID)
 	if err != nil {
 		return idle, claim{}, err
 	}

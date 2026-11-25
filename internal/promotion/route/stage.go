@@ -7,7 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -67,7 +68,7 @@ func lifecycle(r Route, state State) []promotion.Item {
 	switch {
 	case !ok:
 		return nil
-	case !strings.EqualFold(promotion.ValueOf(existing.Project), promotion.ValueOf(r.Project)):
+	case !strings.EqualFold(ptr.Value(existing.Project), ptr.Value(r.Project)):
 		return []promotion.Item{promotion.Conflict(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_project_mismatch")}
 	case r.Retired && !existing.Retired:
 		return []promotion.Item{promotion.Blocker(contract.ConfigurationPlanItemKindRoute, r.Slug, "route_lifecycle_requires_retirement")}
@@ -121,16 +122,16 @@ func stage(ctx context.Context, tx pgx.Tx, p authz.Principal, r Route, state Sta
 		return err
 	}
 	slot, id := draftSlot(state.drafts, r, p, projectID)
-	if err := routes.StageDraft(ctx, tx, slot, httpkit.NewID(), in.Content(targets, &r.ExposeUpstreamModels)); err != nil {
+	if err := routes.StageDraft(ctx, tx, slot, ids.New(), in.Content(targets, &r.ExposeUpstreamModels)); err != nil {
 		return err
 	}
-	return routes.StageDraftPolicy(ctx, tx, id, httpkit.NewID(), p.UserID(), r.RoutingPolicy)
+	return routes.StageDraftPolicy(ctx, tx, id, ids.New(), p.UserID(), r.RoutingPolicy)
 }
 
 func draftSlot(drafts map[string]draft, r Route, p authz.Principal, projectID *string) (routes.DraftSlot, string) {
 	if staged, ok := drafts[draftKey(r.Slug, r.Project)]; ok {
 		return routes.ExistingDraft{ID: staged.id}, staged.id
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	return routes.NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: projectID}, id
 }

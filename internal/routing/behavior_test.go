@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -59,7 +60,7 @@ func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, guardrailErr := guardrails.ParseRevision(guardrails.Revision{Type: "plugin", Configuration: configuration, TimeoutMS: 1000, OnError: guardrails.FailClosed})
+			_, guardrailErr := guardrails.ParseRevision(guardrails.Revision{Type: "plugin", Configuration: configuration, TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed})
 			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
 			routeErr := behavior.Validate("route", nil)
 			indexErr := index.Validate()
@@ -173,15 +174,15 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	tagged := func(tag string) bool { return tag == "fast" }
 	valid := Behavior{
 		Fallbacks: []Fallback{{Route: "backup", On: []string{FallbackExhausted, FallbackContextWindow}}},
-		Selectors: []Selector{{ID: "short", When: Predicate{MaxInputTokens: ptr(int64(500))}, Tags: []string{"fast"}}, {ID: "long", Route: "long-context"}},
+		Selectors: []Selector{{ID: "short", When: Predicate{MaxInputTokens: new(int64(500))}, Tags: []string{"fast"}}, {ID: "long", Route: "long-context"}},
 		Retry:     Retry{"rate_limit": {MaxRetries: 2, BaseBackoffMS: 100, MaxBackoffMS: 1000, RespectRetryAfter: true}},
 		Affinity:  &Affinity{Source: AffinityLabel, Label: "session"},
-		Budget:    &CostLimits{DailyCostLimit: ptr("12.50")},
+		Budget:    &CostLimits{DailyCostLimit: new("12.50")},
 	}
 	if err := valid.Validate("assistant", tagged); err != nil {
 		t.Fatalf("valid behavior refused: %v", err)
 	}
-	if err := (CostLimits{DailyCostLimit: ptr("0.000000000001"), MonthlyCostLimit: ptr("0.000000000001")}).Validate("budget"); err != nil {
+	if err := (CostLimits{DailyCostLimit: new("0.000000000001"), MonthlyCostLimit: new("0.000000000001")}).Validate("budget"); err != nil {
 		t.Fatalf("small positive caps refused: %v", err)
 	}
 	for name, mutate := range map[string]func(*Behavior){
@@ -192,7 +193,7 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 		"untagged selector":  func(b *Behavior) { b.Selectors[0].Tags = []string{"slow"} },
 		"tags and route":     func(b *Behavior) { b.Selectors[0].Route = "backup" },
 		"duplicate selector": func(b *Behavior) { b.Selectors[1].ID = "short" },
-		"inverted bounds":    func(b *Behavior) { b.Selectors[0].When.MinInputTokens = ptr(int64(900)) },
+		"inverted bounds":    func(b *Behavior) { b.Selectors[0].When.MinInputTokens = new(int64(900)) },
 		"unknown modality":   func(b *Behavior) { b.Selectors[0].When.Modalities = []string{"smell"} },
 		"classifier self": func(b *Behavior) {
 			b.Selectors[0].When.Classifier = &ClassifierPredicate{Route: "assistant", Labels: []string{"x"}, TimeoutMS: 100}
@@ -211,9 +212,9 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 		"cache key label":       func(b *Behavior) { b.Affinity = &Affinity{Source: AffinityCacheKey, Label: "session"} },
 		"unlabelled affinity":   func(b *Behavior) { b.Affinity = &Affinity{Source: AffinityLabel} },
 		"empty budget":          func(b *Behavior) { b.Budget = &CostLimits{} },
-		"inexact budget":        func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: ptr("1e3")} },
-		"zero daily budget":     func(b *Behavior) { b.Budget = &CostLimits{DailyCostLimit: ptr("0")} },
-		"zero monthly budget":   func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: ptr("00.000000000000")} },
+		"inexact budget":        func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: new("1e3")} },
+		"zero daily budget":     func(b *Behavior) { b.Budget = &CostLimits{DailyCostLimit: new("0")} },
+		"zero monthly budget":   func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: new("00.000000000000")} },
 		"selector without verb": func(b *Behavior) { b.Selectors[1].Route = "" },
 	} {
 		t.Run(name, func(t *testing.T) {

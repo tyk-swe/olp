@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -19,7 +20,7 @@ func StoreCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, inst
 	if keys == nil {
 		return "", httpkit.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	if err := keys.Store(ctx, tx, installation, id, secrets.AgentCredential, material, nil); err != nil {
 		return "", err
 	}

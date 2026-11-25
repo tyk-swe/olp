@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/oapi-codegen/nullable"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -21,7 +22,7 @@ type wire struct {
 
 func transportOf(flat wire) Transport {
 	if flat.transport == routing.MCPStdio {
-		return Stdio{Binding: promotion.ValueOf(flat.stdio)}
+		return Stdio{Binding: ptr.Value(flat.stdio)}
 	}
 	return HTTP{Endpoint: flat.endpoint, SSE: flat.transport == routing.MCPLegacySSE, OAuth: flat.oauth, Delegation: flat.delegation, Bearer: flat.bearer}
 }
@@ -140,9 +141,9 @@ func oauthOf(oauth nullable.Nullable[contract.MCPOAuthConfiguration]) *routing.M
 		ClientID:                    value.ClientId,
 		Audience:                    value.Audience,
 		Scopes:                      value.Scopes,
-		AuthorizationEndpoint:       promotion.ValueOf(value.AuthorizationEndpoint),
+		AuthorizationEndpoint:       ptr.Value(value.AuthorizationEndpoint),
 		TokenEndpoint:               value.TokenEndpoint,
-		DeviceAuthorizationEndpoint: promotion.ValueOf(value.DeviceAuthorizationEndpoint),
+		DeviceAuthorizationEndpoint: ptr.Value(value.DeviceAuthorizationEndpoint),
 		EntraOBO:                    entraOf(value.EntraObo),
 	}
 }
@@ -165,11 +166,4 @@ func widen(value *int) *int64 {
 func narrow(value int64) *int {
 	short := int(value)
 	return &short
-}
-
-func nonNil(values map[string]string) map[string]string {
-	if values == nil {
-		return map[string]string{}
-	}
-	return values
 }

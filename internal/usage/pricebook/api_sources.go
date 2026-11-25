@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -71,7 +72,7 @@ func (s *API) createPricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 		if input.Enabled != nil {
 			enabled = *input.Enabled
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		source, err := scanSource(tx.QueryRow(r.Context(),
 			`INSERT INTO olp.pricing_sources (id, name, format, url, enabled, etag, created_by)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -183,7 +184,7 @@ func (s *API) updatePricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 			`UPDATE olp.pricing_sources SET name=$2, url=$3, enabled=$4, etag=$5, updated_at=now()
 			 WHERE id=$1
 			 RETURNING `+sourceReturning,
-			id, name, rawURL, enabled, httpkit.NewID()))
+			id, name, rawURL, enabled, ids.New()))
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -228,7 +229,7 @@ func (s *API) refreshPricingSource(r *http.Request, _ authz.Principal) (httpkit.
 			 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
 			 ON CONFLICT (source_id, sha256) DO UPDATE SET source_id = EXCLUDED.source_id
 			 RETURNING `+snapshotReturning,
-			httpkit.NewID(), source.ID, sum, string(fetched.Canonical), catalogSHA256, catalogPublishedAt, catalogKeyID))
+			ids.New(), source.ID, sum, string(fetched.Canonical), catalogSHA256, catalogPublishedAt, catalogKeyID))
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

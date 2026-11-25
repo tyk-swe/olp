@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { json, route, serve } from '#lib/management/test/transport.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import RouteFixtureChecks from './RouteFixtureChecks.svelte';
 import type { RouteFixturePlan, RouteFixtureReport } from './api.js';
 import { eventually } from '../../../../tests/unit/support/eventually.js';

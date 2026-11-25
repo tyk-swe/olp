@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -128,7 +130,7 @@ func templateProviderBlocker(t Template, providerProjects map[string]*string, pr
 		return []promotion.Item{promotion.Blocker(kind, t.Name, "provider_unknown")}
 	}
 	project := projectName(projects, projectID)
-	if !strings.EqualFold(promotion.ValueOf(project), promotion.ValueOf(t.Project)) {
+	if !strings.EqualFold(ptr.Value(project), ptr.Value(t.Project)) {
 		return []promotion.Item{promotion.Blocker(kind, t.Name, "provider_project_mismatch")}
 	}
 	return nil
@@ -139,7 +141,7 @@ func templateChange(t Template, current map[string]Template) (promotion.Item, er
 	if !ok {
 		return templateItem(t.Name, contract.ConfigurationPlanItemActionCreate), nil
 	}
-	if !strings.EqualFold(promotion.ValueOf(found.Project), promotion.ValueOf(t.Project)) {
+	if !strings.EqualFold(ptr.Value(found.Project), ptr.Value(t.Project)) {
 		return promotion.Conflict(contract.ConfigurationPlanItemKindRouteTemplate, t.Name, "route_template_project_mismatch"), nil
 	}
 	same, err := sameTemplate(t, found)
@@ -196,16 +198,16 @@ func TemplateApplier(desired Desired) promotion.Applier {
 			}
 			in := t.input(projectID)
 			if !found {
-				return routes.WriteTemplate(ctx, tx, httpkit.NewID(), httpkit.NewID(), p.UserID(), &in, false)
+				return routes.WriteTemplate(ctx, tx, ids.New(), ids.New(), p.UserID(), &in, false)
 			}
-			if promotion.ValueOf(stored.ProjectID) != promotion.ValueOf(projectID) {
+			if ptr.Value(stored.ProjectID) != ptr.Value(projectID) {
 				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
 			}
 			same, err := sameTemplate(t, templateOf(stored.TemplateInput, nil))
 			if err != nil || same {
 				return err
 			}
-			return routes.WriteTemplate(ctx, tx, stored.ID, httpkit.NewID(), p.UserID(), &in, true)
+			return routes.WriteTemplate(ctx, tx, stored.ID, ids.New(), p.UserID(), &in, true)
 		})
 	}
 }

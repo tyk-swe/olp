@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -89,7 +90,7 @@ func projectName(directory promotion.Directory, id *string) *string {
 }
 
 func draftKey(slug string, project *string) string {
-	return slug + "\x00" + strings.ToLower(promotion.ValueOf(project))
+	return slug + "\x00" + strings.ToLower(ptr.Value(project))
 }
 
 func projectIDOf(directory promotion.Directory, name *string) (*string, error) {

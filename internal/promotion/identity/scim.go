@@ -5,6 +5,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	signin "github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5"
@@ -100,7 +101,7 @@ func renderSCIM(groups []group) []group {
 }
 
 func sortedGrants(grants []grant) []grant {
-	return promotion.NonNil(slices.SortedFunc(slices.Values(grants), func(a, b grant) int {
+	return ptr.NonNil(slices.SortedFunc(slices.Values(grants), func(a, b grant) int {
 		return cmp.Compare(promotion.Fold(a.Project), promotion.Fold(b.Project))
 	}))
 }

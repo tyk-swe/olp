@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/export/destination"
 )
 
@@ -126,7 +127,7 @@ func scanUsageRow(row pgx.CollectableRow) (usageRow, error) {
 		&r.contractedCost, &r.periodWeight, &r.latestAmount, &r.attempts, &r.scheduleID, &r.allocated); err != nil {
 		return usageRow{}, err
 	}
-	r.consumer, r.model, r.operation = deref(consumer), deref(model), deref(operation)
+	r.consumer, r.model, r.operation = ptr.Value(consumer), ptr.Value(model), ptr.Value(operation)
 	return r, nil
 }
 
@@ -135,13 +136,6 @@ func scanPurchase(row pgx.CollectableRow) (purchase, error) {
 	err := row.Scan(&p.providerID, &p.period, &p.bucketStart, &p.amount, &p.connectionName,
 		&p.vendorID, &p.providerKind, &p.scheduleID, &p.unused)
 	return p, err
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 type assembled struct {

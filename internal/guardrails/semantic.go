@@ -5,6 +5,8 @@ import (
 	"math"
 	"slices"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 )
 
 const (
@@ -23,7 +25,7 @@ type SemanticRule struct {
 }
 
 func validateSemantic(rule SemanticRule) error {
-	if !categoryID.MatchString(rule.Category) || math.IsNaN(rule.SimilarityThreshold) || math.IsInf(rule.SimilarityThreshold, 0) || rule.SimilarityThreshold <= 0 || rule.SimilarityThreshold > 1 || len(rule.Utterances) == 0 || len(rule.Utterances) > MaxSemanticReferences {
+	if !guardrailpolicy.ValidCategory(rule.Category) || math.IsNaN(rule.SimilarityThreshold) || math.IsInf(rule.SimilarityThreshold, 0) || rule.SimilarityThreshold <= 0 || rule.SimilarityThreshold > 1 || len(rule.Utterances) == 0 || len(rule.Utterances) > MaxSemanticReferences {
 		return errEvaluation
 	}
 	size := 0

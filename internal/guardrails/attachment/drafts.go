@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -41,7 +42,7 @@ func Drafts(ctx context.Context, q database.Queryer) ([]Draft, error) {
 }
 
 func Staged(ctx context.Context, q database.Queryer, draftID, routeID string) ([]guardrails.Attachment, error) {
-	rows, err := q.Query(ctx, "SELECT policy_revision_id::text,$2,$3::text,policy_revision_id::text,position FROM olp.guardrail_draft_attachments WHERE draft_id=$1 ORDER BY position", draftID, guardrails.RouteScope, routeID)
+	rows, err := q.Query(ctx, "SELECT policy_revision_id::text,$2,$3::text,policy_revision_id::text,position FROM olp.guardrail_draft_attachments WHERE draft_id=$1 ORDER BY position", draftID, guardrailpolicy.RouteScope, routeID)
 	if err != nil {
 		return nil, err
 	}

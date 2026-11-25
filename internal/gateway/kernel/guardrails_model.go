@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/contracts/unary"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -54,7 +55,7 @@ func (s *Server) ApplyGuardrails(ctx context.Context, h http.Header, x *Call, in
 	return guardrails.Applied(result, err), nil
 }
 
-func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID string, phase guardrails.Phase, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
+func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthority.Authority, release *release.Release, engine *guardrails.Engine, requestID string, phase guardrailpolicy.Phase, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
 	if s == nil || release == nil || release.Snapshot() == nil {
 		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
 	}
@@ -107,7 +108,7 @@ func (s *Server) admitGuardrailEvaluation(r *http.Request) error {
 }
 
 func (s *Server) evaluatePinnedGuardrails(r *http.Request, member Member, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-	x := &Call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: member.UserID, family: wire.Chat, operationOverride: "guardrail"}
+	x := &Call{request: request{id: ids.New(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: member.UserID, family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = member.Admit
 	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
 		return pinned.Compile()
@@ -164,7 +165,7 @@ func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.
 	}
 	// Candidate preparation can see identical effective input for several
 	// targets. Charge one evaluator request for each distinct synchronous input.
-	if e.Phase == guardrails.Input {
+	if e.Phase == guardrailpolicy.Input {
 		raw, _ := json.Marshal(struct {
 			Revision string
 			Segments []guardrails.Segment
@@ -218,7 +219,7 @@ func (s *Server) newEvaluatorCall(parent *Call, d guardrails.Revision, route *ro
 		origin = usage.OriginPlayground
 	}
 	return &Call{
-		request:              request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
+		request:              request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
 		actor:                parent.actor,
 		keyID:                parent.keyID,
 		budgetGroupID:        parent.budgetGroupID,

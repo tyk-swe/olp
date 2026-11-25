@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/health"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/staging"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -284,8 +285,10 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 		media:              video,
 		request:            request{id: "video-charge", minted: true},
 		historicalSnapshot: x.historicalSnapshot,
-		cardPinned:         true,
-		cardRev:            loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+		callPricing: callPricing{
+			cardPinned: true,
+			cardRev:    loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+		},
 	}
 	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.Amount != "1" || hold.Charge != "1.5" {
 		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
@@ -372,10 +375,12 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 		retained:           retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage},
 		request:            request{startedAt: now},
 		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
-		routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
-			*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
-		}},
+		callPricing: callPricing{
+			routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
+				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
+				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
+			}},
+		},
 	}
 	s := &Server{Now: func() time.Time { return now }, Deps: Dependencies{Admission: &quota.Admission{
 		CostAccountingReady: func(context.Context) error { return errors.New("accounting unavailable") },
@@ -428,8 +433,8 @@ func TestPreparationFollowsSourceChanges(t *testing.T) {
 			provider.Kind = "openai_compatible"
 			if transformed {
 				engine, err := guardrails.Compile(
-					[]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}},
-					map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"redact","pattern":"first|second","replacement":"filtered"}]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+					[]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Redact}},
+					map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"redact","pattern":"first|second","replacement":"filtered"}]}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}},
 				)
 				if err != nil {
 					t.Fatal(err)

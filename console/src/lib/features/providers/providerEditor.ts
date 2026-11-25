@@ -1,6 +1,10 @@
-import { ConfigurationDraft } from './configurationDraft.svelte';
+import {
+  ConfigurationDraft,
+  type ConfigurationPatch
+} from './configurationDraft.svelte';
+import { ProviderCreateDraft, ProviderEditDraft } from './providerDraft.svelte';
 import { parseExternalReference } from './externalReference';
-import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
+import { nativeObject } from '#lib/nativeJson.js';
 import type { Provider, ProviderVendor } from './providers';
 import type {
   CreateProviderInput,
@@ -78,108 +82,11 @@ export function emptyProviderOptions(): NonNullable<
   };
 }
 
-/** Read/write field views share the same immutable native document. The
- * non-enumerable document is not a second wire field or part of form spreads. */
-function configurationViews<Values extends ProviderEditValues>(
-  values: Values,
-  configuration: Provider['configuration'],
-  lockedKind?: string
-): Values {
-  const document = new ConfigurationDraft(configuration, lockedKind);
-  Object.defineProperty(values, 'document', {
-    value: document,
-    enumerable: false
-  });
-  const fields: Record<string, string> = {
-    endpoint: 'endpoint',
-    apiVersion: 'api_version',
-    cloudRegion: 'cloud_region',
-    cloudProject: 'cloud_project',
-    deployment: 'deployment',
-    authMode: 'auth_mode',
-    profileId: 'profile_id',
-    profileRevision: 'profile_revision'
-  };
-  if ('kind' in values) fields.kind = 'kind';
-  for (const [field, member] of Object.entries(fields)) {
-    Object.defineProperty(values, field, {
-      enumerable: true,
-      configurable: true,
-      get: () => document.text([member]),
-      set: (input: string) => {
-        const previousProfile =
-          member === 'profile_id' ? document.text(['profile_id']) : '';
-        document.set(
-          [member],
-          member === 'profile_id' || member === 'profile_revision'
-            ? input || undefined
-            : member === 'kind' || member === 'auth_mode'
-              ? input
-              : input.trim() || null
-        );
-        if (member === 'profile_id' && previousProfile !== input)
-          document.set(['batch_storage'], null);
-      }
-    });
-  }
-  Object.defineProperty(values, 'options', {
-    enumerable: true,
-    configurable: true,
-    get: () => document.at(['options']),
-    set: (options: NativeValue | undefined) =>
-      document.set(['options'], options)
-  });
-  if ('kind' in values) {
-    Object.defineProperty(values, 'presetId', {
-      enumerable: true,
-      configurable: true,
-      get: () => document.text(['options', 'vendor_id']),
-      set: (vendor: string) =>
-        document.set(['options', 'vendor_id'], vendor || null)
-    });
-    Object.defineProperty(values, 'credentialHeaders', {
-      enumerable: true,
-      configurable: true,
-      get: () => {
-        const headers = document.at(['options', 'credential_headers']);
-        return Array.isArray(headers)
-          ? headers.filter((value) => typeof value === 'string').join(', ')
-          : '';
-      },
-      set: (headers: string) =>
-        document.set(
-          ['options', 'credential_headers'],
-          headers
-            .split(/[\n,]/)
-            .map((header) => header.trim())
-            .filter(Boolean)
-        )
-    });
-  }
-  return values;
-}
-
 export function createProviderDraft(
   spec: ProviderKindCapability,
   configuration?: Provider['configuration']
 ): ProviderDraft {
-  return configurationViews(
-    {
-      kind: spec.kind,
-      name: '',
-      endpoint: '',
-      apiVersion: '',
-      cloudRegion: '',
-      cloudProject: '',
-      deployment: '',
-      authMode: spec.default_auth_mode,
-      credential: '',
-      useExternalCredential: false,
-      externalCredentialReference: '',
-      model: '',
-      projectId: '',
-      presetId: ''
-    },
+  return new ProviderCreateDraft(
     configuration ?? {
       kind: spec.kind,
       auth_mode: spec.default_auth_mode,
@@ -198,24 +105,42 @@ export function setProviderDraftKind(
   kind: ProviderKind
 ): void {
   if (draft.kind === kind) return;
-  draft.kind = kind;
-  draft.profileId = '';
-  draft.profileRevision = '';
   // Connector fields are kind-specific. Carrying an Azure resource endpoint or
   // a preset-resolved URL into the next connector silently persists a value the
   // operator never chose for it, and a secret typed for one upstream must never
   // be submitted as another upstream's credential.
-  draft.presetId = '';
-  draft.options = undefined;
-  draft.credentialHeaders = '';
+  if (draft.document) {
+    const hadProfile = Boolean(draft.profileId);
+    draft.document.patch([
+      [['kind'], kind],
+      [['profile_id'], undefined],
+      ...(hadProfile
+        ? ([[['batch_storage'], null]] as ConfigurationPatch[])
+        : []),
+      [['profile_revision'], undefined],
+      [['options'], undefined],
+      [['endpoint'], null],
+      [['api_version'], null],
+      [['cloud_region'], null],
+      [['cloud_project'], null],
+      [['deployment'], null]
+    ]);
+  } else {
+    draft.kind = kind;
+    draft.profileId = '';
+    draft.profileRevision = '';
+    draft.presetId = '';
+    draft.options = undefined;
+    draft.credentialHeaders = '';
+    draft.endpoint = '';
+    draft.apiVersion = '';
+    draft.cloudRegion = '';
+    draft.cloudProject = '';
+    draft.deployment = '';
+  }
   draft.credential = '';
   draft.useExternalCredential = false;
   draft.externalCredentialReference = '';
-  draft.endpoint = '';
-  draft.apiVersion = '';
-  draft.cloudRegion = '';
-  draft.cloudProject = '';
-  draft.deployment = '';
   draft.model = '';
 }
 
@@ -227,37 +152,68 @@ export function selectProviderPreset(
   const previous = spec.presets.find(
     (candidate) => candidate.id === draft.presetId
   );
-  if (draft.presetId !== presetId) {
-    draft.options = undefined;
-    draft.credential = '';
-    draft.useExternalCredential = false;
-    draft.externalCredentialReference = '';
-    draft.credentialHeaders = '';
-  }
   const preset = presetId
     ? spec.presets.find((candidate) => candidate.id === presetId)
     : undefined;
   if (presetId && !preset)
     throw new Error('The selected provider preset is unavailable.');
+
+  const changedPreset = draft.presetId !== presetId;
   // A preset's profile follows the preset only while the operator has not
   // chosen another: an untouched profile is replaced, a chosen one is kept.
-  if (
+  const followPresetProfile =
     draft.profileId === (previous?.profile_id ?? '') &&
-    draft.profileRevision === (previous?.profile_revision ?? '')
-  ) {
-    draft.profileId = preset?.profile_id ?? '';
-    draft.profileRevision = preset?.profile_revision ?? '';
+    draft.profileRevision === (previous?.profile_revision ?? '');
+  const nextProfileId = preset?.profile_id ?? '';
+  const nextProfileRevision = preset?.profile_revision ?? '';
+
+  if (draft.document) {
+    const updates: ConfigurationPatch[] = [
+      ...(changedPreset
+        ? ([[['options'], undefined]] as ConfigurationPatch[])
+        : []),
+      ...(followPresetProfile
+        ? ([
+            [['profile_id'], nextProfileId || undefined],
+            ...(draft.profileId !== nextProfileId
+              ? ([[['batch_storage'], null]] as ConfigurationPatch[])
+              : []),
+            [['profile_revision'], nextProfileRevision || undefined]
+          ] as ConfigurationPatch[])
+        : []),
+      ...(preset
+        ? ([
+            [['options', 'vendor_id'], preset.id],
+            [['endpoint'], preset.endpoint.trim() || null],
+            [['auth_mode'], preset.auth_mode]
+          ] as ConfigurationPatch[])
+        : ([
+            [['options', 'vendor_id'], null],
+            [['endpoint'], null],
+            [['auth_mode'], spec.default_auth_mode]
+          ] as ConfigurationPatch[]))
+    ];
+    draft.document.patch(updates);
+  } else {
+    if (changedPreset) {
+      draft.options = undefined;
+      draft.credentialHeaders = '';
+    }
+    if (followPresetProfile) {
+      draft.profileId = nextProfileId;
+      draft.profileRevision = nextProfileRevision;
+    }
+    draft.presetId = preset?.id ?? '';
+    draft.endpoint = preset?.endpoint ?? '';
+    draft.authMode = preset?.auth_mode ?? spec.default_auth_mode;
   }
-  if (!preset) {
-    draft.presetId = '';
-    draft.endpoint = '';
-    draft.authMode = spec.default_auth_mode;
-    return null;
+
+  if (changedPreset) {
+    draft.credential = '';
+    draft.useExternalCredential = false;
+    draft.externalCredentialReference = '';
   }
-  draft.presetId = preset.id;
-  draft.endpoint = preset.endpoint;
-  draft.authMode = preset.auth_mode;
-  return preset;
+  return preset ?? null;
 }
 
 export function authOptionsFor(
@@ -376,27 +332,46 @@ export function selectPluginProfile(
       >
     | undefined
 ): void {
+  const nextProfileId = profile?.id ?? '';
+  const nextProfileRevision = profile?.revision ?? '';
   if (
-    values.profileId !== (profile?.id ?? '') ||
-    values.profileRevision !== (profile?.revision ?? '')
+    values.profileId !== nextProfileId ||
+    values.profileRevision !== nextProfileRevision
   ) {
     values.credential = '';
   }
-  values.profileId = profile?.id ?? '';
-  values.profileRevision = profile?.revision ?? '';
-  values.endpoint = '';
   const authentication = profile?.authentication[0];
+  if (values.document) {
+    const previousProfileId = values.document.text(['profile_id']);
+    const updates: ConfigurationPatch[] = [
+      [['profile_id'], nextProfileId || undefined],
+      ...(previousProfileId !== nextProfileId
+        ? ([[['batch_storage'], null]] as ConfigurationPatch[])
+        : []),
+      [['profile_revision'], nextProfileRevision || undefined],
+      [['endpoint'], null],
+      ...(authentication
+        ? ([[['auth_mode'], authentication]] as ConfigurationPatch[])
+        : [])
+    ];
+    const options = values.document.at(['options', 'plugin_options']);
+    if (nativeObject(options)) {
+      const declared = pluginOptionFields(profile).map((option) => option.name);
+      const kept = Object.entries(options).filter(([name]) =>
+        declared.includes(name)
+      );
+      updates.push([
+        ['options', 'plugin_options'],
+        kept.length ? Object.fromEntries(kept) : undefined
+      ]);
+    }
+    values.document.patch(updates);
+    return;
+  }
+  values.profileId = nextProfileId;
+  values.profileRevision = nextProfileRevision;
+  values.endpoint = '';
   if (authentication) values.authMode = authentication as ProviderAuthMode;
-  const options = values.document?.at(['options', 'plugin_options']);
-  if (!nativeObject(options)) return;
-  const declared = pluginOptionFields(profile).map((option) => option.name);
-  const kept = Object.entries(options).filter(([name]) =>
-    declared.includes(name)
-  );
-  values.document?.set(
-    ['options', 'plugin_options'],
-    kept.length ? Object.fromEntries(kept) : undefined
-  );
 }
 
 export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {
@@ -549,29 +524,11 @@ export function buildCreateProviderInput(
 
 export function providerEditValues(
   current: Pick<Provider, 'name' | 'configuration'>,
-  spec: ProviderKindCapability
+  _spec?: ProviderKindCapability
 ): ProviderEditValues {
-  return configurationViews(
-    {
-      options: current.configuration.options,
-      name: current.name,
-      endpoint: hasCustomEndpoint(spec)
-        ? (current.configuration.endpoint ?? '')
-        : '',
-      apiVersion: hasApiVersion(spec)
-        ? (current.configuration.api_version ?? '')
-        : '',
-      cloudRegion: hasCloudRegion(spec)
-        ? (current.configuration.cloud_region ?? '')
-        : '',
-      cloudProject: hasCloudProject(spec)
-        ? (current.configuration.cloud_project ?? '')
-        : '',
-      deployment: hasDeployment(spec)
-        ? (current.configuration.deployment ?? '')
-        : '',
-      authMode: current.configuration.auth_mode
-    },
+  void _spec;
+  return new ProviderEditDraft(
+    current.name,
     current.configuration,
     current.configuration.kind
   );

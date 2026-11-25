@@ -8,9 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type Resource struct{ table, audit string }
@@ -31,7 +32,7 @@ func Write(s *access.Server, r *http.Request, resource Resource, project string,
 	}
 	if r.PathValue("id") != "" {
 		return access.Transact(s, r, target(s, r, resource, projectID), func(tx pgx.Tx, p authz.Principal, id string) (httpkit.Reply, access.Event, error) {
-			etag := httpkit.NewID()
+			etag := ids.New()
 			body, err := write(tx, p, id, etag, true)
 			return httpkit.Detail(body, etag), resource.written(id), err
 		})
@@ -40,7 +41,7 @@ func Write(s *access.Server, r *http.Request, resource Resource, project string,
 		return struct{}{}, s.RequireProject(r.Context(), tx, p, &projectID)
 	}
 	return access.Mutate(s, r, input, admitted, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		body, err := write(tx, p, id, etag, false)
 		return httpkit.Reply{Status: http.StatusCreated, Body: body, ETag: etag, Location: r.URL.Path + "/" + id}, resource.written(id), err
 	})
@@ -107,7 +108,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 	if digest := r.URL.Query().Get("end_user_digest"); endUsers && digest != "" {
 		if digest == "unidentified" {
 			digest = ""
-		} else if !authority.ValidEndUserDigest(digest) {
+		} else if !attribution.ValidEndUserDigest(digest) {
 			return httpkit.Reply{}, httpkit.Invalid("end_user_digest", "Use an end-user digest or unidentified.")
 		}
 		args = append(args, digest)

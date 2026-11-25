@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
@@ -286,7 +287,7 @@ func (s *Server) createTemplate(r *http.Request, _ authz.Principal) (httpkit.Rep
 		if err := ValidateTemplateInput(&input); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if err := WriteTemplate(r.Context(), tx, id, etag, p.UserID(), &input, false); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -354,7 +355,7 @@ func (s *Server) replaceTemplate(r *http.Request, _ authz.Principal) (httpkit.Re
 		if err = ValidateTemplateInput(&input); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = WriteTemplate(r.Context(), tx, id, httpkit.NewID(), p.UserID(), &input, true); err != nil {
+		if err = WriteTemplate(r.Context(), tx, id, ids.New(), p.UserID(), &input, true); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		updated, err := loadTemplate(r.Context(), tx, id, false)

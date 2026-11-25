@@ -4,15 +4,14 @@
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { listUsers } from '#lib/features/access/users/api.js';
-  import { userKeys } from '#lib/features/access/users/userKeys.js';
+  import { listUsers, userKeys } from '#lib/features/identity/index.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
   } from '#lib/listing/pagination.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
-  import CursorPagination from '#lib/shell/CursorPagination.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
     listAllProjectMembers,
     listProjectMemberPage,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import InstallationBudget from '#lib/features/access/budgets/InstallationBudget.svelte';
+  import InstallationBudget from '#lib/features/budgets/InstallationBudget.svelte';
 </script>
 
 <InstallationBudget />

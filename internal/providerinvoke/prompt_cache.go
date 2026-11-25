@@ -6,15 +6,15 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
 // ApplyPromptCache changes only omitted provider controls. It runs as part of
 // transformed preparation, before input inspection and token estimation.
-func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cache.PromptPolicy, key string) (Invocation, error) {
+func ApplyPromptCache(inv Invocation, config connectors.Config, policy *cachepolicy.PromptPolicy, key string) (Invocation, error) {
 	if policy == nil {
 		return inv, nil
 	}

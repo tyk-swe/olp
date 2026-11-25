@@ -183,7 +183,7 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 		return
 	}
 	writer := &fault.StreamWriter{W: w, Family: family}
-	completion, err := a.translatedCompletion(response, model, stream, family, includeUsage, writer.Emit)
+	completion, err := a.translatedCompletion(ctx, response, model, stream, family, includeUsage, writer.Emit)
 	if err != nil {
 		if !a.terminal {
 			a.outcome(ctx, codemode.Outcome{Origin: "upstream", Kind: "incomplete"})
@@ -201,14 +201,14 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 func (a *codeAttempt) observeTranslatedRateLimit(ctx context.Context, response *http.Response) {
 	body, err := readTranslatedRejection(ctx, response.Body, codewire.MaxBody+1)
 	if err == nil {
-		a.observeEncodedUnary(body, response.Header.Get("Content-Encoding"))
+		a.observeEncodedUnary(ctx, body, response.Header.Get("Content-Encoding"))
 	}
 }
 
-func (a *codeAttempt) translatedCompletion(response *http.Response, model string, stream bool, family wire.Format, includeUsage bool, emit func([]byte) error) (*wire.Completion, error) {
+func (a *codeAttempt) translatedCompletion(ctx context.Context, response *http.Response, model string, stream bool, family wire.Format, includeUsage bool, emit func([]byte) error) (*wire.Completion, error) {
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 		observe := func(event oif.Event) error {
-			a.observe(a.observer.Event(event.Source().Bytes()))
+			a.observe(ctx, a.observer.Event(event.Source().Bytes()))
 			return nil
 		}
 		if stream {
@@ -223,6 +223,6 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 	if err != nil || len(body) > codewire.MaxBody {
 		return nil, codemode.Refuse(502, "code_upstream_invalid")
 	}
-	a.observeUnary(body)
+	a.observeUnary(ctx, body)
 	return protocols.Decode(wire.Responses, family, body, model, "")
 }

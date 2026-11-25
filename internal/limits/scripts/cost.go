@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -17,6 +18,13 @@ type CostCaps struct {
 	Weekly    string
 	Monthly   string
 	Increases string
+}
+
+func BudgetCaps(b limits.CostBudget) CostCaps {
+	return CostCaps{
+		Owner: b.Owner, Daily: ptr.Value(b.Daily), Weekly: ptr.Value(b.Weekly), Monthly: ptr.Value(b.Monthly),
+		Increases: b.Increases,
+	}
 }
 
 type CostHold struct {

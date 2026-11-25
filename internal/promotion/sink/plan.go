@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -226,10 +227,10 @@ func owningProject(owner Owner, projects promotion.Directory, principal authz.Pr
 }
 
 func write(ctx context.Context, tx pgx.Tx, s Sink, projectID *string, current stored, found bool, actor string) (string, error) {
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if found {
 		return current.id, sinks.Update(ctx, tx, current.id, s.spec(projectID), etag)
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	return id, sinks.Insert(ctx, tx, id, s.spec(projectID), etag, actor)
 }

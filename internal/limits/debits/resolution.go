@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type NonAcceptanceProof struct {
@@ -15,7 +16,7 @@ type NonAcceptanceProof struct {
 }
 
 func ResolveNotAcceptedTx(ctx context.Context, tx pgx.Tx, p NonAcceptanceProof) error {
-	if !canonicalID(p.DispatchID) || !canonicalID(p.ActorID) || len(p.EvidenceDigest) != 32 {
+	if !ids.Canonical(p.DispatchID) || !ids.Canonical(p.ActorID) || len(p.EvidenceDigest) != 32 {
 		return ErrConflict
 	}
 	var state State

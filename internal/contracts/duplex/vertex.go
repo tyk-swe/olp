@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
@@ -16,34 +17,34 @@ func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
 	}
 	root := doc.Root()
 	if len(root.Members()) != 1 {
-		return Setup{}, refuse("invalid_duplex_setup", "/setup", "one_setup_object", "Vertex Live must begin with one setup object.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/setup", "one_setup_object", "Vertex Live must begin with one setup object.")
 	}
 	setup, ok := root.Lookup("setup")
 	if !ok || setup.Kind() != oif.Object {
-		return Setup{}, refuse("invalid_duplex_setup", "/setup", "setup_object", "Vertex Live must begin with setup.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/setup", "setup_object", "Vertex Live must begin with setup.")
 	}
 	model, ok := textField(setup, "model")
 	if !ok || model == "" || len(model) > 512 {
-		return Setup{}, refuse("invalid_duplex_setup", "/setup/model", "route_model", "Vertex Live setup must name its route model.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/setup/model", "route_model", "Vertex Live setup must name its route model.")
 	}
 	slug := strings.TrimPrefix(model, "models/")
 	if idx := strings.LastIndex(slug, "/models/"); idx >= 0 {
 		slug = slug[idx+len("/models/"):]
 	}
 	if slug == "" || strings.Contains(slug, "/") {
-		return Setup{}, refuse("invalid_duplex_setup", "/setup/model", "route_model", "Vertex Live setup must name its route model.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/setup/model", "route_model", "Vertex Live setup must name its route model.")
 	}
 	for _, aliases := range [][]string{{"generationConfig", "generation_config"}, {"realtimeInputConfig", "realtime_input_config"}, {"sessionResumption", "session_resumption"}, {"inputAudioTranscription", "input_audio_transcription"}, {"outputAudioTranscription", "output_audio_transcription"}} {
 		_, a := setup.Lookup(aliases[0])
 		_, b := setup.Lookup(aliases[1])
 		if a && b {
-			return Setup{}, refuse("invalid_duplex_setup", "/setup", "unambiguous_setup", "Vertex Live setup has ambiguous field aliases.")
+			return Setup{}, operations.Error("invalid_duplex_setup", "/setup", "unambiguous_setup", "Vertex Live setup has ambiguous field aliases.")
 		}
 	}
 	for _, name := range []string{"sessionResumption", "session_resumption"} {
 		if state, present := setup.Lookup(name); present && state.Kind() == oif.Object {
 			if _, hasHandle := state.Lookup("handle"); hasHandle {
-				return Setup{}, refuse("invalid_duplex_setup", "/setup/sessionResumption", "connection_scoped_session", "Vertex Live session resumption handles are not admitted on connection-scoped sessions.")
+				return Setup{}, operations.Error("invalid_duplex_setup", "/setup/sessionResumption", "connection_scoped_session", "Vertex Live session resumption handles are not admitted on connection-scoped sessions.")
 			}
 		}
 	}
@@ -68,7 +69,7 @@ func inspectVertexSetup(frame []byte, maxBytes int) (Setup, error) {
 		}
 	}
 	if (transcription || outputTranscription) && !transcriptionOnly {
-		return Setup{}, refuse("invalid_duplex_setup", "/setup", "metered_transcription", "Vertex Live transcription alongside generated output has no complete usage meter on this surface.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/setup", "metered_transcription", "Vertex Live transcription alongside generated output has no complete usage meter on this surface.")
 	}
 	return Setup{Model: slug, TranscriptionOnly: transcriptionOnly}, nil
 }
@@ -110,7 +111,7 @@ func (o *vertexObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	}
 	if observed.Kind == "setupComplete" {
 		if o.setupDone {
-			return ServerFrame{}, refuse("invalid_duplex_frame", "/frame", "one_setup_completion", "Vertex Live repeated its setup completion.")
+			return ServerFrame{}, operations.Error("invalid_duplex_frame", "/frame", "one_setup_completion", "Vertex Live repeated its setup completion.")
 		}
 		o.setupDone = true
 	}

@@ -5,11 +5,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -41,7 +41,7 @@ func (t *BudgetTarget) validate() error {
 		return httpkit.Invalid("target.route", "Supply a route only for a key-route budget.")
 	}
 	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"
-	if (identified && !keyauthority.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
+	if (identified && !attribution.ValidEndUserDigest(t.EndUserDigest)) || (!identified && t.EndUserDigest != "") {
 		return httpkit.Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
 	}
 	if t.Kind == "attribution" {
