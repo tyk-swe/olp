@@ -834,6 +834,78 @@ it('retires a pending authorization and its secrets when the principal changes',
   expect(state.view.authorization).toBeUndefined();
 });
 
+it('shows why a claim failed, then clears the outcome of the last write when the next one starts', async () => {
+  const authorization = Promise.withResolvers<Response>();
+  const claim = vi
+    .fn<() => Response>()
+    .mockReturnValueOnce(
+      json({ title: 'Conflict', status: 409, detail: 'Already claimed' }, 409)
+    )
+    .mockReturnValue(json({ enrollment: { id: 'grant' }, state: 'pending' }));
+  const authorize = vi.fn(() => authorization.promise);
+  serve(
+    (request) =>
+      new URL(request.url).pathname.endsWith('/claim') ? claim() : authorize(),
+    ['read', 'configure']
+  );
+  const state = personalEnrollment();
+  state.consumeLocation(
+    new URL('https://console.example.test/grants#grant.token')
+  );
+
+  await state.claim();
+  expect(state.view.error).toBe('Already claimed');
+  expect(state.view.busy).toBe(false);
+  expect(state.view.phase.kind).toBe('handoff');
+
+  await state.claim();
+  expect(state.view.error).toBe('');
+  expect(state.view.message).toBe(
+    'Enrollment claimed. Authorization is pending'
+  );
+
+  const authorizing = state.authorize('device_code');
+  expect(state.view.busy).toBe(true);
+  expect(state.view.message).toBe('');
+  await state.authorize('device_code');
+  authorization.resolve(json({ state: 'pending' }));
+  await authorizing;
+  expect(authorize).toHaveBeenCalledOnce();
+  expect(state.view.busy).toBe(false);
+  expect(state.view.phase.kind).toBe('authorization');
+});
+
+it('keeps a claimed enrollment and says so when the grants list cannot refresh', async () => {
+  serve(
+    () => json({ enrollment: { id: 'grant' }, state: 'pending' }),
+    ['read', 'configure']
+  );
+  const ready = vi.fn(() => {
+    vi.spyOn(useQueryClient(), 'invalidateQueries').mockRejectedValue(
+      new Error('offline')
+    );
+    return new PersonalGrantEnrollment();
+  });
+  const component = mount(StateHarness, {
+    target: document.createElement('div'),
+    props: { setup: ready }
+  });
+  onTestFinished(() => unmount(component));
+  const state = ready.mock.results[0].value;
+  state.consumeLocation(
+    new URL('https://console.example.test/grants#grant.token')
+  );
+
+  await state.claim();
+
+  expect(state.view.phase.kind).toBe('claimed');
+  expect(state.view.message).toBe(
+    'Enrollment claimed. Authorization is pending'
+  );
+  expect(state.view.error).toBe('Write saved, but refreshing failed. offline');
+  expect(state.view.busy).toBe(false);
+});
+
 it('shows the latest personal grant result after saving authorization settings', async () => {
   const configured: MCPServer = {
     ...server,

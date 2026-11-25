@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/svelte-query';
+import { useAction, type ActionFeedback } from '#lib/editing/action.svelte.js';
 import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 import { errorMessage } from '#lib/management/http.js';
 import { agentKeys } from './agentKeys';
@@ -34,21 +35,33 @@ export type PersonalGrantTarget = {
   readonly keyId: string;
 };
 
+const feedback: ActionFeedback = {
+  failure: (cause, stage) =>
+    stage === 'accept'
+      ? `Write saved, but refreshing failed. ${errorMessage(cause)}`
+      : errorMessage(cause)
+};
+
 export class PersonalGrantEnrollment {
   private phase = $state<PersonalGrantPhase>({ kind: 'idle' });
   private invitationURL = $state('');
-  private working = $state(false);
-  private failure = $state('');
   private message = $state('');
-  private epoch = 0;
   private readonly client = useQueryClient();
-  private readonly principal = usePrincipalLifetime(() => this.reset());
+  private readonly action = useAction({
+    begin: () => {
+      this.message = '';
+    }
+  });
+
+  constructor() {
+    usePrincipalLifetime(this.reset);
+  }
 
   get view() {
     return {
       phase: this.phase,
-      busy: this.working,
-      error: this.failure,
+      busy: this.action.busy,
+      error: this.action.error,
       message: this.message,
       enrollmentID: 'id' in this.phase ? this.phase.id : '',
       handoffToken: this.phase.kind === 'handoff' ? this.phase.token : '',
@@ -62,16 +75,14 @@ export class PersonalGrantEnrollment {
   }
 
   reset = () => {
-    this.epoch += 1;
+    this.action.retire();
     this.phase = { kind: 'idle' };
-    this.invitationURL = '';
-    this.working = false;
-    this.failure = this.message = '';
+    this.invitationURL = this.message = '';
   };
 
   clearInvitation = () => {
-    this.invitationURL = '';
-    this.failure = this.message = '';
+    this.action.reset();
+    this.invitationURL = this.message = '';
   };
 
   consumeLocation = (location: URL): string | null => {
@@ -94,75 +105,57 @@ export class PersonalGrantEnrollment {
     return location.pathname + location.search;
   };
 
-  private async run(action: (isCurrent: () => boolean) => Promise<void>) {
-    if (this.working) return;
-    const principal = this.principal();
-    const epoch = this.epoch;
-    const isCurrent = () => principal() && epoch === this.epoch;
-    this.working = true;
-    this.failure = this.message = '';
-    try {
-      await action(isCurrent);
-    } catch (cause) {
-      if (isCurrent()) this.failure = errorMessage(cause);
-    } finally {
-      if (isCurrent()) this.working = false;
-    }
-  }
-
-  private async refresh(isCurrent: () => boolean) {
-    try {
-      await this.client.invalidateQueries(
-        { queryKey: agentKeys.grants() },
-        { throwOnError: true }
-      );
-    } catch (cause) {
-      if (isCurrent())
-        this.failure = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
-    }
-  }
+  private refresh = () =>
+    this.client.invalidateQueries(
+      { queryKey: agentKeys.grants() },
+      { throwOnError: true }
+    );
 
   begin = async (target: PersonalGrantTarget) => {
-    if (this.working || !target.id || !target.keyId.trim()) return;
+    if (this.action.busy || !target.id || !target.keyId.trim()) return;
     this.clearInvitation();
-    await this.run(async (isCurrent) => {
-      const result =
+    await this.action.run(
+      () =>
         target.kind === 'server'
-          ? await startMCPGrant(target.id, target.keyId.trim())
-          : await startAgentGrant(target.id, target.keyId.trim());
-      if (isCurrent()) this.invitationURL = result.enrollment_url;
-    });
+          ? startMCPGrant(target.id, target.keyId.trim())
+          : startAgentGrant(target.id, target.keyId.trim()),
+      (result) => {
+        this.invitationURL = result.enrollment_url;
+      },
+      feedback
+    );
   };
 
   claim = async () => {
     const phase = this.phase;
     if (phase.kind !== 'handoff') return;
-    await this.run(async (isCurrent) => {
-      const claimed = await claimMCPGrant(phase.id, phase.token);
-      if (!isCurrent()) return;
-      this.phase = { kind: 'claimed', id: claimed.enrollment.id };
-      this.message = 'Enrollment claimed. Authorization is pending';
-      await this.refresh(isCurrent);
-    });
+    await this.action.run(
+      () => claimMCPGrant(phase.id, phase.token),
+      async (claimed) => {
+        this.phase = { kind: 'claimed', id: claimed.enrollment.id };
+        this.message = 'Enrollment claimed. Authorization is pending';
+        await this.refresh();
+      },
+      feedback
+    );
   };
 
   authorize = async (flow: 'authorization_code' | 'device_code') => {
     const phase = this.phase;
     if (phase.kind !== 'claimed' && phase.kind !== 'authorization') return;
-    await this.run(async (isCurrent) => {
-      const authorization = await authorizeMCPGrant(phase.id, flow);
-      if (isCurrent())
+    await this.action.run(
+      () => authorizeMCPGrant(phase.id, flow),
+      (authorization) => {
         this.phase = { kind: 'authorization', id: phase.id, authorization };
-    });
+      },
+      feedback
+    );
   };
 
-  private async complete(
+  private complete = async (
     id: string,
-    result: Promise<MCPGrantAuthorization>,
-    isCurrent: () => boolean
-  ) {
-    const authorization = await result;
-    if (!isCurrent()) return;
+    authorization: MCPGrantAuthorization
+  ) => {
     const previous =
       this.phase.kind === 'authorization'
         ? this.phase.authorization
@@ -176,26 +169,26 @@ export class PersonalGrantEnrollment {
       authorization.state === 'active'
         ? 'Personal authorization is active'
         : `Personal authorization is ${authorization.state}`;
-    await this.refresh(isCurrent);
-  }
+    await this.refresh();
+  };
 
   completeCallback = async () => {
     const phase = this.phase;
     if (phase.kind !== 'callback' || !phase.id) return;
-    await this.run((isCurrent) =>
-      this.complete(
-        phase.id,
-        completeMCPGrant(phase.id, phase.code, phase.state),
-        isCurrent
-      )
+    await this.action.run(
+      () => completeMCPGrant(phase.id, phase.code, phase.state),
+      (authorization) => this.complete(phase.id, authorization),
+      feedback
     );
   };
 
   poll = async () => {
     const phase = this.phase;
     if (phase.kind !== 'authorization') return;
-    await this.run((isCurrent) =>
-      this.complete(phase.id, pollMCPGrant(phase.id), isCurrent)
+    await this.action.run(
+      () => pollMCPGrant(phase.id),
+      (authorization) => this.complete(phase.id, authorization),
+      feedback
     );
   };
 }
