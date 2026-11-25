@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { personOptions } from '../../features/identity/users/personOptions.js';
+  import { personOptions } from '#lib/features/identity/index.js';
   import EntityPicker from '../EntityPicker.svelte';
 
   let { picked }: { picked: (value: string) => void } = $props();

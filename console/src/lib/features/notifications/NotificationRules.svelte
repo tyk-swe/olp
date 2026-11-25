@@ -13,10 +13,11 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import NotificationRuleDialog from './NotificationRuleDialog.svelte';
   import NotificationRuleEditRow from './NotificationRuleEditRow.svelte';
-  import { listApiKeys } from '#lib/features/access/index.js';
-  import { apiKeyKeys } from '#lib/features/access/index.js';
-  import { listBudgetGroups } from '#lib/features/budgets/index.js';
-  import { budgetGroupKeys } from '#lib/features/budgets/index.js';
+  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
+  import {
+    listBudgetGroups,
+    budgetGroupKeys
+  } from '#lib/features/budgets/index.js';
   import {
     createNotificationRule,
     deleteNotificationRule,

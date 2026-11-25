@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { LimitFields } from '#lib/features/budgets/index.js';
+  import { LimitFields, limitForm } from '#lib/features/budgets/index.js';
   import { type PolicyForm } from './policy';
-  import { limitForm } from '#lib/features/budgets/index.js';
   let {
     form = $bindable(),
     prefix,

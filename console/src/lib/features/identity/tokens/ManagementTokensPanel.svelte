@@ -24,8 +24,7 @@
     type ManagementToken,
     type ManagementTokenSecret
   } from '#lib/features/identity/tokens/api.js';
-  import { listProjects } from '#lib/features/access/index.js';
-  import { projectKeys } from '#lib/features/access/index.js';
+  import { listProjects, projectKeys } from '#lib/features/access/index.js';
   import { copyText } from '#lib/clipboard.js';
   import { errorMessage } from '#lib/management/http.js';
   import {

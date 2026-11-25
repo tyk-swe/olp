@@ -96,7 +96,7 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
       {
         filename: inLib('components/Tabs.ts'),
         options: ordered,
-        code: "import { a } from '#lib/shell/navigation.js'; export { b } from '../shell/indicator.js'; export * from '../shell/icons.js'; const c = () => import('#lib/shell/icons.js'); export { a, c };",
+        code: "import { a } from '#lib/shell/navigation.js'; export { b } from '../shell/indicator.js'; export * from '../shell/branding/branding.js'; const c = () => import('#lib/shell/branding/branding.js'); export { a, c };",
         errors: [...layer, ...layer, ...layer, ...layer]
       },
       {
