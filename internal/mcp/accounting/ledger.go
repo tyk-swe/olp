@@ -7,10 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -26,14 +27,6 @@ type DurableLedger struct {
 
 func NewDurableLedger(pool *pgxpool.Pool, store *debits.Store, syncer *debits.Syncer, auth *secrets.AuthKey) *DurableLedger {
 	return &DurableLedger{pool: pool, store: store, syncer: syncer, auth: auth}
-}
-
-func newID() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", err
-	}
-	return id.String(), nil
 }
 
 func (l *DurableLedger) currency(ctx context.Context) (string, error) {
@@ -58,29 +51,21 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if in.UnitPrice != nil {
 		bound = *in.UnitPrice
 	}
-	ids := make([]string, 5)
-	for i := range ids {
-		id, err := newID()
-		if err != nil {
-			return ReserveResult{}, err
-		}
-		ids[i] = id
-	}
 	currency, err := l.currency(ctx)
 	if err != nil || currency == "" {
 		return ReserveResult{}, debits.ErrAuthority
 	}
 	reservation := &Reservation{
 		Approval: in.Approval, Authority: in.Authority,
-		DispatchID: ids[0], ClaimID: ids[1], RunID: ids[2], StepID: ids[3], AttemptID: ids[4],
+		DispatchID: ids.New(), ClaimID: ids.New(), RunID: ids.New(), StepID: ids.New(), AttemptID: ids.New(),
 		APIKeyID: in.Authority.ID, ProjectID: *in.Authority.ProjectID,
 		ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
 		ToolAlias: in.ToolAlias, InputDigest: in.InputDigest, CallDigest: in.CallDigest,
 		AgentPrincipalID: in.Authority.DelegationAgentID, MemberPrincipalID: in.Authority.DelegationMemberID, DelegationPairDigest: in.Authority.DelegationPairDigest,
-		UnitPrice: cloneUnitPrice(in.UnitPrice), Currency: currency,
+		UnitPrice: ptr.Clone(in.UnitPrice), Currency: currency,
 	}
 	if in.RunID != "" {
-		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {
+		if !ids.Canonical(in.RunID) || in.Ordinal < 0 {
 			return ReserveResult{}, debits.ErrAuthority
 		}
 		reservation.RunID = in.RunID
@@ -365,7 +350,7 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
+		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), ptr.NonNil(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -382,7 +367,7 @@ func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, e
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest)
+		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), ptr.NonNil(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest)
 	return err
 }
 

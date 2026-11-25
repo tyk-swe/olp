@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -132,7 +133,7 @@ func (s *WorkflowStore) Continue(ctx context.Context, authority keyauthority.Aut
 		return WorkflowContinuation{}, ErrApproval
 	}
 	parts := strings.SplitN(token, "_", 4)
-	if len(parts) != 4 || parts[0] != "olpa" || !validApprovalID(parts[2]) {
+	if len(parts) != 4 || parts[0] != "olpa" || !ids.Canonical(parts[2]) {
 		return WorkflowContinuation{}, ErrApproval
 	}
 	version, err := strconv.Atoi(parts[1])

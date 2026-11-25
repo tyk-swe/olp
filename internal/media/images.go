@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
@@ -90,7 +91,7 @@ func DecodeImageEdit(form *staging.Form) (*Request, *Error) {
 	route := form.Required("model")
 	p := ImageEdit{
 		Images: images, Mask: mask, Prompt: form.Required("prompt"), Count: int64Ptr(form.OptionalInt("n")),
-		Size: form.Optional("size"), Stream: valueOf(form.OptionalBool("stream")), Quality: form.Optional("quality"),
+		Size: form.Optional("size"), Stream: ptr.Value(form.OptionalBool("stream")), Quality: form.Optional("quality"),
 		Format: form.Optional("response_format"), User: form.Optional("user"), Background: form.Optional("background"),
 		InputFidelity: form.Optional("input_fidelity"), OutputCompression: int64Ptr(form.OptionalInt("output_compression")),
 		OutputFormat: form.Optional("output_format"), PartialImages: int64Ptr(form.OptionalInt("partial_images")),
@@ -238,7 +239,7 @@ func encodeBedrockImage(r *Request, p ImageGeneration, model string) (*UpstreamC
 	if err := rejectNativeImageFields(r, p); err != nil {
 		return nil, err
 	}
-	size, ok := titanSizes[valueOr(p.Size, "1024x1024")]
+	size, ok := titanSizes[ptr.Or(p.Size, "1024x1024")]
 	if !ok {
 		return nil, invalidMedia("The size is not supported by the Bedrock Titan target.")
 	}

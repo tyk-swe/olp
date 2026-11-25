@@ -167,8 +167,6 @@ func ValidText(field, value string, max int) error {
 	return nil
 }
 
-func NewID() string { return uuid.Must(uuid.NewV7()).String() }
-
 func ParseUUID(value string) (string, error) {
 	id, err := uuid.Parse(value)
 	if err != nil {

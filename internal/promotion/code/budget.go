@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -130,7 +131,7 @@ func budgetChange(ctx context.Context, q database.Queryer, b resolved[codeadmin.
 	return change{
 		item: promotion.Item{Kind: contract.ConfigurationPlanItemKindCodeBudget, Key: b.ref, Action: action},
 		write: func(ctx context.Context, tx pgx.Tx, p authz.Principal) error {
-			_, err := codeadmin.SaveBudget(ctx, tx, p, b.to.id, httpkit.NewID(), b.input, b.to.existing)
+			_, err := codeadmin.SaveBudget(ctx, tx, p, b.to.id, ids.New(), b.input, b.to.existing)
 			return err
 		},
 	}, err

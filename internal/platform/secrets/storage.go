@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 // RowQuerier is the read-only part of a database handle needed to load a
@@ -189,7 +189,7 @@ func (k *KeyRing) rotateBatch(ctx context.Context, pool *pgxpool.Pool, installat
 		return 0, err
 	}
 	if active != k.Active {
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family) VALUES($1,'master_key.rotate','installation',$2,'success','olp-cli')", uuid.Must(uuid.NewV7()).String(), installation); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family) VALUES($1,'master_key.rotate','installation',$2,'success','olp-cli')", ids.New(), installation); err != nil {
 			return 0, err
 		}
 	}

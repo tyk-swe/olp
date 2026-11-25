@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -52,7 +53,7 @@ type resolution struct {
 }
 
 func Parse(document *contract.ConfigurationCode, declared *contract.ConfigurationCodeBindings, names promotion.Names, deps provider.Deps) (Desired, error) {
-	codeBindings := promotion.ValueOf(declared)
+	codeBindings := ptr.Value(declared)
 	values := bindings{credentials: uuids(codeBindings.Credentials), users: uuids(codeBindings.Users), keys: uuids(codeBindings.ApiKeys)}
 	if document == nil {
 		return Desired{}, onlyDeclared(values, Code{})
@@ -285,7 +286,7 @@ func resolve(ctx context.Context, q database.Queryer, desired Desired, directory
 
 func uuids(declared *map[string]openapi_types.UUID) map[string]string {
 	return maps.Collect(func(yield func(string, string) bool) {
-		for ref, id := range promotion.ValueOf(declared) {
+		for ref, id := range ptr.Value(declared) {
 			if !yield(ref, id.String()) {
 				return
 			}

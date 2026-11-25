@@ -7,9 +7,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -34,15 +33,9 @@ type ApprovalBinding struct {
 	MaxCost           string `json:"max_cost"`
 }
 
-func validApprovalID(raw string) bool {
-	id, err := uuid.Parse(raw)
-	return err == nil && id != uuid.Nil && id.String() == raw
-}
-
 func approvalDigest(key *secrets.AuthKey, b ApprovalBinding) ([]byte, error) {
 	for _, id := range []string{b.RunID, b.ToolsetID, b.ToolsetRevisionID} {
-		v, e := uuid.Parse(id)
-		if e != nil || v == uuid.Nil || v.String() != id {
+		if !ids.Canonical(id) {
 			return nil, ErrApproval
 		}
 	}
@@ -52,7 +45,7 @@ func approvalDigest(key *secrets.AuthKey, b ApprovalBinding) ([]byte, error) {
 			return nil, ErrApproval
 		}
 	}
-	if b.RouteRevisionID != "" && !validApprovalID(b.RouteRevisionID) {
+	if b.RouteRevisionID != "" && !ids.Canonical(b.RouteRevisionID) {
 		return nil, ErrApproval
 	}
 	if key == nil || !toolidentity.ValidAlias(b.ToolAlias) || b.MaxCost != "0" && !limits.ValidCostLimit(b.MaxCost) || !pricingpolicy.ValidCurrency(b.Currency) {
@@ -77,7 +70,7 @@ func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a ke
 	if err != nil {
 		return "", err
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	_, err = tx.Exec(ctx, `INSERT INTO olp.agent_approvals(id,api_key_id,project_id,run_id,binding_digest,expires_at) SELECT $1,$2,$3,r.id,$5,$6 FROM olp.agent_runs r JOIN olp.agent_publications p ON p.id=$7 AND p.project_id=r.project_id AND NOT p.retired JOIN olp.live_agent_publication_revisions v ON v.id=$8 AND v.publication_id=p.id AND p.latest_revision_id=v.id WHERE r.id=$4 AND r.api_key_id=$2 AND r.project_id=$3 AND encode(r.principal_digest,'hex')=$9 AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.definition->'toolset'->'tools') t WHERE t->>'alias'=$10) AND ($11='' OR EXISTS(SELECT 1 FROM olp.route_revisions rr JOIN olp.routes route ON route.id=rr.route_id WHERE rr.id=r.route_revision_id AND rr.id::text=$11 AND route.latest_revision_id=rr.id AND route.state='active'))`, id, a.ID, *a.ProjectID, b.RunID, digest, expires, b.ToolsetID, b.ToolsetRevisionID, b.PrincipalDigest, b.ToolAlias, b.RouteRevisionID)
 	if err != nil {
 		return "", err

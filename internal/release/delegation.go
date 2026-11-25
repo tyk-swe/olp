@@ -7,11 +7,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
@@ -83,14 +83,12 @@ func validDelegationBounds(bounds DelegationBounds) bool {
 		}
 	}
 	for index, raw := range bounds.AllowedToolsets {
-		id, err := uuid.Parse(raw)
-		if err != nil || id == uuid.Nil || id.String() != raw || slices.Contains(bounds.AllowedToolsets[:index], raw) {
+		if !ids.Canonical(raw) || slices.Contains(bounds.AllowedToolsets[:index], raw) {
 			return false
 		}
 	}
 	for index, raw := range bounds.AllowedAgents {
-		id, err := uuid.Parse(raw)
-		if err != nil || id == uuid.Nil || id.String() != raw || slices.Contains(bounds.AllowedAgents[:index], raw) {
+		if !ids.Canonical(raw) || slices.Contains(bounds.AllowedAgents[:index], raw) {
 			return false
 		}
 	}

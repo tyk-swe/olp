@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -198,15 +199,15 @@ func (s *Server) setup(r *http.Request) (httpkit.Reply, error) {
 	if complete {
 		return httpkit.Reply{}, httpkit.Fail(409, "setup_complete", "This installation already has an owner.")
 	}
-	id := httpkit.NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, address, strings.TrimSpace(input.DisplayName), hash, httpkit.NewID()); err != nil {
+	id := ids.New()
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, address, strings.TrimSpace(input.DisplayName), hash, ids.New()); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,setup_complete=true WHERE singleton", strings.TrimSpace(input.Name)); err != nil {
 		return httpkit.Reply{}, err
 	}
 	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "budgets.time_zone": "UTC", "guardrails.stream_window_bytes": "65536", "auth.mfa_required": "false", "auth.local_login_enabled": "true"} {
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, httpkit.NewID(), id); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, ids.New(), id); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -282,7 +283,7 @@ func (s *Server) updateUser(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		if id == p.ID && (!u.Active || u.Role != p.Role || u.AccessScope != p.AccessScope) {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
 		}
-		u.ETag = httpkit.NewID()
+		u.ETag = ids.New()
 		// Taking over a provisioned user ends the project grants their SCIM groups
 		// gave them, which must not leave a project without a manager.
 		managed, err := scimManagedProjects(r, tx)

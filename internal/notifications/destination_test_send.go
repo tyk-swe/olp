@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -102,7 +103,7 @@ func (s *Server) claimTest(ctx context.Context, tx pgx.Tx, key testKey, projectI
 	if err != nil {
 		return testClaim{}, err
 	}
-	id := httpkit.NewID()
+	id := ids.New()
 	var expires time.Time
 	err = tx.QueryRow(ctx, insertTestSQL, id, key.destination, key.action, int(testClaimLifetime/time.Second), testsPerMinute).Scan(&expires)
 	if errors.Is(err, pgx.ErrNoRows) {

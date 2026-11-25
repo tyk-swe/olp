@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -159,7 +160,7 @@ func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) 
 	if _, err := liveBinding(ctx, s.pool, expected); err != nil {
 		return Handoff{}, err
 	}
-	id, token := httpkit.NewID(), rand.Text()
+	id, token := ids.New(), rand.Text()
 	expires := time.Now().UTC().Add(10 * time.Minute)
 	_, err := s.pool.Exec(ctx, `INSERT INTO olp.mcp_grant_enrollments(id,server_id,agent_id,project_id,binding,binding_digest,handoff_digest,started_by,expires_at) VALUES($1,NULLIF($2,'')::uuid,NULLIF($3,'')::uuid,$4,$5,$6,$7,$8,$9)`, id, expected.ServerID, expected.AgentID, expected.ProjectID, expected, expected.Digest(), s.auth.Digest(secrets.MCPEnrollmentDigest, token), startedBy, expires)
 	if err != nil {

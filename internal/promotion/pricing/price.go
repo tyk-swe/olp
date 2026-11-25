@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/usage/pricebook"
@@ -24,7 +25,7 @@ func parsePrice(entry contract.ConfigurationPriceEntry) Price {
 			TrainingPerMillion:              promotion.Pointer(entry.TrainingPerMillion),
 			StoragePerGiBDay:                promotion.Pointer(entry.StoragePerGibDay),
 			CacheStoragePerMillionTokenHour: promotion.Pointer(entry.CacheStoragePerMillionTokenHour),
-			ContainerPerSession:             promotion.ValueOf(promotion.Pointer(entry.ContainerPerSession)),
+			ContainerPerSession:             ptr.Value(promotion.Pointer(entry.ContainerPerSession)),
 			VendorID:                        promotion.Trimmed(promotion.Pointer(entry.VendorId)),
 			ProviderKind:                    entry.ProviderKind,
 			Model:                           strings.TrimSpace(entry.Model),
@@ -44,8 +45,8 @@ func parsePrice(entry contract.ConfigurationPriceEntry) Price {
 			UnitPrice:                       promotion.Pointer(entry.UnitPrice),
 			PerRequest:                      promotion.Pointer(entry.PerRequest),
 			BatchMultiplier:                 promotion.Pointer(entry.BatchMultiplier),
-			ToolCalls:                       promotion.ValueOf(promotion.Pointer(entry.ToolCalls)),
-			Tiers:                           parseTiers(promotion.ValueOf(promotion.Pointer(entry.Tiers))),
+			ToolCalls:                       ptr.Value(promotion.Pointer(entry.ToolCalls)),
+			Tiers:                           parseTiers(ptr.Value(promotion.Pointer(entry.Tiers))),
 			Windows:                         parseWindows(promotion.Pointer(entry.Windows)),
 			Currency:                        strings.ToUpper(strings.TrimSpace(entry.Currency)),
 		},
@@ -139,7 +140,7 @@ func nonNegative(value string) bool {
 }
 
 func folded(value *string) string {
-	return strings.ToLower(promotion.ValueOf(value))
+	return strings.ToLower(ptr.Value(value))
 }
 
 func parseTier(tier contract.PriceTier) rates.PriceTier {

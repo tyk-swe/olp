@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -261,7 +262,7 @@ func catalogCandidate(current *Definition, catalog *upstream.Catalog) Definition
 		Enabled: current.Enabled, Stdio: current.Stdio.Clone(), Catalog: catalog,
 		CredentialID: current.CredentialID, DelegationKeyID: current.DelegationKeyID, EntraClientSecretID: current.EntraClientSecretID,
 		Delegation: current.Delegation.Clone(), OAuth: current.OAuth.Clone(),
-		UnitPrice: clonePrice(current.UnitPrice), ToolPrices: retainedToolPrices(current.ToolPrices, catalog),
+		UnitPrice: ptr.Clone(current.UnitPrice), ToolPrices: retainedToolPrices(current.ToolPrices, catalog),
 		CallsPerMinute: current.CallsPerMinute, MaxConcurrency: current.MaxConcurrency,
 		PerKeyCallsPerMinute: current.PerKeyCallsPerMinute, PerKeyMaxConcurrency: current.PerKeyMaxConcurrency,
 	}

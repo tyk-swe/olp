@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -104,8 +104,7 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 	if authority.TaskCapability == nil {
 		return ErrInvalidKey
 	}
-	id, err := uuid.Parse(accountingID)
-	if err != nil || id == uuid.Nil || id.String() != accountingID {
+	if !ids.Canonical(accountingID) {
 		return ErrInvalidKey
 	}
 	digest, err := hex.DecodeString(authority.TaskCapability.Digest)

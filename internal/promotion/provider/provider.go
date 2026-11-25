@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -159,7 +160,7 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 		if _, err := connection.ValidCapabilities(capabilities); err != nil {
 			return providers.DraftModel{}, err
 		}
-		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: promotion.NonNil(capabilities)}, nil
+		return providers.DraftModel{UpstreamModel: model.UpstreamModel, DisplayName: display, Enabled: model.Enabled, Capabilities: ptr.NonNil(capabilities)}, nil
 	})
 }
 
@@ -212,7 +213,7 @@ func render(entry Entry) (contract.ConfigurationProviderEntry, error) {
 	return contract.ConfigurationProviderEntry{
 		BillingImport:        billing,
 		Configuration:        configuration,
-		Models:               promotion.NonNil(models),
+		Models:               ptr.NonNil(models),
 		Name:                 entry.Name,
 		NetworkCredentialRef: renderNetwork(entry),
 		Project:              promotion.Nullable(entry.Project),
@@ -228,7 +229,7 @@ func canonicalModels(models []providers.DraftModel) []providers.DraftModel {
 }
 
 func canonicalCapabilities(capabilities []connection.Capability) []connection.Capability {
-	return promotion.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b connection.Capability) int {
+	return ptr.NonNil(slices.SortedFunc(slices.Values(capabilities), func(a, b connection.Capability) int {
 		return cmp.Compare(a.Operation+"/"+a.Surface+"/"+a.Mode, b.Operation+"/"+b.Surface+"/"+b.Mode)
 	}))
 }

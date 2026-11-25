@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Binding, *codeSelection, error) {
@@ -30,7 +30,7 @@ func (s *Store) bind(ctx context.Context, tx pgx.Tx, in Admission) (codemode.Bin
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return b, nil, err
 	}
-	b = codemode.Binding{ID: httpkit.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
+	b = codemode.Binding{ID: ids.New(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
 	b.RootID = b.ID
 	var root *codeSelection
 	if identity.Parent != "" {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 )
 
 const (
@@ -69,44 +70,40 @@ type Template struct {
 	model   string
 }
 
-func refuse(code, field, requirement, message string) error {
-	return &oif.Incompatibility{Code: code, Field: field, Requirement: requirement, Message: message}
-}
-
 func Compile(c Config) (*Template, error) {
 	provider := c.Provider.Clone()
 	p, err := provider.Profile()
 	if err != nil || provider.ValidateProfile() != nil {
-		return nil, refuse("target_capability", "/profile", "explicit_profile", "Native duplex requires a registered versioned provider profile.")
+		return nil, operations.Error("target_capability", "/profile", "explicit_profile", "Native duplex requires a registered versioned provider profile.")
 	}
 	descriptor, ok := Lookup(p.Dialect)
 	if !ok || descriptor.ProfileID != p.ID || descriptor.Kind != p.Kind || descriptor.Hosting != p.Hosting ||
 		!slices.Contains(p.Operations, "realtime") ||
 		!provider.Supports("realtime", "native", "realtime") {
-		return nil, refuse("target_capability", "/profile", "native_duplex_contract", "This provider profile has no native duplex contract.")
+		return nil, operations.Error("target_capability", "/profile", "native_duplex_contract", "This provider profile has no native duplex contract.")
 	}
 	if descriptor.Transport == TransportBedrockBidi {
 		if _, endpointErr := provider.BedrockDuplexEndpoint(); endpointErr != nil {
-			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
+			return nil, operations.Error("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
 	}
 	if descriptor.Transport == TransportWebSocket {
 		if _, urlErr := provider.DuplexURL(c.Model); urlErr != nil {
-			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
+			return nil, operations.Error("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
 		if _, modelErr := provider.DuplexBoundModel(c.Model); modelErr != nil {
-			return nil, refuse("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
+			return nil, operations.Error("resource_affinity", "/model", "duplex_address", "This target cannot address its native duplex model.")
 		}
 	}
 	if len(provider.SemanticHeaders) > 0 || len(provider.QuerySettings) > 0 {
-		return nil, refuse("target_capability", "/provider", "unchanged_duplex_handshake", "Native duplex has no qualified provider handshake overrides or implicit defaults.")
+		return nil, operations.Error("target_capability", "/provider", "unchanged_duplex_handshake", "Native duplex has no qualified provider handshake overrides or implicit defaults.")
 	}
 	if defaults, present := provider.OperationDefaults["realtime"]; present && (len(defaults.Values) > 0 || len(defaults.NativeOptions) > 0) {
-		return nil, refuse("target_capability", "/operation_defaults/realtime", "native_duplex_defaults", "Realtime defaults cannot be applied to opaque duplex events.")
+		return nil, operations.Error("target_capability", "/operation_defaults/realtime", "native_duplex_defaults", "Realtime defaults cannot be applied to opaque duplex events.")
 	}
 	if binding, present := provider.Bindings[c.Model]; present {
 		if defaults, has := binding.Defaults["realtime"]; has && (len(defaults.Values) > 0 || len(defaults.NativeOptions) > 0) {
-			return nil, refuse("target_capability", "/bindings/realtime", "native_duplex_defaults", "Realtime model defaults cannot be applied to opaque duplex events.")
+			return nil, operations.Error("target_capability", "/bindings/realtime", "native_duplex_defaults", "Realtime model defaults cannot be applied to opaque duplex events.")
 		}
 	}
 	return &Template{profile: descriptor, model: provider.Model(c.Model)}, nil
@@ -131,12 +128,12 @@ func InspectProfileSetup(profile Profile, frame []byte, maxBytes int) (Setup, er
 	case BedrockRealtime:
 		return inspectBedrockSetup(frame, maxBytes)
 	}
-	return Setup{}, refuse("target_capability", "/profile", "native_duplex_contract", "This duplex profile has no setup inspector.")
+	return Setup{}, operations.Error("target_capability", "/profile", "native_duplex_contract", "This duplex profile has no setup inspector.")
 }
 
 func AdmitProfileSetup(profile Profile, setup Setup) error {
 	if setup.TranscriptionOnly && !profile.TranscriptionOnly {
-		return refuse("transcription_unsupported", "/setup", "declared_transcription", "This duplex profile does not declare transcription-only sessions.")
+		return operations.Error("transcription_unsupported", "/setup", "declared_transcription", "This duplex profile does not declare transcription-only sessions.")
 	}
 	return nil
 }
@@ -148,16 +145,16 @@ func (t *Template) BindSetup(frame []byte, boundModel string) ([]byte, error) {
 	case VertexRealtime:
 		return bindVertexSetup(frame, boundModel, len(frame)+len(boundModel)+2048)
 	}
-	return nil, refuse("target_capability", "/profile", "native_duplex_contract", "This duplex profile cannot bind its setup frame.")
+	return nil, operations.Error("target_capability", "/profile", "native_duplex_contract", "This duplex profile cannot bind its setup frame.")
 }
 
 func parseObject(frame []byte, maxBytes int) (oif.Document, error) {
 	if maxBytes < 1 || len(frame) > maxBytes {
-		return oif.Document{}, refuse("invalid_duplex_frame", "/frame", "bounded_frame", "The duplex frame exceeds its byte limit.")
+		return oif.Document{}, operations.Error("invalid_duplex_frame", "/frame", "bounded_frame", "The duplex frame exceeds its byte limit.")
 	}
 	doc, err := oif.ParseJSON(frame, oif.Limits{MaxBytes: maxBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return oif.Document{}, refuse("invalid_duplex_frame", "/frame", "json_object_frame", "Native duplex frames must be bounded JSON objects.")
+		return oif.Document{}, operations.Error("invalid_duplex_frame", "/frame", "json_object_frame", "Native duplex frames must be bounded JSON objects.")
 	}
 	return doc, nil
 }

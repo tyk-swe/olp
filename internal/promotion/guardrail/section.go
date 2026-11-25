@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -36,11 +37,11 @@ func guardrailKey(g Guardrail) portable { return keyOf(g.Project, g.Name) }
 func policyKey(p Policy) portable { return keyOf(p.Project, p.Name) }
 
 func Parse(document contract.ConfigurationDocument) (Section, error) {
-	definitions, err := parseGuardrails(promotion.ValueOf(document.Guardrails))
+	definitions, err := parseGuardrails(ptr.Value(document.Guardrails))
 	if err != nil {
 		return Section{}, err
 	}
-	declared, attached := promotion.ValueOf(document.GuardrailPolicies), promotion.ValueOf(document.GuardrailAttachments)
+	declared, attached := ptr.Value(document.GuardrailPolicies), ptr.Value(document.GuardrailAttachments)
 	if len(declared) > 1000 || len(attached) > 10000 {
 		return Section{}, httpkit.Invalid("guardrail_policies", "Too many policies or attachments.")
 	}

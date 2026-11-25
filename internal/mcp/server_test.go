@@ -92,17 +92,6 @@ func TestResolvedToolsetListingFailure(t *testing.T) {
 	}
 }
 
-func TestCanonicalUUID(t *testing.T) {
-	if !canonicalUUID("123e4567-e89b-12d3-a456-426614174000") {
-		t.Error("canonicalUUID rejected a canonical UUID")
-	}
-	for _, raw := range []string{"", "123e4567e89b12d3a456426614174000", "123E4567-E89B-12D3-A456-426614174000", "not-a-uuid"} {
-		if canonicalUUID(raw) {
-			t.Errorf("canonicalUUID accepted %q", raw)
-		}
-	}
-}
-
 func TestToolResultResponses(t *testing.T) {
 	resolved := resolvedToolset{id: "toolset", revisionID: "revision"}
 	tool := routing.MCPToolsetTool{Alias: "lookup"}

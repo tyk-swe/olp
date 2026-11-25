@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -59,7 +59,7 @@ func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *ke
 	if err != nil {
 		return "", err
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err := tx.Exec(ctx, "UPDATE olp.installation SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),budget_etag=$3 WHERE id=$1", id, encoded, etag); err != nil {
 		return "", err
 	}
@@ -83,7 +83,7 @@ func ApplyBudgetTimeZone(ctx context.Context, tx pgx.Tx, p authz.Principal, desi
 	if _, err := tx.Exec(ctx, "SELECT olp.schedule_budget_zone($1,now())", *desired); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, httpkit.NewID(), p.UserID())
+	_, err := tx.Exec(ctx, "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key='budgets.time_zone'", *desired, ids.New(), p.UserID())
 	return err
 }
 

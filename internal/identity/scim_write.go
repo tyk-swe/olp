@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
@@ -26,7 +27,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		create := r.Method == "POST"
-		id := httpkit.NewID()
+		id := ids.New()
 		var current scim.Document
 		var etag string
 		if !create {
@@ -296,9 +297,9 @@ func (s *Server) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Do
 	}
 	data, _ := json.Marshal(stored)
 	if method == "POST" {
-		_, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_groups(id,document,etag) VALUES($1,$2,$3)", id, data, httpkit.NewID())
+		_, err = tx.Exec(r.Context(), "INSERT INTO olp.scim_groups(id,document,etag) VALUES($1,$2,$3)", id, data, ids.New())
 	} else {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.scim_groups SET document=$2,etag=$3,updated_at=now() WHERE id=$1", id, data, httpkit.NewID())
+		_, err = tx.Exec(r.Context(), "UPDATE olp.scim_groups SET document=$2,etag=$3,updated_at=now() WHERE id=$1", id, data, ids.New())
 	}
 	if err != nil {
 		return nil, err

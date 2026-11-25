@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -77,7 +78,7 @@ func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if err := checkActiveIncreaseLimit(r.Context(), tx, target.owner, in.Window); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		encoded, _ := json.Marshal(in.Target)
 		_, err := tx.Exec(r.Context(), `INSERT INTO olp.budget_increases(id,owner_id,project_id,organization_id,target,window_kind,window_id,amount,reason,starts_at,expires_at,window_ends_at,created_by,etag) VALUES($1,$2,$3,CASE WHEN $4::jsonb->>'kind'='organization' THEN ($4::jsonb->>'id')::uuid ELSE NULL END,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, target.owner, target.project, encoded, in.Window, window, in.Amount, in.Reason, now, expires, end, p.UserID(), etag)
 		if err != nil {
@@ -124,7 +125,7 @@ func (a *API) revokeIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		}
 		return struct{}{}, httpkit.Match(r, etag)
 	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		if _, err := tx.Exec(r.Context(), `UPDATE olp.budget_increases SET revoked_at=COALESCE(revoked_at,now()),revoked_by=COALESCE(revoked_by,$2),etag=$3 WHERE id=$1`, id, p.UserID(), httpkit.NewID()); err != nil {
+		if _, err := tx.Exec(r.Context(), `UPDATE olp.budget_increases SET revoked_at=COALESCE(revoked_at,now()),revoked_by=COALESCE(revoked_by,$2),etag=$3 WHERE id=$1`, id, p.UserID(), ids.New()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		_, err := access.AdvanceAuthority(r.Context(), tx)

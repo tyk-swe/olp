@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity"
 
 	"github.com/jackc/pgx/v5"
@@ -95,7 +96,7 @@ func (a *API) store(r *http.Request, tx pgx.Tx, p authz.Principal, key, value st
 			return httpkit.Reply{}, err
 		}
 	}
-	etag := httpkit.NewID()
+	etag := ids.New()
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key=$4", value, etag, p.UserID(), key); err != nil {
 		return httpkit.Reply{}, err
 	}

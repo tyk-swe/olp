@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -127,7 +128,7 @@ func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
 				}
 				return nil
 			}()
-			_, err := CreateCardRevision(t.Context(), tc.tx, httpkit.NewID(), httpkit.NewID(), "1", time.Now().UTC(), prices, "USD", NewNormalizer(sampleVendorKind))
+			_, err := CreateCardRevision(t.Context(), tc.tx, ids.New(), ids.New(), "1", time.Now().UTC(), prices, "USD", NewNormalizer(sampleVendorKind))
 			if tc.want != nil {
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("currency failure = %v, want %v", err, tc.want)

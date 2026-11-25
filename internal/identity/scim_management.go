@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
@@ -120,7 +121,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Princi
 	var document scim.Document
 	method := "PUT"
 	if create {
-		id = httpkit.NewID()
+		id = ids.New()
 		method = "POST"
 		document = scim.Document{"schemas": []any{scim.GroupSchema}, "displayName": name}
 	} else {

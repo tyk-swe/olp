@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -107,8 +108,7 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 }
 
 func canonicalSessionID(id string) string {
-	parsed, err := uuid.Parse(id)
-	if err != nil || parsed == uuid.Nil || parsed.String() != id {
+	if !ids.Canonical(id) {
 		return ""
 	}
 	return id

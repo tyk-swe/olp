@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -53,7 +54,7 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontr
 		if count >= 256 {
 			return agentcontract.Publication{}, httpkit.Invalid("name", "This project has reached its publication limit.")
 		}
-		next := agentcontract.Publication{ID: httpkit.NewID(), ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: httpkit.NewID()}
+		next := agentcontract.Publication{ID: ids.New(), ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: ids.New()}
 		_, err := tx.Exec(ctx, `INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`, next.ID, next.ProjectID, next.Kind, next.Name, next.Draft, next.ETag, actor)
 		return next, err
 	}
@@ -69,7 +70,7 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontr
 			return agentcontract.Publication{}, httpkit.Invalid("oauth", "Remove the OAuth credential before changing the endpoint, then enroll a new grant.")
 		}
 	}
-	next := agentcontract.Publication{ID: current.ID, ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: httpkit.NewID(), RevisionID: current.RevisionID}
+	next := agentcontract.Publication{ID: current.ID, ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: ids.New(), RevisionID: current.RevisionID}
 	_, err := tx.Exec(ctx, `UPDATE olp.agent_publications SET name=$2,draft=$3,etag=$4 WHERE id=$1`, next.ID, next.Name, next.Draft, next.ETag)
 	return next, err
 }
@@ -147,7 +148,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, publication agentcont
 	if err != nil {
 		return agentcontract.Publication{}, err
 	}
-	next := selectedRevision(publication, draft, revision, httpkit.NewID())
+	next := selectedRevision(publication, draft, revision, ids.New())
 	_, updateErr := tx.Exec(ctx, `UPDATE olp.agent_publications SET latest_revision_id=$2,etag=$3 WHERE id=$1`, next.ID, revision, next.ETag)
 	return next, updateErr
 }
@@ -207,7 +208,7 @@ func insertRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontrac
 		return "", httpkit.Invalid("revision", "This publication has reached its immutable revision limit.")
 	}
 	var created string
-	insertErr := tx.QueryRow(ctx, `INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(publication_id,digest) DO NOTHING RETURNING id::text`, httpkit.NewID(), p.ID, p.ProjectID, p.Kind, draft, digest, actor).Scan(&created)
+	insertErr := tx.QueryRow(ctx, `INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(publication_id,digest) DO NOTHING RETURNING id::text`, ids.New(), p.ID, p.ProjectID, p.Kind, draft, digest, actor).Scan(&created)
 	if !errors.Is(insertErr, pgx.ErrNoRows) {
 		return created, insertErr
 	}
@@ -243,7 +244,7 @@ func ReplaceLabels(ctx context.Context, tx pgx.Tx, publication agentcontract.Pub
 		return err
 	}
 	for _, label := range labels {
-		if err := SetLabel(ctx, tx, publication, label.Label, label.RevisionID, httpkit.NewID()); err != nil {
+		if err := SetLabel(ctx, tx, publication, label.Label, label.RevisionID, ids.New()); err != nil {
 			return err
 		}
 	}

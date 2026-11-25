@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
@@ -23,7 +24,7 @@ func PrincipalDigest(key *secrets.AuthKey, a keyauthority.Authority) []byte {
 // StartRunTx deduplicates a correlation record. It grants no permission to
 // resend a step and does not itself reserve or charge money.
 func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a keyauthority.Authority, id, scope, resource, revision string) error {
-	if key == nil || a.ProjectID == nil || !validApprovalID(id) || !a.AllowsResource(scope, resource, *a.ProjectID, time.Now()) {
+	if key == nil || a.ProjectID == nil || !ids.Canonical(id) || !a.AllowsResource(scope, resource, *a.ProjectID, time.Now()) {
 		return debits.ErrAuthority
 	}
 	kind := "toolset"

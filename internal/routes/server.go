@@ -15,7 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -198,7 +200,7 @@ func targetJSON(t routing.PublishedTarget, live *resolved) map[string]any {
 	if live != nil {
 		lifecycle = live.Lifecycle
 	}
-	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position, "lifecycle": lifecycle, "tags": orEmpty(t.Tags), "shadow": t.Shadow}
+	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position, "lifecycle": lifecycle, "tags": ptr.NonNil(t.Tags), "shadow": t.Shadow}
 }
 
 // behaviorJSON flattens a stored route behavior into a draft or revision
@@ -209,14 +211,14 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	if retry == nil {
 		retry = routing.Retry{}
 	}
-	out["fallbacks"], out["selectors"], out["retry"] = orEmpty(behavior.Fallbacks), orEmpty(behavior.Selectors), retry
+	out["fallbacks"], out["selectors"], out["retry"] = ptr.NonNil(behavior.Fallbacks), ptr.NonNil(behavior.Selectors), retry
 	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
 	out["max_body_bytes"] = behavior.MaxBodyBytes
 	out["caller_cost_exempt"] = behavior.CallerCostExempt
 	out["provider_fetched_documents"] = behavior.ProviderFetchedDocuments
 	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
 	out["passthrough"] = behavior.Passthrough
-	out["tool_execution"], out["toolsets"] = behavior.ToolExecution, orEmpty(behavior.Toolsets)
+	out["tool_execution"], out["toolsets"] = behavior.ToolExecution, ptr.NonNil(behavior.Toolsets)
 	out["responses_mcp_items"] = behavior.ResponsesMCPItems
 	out["run_limits"] = behavior.RunLimits
 	certification := "certified"
@@ -225,13 +227,6 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	}
 	out["certification"] = certification
 	return out
-}
-
-func orEmpty[T any](values []T) []T {
-	if values == nil {
-		return []T{}
-	}
-	return values
 }
 
 func targetsJSON(targets []routing.PublishedTarget, live map[string]*resolved) []map[string]any {
@@ -323,7 +318,7 @@ func (s *Server) createDraft(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		id, etag := httpkit.NewID(), httpkit.NewID()
+		id, etag := ids.New(), ids.New()
 		if err = StageDraft(r.Context(), tx, NewDraft{ID: id, CreatedBy: p.UserID(), ProjectID: input.ProjectID}, etag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -360,7 +355,7 @@ func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		etag := httpkit.NewID()
+		etag := ids.New()
 		if err = StageDraft(r.Context(), tx, ExistingDraft{ID: id}, etag, input.Content(targets, nil)); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

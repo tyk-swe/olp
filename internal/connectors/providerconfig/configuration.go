@@ -1,12 +1,12 @@
 package providerconfig
 
 import (
-	"bytes"
 	"encoding/json"
 	"maps"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
@@ -49,7 +49,7 @@ func (c Identity[T]) StringIdentity() Identity[string] {
 		Endpoint:         Value(c.Endpoint),
 		CloudRegion:      Value(c.CloudRegion),
 		CloudProject:     Value(c.CloudProject),
-		BatchStorage:     CloneBatchStorage(c.BatchStorage),
+		BatchStorage:     ptr.Clone(c.BatchStorage),
 		Deployment:       Value(c.Deployment),
 		APIVersion:       Value(c.APIVersion),
 	}
@@ -73,84 +73,17 @@ func (o Options) Clone() Options {
 	return Options{
 		TuningDatasetURIPrefixes: slices.Clone(o.TuningDatasetURIPrefixes),
 		DocumentURIPrefixes:      slices.Clone(o.DocumentURIPrefixes),
-		Network:                  CloneNetwork(o.Network),
+		Network:                  connectors.CloneNetwork(o.Network),
 		SemanticHeaders:          maps.Clone(o.SemanticHeaders),
 		QuerySettings:            maps.Clone(o.QuerySettings),
-		OperationDefaults:        CloneDefaults(o.OperationDefaults),
-		Bindings:                 CloneBindings(o.Bindings),
+		OperationDefaults:        connectors.CloneDefaults(o.OperationDefaults),
+		Bindings:                 connectors.CloneBindings(o.Bindings),
 		CredentialHeaders:        slices.Clone(o.CredentialHeaders),
-		Models:                   CloneRawMap(o.Models),
-		ParameterDefaults:        CloneRawMap(o.ParameterDefaults),
+		Models:                   connectors.CloneRawMap(o.Models),
+		ParameterDefaults:        connectors.CloneRawMap(o.ParameterDefaults),
 		VendorID:                 o.VendorID,
 		PluginOptions:            maps.Clone(o.PluginOptions),
 	}
-}
-
-func CloneBatchStorage(storage *connectors.BatchStorage) *connectors.BatchStorage {
-	if storage == nil {
-		return nil
-	}
-	copied := *storage
-	return &copied
-}
-
-func CloneNetwork(network *egress.ConnectionOptions) *egress.ConnectionOptions {
-	if network == nil {
-		return nil
-	}
-	copied := *network
-	copied.ConnectTimeoutMS = clonePtr(network.ConnectTimeoutMS)
-	copied.TLSHandshakeTimeoutMS = clonePtr(network.TLSHandshakeTimeoutMS)
-	copied.ResponseHeaderTimeoutMS = clonePtr(network.ResponseHeaderTimeoutMS)
-	copied.IdleConnTimeoutMS = clonePtr(network.IdleConnTimeoutMS)
-	copied.MaxIdleConns = clonePtr(network.MaxIdleConns)
-	copied.MaxIdleConnsPerHost = clonePtr(network.MaxIdleConnsPerHost)
-	copied.MaxConnsPerHost = clonePtr(network.MaxConnsPerHost)
-	return &copied
-}
-
-func CloneRawMap(values map[string]json.RawMessage) map[string]json.RawMessage {
-	if values == nil {
-		return nil
-	}
-	out := make(map[string]json.RawMessage, len(values))
-	for name, value := range values {
-		out[name] = bytes.Clone(value)
-	}
-	return out
-}
-
-func CloneDefaults(values map[string]connectors.DefaultSet) map[string]connectors.DefaultSet {
-	if values == nil {
-		return nil
-	}
-	out := make(map[string]connectors.DefaultSet, len(values))
-	for name, value := range values {
-		value.Values = CloneRawMap(value.Values)
-		value.NativeOptions = CloneRawMap(value.NativeOptions)
-		out[name] = value
-	}
-	return out
-}
-
-func CloneBindings(values map[string]connectors.Binding) map[string]connectors.Binding {
-	if values == nil {
-		return nil
-	}
-	out := make(map[string]connectors.Binding, len(values))
-	for name, binding := range values {
-		binding.Defaults = CloneDefaults(binding.Defaults)
-		out[name] = binding
-	}
-	return out
-}
-
-func clonePtr[T any](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
 }
 
 func Value[T string | *string](value T) string {

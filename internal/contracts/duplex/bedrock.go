@@ -2,6 +2,7 @@ package duplex
 
 import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
@@ -23,7 +24,7 @@ func bedrockEventKind(frame []byte, maxBytes int) (string, error) {
 	}
 	event, ok := doc.Root().Lookup("event")
 	if !ok || event.Kind() != oif.Object || len(event.Members()) != 1 {
-		return "", refuse("invalid_duplex_frame", "/event", "one_event_object", "Nova Sonic frames must carry one event object.")
+		return "", operations.Error("invalid_duplex_frame", "/event", "one_event_object", "Nova Sonic frames must carry one event object.")
 	}
 	return event.Members()[0].Name, nil
 }
@@ -34,7 +35,7 @@ func inspectBedrockSetup(frame []byte, maxBytes int) (Setup, error) {
 		return Setup{}, err
 	}
 	if kind != "sessionStart" {
-		return Setup{}, refuse("invalid_duplex_setup", "/event", "session_start_first", "A Nova Sonic session must begin with sessionStart.")
+		return Setup{}, operations.Error("invalid_duplex_setup", "/event", "session_start_first", "A Nova Sonic session must begin with sessionStart.")
 	}
 	return Setup{}, nil
 }
@@ -55,11 +56,11 @@ func (o *bedrockObserver) serverFrame(frame []byte) (ServerFrame, error) {
 	}
 	event, ok := doc.Root().Lookup("event")
 	if !ok || event.Kind() != oif.Object || len(event.Members()) != 1 {
-		return ServerFrame{}, refuse("invalid_duplex_frame", "/event", "one_event_object", "Nova Sonic frames must carry one event object.")
+		return ServerFrame{}, operations.Error("invalid_duplex_frame", "/event", "one_event_object", "Nova Sonic frames must carry one event object.")
 	}
 	kind := event.Members()[0].Name
 	if !bedrockServerEvents[kind] {
-		return ServerFrame{}, refuse("invalid_duplex_frame", "/event", "registered_event", "Nova Sonic sent an unregistered server event.")
+		return ServerFrame{}, operations.Error("invalid_duplex_frame", "/event", "registered_event", "Nova Sonic sent an unregistered server event.")
 	}
 	switch kind {
 	case "completionStart":
@@ -124,7 +125,7 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 		return err
 	}
 	if !bedrockClientEvents[kind] {
-		return refuse("invalid_duplex_frame", "/event", "registered_event", "The duplex client sent an unregistered Nova Sonic event.")
+		return operations.Error("invalid_duplex_frame", "/event", "registered_event", "The duplex client sent an unregistered Nova Sonic event.")
 	}
 	if kind == "textInput" || kind == "audioInput" || kind == "imageInput" || kind == "toolResult" {
 		o.inputAfterUsage = true

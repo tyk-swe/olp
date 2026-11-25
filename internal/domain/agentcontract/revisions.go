@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/prompts"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 )
 
 func NormalizeDraft(d Draft) Draft { return cloneDraft(d, true) }
@@ -31,14 +33,7 @@ func cloneAgent(value *Definition, normalize bool) *Definition {
 	if value == nil {
 		return nil
 	}
-	return &Definition{Protocol: value.Protocol, Endpoint: value.Endpoint, CardDigest: value.CardDigest, OAuth: value.OAuth.Clone(), CredentialID: clonePointer(value.CredentialID), ToolsetRevisions: cloneSlice(value.ToolsetRevisions, normalize), RouteRevisions: cloneSlice(value.RouteRevisions, normalize), PricingRevisionID: value.PricingRevisionID, MaxCost: value.MaxCost, MessagePrice: value.MessagePrice, RemoteWorkBoundSeconds: clonePointer(value.RemoteWorkBoundSeconds), MaxTaskContinuations: clonePointer(value.MaxTaskContinuations), TaskDeadlineSeconds: clonePointer(value.TaskDeadlineSeconds)}
-}
-func clonePointer[T string | int](value *T) *T {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
+	return &Definition{Protocol: value.Protocol, Endpoint: value.Endpoint, CardDigest: value.CardDigest, OAuth: value.OAuth.Clone(), CredentialID: ptr.Clone(value.CredentialID), ToolsetRevisions: cloneSlice(value.ToolsetRevisions, normalize), RouteRevisions: cloneSlice(value.RouteRevisions, normalize), PricingRevisionID: value.PricingRevisionID, MaxCost: value.MaxCost, MessagePrice: value.MessagePrice, RemoteWorkBoundSeconds: ptr.Clone(value.RemoteWorkBoundSeconds), MaxTaskContinuations: ptr.Clone(value.MaxTaskContinuations), TaskDeadlineSeconds: ptr.Clone(value.TaskDeadlineSeconds)}
 }
 func cloneSlice[T any](values []T, normalize bool) []T {
 	if normalize {
@@ -54,7 +49,7 @@ func ValidateRevisions(values []Revision) error {
 	seen := map[string]bool{}
 	current := map[string]bool{}
 	for _, v := range values {
-		if !validID(v.ID) || !validID(v.PublicationID) || seen[v.ID] || v.ProjectID != v.Definition.ProjectID || v.Digest != DraftDigest(v.Definition) {
+		if !ids.Canonical(v.ID) || !ids.Canonical(v.PublicationID) || seen[v.ID] || v.ProjectID != v.Definition.ProjectID || v.Digest != DraftDigest(v.Definition) {
 			return fmt.Errorf("invalid published agent revision")
 		}
 		seen[v.ID] = true

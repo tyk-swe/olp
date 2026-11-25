@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/plugin/abi"
 	"golang.org/x/oauth2"
@@ -125,12 +125,11 @@ type profile struct {
 }
 
 func Principal(facts map[string]string) string {
-	account, accountErr := uuid.Parse(facts["account_uuid"])
-	organization, organizationErr := uuid.Parse(facts["organization_uuid"])
-	if len(facts) != 2 || accountErr != nil || organizationErr != nil || account == uuid.Nil || organization == uuid.Nil || account.String() != facts["account_uuid"] || organization.String() != facts["organization_uuid"] {
+	account, organization := facts["account_uuid"], facts["organization_uuid"]
+	if len(facts) != 2 || !ids.Canonical(account) || !ids.Canonical(organization) {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(account.String() + "\x00" + organization.String()))
+	sum := sha256.Sum256([]byte(account + "\x00" + organization))
 	return "claude:" + hex.EncodeToString(sum[:])
 }
 

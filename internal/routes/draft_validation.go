@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -116,7 +117,7 @@ func validateDraftTargets(ctx context.Context, q database.Queryer, in *DraftInpu
 			return nil, httpkit.Invalid("targets", "Each provider model may appear once per route.")
 		}
 		seen[modelID] = true
-		id := httpkit.NewID()
+		id := ids.New()
 		if prev, ok := previous[modelID]; ok {
 			id = prev.ID
 		}

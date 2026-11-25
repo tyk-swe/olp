@@ -5,10 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/routing"
-
-	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -129,7 +128,7 @@ func (s *Server) mirror(x *Call) {
 // no longer written once the caller's response is complete; everything the
 // attempt prepares from it is built afresh.
 func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
-	id := uuid.Must(uuid.NewV7()).String()
+	id := ids.New()
 	route := parent.Route
 	x := &Call{
 		request: request{

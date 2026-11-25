@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -80,7 +81,7 @@ func (e candidateEvaluator) evaluate(target Target) rankedCandidate {
 	}
 	row.decision.Price = e.options.Inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, target.ProviderModel, e.operation, e.now)
 	row.attempt.Discount = e.options.Inputs.Discount(string(provider.Kind), provider.ID, provider.VendorID, e.now)
-	row.decision.MaxCost = copyPointer(e.policy.MaxCost)
+	row.decision.MaxCost = ptr.Clone(e.policy.MaxCost)
 	if e.options.EstimateCost && e.options.WorstCost != nil {
 		row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, e.now, e.options.WorstCost, target)
 	}
@@ -228,7 +229,7 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 		switch strategy {
 		case strategyCapacity:
 			ah, bh := a.decision.Headroom, b.decision.Headroom
-			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
+			if order := compareKnown(ptr.Value(ah), ah != nil, ptr.Value(bh), bh != nil); order != 0 {
 				return order
 			}
 		case strategyBoundedCost:
@@ -425,11 +426,4 @@ func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price
 		}
 	}
 	return ""
-}
-
-func deref(v *float64) float64 {
-	if v == nil {
-		return 0
-	}
-	return *v
 }

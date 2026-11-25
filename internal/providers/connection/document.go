@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -102,8 +103,8 @@ func (c Configuration) defaultedEndpoint() *string {
 func (o Options) normalized(kind connectors.Kind) Options {
 	normalized := o
 	normalized.CredentialHeaders = canonicalHeaders(o.CredentialHeaders)
-	normalized.Models = orEmpty(o.Models)
-	normalized.ParameterDefaults = orEmpty(o.ParameterDefaults)
+	normalized.Models = ptr.NonNilMap(o.Models)
+	normalized.ParameterDefaults = ptr.NonNilMap(o.ParameterDefaults)
 	normalized.PluginOptions = setOptions(o.PluginOptions)
 	normalized.VendorID = defaultVendor(kind, o.VendorID)
 	return normalized
@@ -121,13 +122,6 @@ func canonicalHeaders(headers []string) []string {
 		return []string{}
 	}
 	return canonical
-}
-
-func orEmpty[V any](values map[string]V) map[string]V {
-	if values == nil {
-		return map[string]V{}
-	}
-	return values
 }
 
 func setOptions(options map[string]string) map[string]string {

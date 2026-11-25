@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -350,10 +351,10 @@ func (s *Server) restoreRevision(r *http.Request, _ authz.Principal) (httpkit.Re
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		draftID, etag := httpkit.NewID(), httpkit.NewID()
+		draftID, etag := ids.New(), ids.New()
 		targets := slices.Clone(v.Targets)
 		for i := range targets {
-			targets[i].ID = httpkit.NewID()
+			targets[i].ID = ids.New()
 		}
 		content := DraftContent{
 			Slug: v.Slug, Operations: v.Operations, OverallTimeoutMS: v.OverallTimeoutMS, MaxAttempts: v.MaxAttempts, Targets: targets,

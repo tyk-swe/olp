@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
@@ -52,7 +53,7 @@ func DecodeTranscription(form *staging.Form) (*Request, *Error) {
 	chunking := form.Optional("chunking_strategy")
 	stream := form.OptionalBool("stream")
 	extra, failure := formExtensions(form)
-	effective := valueOr(format, "json")
+	effective := ptr.Or(format, "json")
 	switch {
 	case failure != nil:
 		return nil, failure
@@ -75,7 +76,7 @@ func DecodeTranscription(form *staging.Form) (*Request, *Error) {
 	p := Transcription{
 		File: *file, Format: format, Language: language, Prompt: prompt, Temperature: temperature,
 		Include: include, TimestampGranularities: granularities, KnownSpeakerNames: names,
-		KnownSpeakerReferences: references, Stream: valueOf(stream),
+		KnownSpeakerReferences: references, Stream: ptr.Value(stream),
 	}
 	if chunking != nil {
 		p.ChunkingStrategy = *chunking
@@ -146,7 +147,7 @@ func encodeTranscription(r *Request, p Transcription, _ connectors.Config, model
 	}
 	fields = textValue(fields, "stream", strconv.FormatBool(p.Stream))
 	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/transcriptions"}, Accept: "application/json",
-		Body: FormBody(extraFields(fields, r.Extra())), Response: transcriptReply(p.Stream, valueOr(p.Format, "json")), Ambiguous: true}, nil
+		Body: FormBody(extraFields(fields, r.Extra())), Response: transcriptReply(p.Stream, ptr.Or(p.Format, "json")), Ambiguous: true}, nil
 }
 
 func encodeTranslation(r *Request, p Translation, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -156,7 +157,7 @@ func encodeTranslation(r *Request, p Translation, _ connectors.Config, model str
 	fields = textField(fields, "response_format", p.Format)
 	fields = textField(fields, "temperature", float64Text(p.Temperature))
 	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/translations"}, Accept: "application/json",
-		Body: FormBody(extraFields(fields, r.Extra())), Response: TranscriptReply{Format: valueOr(p.Format, "json")}, Ambiguous: true}, nil
+		Body: FormBody(extraFields(fields, r.Extra())), Response: TranscriptReply{Format: ptr.Or(p.Format, "json")}, Ambiguous: true}, nil
 }
 
 func (p Transcription) withFormat(format *string) Transcription {

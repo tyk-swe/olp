@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -76,7 +77,7 @@ func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[st
 	if len(authorization.Session) > maxSession {
 		return e, refused("its session state exceeds 16 KiB")
 	}
-	e.ID, e.ExpiresAt, e.session = httpkit.NewID(), time.Now().Add(SessionTTL), authorization.Session
+	e.ID, e.ExpiresAt, e.session = ids.New(), time.Now().Add(SessionTTL), authorization.Session
 	for _, profile := range manifest.Profiles {
 		if profile.ID == e.ProfileID && profile.Grant != nil {
 			e.Input = profile.Grant.Input

@@ -11,8 +11,8 @@ import (
 	"unicode/utf8"
 
 	jose "github.com/go-jose/go-jose/v4"
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/domain/consumerscope"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
@@ -82,7 +82,7 @@ func (c Config) Validate() error {
 			return bad
 		}
 		names[m.Name] = true
-		if id, e := uuid.Parse(m.ProjectID); e != nil || id.String() != m.ProjectID {
+		if !ids.CanonicalOrNil(m.ProjectID) {
 			return bad
 		}
 		if !unique(m.RouteGroups, 0, 64, 100) || !unique(m.Scopes, 1, len(scopes), 32) {
@@ -101,13 +101,12 @@ func (c Config) Validate() error {
 				return bad
 			}
 		}
-		for _, ids := range [][]string{m.AllowedToolsets, m.AllowedAgents} {
-			if !unique(ids, 0, 100, 36) {
+		for _, allowed := range [][]string{m.AllowedToolsets, m.AllowedAgents} {
+			if !unique(allowed, 0, 100, 36) {
 				return bad
 			}
-			for _, raw := range ids {
-				id, e := uuid.Parse(raw)
-				if e != nil || id == uuid.Nil || id.String() != raw {
+			for _, raw := range allowed {
+				if !ids.Canonical(raw) {
 					return bad
 				}
 			}

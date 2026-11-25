@@ -9,10 +9,10 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -314,7 +314,7 @@ func rejectExpiredReceipt(ctx context.Context, tx pgx.Tx, ev *usage.Event, diges
 		Scan(&rejected)
 	switch {
 	case err == nil:
-		if _, err = tx.Exec(ctx, rejectedGapSQL, uuid.Must(uuid.NewV7()).String(), ev.ObservedAt); err != nil {
+		if _, err = tx.Exec(ctx, rejectedGapSQL, ids.New(), ev.ObservedAt); err != nil {
 			return 0, fmt.Errorf("record expired request metadata receipt: %w", err)
 		}
 		return receiptRejected, nil

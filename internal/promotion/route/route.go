@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -170,7 +171,7 @@ func validateTarget(prefix string, j int, t Target, project *string, providers m
 	if !slices.Contains(declared.models, t.ProviderModel) {
 		return httpkit.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
 	}
-	if !strings.EqualFold(promotion.ValueOf(project), promotion.ValueOf(declared.project)) {
+	if !strings.EqualFold(ptr.Value(project), ptr.Value(declared.project)) {
 		return httpkit.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
 	}
 	return nil
@@ -182,7 +183,7 @@ func Render(c Configuration) ([]contract.ConfigurationRouteEntry, *[]contract.Co
 	if err != nil {
 		return nil, nil, err
 	}
-	rendered := promotion.NonNil(converted)
+	rendered := ptr.NonNil(converted)
 	if len(c.Templates) == 0 {
 		return rendered, nil, nil
 	}

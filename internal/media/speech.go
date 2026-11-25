@@ -2,6 +2,7 @@ package media
 
 import (
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 )
 
@@ -16,7 +17,7 @@ type Speech struct {
 
 func (Speech) Operation() Operation    { return OpSpeech }
 func (Speech) uploads() []staging.Part { return nil }
-func (p Speech) streaming() bool       { return valueOr(p.StreamFormat, "") == "sse" }
+func (p Speech) streaming() bool       { return ptr.Value(p.StreamFormat) == "sse" }
 
 func DecodeSpeech(body []byte) (*Request, *Error) {
 	var p Speech

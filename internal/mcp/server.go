@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -34,14 +34,6 @@ const (
 
 type RateLimiter interface {
 	Reserve(ctx context.Context, request admission.Request) (*admission.Lease, error)
-}
-
-func cloneUnitPrice(price *string) *string {
-	if price == nil {
-		return nil
-	}
-	out := *price
-	return &out
 }
 
 type Runtime interface {
@@ -102,7 +94,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 func releaseIDFor(release *release.Release, snapshot *routing.View) string {
-	if canonicalUUID(release.ID) {
+	if ids.Canonical(release.ID) {
 		return release.ID
 	}
 	return snapshot.Generation().ID
@@ -146,11 +138,6 @@ func callIDFailure(callID *string) *apiError {
 		return errCallIDInvalid
 	}
 	return nil
-}
-
-func canonicalUUID(raw string) bool {
-	id, err := uuid.Parse(raw)
-	return err == nil && id != uuid.Nil && id.String() == raw
 }
 
 type delegatedSessionAuthenticator struct{ Runtime }
@@ -312,7 +299,7 @@ func currentToolsetRevision(snapshot *routing.View, toolsetID, project string) (
 }
 
 func (s *Server) resolveToolset(authority keyauthority.Authority, snapshot *routing.View, toolsetID string) (resolvedToolset, *apiError) {
-	if !canonicalUUID(toolsetID) {
+	if !ids.Canonical(toolsetID) {
 		return resolvedToolset{}, errToolsetNotFound
 	}
 	revisionID, ok := currentToolsetRevision(snapshot, toolsetID, *authority.ProjectID)

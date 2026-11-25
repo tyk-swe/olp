@@ -7,11 +7,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
 type InvestigationFilters struct {
@@ -48,23 +48,18 @@ type Investigation struct {
 }
 
 func (input InvestigationInput) Validate() error {
-	if !investigationUUID(input.ProjectID) || input.Filters == nil || input.Evidence == nil || len(input.Evidence) > 100 || utf8.RuneCountInString(input.Summary) > 4096 || strings.TrimSpace(input.Summary) == "" {
+	if !ids.Canonical(input.ProjectID) || input.Filters == nil || input.Evidence == nil || len(input.Evidence) > 100 || utf8.RuneCountInString(input.Summary) > 4096 || strings.TrimSpace(input.Summary) == "" {
 		return httpkit.Invalid("investigation", "Supply filters, up to 100 evidence references, and a summary of at most 4096 characters.")
 	}
 	if !validInvestigationFilters(*input.Filters) {
 		return httpkit.Invalid("filters", "Use valid time, run, duration, error and tool filters.")
 	}
 	for _, evidence := range input.Evidence {
-		if investigationEvidenceQuery(evidence.Kind) == "" || !investigationUUID(evidence.ID) {
+		if investigationEvidenceQuery(evidence.Kind) == "" || !ids.Canonical(evidence.ID) {
 			return httpkit.Invalid("evidence", "Use a valid evidence kind and canonical UUID.")
 		}
 	}
 	return nil
-}
-
-func investigationUUID(value string) bool {
-	id, err := uuid.Parse(value)
-	return err == nil && id != uuid.Nil && id.String() == value
 }
 
 func investigationTime(value *string) (time.Time, error) {
@@ -80,7 +75,7 @@ func validInvestigationFilters(filters InvestigationFilters) bool {
 	if fromErr != nil || toErr != nil || filters.From != nil && filters.To != nil && from.After(to) {
 		return false
 	}
-	if filters.RunID != nil && !investigationUUID(*filters.RunID) {
+	if filters.RunID != nil && !ids.Canonical(*filters.RunID) {
 		return false
 	}
 	if filters.MinDurationMS != nil && *filters.MinDurationMS < 0 || filters.MaxDurationMS != nil && *filters.MaxDurationMS < 0 {
@@ -119,15 +114,9 @@ func (s *Management) listInvestigations(r *http.Request, p authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	project := r.URL.Query().Get("project_id")
-	if project != "" {
-		id, err := uuid.Parse(project)
-		if err != nil || id == uuid.Nil || id.String() != project {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
-		}
-		if err := p.Project(&project, authz.View); err != nil {
-			return httpkit.Reply{}, err
-		}
+	project, err := p.ProjectFilter(r)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
@@ -201,7 +190,7 @@ func (s *Management) createInvestigation(r *http.Request, _ authz.Principal) (ht
 			}
 		}
 		itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
-	 RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, httpkit.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
+	 RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, ids.New(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
