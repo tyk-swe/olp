@@ -1,7 +1,7 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { personOptions } from '#lib/features/access/entityOptions.js';
+  import { personOptions } from '#lib/features/identity/index.js';
   import Advanced from '#lib/components/Advanced.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import Fields from '../attribution-budgets/BudgetFields.svelte';
+  import Fields from './AttributionBudgetFields.svelte';
   import {
     budgetError,
     budgetForm,
     budgetInput
-  } from '../attribution-budgets/policy';
+  } from './attributionBudgetPolicy';
   import {
     getProjectAttributionBudgets,
     putProjectAttributionBudgets,

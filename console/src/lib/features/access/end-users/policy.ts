@@ -4,7 +4,7 @@ import {
   limitsInput,
   limitsError,
   type LimitForm
-} from '../budgets/limitForm';
+} from '#lib/features/budgets/index.js';
 import type { components } from '#lib/management/schema.js';
 
 export type EndUserPolicy = components['schemas']['EndUserPolicy'];

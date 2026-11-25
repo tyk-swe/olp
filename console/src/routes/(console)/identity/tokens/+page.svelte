@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ManagementTokensPanel from '#lib/features/access/tokens/ManagementTokensPanel.svelte';
+  import ManagementTokensPanel from '#lib/features/identity/tokens/ManagementTokensPanel.svelte';
 </script>
 
 <ManagementTokensPanel />

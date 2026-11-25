@@ -1,6 +1,6 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
-  import { RunLimits } from '#lib/features/workflows/index.js';
+  import { RunLimits } from '#lib/features/budgets/index.js';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { admissionPriorities } from './keyValidation.js';

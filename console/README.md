@@ -58,6 +58,49 @@ repository-wide commands.
 The application is client-only: use the static adapter and avoid server routes,
 server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
+A feature is one management resource family and the pages that read and edit
+it, so a feature can own several top-level routes. The folders under
+`src/lib/features/` and the routes they render are:
+
+| Feature         | Routes                                                                           | Owns                                                                                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `access`        | `/organizations`, `/projects`, `/keys`, `/audit`                                 | Organizations, projects with their members and policies (limit templates, attribution budgets, catalog publication), API keys, attribution, end users, route groups and the audit log. |
+| `agents`        | `/agents`, `/mcp-servers`, `/activity`, `/investigations`, `/budgets/exposure`   | Agent publications, grants and delegations, MCP servers, runs, tasks, tool calls, investigations and provisional exposure.                                                             |
+| `budgets`       | `/budgets`                                                                       | The installation budget, budget groups, budget increases, aggregate budgets and the limit fields other features embed.                                                                 |
+| `code-mode`     | `/code-mode`                                                                     | Code mode accounts, pools, routes, bindings, budgets and diagnostics.                                                                                                                  |
+| `exports`       | `/exports`                                                                       | Capture and telemetry export settings at the root and signed export sinks in `signed/`.                                                                                                |
+| `guardrails`    | `/guardrails`                                                                    | Guardrail definitions, policies, credentials and attachments.                                                                                                                          |
+| `health`        | `/health`                                                                        | Readiness, provider health, gateway epochs and runtime generations.                                                                                                                    |
+| `identity`      | `/login`, `/setup`, `/invitations`, `/members`, `/identity`, `/settings/profile` | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.                                               |
+| `inference`     | `/playground`                                                                    | The playground and its request templates.                                                                                                                                              |
+| `media`         | `/media-jobs`                                                                    | Media job metadata.                                                                                                                                                                    |
+| `notifications` | `/notifications`                                                                 | Notification rules, destinations and deliveries.                                                                                                                                       |
+| `overview`      | `/`                                                                              | The landing page and its summaries.                                                                                                                                                    |
+| `plugins`       | `/plugins`                                                                       | The plugin index, installed plugins and the unconfined plugin and MCP executable reviews.                                                                                              |
+| `providers`     | `/providers`, `/models`, `/catalog`                                              | Provider connections, credentials, grants and models, with the published model catalog in `model-catalog/`.                                                                            |
+| `resources`     | `/provider-resources`                                                            | Retained provider resources and retrieval bindings.                                                                                                                                    |
+| `routes`        | `/routes`                                                                        | Route drafts, activation, routing policy and inspection, with the route cache editor in `cache/`.                                                                                      |
+| `settings`      | `/settings`                                                                      | Installation settings and the branding write, with declarative configuration in `configuration/`.                                                                                      |
+| `usage`         | `/usage`, `/requests`, `/pricing`                                                | Usage reports, request records, pricing, rate cards and reconciliation.                                                                                                                |
+
+Two pages sit under another feature's route section. `agents` renders
+`/budgets/exposure`, because the page lists agent exposure, and `identity`
+renders `/settings/profile`, because the page edits the signed-in user. The
+root layouts also mount the MFA confirmation host and read the setup status
+from `identity`.
+
+New code goes in the feature that owns the resource it reads or writes. A new
+resource in an existing family gets its own subfolder in that feature, and a
+new feature folder is for a resource family that no feature owns yet. A
+component with one consumer lives next to that consumer, even when its name
+suggests another feature. Code that two features need stays in the feature
+that owns its resource and is exported from that feature's `index.ts`. A pure
+helper that belongs to no resource, such as `shortDigest` in
+`src/lib/format.ts`, goes into a shared layer. The shell reads branding itself
+because a shared layer cannot import a feature, which is why `settings` owns
+only the branding write. An `index.ts` lists only what other features import,
+so a feature that no other feature imports has none.
+
 ## Boundaries
 
 ESLint enforces eight structural rules. `eslint.config.mjs` is their source,
@@ -67,8 +110,8 @@ first five, in `import` and `export` statements, dynamic imports and inline
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
   `listing/`, `components/` and `shell/`) never import from
-  `src/lib/features/`. When two features need the same thing, move it into a
-  shared layer.
+  `src/lib/features/`. "Feature ownership" above says where code that two
+  features need goes.
 - A shared layer imports only itself and the layers below it. See "Shared
   layers" below.
 - A feature imports another feature only through that feature's `index.ts`.
@@ -144,7 +187,7 @@ also drops the saved retry intent. Reads that can fail return the problem as
 a value through `captureResult`/`readResult` in `src/lib/editing/result.ts`
 rather than throwing through the component.
 
-`src/lib/features/sinks/SinkEditor.svelte` is the example to copy for a form
+`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a form
 that creates and updates. Other logic that can fail, such as parsing what the
 user typed, belongs in a `.ts` module that returns the problem as a value, like
 `src/lib/editing/json.ts`.

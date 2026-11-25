@@ -11,7 +11,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
   import ApiKeyOverlaps from './ApiKeyOverlaps.svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
 
@@ -24,8 +24,10 @@
   import ApiKeyRateFields from './ApiKeyRateFields.svelte';
   import ApiKeySpendingFields from './ApiKeySpendingFields.svelte';
   import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
-  import { listBudgetGroups } from '#lib/features/access/budget-groups/api.js';
-  import { budgetGroupKeys } from '#lib/features/access/budget-groups/budgetGroupKeys.js';
+  import {
+    listBudgetGroups,
+    budgetGroupKeys
+  } from '#lib/features/budgets/index.js';
 
   let {
     editing,

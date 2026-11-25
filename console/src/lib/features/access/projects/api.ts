@@ -277,6 +277,30 @@ export async function putProjectAttributionBudgets(
   );
 }
 
+export type Publication = Schemas['CatalogPublicationResponse'];
+export async function getPublication(
+  id: string,
+  signal?: AbortSignal
+): Promise<Publication> {
+  return unwrap(
+    await apiClient.GET('/api/v1/projects/{project_id}/catalog', {
+      params: { path: { project_id: id } },
+      signal
+    })
+  );
+}
+export async function putPublication(
+  id: string,
+  value: Publication
+): Promise<Publication> {
+  return unwrap(
+    await apiClient.PUT('/api/v1/projects/{project_id}/catalog', {
+      params: { path: { project_id: id }, header: ifMatch(value.etag) },
+      body: { enabled: value.enabled, prices_public: value.prices_public }
+    })
+  );
+}
+
 export const deleteProject = async (
   value: { id: string; etag: string },
   requestId: string

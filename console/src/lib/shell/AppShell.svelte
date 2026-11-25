@@ -6,7 +6,7 @@
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import InstallationMark from '#lib/shell/branding/InstallationMark.svelte';
   import CommandPalette from '#lib/shell/CommandPalette.svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import Sidebar from '#lib/shell/Sidebar.svelte';
   import { breadcrumbs, paletteEntries } from '#lib/shell/navigation.js';
 

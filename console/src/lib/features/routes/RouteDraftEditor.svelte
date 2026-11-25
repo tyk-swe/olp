@@ -14,7 +14,7 @@
   } from '#lib/editing/focusError.js';
   import RouteTargets from '#lib/features/routes/RouteTargets.svelte';
   import RouteResilienceEditor from './RouteResilienceEditor.svelte';
-  import { RouteCacheEditor } from '#lib/features/caching/index.js';
+  import RouteCacheEditor from './cache/RouteCacheEditor.svelte';
   import RoutePublishPanel from '#lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '#lib/features/routes/RouteSimulation.svelte';
   import RouteFixtureChecks from './RouteFixtureChecks.svelte';

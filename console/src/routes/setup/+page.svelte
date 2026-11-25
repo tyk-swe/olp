@@ -3,7 +3,7 @@
   import { resolve } from '$app/paths';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { brandingKey } from '#lib/shell/branding/branding.js';
-  import SetupPage from '#lib/features/access/setup/SetupPage.svelte';
+  import SetupPage from '#lib/features/identity/setup/SetupPage.svelte';
 
   const queryClient = useQueryClient();
 

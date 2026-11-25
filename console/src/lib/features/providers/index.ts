@@ -21,7 +21,6 @@ export {
 export { parseManualModelNames, requiresGrant } from './providerEditor.js';
 export { providerKeys } from './providerKeys.js';
 export {
-  type Provider,
   type ProviderKind,
   type ProviderVendor,
   getProvider,

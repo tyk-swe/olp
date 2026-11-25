@@ -12,7 +12,7 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     listRouteDraftPage,

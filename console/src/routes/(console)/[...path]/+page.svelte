@@ -1,7 +1,7 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { resolve } from '$app/paths';
-  import NavIcon from '#lib/shell/NavIcon.svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
 </script>
 
 <PageTitle title="Page not found" />

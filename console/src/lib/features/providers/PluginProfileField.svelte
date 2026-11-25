@@ -2,7 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import type { FieldIssue } from '#lib/management/http.js';
-  import { shortDigest } from '#lib/features/plugins/index.js';
+  import { shortDigest } from '#lib/format.js';
   import NativeValueField from './NativeValueField.svelte';
   import { pluginOptionFields, pluginProfileGroups } from './profiles';
   import {
