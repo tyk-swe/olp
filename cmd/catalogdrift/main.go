@@ -18,34 +18,32 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog/drift"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 type listing struct {
 	vendor, key, query string
-	header             func(key string) http.Header
 }
 
-func bearer(key string) http.Header { return http.Header{"Authorization": {"Bearer " + key}} }
-
 var listings = []listing{
-	{vendor: "openai", key: "OPENAI_API_KEY", header: bearer},
-	{vendor: "anthropic", key: "ANTHROPIC_API_KEY", query: "?limit=1000", header: func(key string) http.Header {
-		return http.Header{"X-Api-Key": {key}, "Anthropic-Version": {connectors.AnthropicMessagesRevision}}
-	}},
-	{vendor: "google", key: "GEMINI_API_KEY", query: "?pageSize=1000", header: func(key string) http.Header {
-		return http.Header{"X-Goog-Api-Key": {key}}
-	}},
-	{vendor: "mistral", key: "MISTRAL_API_KEY", header: bearer},
-	{vendor: "groq", key: "GROQ_API_KEY", header: bearer},
-	{vendor: "xai", key: "XAI_API_KEY", header: bearer},
-	{vendor: "deepseek", key: "DEEPSEEK_API_KEY", header: bearer},
-	{vendor: "cerebras", key: "CEREBRAS_API_KEY", header: bearer},
-	{vendor: "moonshot", key: "MOONSHOT_API_KEY", header: bearer},
+	{vendor: "openai", key: "OPENAI_API_KEY"},
+	{vendor: "anthropic", key: "ANTHROPIC_API_KEY", query: "?limit=1000"},
+	{vendor: "google", key: "GEMINI_API_KEY", query: "?pageSize=1000"},
+	{vendor: "mistral", key: "MISTRAL_API_KEY"},
+	{vendor: "groq", key: "GROQ_API_KEY"},
+	{vendor: "xai", key: "XAI_API_KEY"},
+	{vendor: "deepseek", key: "DEEPSEEK_API_KEY"},
+	{vendor: "cerebras", key: "CEREBRAS_API_KEY"},
+	{vendor: "moonshot", key: "MOONSHOT_API_KEY"},
+}
+
+func (l listing) provider() connectors.Config {
+	kind, _ := vendors.Kind(l.vendor)
+	return connectors.Config{Kind: connectors.Kind(kind), VendorID: l.vendor, AuthMode: connectors.AuthAPIKey}
 }
 
 func (l listing) shape() (connectors.ModelListing, error) {
-	kind, _ := vendors.Kind(l.vendor)
-	shape, listed, err := connectors.Config{Kind: connectors.Kind(kind), VendorID: l.vendor}.ModelListing()
+	shape, listed, err := l.provider().ModelListing()
 	if err != nil {
 		return connectors.ModelListing{}, err
 	}
@@ -76,13 +74,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	client := &http.Client{Timeout: 30 * time.Second}
+	auth := connectors.NewAuth(&egress.Policy{}, os.Getenv)
 	listed := map[string][]string{}
 	for _, l := range listings {
 		key := os.Getenv(l.key)
 		if key == "" {
 			continue
 		}
-		models, err := l.models(ctx, client, key)
+		models, err := l.models(ctx, client, auth, key)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "catalogdrift: %s: %v\n", l.vendor, err)
 			os.Exit(1)
@@ -93,7 +92,7 @@ func main() {
 	fmt.Print(drift.Compare(signed.Catalog, listed, now).Markdown(signed.Catalog, now))
 }
 
-func (l listing) models(ctx context.Context, client *http.Client, key string) ([]string, error) {
+func (l listing) models(ctx context.Context, client *http.Client, auth *connectors.Auth, key string) ([]string, error) {
 	target, err := l.url()
 	if err != nil {
 		return nil, err
@@ -106,7 +105,9 @@ func (l listing) models(ctx context.Context, client *http.Client, key string) ([
 	if err != nil {
 		return nil, err
 	}
-	request.Header = l.header(key)
+	if _, err := auth.Apply(ctx, request, l.provider(), []byte(key), nil); err != nil {
+		return nil, err
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
