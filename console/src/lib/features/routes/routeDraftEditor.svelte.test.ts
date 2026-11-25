@@ -3,6 +3,7 @@ import type { OperationDialect } from './inspectionDialects';
 import RoutePublishPanel from './RoutePublishPanel.svelte';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
@@ -125,11 +126,13 @@ function serveEditor(dialects: OperationDialect[] = []) {
   return { load, replace, simulate, activate };
 }
 
-async function editor(): Promise<RouteDraftEditorState> {
+async function editor(
+  routeId: () => string = () => draft.id
+): Promise<RouteDraftEditorState> {
   const ready = vi.fn((state: RouteDraftEditorState) => state);
   const component = mount(StateHarness, {
     target: document.createElement('div'),
-    props: { setup: () => ready(new RouteDraftEditorState(() => draft.id)) }
+    props: { setup: () => ready(new RouteDraftEditorState(routeId)) }
   });
   onTestFinished(() => unmount(component));
   flushSync();
@@ -225,6 +228,105 @@ describe('route draft editor', () => {
     expect(state.slug).toBe('local');
     expect(state.hasUnsavedChanges).toBe(true);
     expect(state.concurrentNotice).toBe('conflict');
+    expect(state.errorMessage).toBe('');
+  });
+
+  it('names the running write, sends one at a time and replaces the last outcome', async () => {
+    const { replace } = serveEditor();
+    const state = await editor();
+    const answer = Promise.withResolvers<Response>();
+    replace.mockImplementationOnce(() => answer.promise);
+    state.slug = 'updated';
+    state.touch();
+
+    const saving = state.save(draft);
+    await eventually(() => expect(replace).toHaveBeenCalledOnce());
+    expect(state.busy).toBe('save');
+    await state.save(draft);
+    await state.reload();
+    expect(replace).toHaveBeenCalledOnce();
+
+    answer.resolve(
+      json({ title: 'Invalid draft', detail: 'The slug is taken.' }, 422)
+    );
+    await saving;
+    flushSync();
+    expect(state.busy).toBe('');
+    expect(state.errorMessage).toBe('The slug is taken.');
+    expect(state.hasUnsavedChanges).toBe(true);
+
+    await state.save(draft);
+    flushSync();
+    expect(state.errorMessage).toBe('');
+    expect(state.notice).toContain('Draft saved');
+
+    state.touch();
+    const next = Promise.withResolvers<Response>();
+    replace.mockImplementationOnce(() => next.promise);
+    const again = state.save(draft);
+    await eventually(() => expect(replace).toHaveBeenCalledTimes(3));
+    expect(state.notice).toBe('');
+    next.resolve(json({ ...draft, etag: 'version-3' }));
+    await again;
+  });
+
+  it('ignores a save answered after another principal signed in', async () => {
+    const { replace } = serveEditor();
+    const state = await editor();
+    const answer = Promise.withResolvers<Response>();
+    replace.mockImplementationOnce(() => answer.promise);
+    state.slug = 'updated';
+    state.touch();
+
+    const saving = state.save(draft);
+    await eventually(() => expect(replace).toHaveBeenCalledOnce());
+    authLifecycle.establishSession({
+      user: {
+        id: 'another-owner',
+        email: 'another@example.test',
+        display_name: 'Another owner',
+        role: 'owner',
+        access_scope: 'global',
+        operations: ['read', 'configure']
+      },
+      csrf_token: 'fixture-csrf'
+    });
+    flushSync();
+    answer.resolve(json({ title: 'Refused' }, 500));
+    await saving;
+    flushSync();
+
+    expect(state.errorMessage).toBe('');
+    expect(state.notice).toBe('');
+    expect(state.sync.snapshotEtag).toBe(draft.etag);
+  });
+
+  it('ignores a save answered after the page moved to another draft', async () => {
+    const { replace } = serveEditor();
+    let routeId = $state(draft.id);
+    const state = await editor(() => routeId);
+    const answer = Promise.withResolvers<Response>();
+    replace.mockImplementationOnce(() => answer.promise);
+    state.slug = 'updated';
+    state.touch();
+
+    const saving = state.save(draft);
+    await eventually(() => expect(replace).toHaveBeenCalledOnce());
+    routeId = 'another-draft';
+    flushSync();
+    expect(state.busy).toBe('');
+    expect(state.hasUnsavedChanges).toBe(false);
+
+    answer.resolve(json({ ...draft, slug: 'updated', etag: 'version-2' }));
+    await saving;
+    flushSync();
+
+    expect(state.notice).toBe('');
+    expect(state.errorMessage).toBe('');
+    expect(state.sync.snapshotEtag).toBeNull();
+    expect(state.queryClient.getQueryData(routeKeys.draft(draft.id))).toEqual(
+      expect.objectContaining({ etag: 'version-2' })
+    );
   });
 
   it('activates only a saved draft and reports its published revision', async () => {
