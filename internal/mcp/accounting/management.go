@@ -259,17 +259,12 @@ func (m *Management) list(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	}
 	key := r.URL.Query().Get("api_key_id")
 	toolset := r.URL.Query().Get("toolset_id")
-	project := r.URL.Query().Get("project_id")
 	if err := validateToolCallFilters(key, toolset); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if project != "" {
-		if !ids.Canonical(project) {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a canonical project UUID.")
-		}
-		if err := p.Project(&project, authz.View); err != nil {
-			return httpkit.Reply{}, err
-		}
+	project, err := p.ProjectFilter(r)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	rows, err := m.access.Pool.Query(r.Context(), "SELECT "+toolCallColumns+toolCallFrom+" WHERE c.id<$1 AND ($2 OR c.project_id=ANY($3::uuid[])) AND ($4='' OR c.api_key_id=$4::uuid) AND ($5='' OR c.toolset_id=$5::uuid) AND ($6='' OR c.project_id=$6::uuid) ORDER BY c.id DESC LIMIT $7", page.Before, p.AllProjects, p.ProjectIDs(), key, toolset, project, page.Limit+1)
 	if err != nil {
