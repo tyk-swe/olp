@@ -15,7 +15,7 @@ import (
 
 const (
 	ProfileRevision           = "1"
-	anthropicMessagesRevision = "2023-06-01"
+	AnthropicMessagesRevision = "2023-06-01"
 	unversionedDialect        = "unversioned-2026-09-22"
 )
 
@@ -88,7 +88,7 @@ var hostedProfiles = []Profile{
 	},
 	{
 		ID: "anthropic-messages", Label: "Anthropic Messages", Kind: KindAnthropic,
-		Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic",
+		Dialect: "anthropic-messages", DialectRevision: AnthropicMessagesRevision, Hosting: "direct-anthropic",
 		Authentication: keyHeadersOrNone, Operations: []string{"generation", "token_count", "skill", "batch"},
 		SemanticHeaders: []string{"Anthropic-Version", "Anthropic-Beta"},
 		Documentation:   "https://platform.claude.com/docs/en/api/versioning", Strict: true,

@@ -30,6 +30,7 @@ type Prefix struct {
 	// ManagementCatchAll is mounted by the control server instead of the
 	// generic reserved-prefix handler.
 	ManagementCatchAll bool
+	SDKBase            bool
 }
 
 var prefixes = []Prefix{
@@ -37,13 +38,13 @@ var prefixes = []Prefix{
 	{Path: "/mcp/", Surface: Surface{Name: "openai", Inference: true}},
 	{Path: "/a2a/", Surface: Surface{Name: "management", Inference: true}},
 	{Path: "/code/", Surface: Surface{Name: "openai", Inference: true}},
-	{Path: "/v1/", Surface: Surface{Name: "openai", Inference: true}, GatewayCatchAll: true},
+	{Path: "/v1/", Surface: Surface{Name: "openai", Inference: true}, GatewayCatchAll: true, SDKBase: true},
 	{Path: "/native/", Surface: Surface{Name: "openai", Inference: true}},
-	{Path: "/anthropic/", Surface: Surface{Name: "anthropic", Inference: true}},
-	{Path: "/gemini/", Surface: Surface{Name: "gemini", Inference: true}},
+	{Path: "/anthropic/", Surface: Surface{Name: "anthropic", Inference: true}, SDKBase: true},
+	{Path: "/gemini/", Surface: Surface{Name: "gemini", Inference: true}, SDKBase: true},
 	// Gemini Live clients connect to the root WebSocket path.
 	{Path: "/ws/", Surface: Surface{Name: "gemini", Inference: true}},
-	{Path: "/bedrock/", Surface: Surface{Name: "bedrock", Inference: true}, GatewayCatchAll: true},
+	{Path: "/bedrock/", Surface: Surface{Name: "bedrock", Inference: true}, GatewayCatchAll: true, SDKBase: true},
 	{Path: "/api/", Surface: managementSurface()},
 	{Path: "/scim/", Surface: managementSurface(), ManagementCatchAll: true},
 	{Path: "/v1beta/", Surface: managementSurface()},
@@ -66,6 +67,15 @@ func Of(path string) Surface {
 		}
 	}
 	return managementSurface()
+}
+
+func PathPrefix(name string) string {
+	for _, prefix := range prefixes {
+		if prefix.SDKBase && prefix.Surface.Name == name {
+			return strings.TrimSuffix(prefix.Path, "/")
+		}
+	}
+	return ""
 }
 
 // Reserved lists every prefix the console must never answer.

@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/domain/surface"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
 
@@ -202,13 +205,12 @@ func priceRanges(snapshot *routing.View, route routing.Route, inputs *routinginp
 func certifiedSamples(snapshot *routing.View, route routing.Route, origin string) []Sample {
 	result := []Sample{}
 	for _, candidate := range samples(route, origin) {
-		surface := candidate.SDK
 		if candidate.SDK == "gemini" && candidate.Operation == "embeddings" && !route.Fidelity.Strict() {
 			continue
 		}
 		for _, target := range route.Targets {
 			provider, ok := snapshot.FindProvider(target.ProviderID)
-			if !ok || !provider.Enabled || target.Shadow != nil || !provider.Supports(target.ProviderModel, candidate.Operation, surface, "unary") {
+			if !ok || !provider.Enabled || target.Shadow != nil || !provider.Supports(target.ProviderModel, candidate.Operation, candidate.SDK, "unary") {
 				continue
 			}
 			sample := candidate
@@ -217,25 +219,11 @@ func certifiedSamples(snapshot *routing.View, route routing.Route, origin string
 				if err != nil {
 					continue
 				}
-				var want string
-				switch profile.Dialect {
-				case "openai-chat", "openai-responses":
-					want = "openai"
-				case "anthropic-messages":
-					want = "anthropic"
-				case "gemini-generate-content":
-					want = "gemini"
-				}
-				if candidate.SDK != want {
+				native, speaks := nativeSample(candidate, profile, route.Slug)
+				if !speaks {
 					continue
 				}
-				if profile.Dialect == "openai-responses" {
-					prefix, _, found := strings.Cut(sample.Code, "response = ")
-					if !found {
-						continue
-					}
-					sample.Code = prefix + fmt.Sprintf("response = client.responses.create(model=%s, input=\"Hello\", store=False)\n", strconv.Quote(route.Slug))
-				}
+				sample = native
 			}
 			result = append(result, sample)
 			break
@@ -244,12 +232,29 @@ func certifiedSamples(snapshot *routing.View, route routing.Route, origin string
 	return result
 }
 
+var sampleFamilies = map[string]wire.Format{"openai": wire.Chat, "anthropic": wire.Anthropic, "gemini": wire.Gemini}
+
+func nativeSample(sample Sample, profile connectors.Profile, slug string) (Sample, bool) {
+	family, generates := profile.GenerationFamily()
+	if !generates {
+		return Sample{}, false
+	}
+	if family == sampleFamilies[sample.SDK] {
+		return sample, true
+	}
+	prefix, _, found := strings.Cut(sample.Code, "response = ")
+	if family != wire.Responses || sampleFamilies[sample.SDK] != wire.Chat || !found {
+		return Sample{}, false
+	}
+	return Sample{SDK: sample.SDK, Operation: sample.Operation, Language: sample.Language, Code: prefix + fmt.Sprintf("response = client.responses.create(model=%s, input=\"Hello\", store=False)\n", strconv.Quote(slug))}, true
+}
+
 func samples(route routing.Route, origin string) []Sample {
 	result := []Sample{}
 	base, model := strings.TrimSuffix(origin, "/"), strconv.Quote(route.Slug)
-	openai := fmt.Sprintf("import os\nfrom openai import OpenAI\n\nclient = OpenAI(api_key=os.environ[\"OLP_API_KEY\"], base_url=%s)\n", strconv.Quote(base+"/v1"))
-	anthropic := fmt.Sprintf("import os\nfrom anthropic import Anthropic\n\nclient = Anthropic(api_key=os.environ[\"OLP_API_KEY\"], base_url=%s)\n", strconv.Quote(base+"/anthropic"))
-	gemini := fmt.Sprintf("import os\nfrom google import genai\nfrom google.genai import types\n\nclient = genai.Client(api_key=os.environ[\"OLP_API_KEY\"], http_options=types.HttpOptions(base_url=%s, api_version=\"v1beta\"))\n", strconv.Quote(base+"/gemini"))
+	openai := fmt.Sprintf("import os\nfrom openai import OpenAI\n\nclient = OpenAI(api_key=os.environ[\"OLP_API_KEY\"], base_url=%s)\n", strconv.Quote(base+surface.PathPrefix("openai")))
+	anthropic := fmt.Sprintf("import os\nfrom anthropic import Anthropic\n\nclient = Anthropic(api_key=os.environ[\"OLP_API_KEY\"], base_url=%s)\n", strconv.Quote(base+surface.PathPrefix("anthropic")))
+	gemini := fmt.Sprintf("import os\nfrom google import genai\nfrom google.genai import types\n\nclient = genai.Client(api_key=os.environ[\"OLP_API_KEY\"], http_options=types.HttpOptions(base_url=%s, api_version=\"v1beta\"))\n", strconv.Quote(base+surface.PathPrefix("gemini")))
 	if slices.Contains(route.Operations, "embeddings") {
 		result = append(result, Sample{SDK: "openai", Operation: "embeddings", Language: "python", Code: openai + fmt.Sprintf("response = client.embeddings.create(model=%s, input=[\"Hello\"])\n", model)}, Sample{SDK: "gemini", Operation: "embeddings", Language: "python", Code: gemini + fmt.Sprintf("response = client.models.embed_content(model=%s, contents=\"Hello\")\n", model)})
 	}

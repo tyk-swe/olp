@@ -6,13 +6,16 @@ import (
 	"fmt"
 	goformat "go/format"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/connectors"
+	surfaces "github.com/tyk-swe/olp/internal/domain/surface"
 )
 
 // Code examples configure qualified clients without making requests or copying
 // credentials. The consuming program reads its mounted key when it starts.
 func clientCode(client, format, surface, origin, keyFile, model string) (string, error) {
 	quote := func(value string) string { raw, _ := json.Marshal(value); return string(raw) }
-	prefix := map[string]string{"openai": "/v1", "anthropic": "/anthropic", "gemini": "/gemini"}[surface]
+	prefix := surfaces.PathPrefix(surface)
 	base, route, file := quote(origin+prefix), quote(model), quote(keyFile)
 	framework := client != "openai" && client != "anthropic" && client != "gemini"
 	if framework && format != "javascript" {
@@ -69,7 +72,7 @@ func clientCode(client, format, surface, origin, keyFile, model string) (string,
 			config = "export const client = new OpenAI({ apiKey, baseURL: " + base + ", maxRetries: 0 });\n"
 		case "anthropic":
 			imports = "import Anthropic from '@anthropic-ai/sdk';\n"
-			config = "export const client = new Anthropic({ apiKey, baseURL: " + base + ", maxRetries: 0, defaultHeaders: { 'anthropic-version': '2023-06-01' } });\n"
+			config = "export const client = new Anthropic({ apiKey, baseURL: " + base + ", maxRetries: 0, defaultHeaders: { 'anthropic-version': '" + connectors.AnthropicMessagesRevision + "' } });\n"
 		case "gemini":
 			imports = "import { GoogleGenAI } from '@google/genai';\n"
 			config = "export const client = new GoogleGenAI({ apiKey, httpOptions: { baseUrl: " + base + ", apiVersion: 'v1beta' } });\n"
@@ -78,7 +81,7 @@ func clientCode(client, format, surface, origin, keyFile, model string) (string,
 	case "python":
 		imports, config := "from openai import OpenAI\n", "client = OpenAI(api_key=api_key, base_url="+base+", max_retries=0)\n"
 		if surface == "anthropic" {
-			imports, config = "from anthropic import Anthropic\n", "client = Anthropic(api_key=api_key, base_url="+base+", max_retries=0, default_headers={'anthropic-version': '2023-06-01'})\n"
+			imports, config = "from anthropic import Anthropic\n", "client = Anthropic(api_key=api_key, base_url="+base+", max_retries=0, default_headers={'anthropic-version': '"+connectors.AnthropicMessagesRevision+"'})\n"
 		}
 		if surface == "gemini" {
 			imports, config = "from google import genai\n", "client = genai.Client(api_key=api_key, http_options={'base_url': "+base+", 'api_version': 'v1beta'})\n"

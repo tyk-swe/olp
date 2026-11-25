@@ -45,7 +45,7 @@ func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 		return nil, err
 	}
 	if c.Kind == KindAnthropic && c.ProfileID == "" {
-		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
+		req.Header.Set("Anthropic-Version", AnthropicMessagesRevision)
 	}
 	for name, value := range vendors.HeadersFor(c.VendorID) {
 		req.Header.Set(name, value)
@@ -85,7 +85,7 @@ func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
 	if !strings.EqualFold(name, "Anthropic-Version") || !envelopsMessages(p.Hosting) {
 		return false, nil
 	}
-	if value != anthropicMessagesRevision {
+	if value != AnthropicMessagesRevision {
 		return true, errors.New("the ingress API revision has no qualified hosting binding")
 	}
 	return true, nil

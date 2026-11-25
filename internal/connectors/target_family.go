@@ -28,7 +28,7 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 			return wire.Decisions, nil
 		}
 	case "generation":
-		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
+		if family, ok := p.GenerationFamily(); ok {
 			return family, nil
 		}
 	case "token_count":
@@ -68,6 +68,10 @@ func (c Config) TargetFamily(source wire.Format) (wire.Format, error) {
 		return wire.BedrockInvoke, nil
 	}
 	return "", errors.New("operation has no codec in the selected profile")
+}
+
+func (p Profile) GenerationFamily() (wire.Format, bool) {
+	return generationFamily(p.OperationDialect("generation"))
 }
 
 func generationFamily(dialect string) (wire.Format, bool) {

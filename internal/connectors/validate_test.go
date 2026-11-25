@@ -42,7 +42,7 @@ func TestValidateAcceptsAConfigurationThatFitsItsProfile(t *testing.T) {
 			c.SemanticHeaders = map[string]string{"Anthropic-Beta": "files-api-2025-04-14"}
 		}),
 		"the dialect's anthropic version": changed(valid["anthropic"], func(c *Config) {
-			c.SemanticHeaders = map[string]string{"Anthropic-Version": anthropicMessagesRevision}
+			c.SemanticHeaders = map[string]string{"Anthropic-Version": AnthropicMessagesRevision}
 		}),
 		"a gemini error format": changed(valid["gemini"], func(c *Config) { c.QuerySettings = map[string]string{"$xgafv": "2"} }),
 		"the provider's azure api version": changed(valid["azure"], func(c *Config) {
@@ -115,7 +115,7 @@ func TestApplySemanticSendsTheProfileHeadersAndQuerySettings(t *testing.T) {
 		if err := anthropic.ApplySemantic(req); err != nil {
 			t.Fatal(err)
 		}
-		want := http.Header{"Anthropic-Version": {anthropicMessagesRevision}, "Anthropic-Beta": {"files-api-2025-04-14"}}
+		want := http.Header{"Anthropic-Version": {AnthropicMessagesRevision}, "Anthropic-Beta": {"files-api-2025-04-14"}}
 		for name := range want {
 			if got := req.Header.Get(name); got != want.Get(name) {
 				t.Errorf("%s = %q, want %q", name, got, want.Get(name))

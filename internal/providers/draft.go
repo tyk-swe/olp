@@ -13,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -262,47 +261,7 @@ func (s *Server) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, 
 		return createdProvider{}, err
 	}
 	if input.Model != nil {
-		transport := prepared.Transport()
-		surface, operation := "openai", probe.Operation(transport)
-		switch configuration.Kind {
-		case connectors.KindAnthropic:
-			surface = "anthropic"
-		case connectors.KindGemini, connectors.KindVertexAI:
-			surface = "gemini"
-		}
-		if configuration.ProfileID != "" {
-			profile, _ := transport.Profile()
-			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
-				surface = "native"
-			}
-			switch profile.Dialect {
-			case "openai-chat", "openai-responses":
-				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever
-				// its kind's native surface.
-				surface = "openai"
-			case "anthropic-messages":
-				surface = "anthropic"
-			case "gemini-generate-content":
-				surface = "gemini"
-			case "bedrock-converse":
-				surface = "bedrock"
-			case "bedrock-invoke":
-				surface, operation = "bedrock", "bedrock_invoke"
-			}
-		}
-		// A dedicated operation profile, such as an embeddings or rerank
-		// dialect, declares the tuple it can actually certify.
-		mode := "unary"
-		if configuration.ProfileID != "" && !probe.Probeable(transport, connection.Capability{Operation: operation, Surface: surface, Mode: mode}) {
-			if tuple := probe.DefaultTuple(transport); probe.Probeable(transport, tuple) {
-				operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
-			}
-		}
-		capabilities := []storedCapability{{Capability: connection.Capability{Operation: operation, Surface: surface, Mode: mode}, Source: "declared"}}
-		if operation == "generation" {
-			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: operation, Surface: surface, Mode: "streaming"}, Source: "declared"})
-		}
-		declared, _ := json.Marshal(capabilities)
+		declared, _ := json.Marshal(declaredCapabilities(prepared.Transport()))
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)", httpkit.NewID(), id, *input.Model, displayName, declared); err != nil {
 			return createdProvider{}, err
 		}
@@ -529,4 +488,26 @@ func profileField(code string) string {
 
 func (s *Server) ConnectionPolicy(q database.Queryer) connection.Policy {
 	return connection.Policy{Egress: s.egress, Plugins: installedPlugins{q, s.unconfined}}
+}
+
+func declaredCapabilities(transport connectors.Config) []storedCapability {
+	tuple := declaredTuple(transport)
+	if tuple.Operation != "generation" {
+		return []storedCapability{{Capability: tuple, Source: "declared"}}
+	}
+	return []storedCapability{
+		{Capability: tuple, Source: "declared"},
+		{Capability: connection.Capability{Operation: tuple.Operation, Surface: tuple.Surface, Mode: "streaming"}, Source: "declared"},
+	}
+}
+
+func declaredTuple(transport connectors.Config) connection.Capability {
+	tuple := connection.Capability{Operation: probe.Operation(transport), Surface: transport.ProbeSurface(), Mode: "unary"}
+	if transport.ProfileID == "" || probe.Probeable(transport, tuple) {
+		return tuple
+	}
+	if certifiable := probe.DefaultTuple(transport); probe.Probeable(transport, certifiable) {
+		return certifiable
+	}
+	return tuple
 }

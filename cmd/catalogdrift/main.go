@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/catalog/drift"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 )
 
@@ -33,7 +34,7 @@ func bearer(key string) http.Header { return http.Header{"Authorization": {"Bear
 var listings = []listing{
 	{vendor: "openai", key: "OPENAI_API_KEY", header: bearer, array: "data", id: "id"},
 	{vendor: "anthropic", key: "ANTHROPIC_API_KEY", query: "?limit=1000", header: func(key string) http.Header {
-		return http.Header{"X-Api-Key": {key}, "Anthropic-Version": {"2023-06-01"}}
+		return http.Header{"X-Api-Key": {key}, "Anthropic-Version": {connectors.AnthropicMessagesRevision}}
 	}, array: "data", id: "id"},
 	{vendor: "google", key: "GEMINI_API_KEY", query: "?pageSize=1000", header: func(key string) http.Header {
 		return http.Header{"X-Goog-Api-Key": {key}}
