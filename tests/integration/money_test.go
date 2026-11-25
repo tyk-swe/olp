@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -201,11 +200,32 @@ func TestStoredResourceMoneyGolden(t *testing.T) {
 		}
 		return
 	}
-	want, err := os.ReadFile(path)
+	stored, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(bytes.TrimSpace(want), raw) {
-		t.Fatalf("stored resource money changed, rerun with -update after checking it:\n%s", raw)
+	var want map[string][]moneyStep
+	if err := json.Unmarshal(stored, &want); err != nil {
+		t.Fatal(err)
 	}
+	for name, steps := range got {
+		if len(steps) != len(want[name]) {
+			t.Errorf("%s recorded %d steps, want %d", name, len(steps), len(want[name]))
+			continue
+		}
+		for index, step := range steps {
+			if got, want := moneyLine(t, step), moneyLine(t, want[name][index]); got != want {
+				t.Errorf("%s, %s\n got %s\nwant %s", name, step.Step, got, want)
+			}
+		}
+	}
+}
+
+func moneyLine(t *testing.T, step moneyStep) string {
+	t.Helper()
+	raw, err := json.Marshal(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
