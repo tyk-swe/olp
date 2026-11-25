@@ -2,9 +2,11 @@
   import { createQuery } from '@tanstack/svelte-query';
   import QueryView from '#lib/components/QueryView.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { useMutation } from '#lib/editing/action.svelte.js';
-  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { readResult } from '#lib/editing/result.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '#lib/editing/mutationIntent.svelte.js';
   import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
   import { errorMessage } from '#lib/management/http.js';
   import NativeResourceFields from './NativeResourceFields.svelte';
@@ -31,7 +33,8 @@
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
-  const mutation = useMutation();
+  const action = useAction();
+  const intent = useMutationIntent();
   let operation = $state('');
   let endpointKey = $state('');
   let apiKey = $state('');
@@ -44,13 +47,11 @@
   let files = $state<File[]>([]);
   let filePickerKey = $state(0);
   let result = $state('');
-  let preparing = $state(false);
   let downloadUrl = $state('');
   let downloadName = $state('');
   let downloadBytes = $state(0);
   let controller: AbortController | undefined;
 
-  const busy = $derived(preparing || mutation.busy);
   const apiKeyMissing = $derived(!apiKey.trim());
 
   function clearDownload() {
@@ -59,8 +60,7 @@
     downloadBytes = 0;
   }
 
-  const captureOwner = usePrincipalLifetime(() => {
-    preparing = false;
+  usePrincipalLifetime(() => {
     controller?.abort();
     controller = undefined;
     clearDownload();
@@ -122,7 +122,7 @@
     upload = false;
     body = query = '{}';
     result = '';
-    mutation.error = '';
+    action.error = '';
     clearDownload();
   }
 
@@ -132,9 +132,8 @@
 
   async function run(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !endpoint) return;
+    if (action.busy || !endpoint) return;
     const selected = endpoint;
-    const isCurrent = captureOwner();
     const owner = new AbortController();
     controller = owner;
     const request: NativeResourceRequest = {
@@ -150,7 +149,6 @@
       signal: owner.signal
     };
     result = '';
-    mutation.error = '';
     clearDownload();
     const accept = (response: NativeResourceResult) => {
       captureId(response.resourceId, selected.kind);
@@ -182,39 +180,20 @@
         );
       }
     };
-    if (selected.method === 'GET') {
-      await mutation.run(
-        () => runNativeResourceRequest(request),
-        accept,
-        feedback
-      );
-    } else {
-      preparing = true;
-      const fingerprint = await readResult(() =>
-        nativeResourceFingerprint(request)
-      );
-      if (!isCurrent()) return;
-      preparing = false;
-      if (!owner.signal.aborted) {
-        if (!fingerprint.ok) {
-          mutation.error = errorMessage(
-            fingerprint.error,
-            'The resource operation could not be completed.'
-          );
-        } else {
-          await mutation.submit(
-            [fingerprint.value, request.apiKey.trim()],
-            (_intent, requestId) =>
-              runNativeResourceRequest({
-                ...request,
-                submissionKey: requestId
-              }),
-            accept,
-            feedback
-          );
-        }
-      }
-    }
+    await action.run(
+      async () => {
+        if (selected.method === 'GET') return runNativeResourceRequest(request);
+        const fingerprint = await nativeResourceFingerprint(request);
+        owner.signal.throwIfAborted();
+        return intent.submit(
+          [fingerprint, request.apiKey.trim()],
+          (_input, submissionKey) =>
+            runNativeResourceRequest({ ...request, submissionKey })
+        );
+      },
+      accept,
+      feedback
+    );
     if (controller === owner) controller = undefined;
   }
 </script>
@@ -240,7 +219,7 @@
       <p>The server has not published selectable resource lifecycle actions.</p>
     {/snippet}
     <form onsubmit={run}>
-      <fieldset disabled={busy}>
+      <fieldset disabled={action.busy}>
         <div class="resource-fields">
           <label>
             Resource family<select
@@ -294,7 +273,7 @@
           />
         {/if}
       </fieldset>
-      {#if busy}<div class="resource-actions">
+      {#if action.busy}<div class="resource-actions">
           <p role="status">Waiting for the resource operation…</p>
           <button
             class="button button-secondary"
@@ -306,8 +285,8 @@
         </div>{/if}
     </form>
   </QueryView>
-  {#if mutation.error}<p class="inline-problem" role="alert">
-      {mutation.error}
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
     </p>{/if}
   {#if downloadUrl}<a
       class="button button-secondary"

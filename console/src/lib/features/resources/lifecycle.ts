@@ -179,7 +179,7 @@ function buildAgentRequestSpec(request: AgentRequest) {
   };
 }
 
-export async function runAgentRequest(request: AgentRequest): Promise<string> {
+export async function runAgentRequest(request: AgentRequest) {
   const spec = buildAgentRequestSpec(request);
   const response = await gatewayFetch(spec.path, {
     method: spec.method,
@@ -187,15 +187,25 @@ export async function runAgentRequest(request: AgentRequest): Promise<string> {
     body: spec.body,
     signal: request.signal
   });
-  const result = new TextDecoder().decode(
+  const text = new TextDecoder().decode(
     await readBoundedResponseBytes(response)
   );
   if (!response.ok)
     throw new ResourceRequestError(
-      `Resource request failed (HTTP ${response.status}). ${result.slice(0, 2048)}`,
+      `Resource request failed (HTTP ${response.status}). ${text.slice(0, 2048)}`,
       response.headers.get('X-OLP-Resource-ID')
     );
-  return result;
+  const creating = request.action === 'create';
+  const metadata = extractResourceResponseMetadata(
+    text,
+    creating ? 'agent_resource' : undefined
+  );
+  if (creating && !metadata.id)
+    throw new ResourceRequestError(
+      'The gateway returned an invalid agent creation response.',
+      response.headers.get('X-OLP-Resource-ID')
+    );
+  return { text, ...metadata };
 }
 
 function evidenceQuantityTemplate(kind: ProviderResource['kind']) {

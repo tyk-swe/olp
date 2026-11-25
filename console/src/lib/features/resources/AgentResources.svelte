@@ -14,7 +14,6 @@
   import {
     ResourceRequestError,
     agentSubmissionFingerprint,
-    extractResourceResponseMetadata,
     runAgentRequest,
     type AgentAction
   } from './lifecycle';
@@ -39,6 +38,12 @@
   let result = $state('');
   let nextPage = $state('');
   let controller: AbortController | undefined;
+  const canCreate = $derived(
+    !routes.isPending &&
+      !routes.isError &&
+      eligible.some((item) => item.slug === route) &&
+      !!apiKey.trim()
+  );
 
   usePrincipalLifetime(() => {
     controller?.abort();
@@ -51,7 +56,7 @@
   });
 
   async function run(action: AgentAction, pageToken?: string) {
-    if (mutation.busy) return;
+    if (mutation.busy || (action === 'create' && !canCreate)) return;
     const fingerprint =
       action === 'create'
         ? captureResult(() => agentSubmissionFingerprint(route, definition))
@@ -74,11 +79,10 @@
       pageToken,
       signal: owner.signal
     };
-    const accept = (response: string) => {
-      result = response || 'Resource deleted.';
-      const metadata = extractResourceResponseMetadata(response);
-      if (metadata.id) id = metadata.id;
-      nextPage = metadata.nextPageToken ?? '';
+    const accept = (response: Awaited<ReturnType<typeof runAgentRequest>>) => {
+      result = response.text || 'Resource deleted.';
+      if (response.id) id = response.id;
+      nextPage = response.nextPageToken ?? '';
     };
     const feedback = {
       key: action,
@@ -167,7 +171,7 @@
       class="button button-primary"
       type="button"
       onclick={() => run('create')}
-      disabled={mutation.busy || !route || !apiKey}
+      disabled={mutation.busy || !canCreate}
     >
       Create agent
     </button>

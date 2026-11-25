@@ -90,7 +90,7 @@ describe('agent resource requests', () => {
 
   it('preserves native numbers and submission identity', async () => {
     vi.mocked(gatewayFetch).mockResolvedValue(
-      new Response('{"id":"agent_resource_123"}')
+      new Response(`{"id":"agent_resource_${hex32()}"}`)
     );
     await runAgentRequest({
       action: 'create',
