@@ -3,13 +3,18 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
@@ -228,4 +233,79 @@ func moneyLine(t *testing.T, step moneyStep) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func TestANativeDuplexSessionHoldsItsBoundsInTheDebitLedgerAndAFailedOneStaysUnresolved(t *testing.T) {
+	t.Parallel()
+	const done = `{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}`
+	for _, session := range []struct {
+		name, state string
+		answers     bool
+	}{{"a served session stays dispatched", "dispatched", true}, {"a session the provider drops stays unresolved", "outcome_unknown", false}} {
+		t.Run(session.name, func(t *testing.T) {
+			t.Parallel()
+			pool, _ := harness.Database(t)
+			fixture := newUsageFixture(t, pool)
+			g := newStoredGateway(t, fixture, storedPlan{
+				slug: "voice", model: "voice-model", kind: "openai_compatible", profile: "xai-realtime", vendor: "xai", surface: "native",
+				operations: []string{"realtime"}, fidelity: routing.FidelityStrict, sessions: true,
+				upstream: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if !session.answers {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					conn, err := websocket.Accept(w, r, nil)
+					if err != nil {
+						return
+					}
+					defer conn.CloseNow()
+					if conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"session.created","session":{"id":"sess-upstream"}}`)) != nil {
+						return
+					}
+					if _, _, err := conn.Read(r.Context()); err != nil {
+						return
+					}
+					if conn.Write(r.Context(), websocket.MessageText, []byte(done)) != nil {
+						return
+					}
+					_, _, _ = conn.Read(r.Context())
+				}),
+			})
+			g.runtime.inputs = money.Inputs(t, g.snapshot, "realtime")
+			keyID := g.key(t, "owner")
+
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(g.server.URL, "http")+"/native/xai-realtime/sessions/voice",
+				&websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer owner"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"session.update","session":{"type":"realtime","voice":"eve"}}`)); err != nil {
+				t.Fatal(err)
+			}
+			for {
+				_, frame, err := conn.Read(ctx)
+				if err != nil {
+					break
+				}
+				if strings.Contains(string(frame), "response.done") {
+					_ = conn.Close(websocket.StatusNormalClosure, "")
+					break
+				}
+			}
+			harness.Eventually(t, "the session debit reaches "+session.state, 2*time.Second, func() (bool, string) {
+				var debits, held, priced, marked int
+				err := pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE state=$2),count(*) FILTER (WHERE cost_bound>0),
+					count(*) FILTER (WHERE kind='api' AND charge_bound=cost_bound*1.5 AND affinity->>'provider_id'=$3)
+					FROM olp.execution_debits WHERE api_key_id=$1`, keyID, session.state, fixture.providerID).Scan(&debits, &held, &priced, &marked)
+				if err != nil {
+					return false, err.Error()
+				}
+				return debits == 1 && held == 1 && priced == 1 && marked == 1,
+					"debits, in the wanted state, with a cost bound, marked up for the pinned provider = " + strings.Join([]string{strconv.Itoa(debits), strconv.Itoa(held), strconv.Itoa(priced), strconv.Itoa(marked)}, ", ")
+			})
+		})
+	}
 }

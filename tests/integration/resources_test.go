@@ -369,6 +369,7 @@ type storedPlan struct {
 	prices      []rates.RoutingPrice
 	upstream    http.Handler
 	valkey      scripts.Commander
+	sessions    bool
 	front       func(http.Handler) http.Handler
 }
 
@@ -492,6 +493,9 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	limiter := admission.NewDurable(runner, syncer)
 	g.limiter = limiter
 	workflow := kernel.Dependencies{}
+	if plan.sessions {
+		workflow = kernel.Dependencies{Debits: &kernel.SessionDebits{Session: debits.NewSession(debitStore, syncer)}}
+	}
 	if plan.tools != nil {
 		workflow = kernel.Dependencies{
 			WorkflowTools: plan.tools,
@@ -579,6 +583,9 @@ func (g *storedGateway) seedRoute(slug string) (string, string) {
 func operationModes(operation string, modes []string) []string {
 	if operation == "video_create" {
 		return []string{"async"}
+	}
+	if operation == "realtime" {
+		return []string{"realtime"}
 	}
 	return modes
 }
