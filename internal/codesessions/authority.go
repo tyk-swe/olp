@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 const LiveKeyIssuerCondition = `(k.workload_issuer_id IS NULL OR wi.document->>'enabled'='true') AND u.active AND u.oidc_authorized

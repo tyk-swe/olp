@@ -9,10 +9,10 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
+	policystore "github.com/tyk-swe/olp/internal/guardrails/policy"
 	"github.com/tyk-swe/olp/internal/platform/database"
-
-	guardrailpolicy "github.com/tyk-swe/olp/internal/guardrails/policy"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/agents/publications"
@@ -195,7 +195,7 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p authz.Principal, director
 	case draft:
 		return guardrailattachment.Stage(ctx, tx, p.UserID(), t.id, revision, a.Order)
 	case published:
-		placed := guardrails.Attachment{Scope: guardrails.Scope(describe(a.Scope).kind), ScopeID: guardrails.ProjectOf(t.id), PolicyRevisionID: revision, Order: a.Order}
+		placed := guardrails.Attachment{Scope: guardrailpolicy.Scope(describe(a.Scope).kind), ScopeID: guardrails.ProjectOf(t.id), PolicyRevisionID: revision, Order: a.Order}
 		if err := guardrailattachment.Authorize(ctx, tx, p, placed, authz.Change); err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func toolsetOutsideProject() error {
 }
 
 func activeRevision(ctx context.Context, q database.Queryer, project *string, name string) (string, error) {
-	current, err := guardrailpolicy.FindLatest(ctx, q, project, name)
+	current, err := policystore.FindLatest(ctx, q, project, name)
 	if err != nil {
 		return "", err
 	}

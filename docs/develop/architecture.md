@@ -12,8 +12,8 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
 | Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
-| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/access/authz/` (callers, roles and operations), `internal/auditlog/`; console `identity/`, `access/` |
-| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/authority/`, `internal/access/httpkit/` (problems, replies, decoding and pagination) |
+| Users, keys and identity | `internal/identity/` (sign-in, sessions, MFA, OIDC, SAML, SCIM, members and tokens), `internal/apikeys/` (keys, end users and workload issuers), `internal/keyauthority/` (the key authority policy a release publishes), `internal/access/authz/` (callers, roles and operations), `internal/auditlog/`; console `identity/`, `access/` |
+| Management transport | `internal/access/` (authentication, route registration, transactions, replay and audit), `internal/access/httpkit/` (problems, replies, decoding and pagination) |
 | Projects, installation settings and policy | `internal/projects/`, `internal/settings/` (settings and branding), `internal/budgets/` (budget groups, increases and execution debits), `internal/limits/`; console `access/`, `settings/`, `budgets/` |
 | Notifications | `internal/notifications/`; console `notifications/` |
 | Admission, execution and retained resources | `internal/gateway/` (the assembly, with the execution kernel in `kernel/`, one package per extracted surface in `surface/`, and `fault/`, `events/`, `quota/`, `ingress/`, `health/`, `codeforward/`, `traceingest/`, `delegation/`, `models/`, `guardstream/` and `realtimeresponses/` beneath it), `internal/resources/`, `internal/media/`; console inference/media |
@@ -254,7 +254,7 @@ its own package under `internal/gateway/`. Each declares its allowed imports in
 where each plane is assembled by one constructor and `Run` owns mode
 selection, listeners and shutdown ordering. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
-vocabulary, as `internal/domain/routeidentity` and `internal/access/authority` do. A
+vocabulary, as `internal/domain/routeidentity` and `internal/keyauthority` do. A
 wrapper whose only job is forwarding to another package belongs in that
 package instead.
 

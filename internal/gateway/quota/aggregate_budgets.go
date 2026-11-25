@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	keyauthority "github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 )
@@ -93,7 +93,7 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 	}
 	request := hold.On(admission.Request{
 		Lookup: limits.AggregateBudgetLookup(owner), LeaseTTL: ttl,
-		Cost: admission.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
+		Cost: limits.Budget(limits.Owner{ID: owner, Kind: limits.OwnerAggregate, Basis: policy.Basis()},
 			policy.DailyCostLimit, policy.WeeklyCostLimit, policy.MonthlyCostLimit, increases),
 	})
 	decision, cancel := context.WithTimeout(ctx, ReserveTimeout)

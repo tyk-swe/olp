@@ -14,12 +14,16 @@ const (
 )
 
 var (
-	keyPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
-	valuePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+	keyPattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
+	valuePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+	endUserDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func ValidKey(key string) bool     { return keyPattern.MatchString(key) }
 func ValidValue(value string) bool { return valuePattern.MatchString(value) }
+
+// ValidEndUserDigest accepts only a derived identity, never a raw identifier.
+func ValidEndUserDigest(value string) bool { return endUserDigest.MatchString(value) }
 
 type Error struct{ Reason string }
 

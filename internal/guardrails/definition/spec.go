@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -17,11 +18,11 @@ type Draft struct {
 	kind          guardrails.Kind
 	configuration json.RawMessage
 	timeout       int64
-	onError       guardrails.OnError
+	onError       guardrailpolicy.OnError
 }
 
-func NewDraft(project, name string, kind guardrails.Kind, configuration json.RawMessage, timeout int64, onError guardrails.OnError) (Draft, error) {
-	d := Draft{project: project, name: name, kind: kind, configuration: configuration, timeout: cmp.Or(timeout, 1000), onError: cmp.Or(onError, guardrails.FailClosed)}
+func NewDraft(project, name string, kind guardrails.Kind, configuration json.RawMessage, timeout int64, onError guardrailpolicy.OnError) (Draft, error) {
+	d := Draft{project: project, name: name, kind: kind, configuration: configuration, timeout: cmp.Or(timeout, 1000), onError: cmp.Or(onError, guardrailpolicy.FailClosed)}
 	if _, err := guardrails.ParseRevision(guardrails.Revision{Type: d.kind, Configuration: d.configuration, TimeoutMS: d.timeout, OnError: d.onError}); err != nil {
 		return Draft{}, httpkit.Invalid("configuration", "Supply valid typed guardrail configuration, timeout and failure policy.")
 	}
@@ -29,19 +30,19 @@ func NewDraft(project, name string, kind guardrails.Kind, configuration json.Raw
 }
 
 type input struct {
-	Configuration json.RawMessage    `json:"configuration,omitempty"`
-	TimeoutMS     int64              `json:"timeout_ms,omitempty"`
-	OnError       guardrails.OnError `json:"on_error,omitempty"`
-	Name          string             `json:"name"`
-	Type          guardrails.Kind    `json:"type,omitempty"`
-	ProjectID     *string            `json:"project_id,omitempty"`
+	Configuration json.RawMessage         `json:"configuration,omitempty"`
+	TimeoutMS     int64                   `json:"timeout_ms,omitempty"`
+	OnError       guardrailpolicy.OnError `json:"on_error,omitempty"`
+	Name          string                  `json:"name"`
+	Type          guardrails.Kind         `json:"type,omitempty"`
+	ProjectID     *string                 `json:"project_id,omitempty"`
 }
 
 type edit struct {
 	name          string
 	configuration json.RawMessage
 	timeout       int64
-	onError       guardrails.OnError
+	onError       guardrailpolicy.OnError
 }
 
 func parseEdit(in input) (edit, error) {

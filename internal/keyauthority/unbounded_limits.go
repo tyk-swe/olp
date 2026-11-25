@@ -1,4 +1,4 @@
-package authority
+package keyauthority
 
 func (a *Authority) CostBudgetedForRoute(route string) bool {
 	return a.Policy.AdmissionLimits().CostBudgeted() ||

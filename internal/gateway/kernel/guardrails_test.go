@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -23,12 +24,12 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func installTestGuardrail(t *testing.T, h *harness, phase guardrails.Phase, action guardrails.Action, kind guardrails.Kind, configuration string) {
+func installTestGuardrail(t *testing.T, h *harness, phase guardrailpolicy.Phase, action guardrailpolicy.Action, kind guardrails.Kind, configuration string) {
 	t.Helper()
 	current := h.rt.release
 	snapshot := current.Snapshot().Clone()
 	route := snapshot.Routes[routeSlug]
-	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: "installation", Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: phase, Action: action}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
 	credentials := map[string][]byte{}
 	for _, provider := range snapshot.Providers {
 		for _, slot := range provider.Slots {
@@ -46,7 +47,7 @@ func installTestGuardrail(t *testing.T, h *harness, phase guardrails.Phase, acti
 
 func TestGuardrailMaskRestoresBeforeOutputAndRecordsOnlyMetadata(t *testing.T) {
 	h := newHarness(t, Config{})
-	installTestGuardrail(t, h, guardrails.Input, guardrails.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
+	installTestGuardrail(t, h, guardrailpolicy.Input, guardrailpolicy.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
 	borrowed := h.rt.release.Snapshot()
 	*borrowed.GuardrailEngine(routeSlug, "") = guardrails.Engine{}
 	*borrowed = routing.View{}
@@ -91,7 +92,7 @@ func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 		return guardrails.Flag(), nil
 	})
 	h := newHarness(t, Config{}, Dependencies{Guardrails: func(guardrails.Caller) guardrails.Evaluator { return evaluator }})
-	installTestGuardrail(t, h, guardrails.InputParallel, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
+	installTestGuardrail(t, h, guardrailpolicy.InputParallel, guardrailpolicy.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -118,7 +119,7 @@ func TestGuardrailParallelRefusalAfterCommitmentIsInBand(t *testing.T) {
 
 func TestGuardrailToolArgumentsBufferedBeforeDeny(t *testing.T) {
 	h := newHarness(t, Config{})
-	installTestGuardrail(t, h, guardrails.OutputStream, guardrails.Block, "builtin.tools", `{"allow":["*"],"deny":["delete*"]}`)
+	installTestGuardrail(t, h, guardrailpolicy.OutputStream, guardrailpolicy.Block, "builtin.tools", `{"allow":["*"],"deny":["delete*"]}`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, frame := range []string{
@@ -140,17 +141,17 @@ func TestGuardrailToolArgumentsBufferedBeforeDeny(t *testing.T) {
 }
 
 func TestNativeOperationOutputUnavailableIsExplicit(t *testing.T) {
-	for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.Output} {
+	for _, phase := range []guardrailpolicy.Phase{guardrailpolicy.Input, guardrailpolicy.Output} {
 		h := strictHarness(t, strictEmbeddings)
-		installTestGuardrail(t, h, phase, guardrails.Block, "builtin.keywords", `{"words":["forbidden"]}`)
+		installTestGuardrail(t, h, phase, guardrailpolicy.Block, "builtin.keywords", `{"words":["forbidden"]}`)
 		h.mock.set("a", status(200, `{"object":"list","model":"model-a","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}`))
 		resp := h.do(t.Context(), "POST", "/v1/embeddings", fullKey, []byte(`{"model":"team-chat","input":"safe"}`), nil)
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if phase == guardrails.Input && resp.StatusCode != 200 {
+		if phase == guardrailpolicy.Input && resp.StatusCode != 200 {
 			t.Fatalf("inspectable input refused: %s", raw)
 		}
-		if phase == guardrails.Output && (resp.StatusCode != 422 || !strings.Contains(string(raw), "guardrail_surface_unavailable")) {
+		if phase == guardrailpolicy.Output && (resp.StatusCode != 422 || !strings.Contains(string(raw), "guardrail_surface_unavailable")) {
 			t.Fatalf("opaque output not refused: %d %s", resp.StatusCode, raw)
 		}
 	}
@@ -175,14 +176,14 @@ func TestToolGuardrailEvaluationReachesConfiguredEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := guardrails.Revision{ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: "webhook", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}
-	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block, Mandatory: true}}, map[string]guardrails.Revision{"revision": definition})
+	definition := guardrails.Revision{ID: "revision", GuardrailID: "guard", ProjectID: "installation", Name: "Guard", Type: "webhook", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}
+	engine, err := guardrails.Compile([]guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block, Mandatory: true}}, map[string]guardrails.Revision{"revision": definition})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	evaluate := func(text string) (guardrails.Result, error) {
-		return h.gateway.EvaluateToolGuardrails(t.Context(), *authority, h.rt.release, engine, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50901", guardrails.Input, []guardrails.Segment{{ID: "arguments", Kind: "tool_call", ToolName: "t_alias", Text: text}}, &guardrails.Masking{})
+		return h.gateway.EvaluateToolGuardrails(t.Context(), *authority, h.rt.release, engine, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50901", guardrailpolicy.Input, []guardrails.Segment{{ID: "arguments", Kind: "tool_call", ToolName: "t_alias", Text: text}}, &guardrails.Masking{})
 	}
 	passed, err := evaluate(`{"query":"hello"}`)
 	if err != nil || len(passed.Decisions) != 1 || passed.Decisions[0].Outcome != "passed" {
@@ -204,7 +205,7 @@ func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing
 		return guardrails.Flag(), nil
 	})
 	h := newHarness(t, Config{}, Dependencies{Guardrails: func(guardrails.Caller) guardrails.Evaluator { return evaluator }})
-	installTestGuardrail(t, h, guardrails.Input, guardrails.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
+	installTestGuardrail(t, h, guardrailpolicy.Input, guardrailpolicy.Block, "webhook", `{"endpoint":"https://example.com","credential_ref":"key","content_egress":true}`)
 	route := h.rt.release.Snapshot().Route(routeSlug)
 	target := route.Targets[0]
 	provider := h.rt.release.Snapshot().Provider(target.ProviderID)
@@ -225,7 +226,7 @@ func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing
 	fact := &events.AttemptFact{TargetID: target.ID, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, UpstreamModel: target.ProviderModel}
 	for range 2 {
 		evidence := x.preparation().factEvidence(fact)
-		if len(evidence.guardrails) != 1 || evidence.guardrails[0].Outcome != guardrails.Blocked {
+		if len(evidence.guardrails) != 1 || evidence.guardrails[0].Outcome != guardrailpolicy.Blocked {
 			t.Fatalf("failed preparation evidence = %+v", evidence.guardrails)
 		}
 		evidence.guardrails[0].Outcome = ""
@@ -282,7 +283,7 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	}
 
 	redacting := newHarness(t, Config{})
-	installTestGuardrail(t, redacting, guardrails.OutputStream, guardrails.Redact, "builtin.keywords", `{"words":["forbidden"]}`)
+	installTestGuardrail(t, redacting, guardrailpolicy.OutputStream, guardrailpolicy.Redact, "builtin.keywords", `{"words":["forbidden"]}`)
 	redacting.mock.set("a", streamedChat("this is for", "bidden text", " and more"))
 	resp := redacting.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("hello"), nil)
 	raw, _ := io.ReadAll(resp.Body)
@@ -297,7 +298,7 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	}
 
 	blocking := newHarness(t, Config{})
-	installTestGuardrail(t, blocking, guardrails.OutputStream, guardrails.Block, "builtin.keywords", `{"words":["forbidden"]}`)
+	installTestGuardrail(t, blocking, guardrailpolicy.OutputStream, guardrailpolicy.Block, "builtin.keywords", `{"words":["forbidden"]}`)
 	blocking.mock.set("a", streamedChat("this is for", "bidden text", " and more"))
 	resp = blocking.do(t.Context(), "POST", "/v1/chat/completions", fullKey, request("hello"), nil)
 	raw, _ = io.ReadAll(resp.Body)
@@ -310,7 +311,7 @@ func TestStreamedOutputIsRedactedBlockedOrUnmaskedAcrossFrameBoundaries(t *testi
 	}
 
 	masking := newHarness(t, Config{})
-	installTestGuardrail(t, masking, guardrails.Input, guardrails.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
+	installTestGuardrail(t, masking, guardrailpolicy.Input, guardrailpolicy.Mask, "builtin.pii", `{"categories":["pii.email"]}`)
 	masking.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		var sent struct {
 			Messages []struct {
@@ -349,13 +350,13 @@ func installModelGuardrailScenario(t *testing.T, h *harness, kind guardrails.Kin
 			Definitions: map[string]guardrails.Revision{
 				"eval-rev": {
 					ID: "eval-rev", GuardrailID: "model-guard", ProjectID: "installation", Name: "Model Guard",
-					Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 2000, OnError: guardrails.FailClosed,
+					Type: kind, Configuration: json.RawMessage(configuration), TimeoutMS: 2000, OnError: guardrailpolicy.FailClosed,
 				},
 			},
 			Policies: map[string]guardrails.PolicyRevision{
 				"eval-pol": {
 					ID: "eval-pol", PolicyID: "policy", ProjectID: "installation",
-					Entries: []guardrails.Entry{{GuardrailID: "model-guard", RevisionID: "eval-rev", Phase: guardrails.Input, Action: guardrails.Block}},
+					Entries: []guardrails.Entry{{GuardrailID: "model-guard", RevisionID: "eval-rev", Phase: guardrailpolicy.Input, Action: guardrailpolicy.Block}},
 				},
 			},
 			Attachments: []guardrails.Attachment{
@@ -482,7 +483,7 @@ func TestModelGuardrailRoutingAndAccounting(t *testing.T) {
 			if tc.expectUsage && (eval.Usage == nil || eval.Usage.TotalTokens == 0) {
 				t.Fatalf("expected evaluator usage accounting, got %+v", eval.Usage)
 			}
-			if len(parent.GuardrailDecisions) != 1 || parent.GuardrailDecisions[0].Outcome != guardrails.Blocked || len(parent.GuardrailDecisions[0].Categories) != 1 || parent.GuardrailDecisions[0].Categories[0] != tc.wantCategory {
+			if len(parent.GuardrailDecisions) != 1 || parent.GuardrailDecisions[0].Outcome != guardrailpolicy.Blocked || len(parent.GuardrailDecisions[0].Categories) != 1 || parent.GuardrailDecisions[0].Categories[0] != tc.wantCategory {
 				t.Fatalf("parent guardrail decisions = %+v", parent.GuardrailDecisions)
 			}
 
@@ -539,7 +540,7 @@ func TestModelGuardrailDeduplicationAuthorizationRecursionAndPlayground(t *testi
 			t.Fatalf("forbidden evaluator route was not refused: status=%d main=%d eval=%d", resp.StatusCode, h.mock.count("a"), h.mock.count("b"))
 		}
 		envs := h.sink.await(t, 1)
-		if len(envs[0].GuardrailDecisions) != 1 || envs[0].GuardrailDecisions[0].Outcome != guardrails.FailedClosed {
+		if len(envs[0].GuardrailDecisions) != 1 || envs[0].GuardrailDecisions[0].Outcome != guardrailpolicy.FailedClosed {
 			t.Fatalf("expected failed_closed evidence, got %+v", envs[0].GuardrailDecisions)
 		}
 	})
@@ -556,9 +557,9 @@ func TestModelGuardrailDeduplicationAuthorizationRecursionAndPlayground(t *testi
 		reg := h.rt.release.Snapshot().Clone().Guardrails
 		pinned := guardrails.Pinned{Policy: reg.Policies["eval-pol"], Definitions: reg.Definitions}
 		res, err := h.gateway.EvaluateGuardrails(req, Member{UserID: "member-1", Admit: func(*routing.Route) *fault.Error { return nil }}, pinned, guardrails.Application{
-			PolicyRevisionID: "eval-pol", Phase: guardrails.Input, Segments: []guardrails.Segment{{ID: "s0", Text: "safe"}},
+			PolicyRevisionID: "eval-pol", Phase: guardrailpolicy.Input, Segments: []guardrails.Segment{{ID: "s0", Text: "safe"}},
 		})
-		if err != nil || len(res.Decisions) != 1 || res.Decisions[0].Outcome != guardrails.Passed {
+		if err != nil || len(res.Decisions) != 1 || res.Decisions[0].Outcome != guardrailpolicy.Passed {
 			t.Fatalf("playground evaluation failed: res=%+v err=%v", res, err)
 		}
 		envs := h.sink.await(t, 2)

@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -64,7 +65,7 @@ func redact(ctx context.Context, engine *guardrails.Engine, c content) (content,
 	}); err != nil {
 		return content{}, err
 	}
-	evaluated, err := engine.Evaluate(ctx, guardrails.Evaluation{Phase: guardrails.Input, Segments: segments}, nil)
+	evaluated, err := engine.Evaluate(ctx, guardrails.Evaluation{Phase: guardrailpolicy.Input, Segments: segments}, nil)
 	if err != nil || ctx.Err() != nil || len(evaluated.Segments) != len(segments) {
 		return content{}, errRedaction
 	}

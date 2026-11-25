@@ -7,8 +7,8 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -16,7 +16,7 @@ import (
 
 type Settings struct {
 	TimeZone        *string
-	Budget          *authority.BudgetPolicy
+	Budget          *keyauthority.BudgetPolicy
 	RequireLocalMFA *bool
 }
 
@@ -77,12 +77,12 @@ func parseTimeZone(value nullable.Nullable[string]) (*string, error) {
 	return zone, nil
 }
 
-func parseBudget(value nullable.Nullable[contract.BudgetPolicy]) (*authority.BudgetPolicy, error) {
+func parseBudget(value nullable.Nullable[contract.BudgetPolicy]) (*keyauthority.BudgetPolicy, error) {
 	budget, ok := promotion.Present(value)
 	if !ok {
 		return nil, nil
 	}
-	policy, err := promotion.Convert[authority.BudgetPolicy](budget)
+	policy, err := promotion.Convert[keyauthority.BudgetPolicy](budget)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func parseBudget(value nullable.Nullable[contract.BudgetPolicy]) (*authority.Bud
 	return canonical(&policy), nil
 }
 
-func renderBudget(policy *authority.BudgetPolicy) (nullable.Nullable[contract.BudgetPolicy], error) {
+func renderBudget(policy *keyauthority.BudgetPolicy) (nullable.Nullable[contract.BudgetPolicy], error) {
 	if policy == nil {
 		return nullable.NewNullNullable[contract.BudgetPolicy](), nil
 	}
@@ -103,9 +103,9 @@ func renderBudget(policy *authority.BudgetPolicy) (nullable.Nullable[contract.Bu
 	return nullable.NewNullableWithValue(budget), nil
 }
 
-func canonical(policy *authority.BudgetPolicy) *authority.BudgetPolicy {
-	if normalized := authority.NormalizedBudget(policy); normalized != nil {
+func canonical(policy *keyauthority.BudgetPolicy) *keyauthority.BudgetPolicy {
+	if normalized := keyauthority.NormalizedBudget(policy); normalized != nil {
 		return normalized
 	}
-	return &authority.BudgetPolicy{}
+	return &keyauthority.BudgetPolicy{}
 }

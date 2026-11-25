@@ -1,4 +1,4 @@
-package authority
+package keyauthority
 
 import (
 	"maps"
@@ -7,8 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/limits/admission"
-	"github.com/tyk-swe/olp/internal/limits/debits"
 )
 
 type KeyPolicy struct {
@@ -248,7 +246,7 @@ type AggregateAccount struct{ Level, Key, Value string }
 type CostBoundary struct {
 	Owner     limits.Owner
 	Lookup    string
-	Budget    *admission.CostBudget
+	Budget    *limits.CostBudget
 	Aggregate *AggregateAccount
 }
 
@@ -257,7 +255,7 @@ type costLimits struct{ daily, weekly, monthly *string }
 func (a Authority) costBoundary(owner limits.Owner, lookup string, l costLimits) CostBoundary {
 	return CostBoundary{
 		Owner: owner, Lookup: lookup,
-		Budget: admission.Budget(owner, l.daily, l.weekly, l.monthly, a.BudgetIncreases[owner.ID]),
+		Budget: limits.Budget(owner, l.daily, l.weekly, l.monthly, a.BudgetIncreases[owner.ID]),
 	}
 }
 
@@ -384,10 +382,10 @@ func (r CostBoundaries) Owners() []limits.Owner {
 	return owners
 }
 
-func (r CostBoundaries) Admissions() []debits.Boundary {
-	admissions := make([]debits.Boundary, 0, len(r.Boundaries))
+func (r CostBoundaries) Admissions() []limits.Boundary {
+	admissions := make([]limits.Boundary, 0, len(r.Boundaries))
 	for _, boundary := range r.Boundaries {
-		admissions = append(admissions, debits.Boundary{Owner: boundary.Owner, Budget: boundary.Budget})
+		admissions = append(admissions, limits.Boundary{Owner: boundary.Owner, Budget: boundary.Budget})
 	}
 	return admissions
 }

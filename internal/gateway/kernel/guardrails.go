@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operations"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -111,7 +112,7 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 		}
 	}
 	if opaqueInput {
-		for _, phase := range []guardrails.Phase{guardrails.Input, guardrails.InputParallel} {
+		for _, phase := range []guardrailpolicy.Phase{guardrailpolicy.Input, guardrailpolicy.InputParallel} {
 			result, err := x.guard.engine.Unavailable(phase)
 			x.guard.record(result.Decisions)
 			if err != nil {
@@ -136,13 +137,13 @@ func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 }
 
 func (x *Call) guardrailStreamSurface(document oif.Document) error {
-	if x.family == wire.Completions && (x.guard.engine.HasAction(guardrails.Output, guardrails.Block) || x.guard.engine.HasAction(guardrails.Output, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask)) {
+	if x.family == wire.Completions && (x.guard.engine.HasAction(guardrailpolicy.Output, guardrailpolicy.Block) || x.guard.engine.HasAction(guardrailpolicy.Output, guardrailpolicy.Redact) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask)) {
 		if value, ok := document.Root().Lookup("logprobs"); ok && value.Kind() != oif.Null {
 			return guardrails.ErrSurface
 		}
 	}
 	if (x.family == wire.Chat || x.family == wire.Completions) && x.generation.parsed != nil && x.generation.parsed.Stream &&
-		(x.guard.engine.HasPhase(guardrails.OutputStream) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask)) {
+		(x.guard.engine.HasPhase(guardrailpolicy.OutputStream) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask)) {
 		// Log-probability alternatives and their byte encodings are separate
 		// output surfaces that cannot share the content delta's stream window.
 		if value, ok := document.Root().Lookup("logprobs"); ok && (value.Raw() == "true" || x.family == wire.Completions && value.Kind() != oif.Null) {
@@ -168,7 +169,7 @@ func (x *Call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 type guardrailInput struct {
 	document  oif.Document
 	segments  []guardrails.Segment
-	decisions []guardrails.Evidence
+	decisions []guardrailpolicy.Evidence
 }
 
 func (x *Call) inspectGuardrailInputWithRecovery(ctx context.Context, document oif.Document, recoverable bool) (oif.Document, []guardrails.Segment, error) {
@@ -187,7 +188,7 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 		result, e := x.guard.engine.Unavailable()
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
-	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
 		for _, segment := range surface.Segments {
 			if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
@@ -208,12 +209,12 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 	return guardrailInput{document: document, segments: result.Segments, decisions: result.Decisions}, err
 }
 
-func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrails.Evidence, error) {
+func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrailpolicy.Evidence, error) {
 	segments := make([]guardrails.Segment, len(texts))
 	for i, t := range texts {
 		segments[i] = guardrails.Segment{ID: "s" + strconv.Itoa(i), Text: t.Value}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Input, Segments: segments, InternalModel: x.guard.internal}, x.guard.masks)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: segments, InternalModel: x.guard.internal}, x.guard.masks)
 	x.guard.input = segments
 	return result.Decisions, err
 }
@@ -223,13 +224,13 @@ func (x *Call) inspectOperationOutput(texts []operations.Text) error {
 	for i, text := range texts {
 		segments[i] = guardrails.Segment{ID: "s" + strconv.Itoa(i), Text: text.Value}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Output, Segments: segments, InternalModel: x.guard.internal}, nil)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: segments, InternalModel: x.guard.internal}, nil)
 	x.guard.record(result.Decisions)
 	return err
 }
 
 func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
-	if !x.guard.engine.HasPhase(guardrails.Output) && !x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.Output) && !x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		return body, nil
 	}
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: guardrails.MaxContentBytes})
@@ -240,12 +241,12 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 		choices, _ := doc.Root().Lookup("choices")
 		for _, choice := range choices.Elements() {
 			if value, ok := choice.Lookup("logprobs"); ok && value.Kind() != oif.Null {
-				result, err := x.guard.engine.Unavailable(guardrails.Output)
+				result, err := x.guard.engine.Unavailable(guardrailpolicy.Output)
 				x.guard.record(result.Decisions)
 				if err != nil {
 					return body, err
 				}
-				if x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+				if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 					return body, guardrails.ErrSurface
 				}
 			}
@@ -253,7 +254,7 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 	}
 	surface, err := guardrails.NativeSurface(doc, true)
 	if err != nil {
-		result, e := x.guard.engine.Unavailable(guardrails.Output)
+		result, e := x.guard.engine.Unavailable(guardrailpolicy.Output)
 		x.guard.record(result.Decisions)
 		return body, e
 	}
@@ -266,7 +267,7 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 			changed = true
 		}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.Output, Segments: slices.Concat(segments, guardrails.InputProvenance(x.guard.input)), InternalModel: x.guard.internal}, x.guard.masks)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: slices.Concat(segments, guardrails.InputProvenance(x.guard.input)), InternalModel: x.guard.internal}, x.guard.masks)
 	x.guard.record(result.Decisions)
 	if err != nil {
 		return body, err
@@ -296,7 +297,7 @@ type guardrailResult struct {
 }
 
 func (s *Server) startParallel(ctx context.Context, x *Call, cancelUpstream context.CancelFunc) *parallelGuardrail {
-	if !x.guard.engine.HasPhase(guardrails.InputParallel) {
+	if !x.guard.engine.HasPhase(guardrailpolicy.InputParallel) {
 		return nil
 	}
 	if x.cache != nil && x.cache.parallelEngine == x.guard.engine && slices.Equal(x.cache.parallelInput, x.guard.input) {
@@ -304,7 +305,7 @@ func (s *Server) startParallel(ctx context.Context, x *Call, cancelUpstream cont
 	}
 	evalctx, cancel := context.WithCancel(ctx)
 	p := &parallelGuardrail{result: make(chan guardrailResult, 1), cancel: cancel}
-	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrails.InputParallel, Segments: slices.Clone(x.guard.input), InternalModel: x.guard.internal}
+	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.InputParallel, Segments: slices.Clone(x.guard.input), InternalModel: x.guard.internal}
 	go func() {
 		defer panics.Recover(s.Log, "parallel guardrail", func(err error) {
 			p.result <- guardrailResult{err: err}
@@ -359,7 +360,7 @@ func (x *Call) guardrailHeaders(h http.Header, streamed, trailers bool) {
 	decisions := x.guard.evidence()
 	values := []string{}
 	for _, d := range decisions {
-		if d.Outcome != guardrails.Passed && d.Outcome != guardrails.Skipped {
+		if d.Outcome != guardrailpolicy.Passed && d.Outcome != guardrailpolicy.Skipped {
 			values = append(values, d.GuardrailID+"@"+d.Revision+":"+string(d.Outcome))
 		}
 	}

@@ -48,7 +48,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	return &Lease{limiter: l, cost: cost, rate: rate}, nil
 }
 
-func (l *Limiter) holdCost(ctx context.Context, budget *CostBudget, ttl time.Duration) (*costHold, error) {
+func (l *Limiter) holdCost(ctx context.Context, budget *limits.CostBudget, ttl time.Duration) (*costHold, error) {
 	if budget == nil {
 		return nil, nil
 	}
@@ -108,29 +108,15 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request) (*rateHold, error)
 	return hold, nil
 }
 
-func (b CostBudget) Caps() scripts.CostCaps {
-	return scripts.CostCaps{
-		Owner: b.Owner, Daily: text(b.Daily), Weekly: text(b.Weekly), Monthly: text(b.Monthly),
-		Increases: b.Increases,
-	}
-}
-
-func text(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
-func (l *Limiter) reserveCost(ctx context.Context, b CostBudget, ttl time.Duration, retain bool) (*costReservation, error) {
+func (l *Limiter) reserveCost(ctx context.Context, b limits.CostBudget, ttl time.Duration, retain bool) (*costReservation, error) {
 	if b.Estimate == nil {
 		return nil, l.decided(ctx, b.Owner.ID, func() error {
-			return l.scripts.ReserveCost(ctx, b.Caps(), "0", "", 0)
+			return l.scripts.ReserveCost(ctx, scripts.BudgetCaps(b), "0", "", 0)
 		})
 	}
 	held := &costReservation{hold: scripts.CostHold{Owner: b.Owner, LeaseID: limits.CanonicalUUID(b.Estimate.RequestID)}}
 	err := l.decided(ctx, b.Owner.ID, func() error {
-		return l.scripts.ReserveCost(ctx, b.Caps(), b.Estimate.Amount, held.hold.LeaseID, ttl+costGrace)
+		return l.scripts.ReserveCost(ctx, scripts.BudgetCaps(b), b.Estimate.Amount, held.hold.LeaseID, ttl+costGrace)
 	})
 	if err == nil {
 		return held, nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -29,7 +30,7 @@ type preparedProvider struct {
 	plan               *interaction.Plan
 	receipt            *oif.Receipt
 	guardrailSegments  []guardrails.Segment
-	guardrailDecisions []guardrails.Evidence
+	guardrailDecisions []guardrailpolicy.Evidence
 }
 
 // admittedEstimate is the estimate one attempt is admitted under. Reserve is the
@@ -205,7 +206,7 @@ func (x *Call) preparedEstimate(model string, effective requestSummary) (admitte
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
 	counter := estimate.ForModel(model)
-	if x.guard.engine.HasAction(guardrails.Input, guardrails.Redact) || x.guard.engine.HasAction(guardrails.Input, guardrails.Mask) {
+	if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Redact) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		to := effective.prompt.Estimate(counter, nil)
 		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
 	}

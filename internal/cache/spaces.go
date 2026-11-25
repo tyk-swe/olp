@@ -1,3 +1,5 @@
+// Package cache owns the opt-in, sealed response cache. It never stores content
+// in the control database or in the coordination Valkey.
 package cache
 
 import (
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -194,7 +197,7 @@ func (s *Store) Begin(ctx context.Context, space Space, canonical []byte) (Ticke
 
 // Lookup resolves the current namespace and reads its entry atomically in one
 // round trip. Purge and eviction cannot interleave those two decisions.
-func (s *Store) Lookup(ctx context.Context, space Space, canonical []byte, controls Controls) (Ticket, *Entry, error) {
+func (s *Store) Lookup(ctx context.Context, space Space, canonical []byte, controls cachepolicy.Controls) (Ticket, *Entry, error) {
 	ticket, raw, err := s.resolve(ctx, space, canonical, true)
 	if err != nil {
 		return Ticket{}, nil, err
@@ -203,7 +206,7 @@ func (s *Store) Lookup(ctx context.Context, space Space, canonical []byte, contr
 	return ticket, entry, err
 }
 
-func (s *Store) get(ctx context.Context, ticket Ticket, controls Controls) (*Entry, error) {
+func (s *Store) get(ctx context.Context, ticket Ticket, controls cachepolicy.Controls) (*Entry, error) {
 	value, err := s.Client.Do(ctx, "HGET", ticket.Key, "sealed")
 	if err != nil {
 		return nil, ErrUnavailable
@@ -228,7 +231,7 @@ func replyString(value any) (string, error) {
 	return raw, nil
 }
 
-func (s *Store) open(ticket Ticket, raw string, controls Controls) (*Entry, error) {
+func (s *Store) open(ticket Ticket, raw string, controls cachepolicy.Controls) (*Entry, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -258,14 +261,14 @@ func (s *Store) open(ticket Ticket, raw string, controls Controls) (*Entry, erro
 
 // fresh reports whether the entry is live at now and within the caller's
 // max-age control, when given.
-func (e *Entry) fresh(now time.Time, controls Controls) bool {
+func (e *Entry) fresh(now time.Time, controls cachepolicy.Controls) bool {
 	if e.CreatedAt.After(now) || !e.ExpiresAt.After(now) {
 		return false
 	}
 	return controls.MaxAge == nil || now.Sub(e.CreatedAt) <= time.Duration(*controls.MaxAge)*time.Second
 }
 
-func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy Policy, controls Controls, vector []float32) error {
+func (s *Store) Put(ctx context.Context, ticket Ticket, entry Entry, policy cachepolicy.Policy, controls cachepolicy.Controls, vector []float32) error {
 	if controls.NoStore {
 		return ErrNotStored
 	}
@@ -312,7 +315,7 @@ func (s *Store) Purge(ctx context.Context, kind, id string) error {
 	if err != nil {
 		return ErrUnavailable
 	}
-	if _, err = s.Client.Do(ctx, "SET", s.generationKey(kind, id), nonce, "EX", strconv.Itoa(maxTTLSeconds)); err != nil {
+	if _, err = s.Client.Do(ctx, "SET", s.generationKey(kind, id), nonce, "EX", strconv.Itoa(cachepolicy.MaxTTLSeconds)); err != nil {
 		return ErrUnavailable
 	}
 	return nil

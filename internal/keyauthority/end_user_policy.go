@@ -1,10 +1,11 @@
-package authority
+package keyauthority
 
 import (
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -38,11 +39,6 @@ type EndUserPolicy struct {
 	Overrides     map[string]AdmissionLimits `json:"overrides,omitempty"`
 	Blocked       []string                   `json:"blocked,omitempty"`
 }
-
-var endUserDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
-// ValidEndUserDigest accepts only a derived identity, never a raw identifier.
-func ValidEndUserDigest(value string) bool { return endUserDigest.MatchString(value) }
 
 var endUserIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
@@ -114,7 +110,7 @@ func (p *EndUserPolicy) ValidateAndNormalize() error {
 		return err
 	}
 	for digest, policy := range p.Overrides {
-		if !endUserDigest.MatchString(digest) {
+		if !attribution.ValidEndUserDigest(digest) {
 			return invalid("end_user_policy.overrides", "Use project-scoped SHA-256 digests as override keys.")
 		}
 		if err := policy.ValidateAndNormalize(); err != nil {
@@ -123,7 +119,7 @@ func (p *EndUserPolicy) ValidateAndNormalize() error {
 	}
 	seen := make(map[string]bool, len(p.Blocked))
 	for _, digest := range p.Blocked {
-		if !endUserDigest.MatchString(digest) || seen[digest] {
+		if !attribution.ValidEndUserDigest(digest) || seen[digest] {
 			return invalid("end_user_policy.blocked", "Use unique project-scoped SHA-256 digests.")
 		}
 		seen[digest] = true

@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 func (s *Server) projectEndUserPolicy(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -42,7 +42,7 @@ func (s *Server) putProjectEndUserPolicy(r *http.Request, _ authz.Principal) (ht
 	if len(body.Policy) == 0 {
 		return httpkit.Reply{}, httpkit.Invalid("policy", "A policy or explicit null is required.")
 	}
-	var input struct{ Policy *authority.EndUserPolicy }
+	var input struct{ Policy *keyauthority.EndUserPolicy }
 	decoder := json.NewDecoder(bytes.NewReader(body.Policy))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&input.Policy); err != nil {

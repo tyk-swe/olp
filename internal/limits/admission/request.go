@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
@@ -14,7 +13,7 @@ type Request struct {
 	Lookup     string
 	LeaseTTL   time.Duration
 	Rate       RateLimits
-	Cost       *CostBudget
+	Cost       *limits.CostBudget
 	Membership *Membership
 }
 
@@ -42,27 +41,6 @@ type Share struct {
 	Class             string
 	Percent           int64
 	SaturationPercent int64
-}
-
-type CostBudget struct {
-	Owner     limits.Owner
-	Daily     *string
-	Weekly    *string
-	Monthly   *string
-	Increases string
-	Estimate  *Estimate
-}
-
-type Estimate struct {
-	Amount    string
-	RequestID string
-}
-
-func Budget(owner limits.Owner, daily, weekly, monthly *string, increases string) *CostBudget {
-	if daily == nil && weekly == nil && monthly == nil {
-		return nil
-	}
-	return &CostBudget{Owner: owner, Daily: daily, Weekly: weekly, Monthly: monthly, Increases: increases}
 }
 
 func (r RateLimits) Limited() bool {
@@ -152,48 +130,4 @@ func (r RateLimits) validate() error {
 		return invalid("a share names a lowercase class, a percent from 0 to 100 and a saturation from 1 to 100")
 	}
 	return nil
-}
-
-func (b CostBudget) Validate() error {
-	if _, err := uuid.Parse(b.Owner.ID); err != nil {
-		return invalid("cost owner ID must be a UUID")
-	}
-	if !b.Owner.Basis.Valid() {
-		return invalid(`cost basis must be "cost" or "charge"`)
-	}
-	if b.Daily == nil && b.Weekly == nil && b.Monthly == nil {
-		return invalid("a cost budget needs a daily, weekly or monthly limit")
-	}
-	for _, limit := range [...]struct {
-		value *string
-		name  string
-	}{{b.Daily, "daily"}, {b.Monthly, "monthly"}, {b.Weekly, "weekly"}} {
-		if limit.value != nil && !limits.ValidCostLimit(*limit.value) {
-			return invalid(limit.name + " cost limit must be a positive decimal with at most 12 integer and 12 fractional digits")
-		}
-	}
-	if b.Estimate == nil {
-		return nil
-	}
-	return b.Estimate.validate()
-}
-
-func (e Estimate) validate() error {
-	if !limits.ValidCostLimit(e.Amount) {
-		return invalid("cost estimate must be a positive decimal with at most 12 integer and 12 fractional digits")
-	}
-	if _, err := uuid.Parse(e.RequestID); err != nil {
-		return invalid("a cost estimate needs the request ID it will be accounted under")
-	}
-	return nil
-}
-
-func (b *CostBudget) Holding(amount, requestID string) *CostBudget {
-	if b == nil || amount == "" {
-		return b
-	}
-	return &CostBudget{
-		Owner: b.Owner, Daily: b.Daily, Weekly: b.Weekly, Monthly: b.Monthly, Increases: b.Increases,
-		Estimate: &Estimate{Amount: amount, RequestID: requestID},
-	}
 }

@@ -3,6 +3,7 @@ package guardrails
 import (
 	"cmp"
 	"errors"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"slices"
 	"strings"
 )
@@ -29,7 +30,7 @@ func (r *Registry) Validate() error {
 	}
 	pluginModules := map[string]bool{}
 	for id, d := range r.Definitions {
-		if id != d.ID || !identifier.MatchString(id) || !identifier.MatchString(d.GuardrailID) || !identifier.MatchString(d.ProjectID) {
+		if id != d.ID || !guardrailpolicy.ValidIdentifier(id) || !guardrailpolicy.ValidIdentifier(d.GuardrailID) || !guardrailpolicy.ValidIdentifier(d.ProjectID) {
 			return errors.New("invalid guardrail identity")
 		}
 		spec, err := ParseRevision(d)
@@ -44,7 +45,7 @@ func (r *Registry) Validate() error {
 		}
 	}
 	for id, p := range r.Policies {
-		if id != p.ID || !identifier.MatchString(id) || !identifier.MatchString(p.ProjectID) || len(p.Entries) > MaxEntries {
+		if id != p.ID || !guardrailpolicy.ValidIdentifier(id) || !guardrailpolicy.ValidIdentifier(p.ProjectID) || len(p.Entries) > guardrailpolicy.MaxEntries {
 			return errors.New("invalid guardrail policy")
 		}
 		for _, e := range p.Entries {
@@ -59,7 +60,7 @@ func (r *Registry) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, a := range r.Attachments {
-		if !identifier.MatchString(a.ID) || seen[a.ID] || a.Order < 0 {
+		if !guardrailpolicy.ValidIdentifier(a.ID) || seen[a.ID] || a.Order < 0 {
 			return errors.New("invalid guardrail attachment")
 		}
 		seen[a.ID] = true
@@ -68,20 +69,20 @@ func (r *Registry) Validate() error {
 			return errors.New("guardrail attachment has no policy revision")
 		}
 		switch a.Scope {
-		case InstallationScope:
+		case guardrailpolicy.InstallationScope:
 			if a.ScopeID != InstallationProject {
 				return errors.New("invalid installation attachment")
 			}
-		case OrganizationScope:
+		case guardrailpolicy.OrganizationScope:
 			if r.ProjectOrganizations[p.ProjectID] != a.ScopeID {
 				return errors.New("organization attachment crosses a project boundary")
 			}
-		case ProjectScope:
+		case guardrailpolicy.ProjectScope:
 			if a.ScopeID != p.ProjectID {
 				return errors.New("project attachment crosses a project boundary")
 			}
-		case RouteScope, ToolsetScope, KeyScope:
-			if !identifier.MatchString(a.ScopeID) {
+		case guardrailpolicy.RouteScope, guardrailpolicy.ToolsetScope, guardrailpolicy.KeyScope:
+			if !guardrailpolicy.ValidIdentifier(a.ScopeID) {
 				return errors.New("invalid attachment scope identity")
 			}
 		default:
@@ -91,21 +92,21 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
-var scopeRanks = map[Scope]int{InstallationScope: 0, OrganizationScope: 1, ProjectScope: 2, RouteScope: 3, ToolsetScope: 3, KeyScope: 4}
+var scopeRanks = map[guardrailpolicy.Scope]int{guardrailpolicy.InstallationScope: 0, guardrailpolicy.OrganizationScope: 1, guardrailpolicy.ProjectScope: 2, guardrailpolicy.RouteScope: 3, guardrailpolicy.ToolsetScope: 3, guardrailpolicy.KeyScope: 4}
 
 func (b Boundary) matches(a Attachment, organization string) bool {
 	switch a.Scope {
-	case InstallationScope:
+	case guardrailpolicy.InstallationScope:
 		return true
-	case OrganizationScope:
+	case guardrailpolicy.OrganizationScope:
 		return a.ScopeID == organization
-	case ProjectScope:
+	case guardrailpolicy.ProjectScope:
 		return a.ScopeID == b.ProjectID
-	case RouteScope:
+	case guardrailpolicy.RouteScope:
 		return a.ScopeID == b.RouteID
-	case ToolsetScope:
+	case guardrailpolicy.ToolsetScope:
 		return a.ScopeID == b.ToolsetID
-	case KeyScope:
+	case guardrailpolicy.KeyScope:
 		return a.ScopeID == b.KeyID
 	}
 	return false
@@ -143,14 +144,14 @@ func (r *Registry) resolve(b Boundary) ([]resolvedEntry, error) {
 		}
 		// Installation policies are deliberately global. Every narrower policy
 		// must belong to the request project, including key/route attachments.
-		if a.Scope != InstallationScope && a.Scope != OrganizationScope && p.ProjectID != b.ProjectID {
+		if a.Scope != guardrailpolicy.InstallationScope && a.Scope != guardrailpolicy.OrganizationScope && p.ProjectID != b.ProjectID {
 			return nil, errors.New("guardrail attachment crosses request project")
 		}
 		origin := Placement{a.Scope, a.ScopeID, p.ProjectID, p.PolicyID, p.ID}
 		for _, entry := range p.Entries {
 			entries = append(entries, resolvedEntry{entry: entry, placement: origin})
 		}
-		if len(entries) > MaxEntries {
+		if len(entries) > guardrailpolicy.MaxEntries {
 			return nil, errors.New("effective guardrails exceed entry bound")
 		}
 	}
@@ -166,7 +167,7 @@ func (r *Registry) Engines(b Boundary) (map[string]*Engine, error) {
 			return
 		}
 		for _, a := range r.Attachments {
-			if a.Scope == KeyScope && r.Policies[a.PolicyRevisionID].ProjectID == b.ProjectID && !yield(a.ScopeID) {
+			if a.Scope == guardrailpolicy.KeyScope && r.Policies[a.PolicyRevisionID].ProjectID == b.ProjectID && !yield(a.ScopeID) {
 				return
 			}
 		}

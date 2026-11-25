@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"math"
 	"slices"
 	"strings"
@@ -32,7 +33,7 @@ func TestSemanticInputs(t *testing.T) {
 	}
 	for _, rule := range []SemanticRule{{Category: "bad category", SimilarityThreshold: .5, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: 0, Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: math.NaN(), Utterances: []string{"a"}}, {Category: "semantic", SimilarityThreshold: .5}, {Category: "semantic", SimilarityThreshold: .5, Utterances: []string{strings.Repeat("a", 8193)}}} {
 		semantic, _ := json.Marshal(rule)
-		if _, err := ParseRevision(Revision{Type: "semantic_guard", Configuration: json.RawMessage(`{"route":"embeddings","semantic":` + string(semantic) + `}`), TimeoutMS: 1000, OnError: FailClosed}); err == nil {
+		if _, err := ParseRevision(Revision{Type: "semantic_guard", Configuration: json.RawMessage(`{"route":"embeddings","semantic":` + string(semantic) + `}`), TimeoutMS: 1000, OnError: guardrailpolicy.FailClosed}); err == nil {
 			t.Fatalf("invalid rule accepted: %+v", rule)
 		}
 	}
@@ -113,21 +114,21 @@ func TestSemanticExactSimilarity(t *testing.T) {
 }
 
 func TestInternalSemanticEngineKeepsLocalPolicy(t *testing.T) {
-	entry := func(phase Phase, kind Kind) compiledEntry {
+	entry := func(phase guardrailpolicy.Phase, kind Kind) compiledEntry {
 		k, _ := lookup(kind)
 		return compiledEntry{entry: Entry{Phase: phase}, definition: Revision{Type: kind}, kind: k}
 	}
 	engine := &Engine{entries: []compiledEntry{
-		entry(Input, "semantic_guard"),
-		entry(Output, "decision_model"),
-		entry(InputParallel, "builtin.keywords"),
-		entry(Input, "webhook"),
+		entry(guardrailpolicy.Input, "semantic_guard"),
+		entry(guardrailpolicy.Output, "decision_model"),
+		entry(guardrailpolicy.InputParallel, "builtin.keywords"),
+		entry(guardrailpolicy.Input, "webhook"),
 	}}
 	internal := engine.WithoutModelGuardrails()
-	if !internal.HasPhase(Input) || !internal.HasPhase(InputParallel) || internal.HasPhase(Output) || len(internal.entries) != 2 {
+	if !internal.HasPhase(guardrailpolicy.Input) || !internal.HasPhase(guardrailpolicy.InputParallel) || internal.HasPhase(guardrailpolicy.Output) || len(internal.entries) != 2 {
 		t.Fatal("internal evaluator dropped local policies or retained recursive model policy")
 	}
-	if len(engine.entries) != 4 || !engine.HasPhase(Output) {
+	if len(engine.entries) != 4 || !engine.HasPhase(guardrailpolicy.Output) {
 		t.Fatal("immutable release engine was changed")
 	}
 	modelOnly := &Engine{entries: engine.entries[:2]}

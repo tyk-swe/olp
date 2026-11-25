@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -17,8 +17,8 @@ import (
 const maxOrganizations = 1000
 
 type Organization struct {
-	Name   string                  `json:"name"`
-	Budget *authority.BudgetPolicy `json:"budget,omitempty"`
+	Name   string                     `json:"name"`
+	Budget *keyauthority.BudgetPolicy `json:"budget,omitempty"`
 }
 
 func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
@@ -36,7 +36,7 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 		return nil, err
 	}
 	return slices.SortedFunc(slices.Values(promotion.Map(declared, func(organization Organization) Organization {
-		return Organization{Name: strings.TrimSpace(organization.Name), Budget: authority.NormalizedBudget(organization.Budget)}
+		return Organization{Name: strings.TrimSpace(organization.Name), Budget: keyauthority.NormalizedBudget(organization.Budget)}
 	})), byName), nil
 }
 

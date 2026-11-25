@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access/authority"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 type Problem struct {
@@ -48,7 +48,7 @@ func ProblemFor(err error) (*Problem, bool) {
 	if known, ok := errors.AsType[*Problem](err); ok {
 		return known, true
 	}
-	if validation, ok := errors.AsType[*authority.ValidationError](err); ok {
+	if validation, ok := errors.AsType[*keyauthority.ValidationError](err); ok {
 		return &Problem{Status: 422, Code: "validation_failed", Detail: validation.Detail, Field: validation.Field}, true
 	}
 	if contract := ContractProblem(err); contract != nil {

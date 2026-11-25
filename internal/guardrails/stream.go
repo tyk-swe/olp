@@ -2,6 +2,7 @@ package guardrails
 
 import (
 	"context"
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -19,7 +20,7 @@ type Stream struct {
 	texts      map[string]string
 	ids        []string
 	frames     []heldFrame
-	decisions  []Evidence
+	decisions  []guardrailpolicy.Evidence
 	rewrite    func([]byte, map[string]string) ([]byte, error)
 	masks      *Masking
 }
@@ -42,12 +43,12 @@ func NewStream(engine *Engine, request Evaluation, window int) (*Stream, error) 
 	width := 0
 	if engine != nil {
 		for _, r := range engine.entries {
-			if r.entry.Phase == OutputStream {
+			if r.entry.Phase == guardrailpolicy.OutputStream {
 				width = max(width, r.detector.width()+utf8.UTFMax)
 			}
 		}
 	}
-	request.Phase = OutputStream
+	request.Phase = guardrailpolicy.OutputStream
 	request.Partial = true
 	request.completeSegments = map[string]bool{}
 	return &Stream{engine: engine, request: request, window: window, lookbehind: width, texts: map[string]string{}}, nil
@@ -66,7 +67,7 @@ func (s *Stream) PushSegments(ctx context.Context, frame []byte, segments []Delt
 	if err := ValidateSegments(assistantText(segments)); err != nil {
 		return nil, err
 	}
-	if (s.engine == nil || !s.engine.HasPhase(OutputStream)) && s.masks == nil {
+	if (s.engine == nil || !s.engine.HasPhase(guardrailpolicy.OutputStream)) && s.masks == nil {
 		return [][]byte{frame}, nil
 	}
 	// Inspect across the retained suffix before releasing any part of a new
@@ -148,7 +149,7 @@ func (s *Stream) inspect(ctx context.Context) error {
 		}
 	}))
 	result, err := s.engine.Evaluate(ctx, request, nil)
-	s.decisions = MergeEvidence(s.decisions, result.Decisions)
+	s.decisions = guardrailpolicy.MergeEvidence(s.decisions, result.Decisions)
 	changed := map[string]string{}
 	for _, segment := range result.Segments {
 		if segment.Text != s.texts[segment.ID] {
@@ -207,4 +208,4 @@ func (s *Stream) Finish(ctx context.Context) ([][]byte, error) {
 	s.bytes = 0
 	return out, nil
 }
-func (s *Stream) Decisions() []Evidence { return slices.Clone(s.decisions) }
+func (s *Stream) Decisions() []guardrailpolicy.Evidence { return slices.Clone(s.decisions) }

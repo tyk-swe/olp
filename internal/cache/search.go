@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/domain/cachepolicy"
 	"github.com/tyk-swe/olp/internal/platform/coordination"
 )
 
@@ -62,7 +63,7 @@ func (s *Store) generationsCurrent(ctx context.Context, ticket Ticket) (bool, er
 	return true, nil
 }
 
-func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, policy Policy, controls Controls) (*Entry, float64, error) {
+func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, policy cachepolicy.Policy, controls cachepolicy.Controls) (*Entry, float64, error) {
 	current, err := s.generationsCurrent(ctx, ticket)
 	if err != nil {
 		return nil, 0, err
@@ -96,7 +97,7 @@ func (s *Store) Nearest(ctx context.Context, ticket Ticket, vector []float32, po
 	return nil, 0, nil
 }
 
-func (s *Store) searchCandidates(documents []coordination.SearchDocument, p Policy) ([]candidate, error) {
+func (s *Store) searchCandidates(documents []coordination.SearchDocument, p cachepolicy.Policy) ([]candidate, error) {
 	candidates := make([]candidate, 0, len(documents))
 	prefix := s.prefix() + "entry:"
 	for _, document := range documents {

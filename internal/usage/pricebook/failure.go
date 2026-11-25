@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access/authority"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
 var (
@@ -14,7 +14,7 @@ var (
 )
 
 func invalid(field, detail string) error {
-	return &authority.ValidationError{Field: field, Detail: detail}
+	return &keyauthority.ValidationError{Field: field, Detail: detail}
 }
 
 // Problem gives a price book failure its public HTTP form.

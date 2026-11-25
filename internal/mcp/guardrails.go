@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
@@ -21,7 +22,7 @@ type ToolPolicies interface {
 type toolGuardrailState struct {
 	engine    *guardrails.Engine
 	masks     *guardrails.Masking
-	decisions []guardrails.Evidence
+	decisions []guardrailpolicy.Evidence
 }
 
 func guardrailRefusal(err error) *Failure {
@@ -43,14 +44,14 @@ func (s *Executor) toolGuardrails(in CallRequest) *toolGuardrailState {
 	return &toolGuardrailState{engine: engine, masks: &guardrails.Masking{}}
 }
 
-func stateDecisions(state *toolGuardrailState) []guardrails.Evidence {
+func stateDecisions(state *toolGuardrailState) []guardrailpolicy.Evidence {
 	if state == nil {
 		return nil
 	}
 	return slices.Clone(state.decisions)
 }
 
-func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase guardrails.Phase, segments []guardrails.Segment) (guardrails.Result, error) {
+func (s *Executor) evaluateToolPhase(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, phase guardrailpolicy.Phase, segments []guardrails.Segment) (guardrails.Result, error) {
 	if s.guardrails == nil {
 		return state.engine.Unavailable(phase)
 	}
@@ -76,7 +77,7 @@ func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservati
 	if state == nil {
 		return in.Arguments, nil, nil
 	}
-	unavailable, failure := state.engine.Unavailable(guardrails.InputParallel, guardrails.OutputStream)
+	unavailable, failure := state.engine.Unavailable(guardrailpolicy.InputParallel, guardrailpolicy.OutputStream)
 	if failure != nil {
 		refused := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: unavailable.Decisions}
 		s.refuseGuardedCall(ctx, in, reservation, refused)
@@ -88,7 +89,7 @@ func (s *Executor) guardArguments(ctx context.Context, in CallRequest, reservati
 		return nil, state, failureGuardrailBlocked
 	}
 	surface := guardrails.ToolJSONSurface(document, in.Tool.Alias, false)
-	result, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrails.Input, surface.Segments())
+	result, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrailpolicy.Input, surface.Segments())
 	guarded := &toolGuardrailState{engine: state.engine, masks: state.masks, decisions: slices.Concat(unavailable.Decisions, result.Decisions)}
 	if err != nil {
 		s.refuseGuardedCall(ctx, in, reservation, guarded)
@@ -179,7 +180,7 @@ func applyToolResult(result upstream.ToolResult, surface toolResultSurface, segm
 	return upstream.ToolResult{Content: content, StructuredContent: document.Bytes(), IsError: result.IsError}, nil
 }
 
-func (s *Executor) guardResult(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, result upstream.ToolResult) (upstream.ToolResult, []guardrails.Evidence, error) {
+func (s *Executor) guardResult(ctx context.Context, in CallRequest, reservation *accounting.Reservation, state *toolGuardrailState, result upstream.ToolResult) (upstream.ToolResult, []guardrailpolicy.Evidence, error) {
 	if state == nil {
 		return result, nil, nil
 	}
@@ -188,7 +189,7 @@ func (s *Executor) guardResult(ctx context.Context, in CallRequest, reservation 
 		return result, stateDecisions(state), projectErr
 	}
 	if surface.opaque {
-		unavailable, err := state.engine.Unavailable(guardrails.Output)
+		unavailable, err := state.engine.Unavailable(guardrailpolicy.Output)
 		return result, slices.Concat(state.decisions, unavailable.Decisions), err
 	}
 	segments := slices.Collect(func(yield func(guardrails.Segment) bool) {
@@ -198,7 +199,7 @@ func (s *Executor) guardResult(ctx context.Context, in CallRequest, reservation 
 			}
 		}
 	})
-	evaluated, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrails.Output, segments)
+	evaluated, err := s.evaluateToolPhase(ctx, in, reservation, state, guardrailpolicy.Output, segments)
 	decisions := slices.Concat(state.decisions, evaluated.Decisions)
 	if err != nil {
 		return result, decisions, err

@@ -1,6 +1,4 @@
-// Package cache owns the opt-in, sealed response cache. It never stores content
-// in the control database or in the coordination Valkey.
-package cache
+package cachepolicy
 
 import (
 	"errors"
@@ -13,7 +11,7 @@ import (
 
 const (
 	defaultTTLSeconds    = 3600
-	maxTTLSeconds        = 604800
+	MaxTTLSeconds        = 604800
 	defaultMaxEntryBytes = 1 << 20
 	maxEntryBytes        = 16 << 20
 	defaultSimilarity    = .95
@@ -78,7 +76,7 @@ func (p *Policy) Validate() error {
 	if !slices.Contains([]string{"key", "project", "route"}, e.Scope) {
 		return errors.New("cache.scope must be key, project or route")
 	}
-	if e.TTLSeconds < 1 || e.TTLSeconds > maxTTLSeconds || e.MaxEntryBytes < 1 || e.MaxEntryBytes > maxEntryBytes {
+	if e.TTLSeconds < 1 || e.TTLSeconds > MaxTTLSeconds || e.MaxEntryBytes < 1 || e.MaxEntryBytes > maxEntryBytes {
 		return errors.New("cache TTL must be 1–604800 seconds and entries 1–16777216 bytes")
 	}
 	if e.Streaming != "replay" && e.Streaming != "bypass" {
@@ -177,7 +175,7 @@ func ParseControls(raw string) (Controls, error) {
 			}
 		case "max-age", "ttl":
 			n, err := strconv.Atoi(value)
-			if !hasValue || err != nil || n < 0 || n > maxTTLSeconds {
+			if !hasValue || err != nil || n < 0 || n > MaxTTLSeconds {
 				return c, errors.New("cache age and TTL must be 0–604800 seconds")
 			}
 			if name == "max-age" {
