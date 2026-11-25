@@ -350,7 +350,7 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
+		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), ptr.NonNil(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -367,7 +367,7 @@ func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, e
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest)
+		reservationPrice(reservation), PricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), ptr.NonNil(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest)
 	return err
 }
 

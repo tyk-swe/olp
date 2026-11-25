@@ -134,13 +134,6 @@ type IdentityDecision struct {
 	Outcome IdentityOutcome `json:"outcome"`
 }
 
-func identityEvidence(decisions []IdentityDecision) []IdentityDecision {
-	if decisions == nil {
-		return []IdentityDecision{}
-	}
-	return decisions
-}
-
 type RetainedCall struct {
 	AttemptID  string
 	DispatchID string

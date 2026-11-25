@@ -43,11 +43,7 @@ func validWorkflowInteger(value *int64, minimum, maximum int64) bool {
 }
 
 func MinWorkflowInteger(fallback int64, values ...*int64) int64 {
-	selected := minWorkflowInteger(values)
-	if selected == nil {
-		return fallback
-	}
-	return *selected
+	return ptr.Or(minWorkflowInteger(values), fallback)
 }
 
 func minWorkflowInteger(values []*int64) *int64 {
