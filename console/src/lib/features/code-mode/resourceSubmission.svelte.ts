@@ -1,7 +1,8 @@
 import { confirmAction } from '#lib/components/confirm.js';
 import { onDestroy } from 'svelte';
-import { ApiProblem, unanswered } from '#lib/management/http.js';
+import { ApiProblem, errorMessage, unanswered } from '#lib/management/http.js';
 import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
+import { readResult } from '#lib/editing/result.js';
 import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
 import { mutationError } from './presentation';
 
@@ -72,11 +73,6 @@ export function useResourceSubmission<Input>(options: {
       const promise = options.persist(submission.input, submission.requestId);
       dispatched = true;
       await promise;
-      if (!active) return;
-      intent.reset();
-      dirty = false;
-      submitted = false;
-      await options.onSaved();
     } catch (e) {
       if (!active) return;
       submitted =
@@ -84,9 +80,18 @@ export function useResourceSubmission<Input>(options: {
         options.creating() &&
         (unanswered(e) || !(e instanceof ApiProblem));
       error = mutationError(e);
-    } finally {
-      if (active) busy = false;
+      busy = false;
+      return;
     }
+    if (!active) return;
+    intent.reset();
+    dirty = false;
+    submitted = false;
+    const followed = await readResult(() => options.onSaved());
+    if (!active) return;
+    busy = false;
+    if (!followed.ok)
+      error = `Changes saved, but the page could not update. ${errorMessage(followed.error)}`;
   }
 
   return {
