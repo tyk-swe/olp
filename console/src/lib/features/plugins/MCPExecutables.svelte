@@ -6,7 +6,7 @@
   import { readResult } from '#lib/editing/result.js';
   import { pluginKeys } from './pluginKeys';
   import { errorMessage } from '#lib/management/http.js';
-  import { formatBytes } from '#lib/format.js';
+  import { formatBytes, shortDigest } from '#lib/format.js';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import {
     beginIdentityReauthentication,
@@ -20,7 +20,6 @@
     permitMCPExecutable,
     revokeMCPExecutable,
     needsReauthentication,
-    shortDigest,
     type MCPExecutablePermission
   } from './api';
 

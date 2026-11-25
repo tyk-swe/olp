@@ -201,7 +201,6 @@ describe('plugin HTTP contracts', () => {
     expect(api.pluginTitle(plugin)).toBe(
       `${plugin.manifest.name} ${plugin.manifest.version}`
     );
-    expect(api.shortDigest(plugin.digest)).toBe(plugin.digest.substring(0, 12));
   });
 
   it.each([

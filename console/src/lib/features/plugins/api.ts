@@ -136,11 +136,6 @@ export function pluginTitle(plugin: {
   return `${plugin.manifest.name} ${plugin.manifest.version}`;
 }
 
-/** The first twelve digest characters, enough to tell installs apart. */
-export function shortDigest(digest: string): string {
-  return digest.slice(0, 12);
-}
-
 /** The signed index of reviewed plugins, with each digest's install state. */
 export async function getPluginIndex(
   signal?: AbortSignal
