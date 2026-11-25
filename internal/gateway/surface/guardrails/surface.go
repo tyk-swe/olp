@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
@@ -23,7 +23,7 @@ func (s surface) apply(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.kernel.Gate.Release(r.Context())
 	var in guardrails.Application
-	if err := httpkit.DecodeUnique(r, &in, guardrails.MaxContentBytes); err != nil {
+	if err := ingress.DecodeStrict(r, &in, guardrails.MaxContentBytes); err != nil {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Supply a policy revision, phase and bounded text segments.", nil))
 		return
 	}

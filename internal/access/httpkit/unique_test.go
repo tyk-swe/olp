@@ -89,3 +89,20 @@ func TestDecodeUniqueGeneratedContractShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeUniqueTellsEachRefusalApart(t *testing.T) {
+	for name, refusal := range map[string]struct{ body, detail string }{
+		"over the byte limit": {`{"zone":"` + strings.Repeat("a", 1<<10) + `"}`, "exceeds"},
+		"duplicate member":    {`{"zone":"a","zone":"b"}`, "unambiguous"},
+		"nested too deep":     {strings.Repeat("[", 200) + strings.Repeat("]", 200), "unambiguous"},
+		"second document":     {`{"zone":"a"} {"zone":"b"}`, "unambiguous"},
+		"undeclared member":   {`{"Zone":"a"}`, "declared names"},
+		"mistyped member":     {`{"zone":7}`, "not valid for this operation"},
+	} {
+		_, err := decodeUniqueBody(refusal.body)
+		problem, ok := ProblemFor(err)
+		if err == nil || !ok || problem.Status != 400 || problem.Code != "invalid_json" || !strings.Contains(problem.Detail, refusal.detail) {
+			t.Errorf("%s: problem = %#v, want 400 invalid_json mentioning %q", name, problem, refusal.detail)
+		}
+	}
+}

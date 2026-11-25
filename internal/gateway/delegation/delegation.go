@@ -62,7 +62,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var bounds release.DelegationBounds
-	if err := httpkit.DecodeUnique(r, &bounds, 16<<10); err != nil {
+	if err := ingress.DecodeStrict(r, &bounds, 16<<10); err != nil {
 		fault.WriteError(w, fault.InvalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
