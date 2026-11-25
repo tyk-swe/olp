@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/svelte-query';
 import { providerKeys } from './providerKeys';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { authLifecycle } from '#lib/session/lifecycle.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import type { ProviderKindCapability } from './models';
 import type { Provider, ProviderProbe } from './providers';
@@ -420,13 +421,15 @@ const editorSpec: ProviderKindCapability = {
   presets: []
 };
 
-async function providerEditorState() {
+async function providerEditorState(
+  providerId: () => string = () => editorProvider.id
+) {
   const ready = vi.fn(() => {
     useQueryClient().setQueryDefaults(
       providerKeys.modelsOf(editorProvider.id),
       { retry: false }
     );
-    return new ProviderEditor(() => editorProvider.id);
+    return new ProviderEditor(providerId);
   });
   const component = mount(StateHarness, {
     target: document.createElement('div'),
@@ -565,6 +568,148 @@ it('uses the reloaded version and a fresh request identity after explicitly disc
   expect(activate).toHaveBeenCalledTimes(2);
   expect(activate.mock.calls[1][0]).not.toBe(activate.mock.calls[0][0]);
   expect(activate.mock.calls[1][1]).toBe(`"${etag}"`);
+});
+
+function serveEditorWrite(write: (request: Request) => Promise<Response>) {
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/provider-kinds')
+        return json({ items: [editorSpec] });
+      if (request.method !== 'GET') return write(request);
+      const id = path.split('/')[4];
+      return json({
+        provider: { ...editorProvider, id },
+        items: [],
+        next_cursor: null
+      });
+    },
+    ['read', 'configure']
+  );
+}
+
+const problem = (type: string, status: number, extra: object = {}) =>
+  json(
+    {
+      type: `https://openllmproxy.dev/problems/${type}`,
+      title: 'Refused',
+      status,
+      ...extra
+    },
+    status
+  );
+
+it('names the running provider write, sends one at a time and replaces the last failure', async () => {
+  const answers = [
+    Promise.withResolvers<Response>(),
+    Promise.withResolvers<Response>()
+  ];
+  const write = vi.fn(() => answers[write.mock.calls.length - 1].promise);
+  serveEditorWrite(write);
+  const state = await providerEditorState();
+
+  const first = state.activate();
+  await eventually(() => expect(write).toHaveBeenCalledOnce());
+  expect(state.view.busy).toBe('detail-activate');
+  await state.disable();
+  expect(write).toHaveBeenCalledOnce();
+  answers[0].resolve(
+    problem('validation_failed', 422, {
+      detail: 'The provider is not ready',
+      errors: { name: [{ code: 'required', message: 'Name is required' }] }
+    })
+  );
+  await first;
+  expect(state.view.busy).toBe('');
+  expect(state.view.error).toBe('The provider is not ready');
+  expect(state.view.validationIssues).toEqual([
+    expect.objectContaining({ message: 'Name is required' })
+  ]);
+
+  const second = state.activate();
+  await eventually(() => expect(write).toHaveBeenCalledTimes(2));
+  expect(state.view.error).toBe('');
+  expect(state.view.validationIssues).toEqual([]);
+  answers[1].resolve(json({ runtime_generation: { sequence: 6 } }));
+  await second;
+  expect(state.view.notice).toContain('runtime generation 6');
+});
+
+it('flags a provider changed elsewhere without an error and keeps the flag until a reload', async () => {
+  const write = vi.fn(async () => problem('etag_mismatch', 412));
+  serveEditorWrite(write);
+  const state = await providerEditorState();
+
+  await state.activate();
+  expect(state.view.concurrentNotice).not.toBeNull();
+  expect(state.view.error).toBe('');
+  expect(state.view.busy).toBe('');
+  await state.reload();
+  expect(state.view.concurrentNotice).toBeNull();
+  expect(state.view.busy).toBe('');
+});
+
+it('says what still uses a provider that cannot be disabled until the next write starts', async () => {
+  const write = vi
+    .fn(async () => json({ runtime_generation: { sequence: 7 } }))
+    .mockResolvedValueOnce(
+      problem('configuration_resource_in_use', 409, {
+        detail: 'A route still uses this provider'
+      })
+    );
+  serveEditorWrite(write);
+  const state = await providerEditorState();
+
+  await state.disable();
+  expect(state.view.referenceConflict).toBe('A route still uses this provider');
+  expect(state.view.error).toBe('');
+  await state.activate();
+  expect(state.view.referenceConflict).toBe('');
+});
+
+it('ignores a provider write answered after another principal signed in', async () => {
+  const answer = Promise.withResolvers<Response>();
+  const write = vi.fn(() => answer.promise);
+  serveEditorWrite(write);
+  const state = await providerEditorState();
+
+  const activating = state.activate();
+  await eventually(() => expect(write).toHaveBeenCalledOnce());
+  authLifecycle.establishSession({
+    user: {
+      id: 'another-owner',
+      email: 'another@example.test',
+      display_name: 'Another owner',
+      role: 'owner',
+      access_scope: 'global',
+      operations: ['read', 'configure']
+    },
+    csrf_token: 'fixture-csrf'
+  });
+  flushSync();
+  expect(state.view.busy).toBe('');
+  answer.resolve(json({ message: 'Refused' }, 500));
+  await activating;
+  expect(state.view.error).toBe('');
+  expect(state.view.notice).toBe('');
+});
+
+it('ignores a provider write answered after the page moved to another provider', async () => {
+  const answer = Promise.withResolvers<Response>();
+  const write = vi.fn(() => answer.promise);
+  serveEditorWrite(write);
+  let providerId = $state(editorProvider.id);
+  const state = await providerEditorState(() => providerId);
+
+  const activating = state.activate();
+  await eventually(() => expect(write).toHaveBeenCalledOnce());
+  providerId = 'another-provider';
+  flushSync();
+  expect(state.view.busy).toBe('');
+  answer.resolve(json({ runtime_generation: { sequence: 8 } }));
+  await activating;
+  expect(state.view.notice).toBe('');
+  expect(state.view.refreshPending).toBe(false);
 });
 
 it('clears a billing import delete conflict after loading the new version', async () => {
