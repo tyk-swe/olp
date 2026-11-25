@@ -1,4 +1,5 @@
 import { useAction, useMutation } from './action.svelte';
+import { ApiProblem } from '#lib/management/http.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import type { AuthenticatedSession } from '#lib/session/state.js';
 import { expect, it, vi } from 'vitest';
@@ -14,6 +15,13 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+const etagMismatch = () =>
+  new ApiProblem({
+    type: 'https://openllmproxy.dev/problems/etag_mismatch',
+    title: 'Precondition failed',
+    status: 412
+  });
 
 function harness(setup: () => void) {
   return mount(StateHarness, { target: document.body, props: { setup } });
@@ -108,7 +116,7 @@ it('retires a pending send with the old principal so its late resolution neither
 it('keeps an authentication-scoped action busy through its own transition and stops accepting after unmount', async () => {
   let action!: ReturnType<typeof useAction>;
   const component = harness(() => {
-    action = useAction(undefined, 'authentication');
+    action = useAction({ lifetime: 'authentication' });
   });
   const session: AuthenticatedSession = {
     user: {
@@ -141,4 +149,134 @@ it('keeps an authentication-scoped action busy through its own transition and st
   second.resolve('too late');
   expect(await secondRun).toBe(false);
   expect(secondAccept).not.toHaveBeenCalled();
+});
+
+it('ignores a run retired by its owner, aborts its signal and lets the next run start', async () => {
+  let action!: ReturnType<typeof useAction>;
+  const component = harness(() => {
+    action = useAction();
+  });
+  const stale = deferred<string>();
+  const staleAccept = vi.fn();
+  const signals: AbortSignal[] = [];
+  const staleRun = action.run((_current, signal) => {
+    signals.push(signal);
+    return stale.promise;
+  }, staleAccept);
+  action.error = 'left over';
+
+  action.retire();
+  expect(action.busy).toBe(false);
+  expect(action.error).toBe('');
+  expect(signals[0].aborted).toBe(true);
+
+  const fresh = deferred<string>();
+  const freshRun = action.run((_current, signal) => {
+    signals.push(signal);
+    return fresh.promise;
+  });
+  stale.reject(new Error('late failure'));
+  expect(await staleRun).toBe(false);
+  expect(staleAccept).not.toHaveBeenCalled();
+  expect(action.error).toBe('');
+  expect(action.key).toBe('submit');
+  expect(signals[1].aborted).toBe(false);
+
+  fresh.resolve('done');
+  expect(await freshRun).toBe(true);
+  expect(action.busy).toBe(false);
+  await unmount(component);
+});
+
+it('drops the outcome of a run once the caller says its scope is gone', async () => {
+  let action!: ReturnType<typeof useAction>;
+  const scope = { id: 'first' };
+  const component = harness(() => {
+    action = useAction({ current: () => scope.id === 'first' });
+  });
+  const pending = deferred<string>();
+  const accept = vi.fn();
+  const observed: boolean[] = [];
+  const run = action.run((current) => {
+    observed.push(current());
+    return pending.promise.finally(() => observed.push(current()));
+  }, accept);
+  scope.id = 'second';
+  pending.reject(new Error('belongs to the first scope'));
+
+  expect(await run).toBe(false);
+  expect(observed).toEqual([true, false]);
+  expect(accept).not.toHaveBeenCalled();
+  expect(action.error).toBe('');
+  await unmount(component);
+});
+
+it('raises only the conflict flag for a failure the caller claims and shows the message for the rest', async () => {
+  let action!: ReturnType<typeof useAction>;
+  const claimed: unknown[] = [];
+  const editing = { existing: true };
+  const component = harness(() => {
+    action = useAction({
+      conflict: (cause) => {
+        claimed.push(cause);
+        return editing.existing;
+      }
+    });
+  });
+  const mismatch = etagMismatch();
+  expect(await action.run(() => Promise.reject(mismatch))).toBe(false);
+  expect(claimed).toEqual([mismatch]);
+  expect(action.conflict).toBe(true);
+  expect(action.error).toBe('');
+  expect(action.busy).toBe(false);
+
+  editing.existing = false;
+  expect(await action.run(() => Promise.reject(mismatch))).toBe(false);
+  expect(action.conflict).toBe(false);
+  expect(action.error).toBe('Precondition failed');
+
+  expect(
+    await action.run(
+      () => Promise.resolve('sent'),
+      () => {
+        throw mismatch;
+      }
+    )
+  ).toBe(false);
+  expect(claimed).toHaveLength(2);
+  await unmount(component);
+});
+
+it('lists the field issues of a rejected write and clears them when the next run starts', async () => {
+  let action!: ReturnType<typeof useAction>;
+  const begin = vi.fn();
+  const component = harness(() => {
+    action = useAction({ begin });
+  });
+  const invalid = new ApiProblem({
+    type: 'about:blank',
+    title: 'Validation failed',
+    status: 422,
+    errors: { name: [{ code: 'required', message: 'Enter a name.' }] }
+  });
+  expect(
+    await action.run(() => Promise.reject(invalid), undefined, { key: 'save' })
+  ).toBe(false);
+  expect(action.issues).toEqual([
+    { field: 'name', code: 'required', message: 'Enter a name.' }
+  ]);
+  expect(begin).toHaveBeenCalledOnce();
+
+  const next = deferred<string>();
+  const run = action.run(() => next.promise, undefined, { key: 'probe' });
+  expect(action.key).toBe('probe');
+  expect(action.issues).toEqual([]);
+  expect(action.error).toBe('');
+  expect(begin).toHaveBeenCalledTimes(2);
+
+  expect(await action.run(() => Promise.resolve('blocked'))).toBe(false);
+  expect(begin).toHaveBeenCalledTimes(2);
+  next.resolve('done');
+  expect(await run).toBe(true);
+  await unmount(component);
 });

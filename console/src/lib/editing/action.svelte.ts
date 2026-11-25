@@ -1,9 +1,15 @@
 import { onDestroy } from 'svelte';
-import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+import {
+  errorMessage,
+  fieldIssues,
+  isEtagMismatch,
+  type FieldIssue
+} from '#lib/management/http.js';
 import {
   useMutationIntent,
   usePrincipalLifetime
 } from './mutationIntent.svelte';
+import { readResult } from './result';
 
 export type ActionFeedback = {
   key?: string;
@@ -11,27 +17,59 @@ export type ActionFeedback = {
   failure?: (cause: unknown, stage: 'send' | 'accept') => string;
 };
 
-export function useAction(
-  refreshOnConflict?: () => Promise<unknown>,
-  lifetime: 'principal' | 'authentication' = 'principal'
-) {
+export type ActionOptions = {
+  refreshOnConflict?: () => Promise<unknown>;
+  lifetime?: 'principal' | 'authentication';
+  current?: () => boolean;
+  conflict?: (cause: unknown) => boolean;
+  begin?: () => void;
+};
+
+export function useAction(options: ActionOptions = {}) {
   let activeKey = $state<string | null>(null);
   let error = $state('');
   let conflict = $state(false);
+  let issues = $state<FieldIssue[]>([]);
+  let generation = 0;
+  let pending: AbortController | null = null;
+  const retire = () => {
+    generation += 1;
+    pending?.abort();
+    pending = null;
+    activeKey = null;
+    error = '';
+    conflict = false;
+    issues = [];
+  };
   const capture =
-    lifetime === 'authentication'
+    options.lifetime === 'authentication'
       ? (() => {
           let mounted = true;
           onDestroy(() => {
             mounted = false;
+            pending?.abort();
           });
           return () => () => mounted;
         })()
-      : usePrincipalLifetime(() => {
-          activeKey = null;
-          error = '';
-          conflict = false;
-        });
+      : usePrincipalLifetime(retire);
+  const fail = async (
+    cause: unknown,
+    stage: 'send' | 'accept',
+    feedback: ActionFeedback
+  ) => {
+    if (stage === 'send' && options.conflict?.(cause)) {
+      conflict = true;
+      return;
+    }
+    error = feedback.failure
+      ? feedback.failure(cause, stage)
+      : errorMessage(cause, feedback.fallback);
+    issues = fieldIssues(cause);
+    if (stage !== 'send' || options.conflict || !isEtagMismatch(cause)) return;
+    conflict = true;
+    const refresh = options.refreshOnConflict;
+    if (refresh) await readResult(refresh);
+  };
   return {
     get busy() {
       return activeKey !== null;
@@ -48,42 +86,42 @@ export function useAction(
     get conflict() {
       return conflict;
     },
+    get issues() {
+      return issues;
+    },
     reset() {
       error = '';
       conflict = false;
+      issues = [];
     },
+    retire,
     async run<T>(
-      send: () => Promise<T>,
+      send: (current: () => boolean, signal: AbortSignal) => Promise<T>,
       accept?: (value: T, current: () => boolean) => void | Promise<void>,
       feedback: ActionFeedback = {}
     ): Promise<boolean> {
       if (activeKey !== null) return false;
-      const current = capture();
+      const owned = capture();
+      const started = generation;
+      const current = () =>
+        owned() && started === generation && (options.current?.() ?? true);
+      const abort = new AbortController();
+      pending = abort;
       activeKey = feedback.key ?? 'submit';
       error = '';
       conflict = false;
+      issues = [];
+      options.begin?.();
       let stage: 'send' | 'accept' = 'send';
       try {
-        const value = await send();
+        const value = await send(current, abort.signal);
         if (current()) {
           stage = 'accept';
           await accept?.(value, current);
         }
         return current();
       } catch (cause) {
-        if (current()) {
-          error = feedback.failure
-            ? feedback.failure(cause, stage)
-            : errorMessage(cause, feedback.fallback);
-          if (stage === 'send' && isEtagMismatch(cause)) {
-            conflict = true;
-            try {
-              await refreshOnConflict?.();
-            } catch {
-              // The reported conflict stands; a failed refresh adds nothing.
-            }
-          }
-        }
+        if (current()) await fail(cause, stage, feedback);
         return false;
       } finally {
         if (current()) activeKey = null;
@@ -93,7 +131,7 @@ export function useAction(
 }
 
 export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
-  const action = useAction(refreshOnConflict);
+  const action = useAction({ refreshOnConflict });
   const intent = useMutationIntent();
   return {
     get busy() {

@@ -29,7 +29,7 @@
   let selectedUser = $state('');
   const pagination = $state(emptyCursorHistory());
   const revoke = useAction();
-  const exit = useAction(undefined, 'authentication');
+  const exit = useAction({ lifetime: 'authentication' });
 
   const users = createQuery(() => ({
     queryKey: userKeys.roster,

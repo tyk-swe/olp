@@ -37,7 +37,7 @@
   });
   let errors = $state<InvitationAcceptanceErrors>({});
   let message = $state('');
-  const accept = useAction(undefined, 'authentication');
+  const accept = useAction({ lifetime: 'authentication' });
   const controller = new AbortController();
 
   async function checkPolicy() {

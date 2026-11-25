@@ -21,7 +21,7 @@
 
   let email = $state('');
   let password = $state('');
-  const login = useAction(undefined, 'authentication');
+  const login = useAction({ lifetime: 'authentication' });
   const busy = $derived(login.key === 'password');
   const ssoBusy = $derived(login.key === 'sso');
   let capabilitiesLoading = $state(true);

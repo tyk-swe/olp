@@ -22,7 +22,7 @@
 
   const pagination = $state(emptyCursorHistory());
   const revoke = useAction();
-  const exit = useAction(undefined, 'authentication');
+  const exit = useAction({ lifetime: 'authentication' });
 
   const sessions = createQuery(() => ({
     queryKey: profileKeys.sessions(pagination.cursor),

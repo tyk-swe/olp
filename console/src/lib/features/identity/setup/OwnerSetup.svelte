@@ -26,7 +26,7 @@
     setupToken: ''
   });
   let errors = $state<OwnerFormErrors>({});
-  const action = useAction(undefined, 'authentication');
+  const action = useAction({ lifetime: 'authentication' });
 
   const serverToFormField: Record<string, keyof OwnerFormValues> = {
     display_name: 'displayName',

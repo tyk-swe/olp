@@ -24,7 +24,7 @@
   authLifecycle.markProtectedBoundaryChecking();
   let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
   let pendingCapabilities: AuthenticationCapabilities | null = null;
-  const exit = useAction(undefined, 'authentication');
+  const exit = useAction({ lifetime: 'authentication' });
 
   function loginDestination(sessionExpired = false) {
     const returnTo = page.url.pathname + page.url.search + page.url.hash;

@@ -9,7 +9,7 @@
     $props();
   const client = useQueryClient();
   const refresh = () => client.invalidateQueries({ queryKey: codeKeys.root });
-  const action = useAction(refresh);
+  const action = useAction({ refreshOnConflict: refresh });
 
   async function toggleDrain() {
     const target = { id: account.id, etag: account.etag };
