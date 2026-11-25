@@ -78,7 +78,7 @@ func (m *Manager) AuthorizeAgentResource(a keyauthority.Authority, scope, id, re
 	if !m.authority.loaded || now.Sub(m.authority.readAt) > AuthorityStaleAfter {
 		return ErrStaleAuthority
 	}
-	if !m.authority.currentAgentPrincipal(a, scope, id, project, now) {
+	if !m.authority.currentAgentPrincipal(a, scope, id, project, now, newAgentWork) {
 		return httpkit.Forbidden()
 	}
 	resource, ok := m.authority.agentResources[id]
@@ -88,7 +88,7 @@ func (m *Manager) AuthorizeAgentResource(a keyauthority.Authority, scope, id, re
 	return nil
 }
 
-func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scope, id, project string, now time.Time) bool {
+func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scope, id, project string, now time.Time, admission agentWorkAdmission) bool {
 	current, ok := state.agentPrincipals[a.ID]
 	if a.WorkloadDigest != "" {
 		principal, known := state.workloadPrincipals[a.WorkloadDigest]
@@ -111,7 +111,7 @@ func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scop
 			break
 		}
 	}
-	if !ok || current.ID != a.ID || !current.AllowsResource(scope, id, project, now) {
+	if !ok || current.ID != a.ID || !admission.authority(current).AllowsResource(scope, id, project, now) {
 		return false
 	}
 	if a.DelegationAgentID == "" {
@@ -120,7 +120,7 @@ func (state authorityState) currentAgentPrincipal(a keyauthority.Authority, scop
 	if a.DelegationAgentLimits == nil || a.DelegationAgentLimits.ID != a.DelegationAgentID || a.DelegationAgentLimits.WorkloadDigest == "" {
 		return false
 	}
-	return state.currentAgentPrincipal(keyauthority.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now)
+	return state.currentAgentPrincipal(keyauthority.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now, admission)
 }
 
 type mcpToolAuthority struct {
@@ -170,7 +170,7 @@ func (m *Manager) AuthorizeMCPTool(a keyauthority.Authority, id, revision, proje
 	if !m.authority.loaded || now.Sub(m.authority.readAt) > AuthorityStaleAfter {
 		return ErrStaleAuthority
 	}
-	if !m.authority.currentAgentPrincipal(a, "tools", id, project, now) {
+	if !m.authority.currentAgentPrincipal(a, "tools", id, project, now, newAgentWork) {
 		return httpkit.Forbidden()
 	}
 	toolset, ok := m.authority.mcpTools[revision]

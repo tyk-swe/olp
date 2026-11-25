@@ -31,7 +31,7 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.AuthorizeAgentTask(record.KeyID, record.ProjectID, record.PublicationID, record.RevisionID, record.WorkloadRevision, record.CallerExpires); err != nil {
+	if err := m.authorizeAgentTask(record.KeyID, record.ProjectID, record.PublicationID, record.RevisionID, record.WorkloadRevision, record.CallerExpires, newAgentWork); err != nil {
 		return nil, err
 	}
 	m.mu.RLock()
@@ -73,7 +73,7 @@ func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy keyauthority.
 	if pair != "" && revision == "" {
 		return nil, ErrInvalidKey
 	}
-	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication, pair, revision)
+	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication, pair, revision, newAgentWork)
 }
 
 func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (keyauthority.Authority, keyauthority.Authority, string, *time.Time, bool) {

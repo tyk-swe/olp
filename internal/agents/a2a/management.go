@@ -59,7 +59,10 @@ func (m *Management) cancel(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	task, err := access.Run(m.access, r, func(tx pgx.Tx, p authz.Principal) (tasks.Remote, access.Event, error) {
 		task, err := load(tx, p)
-		return task, access.Event{}, err
+		if err != nil {
+			return tasks.Remote{}, access.Event{}, err
+		}
+		return task, access.Event{Action: "a2a_task.cancel_attempt", Resource: "a2a_task", ID: task.ID, Project: &task.ProjectID}, nil
 	})
 	if err != nil {
 		return httpkit.Reply{}, err

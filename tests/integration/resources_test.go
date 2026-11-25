@@ -26,14 +26,19 @@ import (
 	"testing"
 	"time"
 
+	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/a2a"
 	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
@@ -65,6 +70,89 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
+
+func TestA2ACancellationAuditsProjectActorBeforePeerDispatch(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	actor, task := uuid.NewString(), uuid.NewString()
+	const upstream = "peer-task"
+	seedA2ACancellation(t, fixture, actor, task, upstream)
+
+	checkAudit := func(ctx context.Context) {
+		var rows int
+		err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE action='a2a_task.cancel_attempt'
+			AND resource_type='a2a_task' AND resource_id=$1 AND project_id=$2 AND actor_user_id=$3`,
+			task, fixture.projectID, actor).Scan(&rows)
+		if err != nil || rows != 1 {
+			t.Errorf("attributed cancellation attempts = %d, want 1 (%v)", rows, err)
+		}
+	}
+	peer := cancellationPeer{cancel: func(ctx context.Context, request *protocol.CancelTaskRequest) (*protocol.Task, error) {
+		checkAudit(ctx)
+		if request.ID != upstream {
+			return nil, fmt.Errorf("cancellation targeted %q, want %q", request.ID, upstream)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM olp.project_members WHERE project_id=$1 AND user_id=$2`, fixture.projectID, actor); err != nil {
+			return nil, err
+		}
+		return &protocol.Task{ID: request.ID, ContextID: "peer-context", Status: protocol.TaskStatus{State: protocol.TaskStateCanceled}}, nil
+	}}
+	store := tasks.New(pool, tasks.Limits{}, nil, slog.New(slog.DiscardHandler))
+	call := managementHTTPAs(t, pool, actor, func(mux *http.ServeMux, server *access.Server) {
+		a2a.NewManagement(server, store, agents.NewTaskOperations(store, peer, nil)).Register(mux)
+	})
+	if result := call("POST", "/api/v1/a2a-tasks/"+task+"/cancel", "", ""); result.status != http.StatusNotFound {
+		t.Fatalf("cancellation after project access was removed = %d %s, want 404", result.status, result.body)
+	}
+	var state tasks.State
+	if err := pool.QueryRow(t.Context(), `SELECT state FROM olp.a2a_tasks WHERE id=$1`, task).Scan(&state); err != nil || state != tasks.Canceled {
+		t.Fatalf("stored task state = %q, want %q (%v)", state, tasks.Canceled, err)
+	}
+	checkAudit(t.Context())
+}
+
+func seedA2ACancellation(t *testing.T, f usageFixture, actor, task, upstream string) {
+	t.Helper()
+	publication, revision, dispatch := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	_, err := f.pool.Exec(t.Context(), `WITH actor AS (
+		INSERT INTO olp.users(id,email,display_name,role,access_scope,etag)
+		VALUES($1::uuid,$1::text||'@example.test','Task operator','operator','assigned',$1::uuid) RETURNING id
+	), membership AS (
+		INSERT INTO olp.project_members(project_id,user_id,role,added_by) SELECT $2,id,'manager',$3 FROM actor
+	), publication AS (
+		INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by)
+		VALUES($4,$2,'agent','Task peer','{}',$4,$3) RETURNING id
+	), revision AS (
+		INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by)
+		SELECT $5,id,$2,'agent',jsonb_build_object('project_id',$2::uuid,'agent','{}'::jsonb),repeat('0',64),$3 FROM publication
+		RETURNING id, publication_id
+	), debit AS (
+		INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,prepared_until)
+		VALUES($6,$7,$2,'agent','{}',decode(repeat('00',32),'hex'),$6,'USD',0,0,now()) RETURNING id
+	)
+	INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,state)
+	SELECT $8,$7,$2,revision.publication_id,revision.id,debit.id,$9,'active' FROM revision CROSS JOIN debit`,
+		actor, f.projectID, f.ownerID, publication, revision, dispatch, f.keyID, task, upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+type cancellationPeer struct {
+	agents.Peer
+	cancel func(context.Context, *protocol.CancelTaskRequest) (*protocol.Task, error)
+}
+
+func (p cancellationPeer) Open(context.Context, agentcontract.Definition, []byte, bool) (agents.Peer, error) {
+	return p, nil
+}
+
+func (p cancellationPeer) Cancel(ctx context.Context, request *protocol.CancelTaskRequest) (*protocol.Task, error) {
+	return p.cancel(ctx, request)
+}
+
+func (cancellationPeer) Close() {}
 
 func (f usageFixture) resource(kind, keyID, upstream string) *resources.Resource {
 	return &resources.Resource{

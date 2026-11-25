@@ -129,6 +129,24 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 			t.Fatalf("owner's pinned model callback refused: %v", err)
 		}
 	})
+	t.Run("paused owner keeps admitted task and cannot start a callback", func(t *testing.T) {
+		manager, _ := newFixture()
+		paused := owner
+		paused.PausedAt = &now
+		manager.authority.agentPrincipals[owner.ID] = paused
+		if err := manager.AuthorizeAgentTask(owner.ID, project, publication, revision, "", nil); err != nil {
+			t.Errorf("monitor rejected an admitted task after pause: %v", err)
+		}
+		if _, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid"); err == nil {
+			t.Error("paused owner authenticated a new callback")
+		}
+		revoked := paused
+		revoked.RevokedAt = &now
+		manager.authority.agentPrincipals[owner.ID] = revoked
+		if err := manager.AuthorizeAgentTask(owner.ID, project, publication, revision, "", nil); err == nil {
+			t.Error("monitor authorized a task after its paused owner was revoked")
+		}
+	})
 	t.Run("workload owner current mapping and expiry", func(t *testing.T) {
 		manager, store := newFixture()
 		issuerID := "workload-issuer"
@@ -320,6 +338,14 @@ func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
 			}
 		})
 	}
+	t.Run("paused workload with current assertion", func(t *testing.T) {
+		paused := principal
+		paused.PausedAt = &now
+		manager.authority.workloadPrincipals[principal.WorkloadDigest] = paused
+		if err := manager.AuthorizeAgentTask(principal.ID, project, resource, resource, "revision", &active); err != nil {
+			t.Fatalf("monitor rejected an admitted workload task after pause: %v", err)
+		}
+	})
 }
 
 func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.T) {
