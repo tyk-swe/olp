@@ -280,3 +280,26 @@ it('lists the field issues of a rejected write and clears them when the next run
   expect(await run).toBe(true);
   await unmount(component);
 });
+
+it('cancels a send through its signal and reports how the send ended', async () => {
+  let action!: ReturnType<typeof useAction>;
+  const component = harness(() => {
+    action = useAction();
+  });
+  const accept = vi.fn();
+  const run = action.run(
+    (_current, signal) =>
+      new Promise<string>((_resolve, reject) =>
+        signal.addEventListener('abort', () => reject(new Error('Stopped.')))
+      ),
+    accept
+  );
+
+  action.cancel();
+
+  expect(await run).toBe(false);
+  expect(accept).not.toHaveBeenCalled();
+  expect(action.error).toBe('Stopped.');
+  expect(action.busy).toBe(false);
+  await unmount(component);
+});

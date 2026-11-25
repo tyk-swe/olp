@@ -98,6 +98,9 @@ export function useAction(options: ActionOptions = {}) {
       issues = [];
     },
     retire,
+    cancel() {
+      pending?.abort();
+    },
     async run<T>(
       send: (current: () => boolean, signal: AbortSignal) => Promise<T>,
       accept?: (value: T, current: () => boolean) => void | Promise<void>,

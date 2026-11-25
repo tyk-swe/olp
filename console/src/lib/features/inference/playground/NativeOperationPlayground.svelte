@@ -26,33 +26,16 @@
     if (!options.includes(dialect)) dialect = options[0] ?? '';
   });
   let key = $state('');
-  let busy = $state(false);
-  let error = $state('');
   let result = $state<NativeOperationResult | null>(null);
-  let abort: AbortController | null = null;
-  let epoch = 0;
 
-  async function run() {
-    if (busy) return;
-    epoch += 1;
-    const owner = epoch;
-    error = '';
+  function run() {
+    if (runAction.busy) return;
     result = null;
-    busy = true;
-    abort = new AbortController();
-    const controller = abort;
-    await runAction.run(
-      () =>
-        runNativeOperation(
-          operation,
-          dialect,
-          route,
-          key,
-          requestText,
-          controller.signal
-        ),
-      (value, current) => {
-        if (owner === epoch && current()) result = value;
+    void runAction.run(
+      (_, signal) =>
+        runNativeOperation(operation, dialect, route, key, requestText, signal),
+      (value) => {
+        result = value;
       },
       {
         failure: (reason) =>
@@ -61,25 +44,14 @@
             : 'The public native operation could not be completed.'
       }
     );
-    if (owner === epoch) {
-      error = runAction.error;
-      busy = false;
-      if (abort === controller) abort = null;
-    }
   }
 
   function clear() {
-    epoch += 1;
-    abort?.abort();
-    abort = null;
-    busy = false;
-    error = '';
+    runAction.retire();
     result = null;
   }
 
   onDestroy(() => {
-    epoch += 1;
-    abort?.abort();
     key = '';
   });
 </script>
@@ -131,13 +103,15 @@
       type="button"
       class="button button-primary"
       onclick={run}
-      disabled={busy || !key || !route || !dialect}
-      >{busy ? 'Running public operation…' : 'Run billable operation'}</button
+      disabled={runAction.busy || !key || !route || !dialect}
+      >{runAction.busy
+        ? 'Running public operation…'
+        : 'Run billable operation'}</button
     >
-    {#if busy}<button
+    {#if runAction.busy}<button
         type="button"
         class="button button-secondary"
-        onclick={() => abort?.abort()}>Cancel delivery</button
+        onclick={runAction.cancel}>Cancel delivery</button
       >{/if}
     {#if result}<button
         type="button"
@@ -145,7 +119,9 @@
         onclick={clear}>Clear result</button
       >{/if}
   </div>
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if runAction.error}<p class="inline-problem" role="alert">
+      {runAction.error}
+    </p>{/if}
   {#if result}
     <OperationResult
       {operation}
