@@ -11,7 +11,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
-	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -33,66 +32,6 @@ type DiscoveredModel struct {
 	Metadata      map[string]json.RawMessage
 }
 
-// A path that is an absolute URL replaces the endpoint. A listing with a cursor
-// continues while a page holds the next cursor and, when it names a more
-// field, while that field reports another page.
-type modelListing struct {
-	path, models, id, display, trimIDPrefix string
-	cursor, more, parameter                 string
-}
-
-func listingFor(t Target) (modelListing, bool, error) {
-	if t.Connection.Transport().RetrievalBackend() != "" {
-		return modelListing{}, false, nil
-	}
-	switch t.Connection.Document().Kind {
-	case connectors.KindAzureOpenAI, connectors.KindVertexAI:
-		return modelListing{}, false, nil
-	case connectors.KindPlugin:
-		if t.Connection.Transport().Plugin == nil {
-			return modelListing{}, false, nil
-		}
-		declared, ok := t.Connection.Transport().Plugin.Discovery()
-		if !ok {
-			return modelListing{}, false, nil
-		}
-		// Keep the rendered address's escaped option segments. call validates
-		// absolute URLs without rebuilding their path from a normalized base.
-		listing := modelListing{path: strings.TrimRight(providerconfig.Value(t.Connection.Document().Endpoint), "/") + declared.Path, models: declared.Models, id: declared.ID}
-		if pagination := declared.Pagination; pagination != nil {
-			listing.cursor, listing.more, listing.parameter = pagination.Cursor, pagination.More, pagination.Parameter
-		}
-		return listing, true, nil
-	}
-	if contract, ok := vendors.Lookup(providerconfig.Value(t.Connection.Document().Options.VendorID)); ok && !contract.Discovery {
-		return modelListing{}, false, nil
-	}
-	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
-	switch t.Connection.Document().Kind {
-	case connectors.KindAnthropic:
-		listing.cursor, listing.more, listing.parameter = "last_id", "has_more", "after_id"
-	case connectors.KindGemini:
-		listing.models, listing.id, listing.display = "models", "name", "displayName"
-		listing.cursor, listing.parameter = "nextPageToken", "pageToken"
-		listing.trimIDPrefix = "models/"
-	case connectors.KindWatsonx:
-		// The chat-capable foundation models, in one page of the most the
-		// listing returns.
-		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(providerconfig.Value(t.Connection.Document().APIVersion)) + "&filters=function_text_chat&limit=200"
-		listing.models, listing.id, listing.display = "resources", "model_id", "label"
-	case connectors.KindBedrock:
-		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
-		if providerconfig.Value(t.Connection.Document().Endpoint) == connectors.DefaultEndpoint(t.Connection.Document().Kind, providerconfig.Value(t.Connection.Document().CloudRegion), "") {
-			endpoint, err := connectors.BedrockEndpoint(providerconfig.Value(t.Connection.Document().CloudRegion), true)
-			if err != nil {
-				return modelListing{}, false, err
-			}
-			listing.path = endpoint + "/foundation-models"
-		}
-	}
-	return listing, true, nil
-}
-
 type Listing struct {
 	Models   []DiscoveredModel
 	Complete bool
@@ -109,7 +48,7 @@ func (p *Prober) ListModelFacts(ctx context.Context, t Target) ([]DiscoveredMode
 }
 
 func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Listing, error) {
-	listing, discovery, err := listingFor(t)
+	listing, discovery, err := t.Connection.Transport().ModelListing()
 	if err != nil {
 		return Listing{}, err
 	}
@@ -120,7 +59,7 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 	defer cancel()
 	out := []DiscoveredModel{}
 	seen, cursors := map[string]bool{}, map[string]bool{}
-	path := listing.path
+	path := listing.Path
 	for {
 		status, body, err := p.call(ctx, t, http.MethodGet, path, nil)
 		if err != nil {
@@ -134,24 +73,24 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid model discovery response."}
 		}
 		var items []map[string]json.RawMessage
-		if json.Unmarshal(page[listing.models], &items) != nil || items == nil {
+		if json.Unmarshal(page[listing.Models], &items) != nil || items == nil {
 			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response is missing its model array."}
 		}
 		for _, item := range items {
 			var id, display string
 			if strict {
-				rawID, hasID := item[listing.id]
+				rawID, hasID := item[listing.ID]
 				if !hasID || json.Unmarshal(rawID, &id) != nil {
 					return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
 				}
-				if rawDisplay, hasDisplay := item[listing.display]; hasDisplay && json.Unmarshal(rawDisplay, &display) != nil {
+				if rawDisplay, hasDisplay := item[listing.Display]; hasDisplay && json.Unmarshal(rawDisplay, &display) != nil {
 					return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid display name."}
 				}
 			} else {
-				_ = json.Unmarshal(item[listing.id], &id)
-				_ = json.Unmarshal(item[listing.display], &display)
+				_ = json.Unmarshal(item[listing.ID], &id)
+				_ = json.Unmarshal(item[listing.Display], &display)
 			}
-			name := strings.TrimPrefix(id, listing.trimIDPrefix)
+			name := strings.TrimPrefix(id, listing.TrimIDPrefix)
 			if strict && connection.ValidModelName("model", name) != nil {
 				return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Discovery response holds a model without a valid identifier."}
 			}
@@ -182,7 +121,7 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 			}
 		}
 		if strict {
-			cursor, final, incomplete, err := listing.strictNext(page)
+			cursor, final, incomplete, err := strictNextCursor(listing, page)
 			if err != nil {
 				return Listing{}, err
 			}
@@ -193,10 +132,10 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 				return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
 			}
 			cursors[cursor] = true
-			path = listing.path + "?" + url.Values{listing.parameter: []string{cursor}}.Encode()
+			path = listing.Path + "?" + url.Values{listing.Parameter: []string{cursor}}.Encode()
 			continue
 		}
-		cursor, err := listing.next(page)
+		cursor, err := nextCursor(listing, page)
 		if err != nil || cursor == "" {
 			return Listing{Models: out}, err
 		}
@@ -204,7 +143,7 @@ func (p *Prober) listModelFacts(ctx context.Context, t Target, strict bool) (Lis
 			return Listing{}, &Failure{Reason: ProviderProtocolError, Detail: "Invalid repeated discovery continuation."}
 		}
 		cursors[cursor] = true
-		path = listing.path + "?" + url.Values{listing.parameter: []string{cursor}}.Encode()
+		path = listing.Path + "?" + url.Values{listing.Parameter: []string{cursor}}.Encode()
 	}
 }
 
@@ -246,30 +185,30 @@ func (p *Prober) probeDeclaredModels(ctx context.Context, t Target) (Listing, er
 	return Listing{Models: out, Detail: "This provider has no model listing that can prove completeness."}, nil
 }
 
-func (l modelListing) next(page map[string]json.RawMessage) (string, error) {
-	if l.cursor == "" {
+func nextCursor(l connectors.ModelListing, page map[string]json.RawMessage) (string, error) {
+	if l.Cursor == "" {
 		return "", nil
 	}
-	if l.more != "" {
+	if l.More != "" {
 		var more bool
-		_ = json.Unmarshal(page[l.more], &more)
+		_ = json.Unmarshal(page[l.More], &more)
 		if !more {
 			return "", nil
 		}
 	}
 	var cursor string
-	_ = json.Unmarshal(page[l.cursor], &cursor)
-	if cursor == "" && l.more != "" {
+	_ = json.Unmarshal(page[l.Cursor], &cursor)
+	if cursor == "" && l.More != "" {
 		return "", &Failure{Reason: ProviderProtocolError, Detail: "Discovery continuation is missing its cursor."}
 	}
 	return cursor, nil
 }
 
-func (l modelListing) strictNext(page map[string]json.RawMessage) (cursor string, final bool, incomplete string, err error) {
-	if l.more == "" || l.cursor == "" || l.parameter == "" {
+func strictNextCursor(l connectors.ModelListing, page map[string]json.RawMessage) (cursor string, final bool, incomplete string, err error) {
+	if l.More == "" || l.Cursor == "" || l.Parameter == "" {
 		return "", true, "The model listing does not state whether another page follows, so completeness cannot be proved.", nil
 	}
-	rawMore, ok := page[l.more]
+	rawMore, ok := page[l.More]
 	if !ok {
 		return "", true, "The model listing is missing its pagination field, so completeness cannot be proved.", nil
 	}
@@ -284,7 +223,7 @@ func (l modelListing) strictNext(page map[string]json.RawMessage) (cursor string
 	if !more {
 		return "", true, "", nil
 	}
-	rawCursor, ok := page[l.cursor]
+	rawCursor, ok := page[l.Cursor]
 	if !ok || json.Unmarshal(rawCursor, &cursor) != nil || cursor == "" {
 		return "", false, "", &Failure{Reason: ProviderProtocolError, Detail: "Discovery continuation is missing its cursor."}
 	}

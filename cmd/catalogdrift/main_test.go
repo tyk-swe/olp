@@ -18,7 +18,11 @@ type recordedListing struct {
 
 func (r *recordedListing) RoundTrip(request *http.Request) (*http.Response, error) {
 	r.asked = request
-	body, err := json.Marshal(map[string][]map[string]string{r.listing.array: {{r.listing.id: r.listing.trimPrefix + "listed-model"}}})
+	shape, err := r.listing.shape()
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(map[string][]map[string]string{shape.Models: {{shape.ID: shape.TrimIDPrefix + "listed-model"}}})
 	if err != nil {
 		return nil, err
 	}
