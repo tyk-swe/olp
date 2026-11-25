@@ -4,7 +4,7 @@ import {
   limitForm,
   limitsError,
   type LimitForm
-} from '../limitForm';
+} from '#lib/features/budgets/index.js';
 type Budgets = components['schemas']['AttributionBudgets'];
 export const costFields = limitFields.filter((field) => !field.numeric);
 export type BudgetForm = {

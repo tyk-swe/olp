@@ -1,6 +1,8 @@
 <script lang="ts">
-  import NamedLimitFields from '../NamedLimitFields.svelte';
-  import type { NamedLimitRow } from '../namedLimits';
+  import {
+    NamedLimitFields,
+    type NamedLimitRow
+  } from '#lib/features/budgets/index.js';
 
   let {
     form = $bindable(),

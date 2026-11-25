@@ -4,8 +4,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { listUsers } from '#lib/features/identity/index.js';
-  import { userKeys } from '#lib/features/identity/index.js';
+  import { listUsers, userKeys } from '#lib/features/identity/index.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory

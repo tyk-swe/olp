@@ -5,12 +5,12 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getPublication, putPublication } from './api';
-  import { catalogKeys } from './catalogKeys';
+  import { projectKeys } from './projectKeys';
   let { projectId }: { projectId: string } = $props();
   const access = useRole();
   const client = useQueryClient();
   const publication = createQuery(() => ({
-    queryKey: catalogKeys.publication(projectId),
+    queryKey: projectKeys.publication(projectId),
     queryFn: ({ signal }) => getPublication(projectId, signal)
   }));
   let enabled = $state(false);
@@ -43,7 +43,7 @@
           etag
         }),
       async (result) => {
-        client.setQueryData(catalogKeys.publication(projectId), result);
+        client.setQueryData(projectKeys.publication(projectId), result);
         etag = result.etag;
         notify('Catalog publication saved.');
       }

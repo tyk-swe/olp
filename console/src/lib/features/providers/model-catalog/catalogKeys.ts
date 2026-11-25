@@ -6,6 +6,5 @@ export const catalogKeys = {
     if (!projectId) return root;
     return [...root, 'public', projectId] as const;
   },
-  publication: (id: string) => [...root, 'publication', id] as const,
   exposure: (id: string) => [...root, 'exposure', id] as const
 };

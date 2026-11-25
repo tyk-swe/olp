@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { limitForm } from '../limitForm';
-  import { costFields, type BudgetForm } from './policy';
+  import { limitForm } from '#lib/features/budgets/index.js';
+  import { costFields, type BudgetForm } from './attributionBudgetPolicy';
   let {
     form = $bindable(),
     disabled = false

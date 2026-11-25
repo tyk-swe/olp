@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { budgetError, budgetForm, budgetInput } from './policy';
+import {
+  budgetError,
+  budgetForm,
+  budgetInput
+} from './attributionBudgetPolicy';
 
 const configured = {
   team: {
