@@ -245,7 +245,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	}), nil
 }
 
-func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string) (*keyauthority.Authority, error) {
+func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string, admission agentWorkAdmission) (*keyauthority.Authority, error) {
 	if m == nil || m.pool == nil {
 		return nil, ErrInvalidKey
 	}
@@ -288,9 +288,14 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 		WorkloadRevision: revision,
 		ExpiresAt:        &expires,
 	})
-	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, time.Now())
+	now := time.Now()
+	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, now, admission)
 	m.mu.RUnlock()
-	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, time.Now()) || !delegationResourcesAllowed(agent, owner, routes, toolsets, agents, time.Now()) {
+	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current {
+		return nil, ErrInvalidKey
+	}
+	agentPolicy := admission.authority(agent)
+	if !delegationResourcesAllowed(agentPolicy, admission.authority(key), routes, toolsets, agents, now) || !delegationResourcesAllowed(agentPolicy, admission.authority(owner), routes, toolsets, agents, now) {
 		return nil, ErrInvalidKey
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -314,8 +319,8 @@ func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID
 	if err != nil {
 		return ErrInvalidKey
 	}
-	_, err = m.authorizeDelegatedTask(ctx, raw, keyID, project, publication, "", "")
-	return err
+	_, authorizationErr := m.authorizeDelegatedTask(ctx, raw, keyID, project, publication, "", "", admittedAgentWork)
+	return authorizationErr
 }
 
 func (m *Manager) delegationPair(project, key, agent string, member *string) (string, string) {

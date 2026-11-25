@@ -129,6 +129,24 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 			t.Fatalf("owner's pinned model callback refused: %v", err)
 		}
 	})
+	t.Run("paused owner keeps admitted task and cannot start a callback", func(t *testing.T) {
+		manager, _ := newFixture()
+		paused := owner
+		paused.PausedAt = &now
+		manager.authority.agentPrincipals[owner.ID] = paused
+		if err := manager.AuthorizeAgentTask(owner.ID, project, publication, revision, "", nil); err != nil {
+			t.Errorf("monitor rejected an admitted task after pause: %v", err)
+		}
+		if _, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid"); err == nil {
+			t.Error("paused owner authenticated a new callback")
+		}
+		revoked := paused
+		revoked.RevokedAt = &now
+		manager.authority.agentPrincipals[owner.ID] = revoked
+		if err := manager.AuthorizeAgentTask(owner.ID, project, publication, revision, "", nil); err == nil {
+			t.Error("monitor authorized a task after its paused owner was revoked")
+		}
+	})
 	t.Run("workload owner current mapping and expiry", func(t *testing.T) {
 		manager, store := newFixture()
 		issuerID := "workload-issuer"
@@ -229,6 +247,13 @@ func TestAgentLiveAuthority(t *testing.T) {
 	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
 		t.Fatal("captured key authority overrode live revocation")
 	}
+	pausedAt := time.Now()
+	paused := a
+	paused.PausedAt = &pausedAt
+	m.authority.agentPrincipals[a.ID] = paused
+	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
+		t.Fatal("captured key authority overrode live pause")
+	}
 	m.authority.agentPrincipals[a.ID] = a
 	m.authority.readAt = time.Now().Add(-AuthorityStaleAfter - time.Second)
 	if m.AuthorizeAgentResource(a, "tools", resource, resource, project) == nil {
@@ -245,7 +270,7 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 			if scope == "agents" {
 				kind = "agent"
 			}
-			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "changed project"} {
+			for _, scenario := range []string{"allowed", "new principal", "disabled issuer", "removed issuer", "changed revision", "removed mapping", "reduced permissions", "revoked principal", "paused principal", "changed project"} {
 				t.Run(scenario, func(t *testing.T) {
 					principal := a
 					issuer := workloadIssuer{ID: issuerID, Revision: a.WorkloadRevision, Config: workload.Config{Enabled: true}, bindings: map[string]keyauthority.Authority{a.WorkloadMapping: a}}
@@ -265,6 +290,9 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 					case "revoked principal":
 						now := time.Now()
 						principal.RevokedAt = &now
+					case "paused principal":
+						now := time.Now()
+						principal.PausedAt = &now
 					case "changed project":
 						other := "other project"
 						live := a
@@ -317,6 +345,14 @@ func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
 			}
 		})
 	}
+	t.Run("paused workload with current assertion", func(t *testing.T) {
+		paused := principal
+		paused.PausedAt = &now
+		manager.authority.workloadPrincipals[principal.WorkloadDigest] = paused
+		if err := manager.AuthorizeAgentTask(principal.ID, project, resource, resource, "revision", &active); err != nil {
+			t.Fatalf("monitor rejected an admitted workload task after pause: %v", err)
+		}
+	})
 }
 
 func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.T) {

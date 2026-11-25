@@ -7,7 +7,27 @@ import (
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
+type agentWorkAdmission uint8
+
+const (
+	newAgentWork agentWorkAdmission = iota
+	admittedAgentWork
+)
+
+func (admission agentWorkAdmission) authority(a keyauthority.Authority) keyauthority.Authority {
+	if admission == newAgentWork {
+		return a
+	}
+	current := a
+	current.PausedAt = nil
+	return current
+}
+
 func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID, workloadRevision string, callerExpiresAt *time.Time) error {
+	return m.authorizeAgentTask(keyID, projectID, publicationID, revisionID, workloadRevision, callerExpiresAt, admittedAgentWork)
+}
+
+func (m *Manager) authorizeAgentTask(keyID, projectID, publicationID, revisionID, workloadRevision string, callerExpiresAt *time.Time, admission agentWorkAdmission) error {
 	now := time.Now()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -28,7 +48,7 @@ func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID
 		WorkloadMapping:  principal.WorkloadMapping,
 		WorkloadRevision: workloadRevision,
 	}
-	if !m.authority.currentAgentPrincipal(identity, "agents", publicationID, projectID, now) {
+	if !m.authority.currentAgentPrincipal(identity, "agents", publicationID, projectID, now, admission) {
 		return httpkit.Forbidden()
 	}
 	return m.authority.authorizeTaskPublication(projectID, publicationID, revisionID)

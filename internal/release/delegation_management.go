@@ -246,6 +246,7 @@ func (state authorityState) memberConsentAgent(principal keyauthority.Authority)
 			}
 			agent, exists := issuer.bindings[mapping.Name]
 			if exists {
+				agent.PausedAt = principal.PausedAt
 				return agent, issuer.Revision, true
 			}
 		}
