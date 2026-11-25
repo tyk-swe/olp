@@ -294,7 +294,7 @@ func newManagement(startup context.Context, in managementInputs) (Management, er
 	if err := access.PrepareInstallation(startup, in.pool, in.installation, core.auth, core.keys); err != nil {
 		return Management{}, err
 	}
-	identityClient := access.IdentityHTTPClient()
+	identityClient := egress.IdentityClient(nil)
 	control := access.New(access.Config{
 		Pool: in.pool, Installation: in.installation, Origin: c.PublicOrigin, Auth: core.auth, Keys: core.keys, Egress: core.policy, Log: log,
 		OIDCClient: identityClient,

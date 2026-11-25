@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -37,6 +37,7 @@ var (
 	ErrStaleAuthority = errors.New("key authority is stale")
 	ErrInvalidKey     = errors.New("invalid API key")
 	ErrPausedKey      = errors.New("api key is paused")
+	ErrForbidden      = errors.New("authority does not cover the request")
 )
 
 // Release is one installed snapshot pinned for the lifetime of a request.
@@ -205,7 +206,7 @@ type Manager struct {
 func NewManager(config ManagerConfig) *Manager {
 	tasks, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
+		workloadKeys: workload.NewCache(egress.IdentityClient(nil)),
 		pool:         config.Pool, readPool: config.ReadPool, installation: config.Installation,
 		auth: config.Auth, keys: config.Keys, log: config.Log, region: config.Region,
 		externalSecrets: config.ExternalSecrets, mounted: cloneMounted(config.Mounted),

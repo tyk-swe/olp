@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
 )
@@ -74,7 +75,7 @@ func (s *Server) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.
 }
 
 func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
-	if err := access.CheckIdentityURL(c.DiscoveryURL); err != nil {
+	if err := egress.CheckIdentityURL(c.DiscoveryURL); err != nil {
 		return nil, nil, httpkit.Invalid("discovery_url", err.Error())
 	}
 	request, err := http.NewRequestWithContext(ctx, "GET", c.DiscoveryURL, nil)
@@ -97,11 +98,11 @@ func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Prov
 		return nil, nil, httpkit.Invalid("issuer", "The issuer must exactly match discovery.")
 	}
 	for _, endpoint := range []string{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL} {
-		if access.CheckIdentityURL(endpoint) != nil {
+		if egress.CheckIdentityURL(endpoint) != nil {
 			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 		u, _ := url.Parse(endpoint) // Syntax was checked by oidcURL.
-		if _, err := access.IdentityAddresses(ctx, u.Hostname()); err != nil {
+		if _, err := egress.IdentityAddresses(ctx, u.Hostname()); err != nil {
 			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 	}

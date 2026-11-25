@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -117,16 +116,16 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 		return err
 	}
 	if current.ID != authority.ID || project == nil {
-		return httpkit.Forbidden()
+		return ErrForbidden
 	}
 	if scope == "inference" && (!current.Allows(scope, resource, project, time.Now()) || !slices.Contains(current.TaskCapability.RouteRevisions, revision)) {
-		return httpkit.Forbidden()
+		return ErrForbidden
 	}
 	if scope == "tools" && (!current.AllowsResource(scope, resource, *project, time.Now()) || !slices.Contains(current.TaskCapability.ToolsetRevisions, revision)) {
-		return httpkit.Forbidden()
+		return ErrForbidden
 	}
 	if scope != "inference" && scope != "tools" {
-		return httpkit.Forbidden()
+		return ErrForbidden
 	}
 	return admitTaskCallback(ctx, m.taskCapabilities(), digest, scope, accountingID)
 }

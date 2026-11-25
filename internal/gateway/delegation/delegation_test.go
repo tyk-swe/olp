@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/concurrency"
@@ -216,7 +215,7 @@ func TestCreateGrantErrors(t *testing.T) {
 	}{
 		{name: "bounds", err: release.ErrDelegationBounds, status: http.StatusBadRequest, code: "invalid_request", message: "Provide bounded delegation scopes and resources."},
 		{name: "invalid key", err: release.ErrInvalidKey, status: http.StatusUnauthorized, code: "invalid_api_key", message: "The member consent is invalid or expired."},
-		{name: "forbidden", err: httpkit.Forbidden(), status: http.StatusForbidden, code: "permission_denied", message: "The principals cannot delegate the requested rights."},
+		{name: "forbidden", err: release.ErrForbidden, status: http.StatusForbidden, code: "permission_denied", message: "The principals cannot delegate the requested rights."},
 		{name: "unavailable", err: errors.New("database is down"), status: http.StatusServiceUnavailable, code: "authority_unavailable", message: "Delegation is unavailable."},
 	}
 	for _, c := range cases {

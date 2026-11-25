@@ -1,4 +1,4 @@
-package access
+package egress
 
 import (
 	"context"
@@ -9,8 +9,6 @@ import (
 	"net/netip"
 	"net/url"
 	"time"
-
-	"github.com/tyk-swe/olp/internal/platform/egress"
 )
 
 func CheckIdentityURL(raw string) error {
@@ -28,15 +26,15 @@ func CheckIdentityURL(raw string) error {
 // is the provider egress denylist with no operator exceptions and is never
 // built from the provider policy, so provider egress settings cannot widen
 // it. Loopback issuers are never admitted.
-var identityEgress = egress.Policy{}
+var identityEgress = Policy{}
 
-// oidcAddresses resolves host to the addresses identity egress may dial; one
+// IdentityAddresses resolves host to the addresses identity egress may dial; one
 // disallowed answer rejects the host.
 func IdentityAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addresses, err := identityEgress.Resolve(ctx, host)
-	if errors.Is(err, egress.ErrUnsafeDestination) {
+	if errors.Is(err, ErrUnsafeDestination) {
 		return nil, errors.New("OIDC address is outside the allowed egress policy")
 	}
 	if err != nil {
@@ -45,11 +43,9 @@ func IdentityAddresses(ctx context.Context, host string) ([]netip.Addr, error) {
 	return addresses, nil
 }
 
-// IdentityHTTPClient applies the independent, bounded identity egress policy.
-// Provider network exceptions never broaden this client.
-func IdentityHTTPClient() *http.Client { return oidcHTTPClient(nil) }
-
-func oidcHTTPClient(injected *http.Client) *http.Client {
+// IdentityClient applies the independent, bounded identity egress policy unless
+// the caller injects its own client. Provider network exceptions never broaden it.
+func IdentityClient(injected *http.Client) *http.Client {
 	if injected != nil {
 		return injected
 	}

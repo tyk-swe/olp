@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -94,7 +95,7 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 	}) {
 		return m, httpkit.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
 	}
-	if access.CheckIdentityURL(m.RedirectURL) != nil {
+	if egress.CheckIdentityURL(m.RedirectURL) != nil {
 		return m, httpkit.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
 	}
 	for field, value := range map[string]string{"email_attribute": c.EmailAttribute, "groups_attribute": c.GroupsAttribute, "name_attribute": c.NameAttribute} {
@@ -281,7 +282,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := access.CheckIdentityURL(input.URL); err != nil {
+	if err := egress.CheckIdentityURL(input.URL); err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Use a safe identity metadata URL.")
 	}
 	req, err := http.NewRequestWithContext(r.Context(), "GET", input.URL, nil)
@@ -298,7 +299,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint did not return a valid document.")
 	}
 	m, err := samlidentity.ParseMetadata(b)
-	if err != nil || access.CheckIdentityURL(m.RedirectURL) != nil {
+	if err != nil || egress.CheckIdentityURL(m.RedirectURL) != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Invalid or unsupported SAML identity metadata.")
 	}
 	return httpkit.OK(map[string]any{"metadata_xml": string(b), "idp_entity_id": m.Entity.EntityID}), nil

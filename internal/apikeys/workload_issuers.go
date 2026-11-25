@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -141,7 +142,7 @@ func ValidateWorkloadConfig(input workload.Config) error {
 		return httpkit.Invalid("issuer", "Supply a bounded issuer, audiences, signature algorithms and explicit claim mappings.")
 	}
 	for _, raw := range []string{input.Issuer, input.JWKSURL} {
-		if access.CheckIdentityURL(raw) != nil {
+		if egress.CheckIdentityURL(raw) != nil {
 			return httpkit.Invalid("issuer", "Use secure identity endpoint URLs.")
 		}
 	}

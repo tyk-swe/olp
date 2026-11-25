@@ -49,8 +49,12 @@ func (r delegationRow) memberAuthorized() bool {
 	if r.MemberActive == nil || !*r.MemberActive || r.MemberOIDCAuthorized == nil || !*r.MemberOIDCAuthorized || r.MemberRole == nil || r.MemberScope == nil {
 		return false
 	}
-	principal := authz.Principal{User: authz.User{Role: *r.MemberRole}, Kind: "user", AllProjects: *r.MemberScope == "global", Projects: map[string]string{r.ProjectID: projectRole(r.ProjectRole)}}
-	return principal.Authorize(authz.Keys) == nil && principal.Project(&r.ProjectID, authz.Change) == nil
+	return memberMayDelegate(*r.MemberRole, *r.MemberScope, r.ProjectID, projectRole(r.ProjectRole))
+}
+
+func memberMayDelegate(role, scope, project, projectRole string) bool {
+	principal := authz.Principal{User: authz.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
+	return principal.Authorize(authz.Keys) == nil && principal.Project(&project, authz.Change) == nil
 }
 
 func (r delegationRow) record() DelegationRecord {
