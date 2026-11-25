@@ -87,6 +87,14 @@ var chatTextStream = dataFrames(
 	`[DONE]`,
 )
 
+var chatLengthStream = dataFrames(
+	chatChunk+`{"role":"assistant","content":""},"finish_reason":null}]}`,
+	chatChunk+`{"content":"Hel"},"finish_reason":null}]}`,
+	chatChunk+`{},"finish_reason":"length"}]}`,
+	`{"id":"chatcmpl-fixture","object":"chat.completion.chunk","created":1,"model":"fixture-upstream","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}`,
+	`[DONE]`,
+)
+
 const completionChunk = `{"id":"cmpl-fixture","object":"text_completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"text":`
 
 var completionsStream = dataFrames(
@@ -159,6 +167,15 @@ var anthropicRefusalStream = namedFrames(
 	namedEvent{"message_stop", `{"type":"message_stop"}`},
 )
 
+var anthropicLengthStream = namedFrames(
+	namedEvent{"message_start", anthropicStart},
+	namedEvent{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+	namedEvent{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}`},
+	namedEvent{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+	namedEvent{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":2}}`},
+	namedEvent{"message_stop", `{"type":"message_stop"}`},
+)
+
 const geminiChunk = `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":`
 
 var geminiToolStream = dataFrames(
@@ -171,6 +188,10 @@ var geminiToolStream = dataFrames(
 var geminiSafetyStream = dataFrames(
 	geminiChunk+`[{"text":"Hel"}]}}]}`,
 	geminiChunk+`[]},"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":1,"totalTokenCount":12}}`,
+)
+
+var geminiLengthStream = dataFrames(
+	geminiChunk + `[{"text":"Hel"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":2,"totalTokenCount":13}}`,
 )
 
 var bedrockToolStream = bedrockFrames(
@@ -194,6 +215,14 @@ var bedrockGuardrailStream = bedrockFrames(
 	namedEvent{"contentBlockStop", `{"contentBlockIndex":0}`},
 	namedEvent{"messageStop", `{"stopReason":"guardrail_intervened"}`},
 	namedEvent{"metadata", `{"usage":{"inputTokens":11,"outputTokens":4,"totalTokens":15}}`},
+)
+
+var bedrockLengthStream = bedrockFrames(
+	namedEvent{"messageStart", `{"role":"assistant"}`},
+	namedEvent{"contentBlockDelta", `{"contentBlockIndex":0,"delta":{"text":"Hel"}}`},
+	namedEvent{"contentBlockStop", `{"contentBlockIndex":0}`},
+	namedEvent{"messageStop", `{"stopReason":"max_tokens"}`},
+	namedEvent{"metadata", `{"usage":{"inputTokens":11,"outputTokens":2,"totalTokens":13}}`},
 )
 
 var bedrockExceptionStream = append(bedrockFrames(
@@ -228,13 +257,13 @@ var cohereToolStream = namedFrames(
 
 func streamSources() []streamSource {
 	return []streamSource{
-		{wire.Chat, []streamScenario{{"tool call", chatToolStream}, {"refusal", chatRefusalStream}, {"text", chatTextStream}}},
+		{wire.Chat, []streamScenario{{"tool call", chatToolStream}, {"refusal", chatRefusalStream}, {"text", chatTextStream}, {"length stop", chatLengthStream}}},
 		{wire.Completions, []streamScenario{{"text", completionsStream}}},
 		{wire.Responses, []streamScenario{{"tool call", responsesToolStream}, {"refusal", responsesRefusalStream}}},
-		{wire.Anthropic, []streamScenario{{"tool call", anthropicToolStream}, {"refusal", anthropicRefusalStream}}},
-		{wire.Gemini, []streamScenario{{"tool call", geminiToolStream}, {"safety stop", geminiSafetyStream}}},
+		{wire.Anthropic, []streamScenario{{"tool call", anthropicToolStream}, {"refusal", anthropicRefusalStream}, {"length stop", anthropicLengthStream}}},
+		{wire.Gemini, []streamScenario{{"tool call", geminiToolStream}, {"safety stop", geminiSafetyStream}, {"length stop", geminiLengthStream}}},
 		{wire.GeminiStream, []streamScenario{{"tool call", geminiToolStream}}},
-		{wire.Bedrock, []streamScenario{{"tool call", bedrockToolStream}, {"guardrail stop", bedrockGuardrailStream}, {"exception", bedrockExceptionStream}, {"truncated", bedrockTruncatedStream}}},
+		{wire.Bedrock, []streamScenario{{"tool call", bedrockToolStream}, {"guardrail stop", bedrockGuardrailStream}, {"length stop", bedrockLengthStream}, {"exception", bedrockExceptionStream}, {"truncated", bedrockTruncatedStream}}},
 		{wire.MistralFIM, []streamScenario{{"text", mistralFIMStream}}},
 		{wire.CohereChat, []streamScenario{{"tool call", cohereToolStream}}},
 	}

@@ -1,6 +1,8 @@
 package protocols_test
 
 import (
+	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,10 +10,13 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,7 +98,7 @@ func checkGolden(t *testing.T, path string, cases []goldenCase) {
 
 func jsonEqual(a, b []byte) bool {
 	var left, right any
-	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && fmt.Sprint(left) == fmt.Sprint(right)
+	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
 func digest(data []byte) string {
@@ -163,46 +168,54 @@ func document(body []byte) any {
 	return string(body)
 }
 
+type unresolvedImports struct{}
+
+func (unresolvedImports) Import(path string) (*types.Package, error) {
+	return nil, fmt.Errorf("%s is not needed to read the wire constants", path)
+}
+
 var declaredFormats = sync.OnceValues(func() ([]wire.Format, error) {
-	files, err := filepath.Glob(filepath.Join("wire", "*.go"))
+	names, err := filepath.Glob(filepath.Join("wire", "*.go"))
 	if err != nil {
 		return nil, err
 	}
-	var formats []wire.Format
-	for _, name := range files {
+	positions := token.NewFileSet()
+	var files []*ast.File
+	for _, name := range names {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.SkipObjectResolution)
+		file, err := parser.ParseFile(positions, name, nil, parser.SkipObjectResolution)
 		if err != nil {
 			return nil, err
 		}
-		for _, declaration := range file.Decls {
-			constants, ok := declaration.(*ast.GenDecl)
-			if !ok || constants.Tok != token.CONST {
-				continue
-			}
-			for _, spec := range constants.Specs {
-				value := spec.(*ast.ValueSpec)
-				if kind, ok := value.Type.(*ast.Ident); !ok || kind.Name != "Format" {
-					continue
-				}
-				for _, expression := range value.Values {
-					literal, ok := expression.(*ast.BasicLit)
-					if !ok {
-						return nil, fmt.Errorf("%s declares a format that is not a string literal", name)
-					}
-					text, err := strconv.Unquote(literal.Value)
-					if err != nil {
-						return nil, err
-					}
-					formats = append(formats, wire.Format(text))
-				}
-			}
+		files = append(files, file)
+	}
+	config := types.Config{Importer: unresolvedImports{}, Error: func(error) {}, IgnoreFuncBodies: true}
+	checked, _ := config.Check("wire", positions, files, nil)
+	format, ok := checked.Scope().Lookup("Format").(*types.TypeName)
+	if !ok {
+		return nil, errors.New("wire no longer declares the Format type")
+	}
+	var formats []wire.Format
+	for _, name := range checked.Scope().Names() {
+		declared, ok := checked.Scope().Lookup(name).(*types.Const)
+		if !ok {
+			continue
 		}
+		if declared.Type() == types.Typ[types.Invalid] {
+			return nil, fmt.Errorf("wire.%s has a type this test cannot resolve, so it cannot tell whether it is a format", name)
+		}
+		if !types.Identical(declared.Type(), format.Type()) {
+			continue
+		}
+		if declared.Val().Kind() != constant.String {
+			return nil, fmt.Errorf("wire.%s is a format whose value this test cannot read", name)
+		}
+		formats = append(formats, wire.Format(constant.StringVal(declared.Val())))
 	}
 	slices.Sort(formats)
-	return formats, nil
+	return slices.Compact(formats), nil
 })
 
 func formats(t *testing.T) []wire.Format {
@@ -215,4 +228,68 @@ func formats(t *testing.T) []wire.Format {
 		t.Fatal("found no wire.Format constant to characterize")
 	}
 	return all
+}
+
+var referenceFormats = []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock}
+
+func preferred(source wire.Format, candidates []wire.Format) []wire.Format {
+	rank := func(format wire.Format) int {
+		if format == source {
+			return 0
+		}
+		if index := slices.Index(referenceFormats, format); index >= 0 {
+			return index + 1
+		}
+		return len(referenceFormats) + 1
+	}
+	return slices.SortedFunc(slices.Values(candidates), func(a, b wire.Format) int {
+		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(a, b))
+	})
+}
+
+type shared struct {
+	SameAs wire.Format `json:"same_as"`
+}
+
+type matrix struct {
+	stored  []wire.Format
+	outcome func(wire.Format) (any, bool)
+	bodies  func() map[wire.Format][]byte
+}
+
+func newMatrix(stored []wire.Format, outcome func(wire.Format) (any, bool)) matrix {
+	return matrix{stored: stored, outcome: outcome, bodies: sync.OnceValue(func() map[wire.Format][]byte {
+		bodies := map[wire.Format][]byte{}
+		for _, target := range stored {
+			value, shareable := outcome(target)
+			if !shareable {
+				continue
+			}
+			if encoded, err := json.Marshal(value); err == nil {
+				bodies[target] = encoded
+			}
+		}
+		return bodies
+	})}
+}
+
+func (m matrix) row(target wire.Format) any {
+	value, shareable := m.outcome(target)
+	if !shareable {
+		return value
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	bodies := m.bodies()
+	for _, candidate := range m.stored {
+		if candidate == target {
+			return value
+		}
+		if bytes.Equal(bodies[candidate], encoded) {
+			return shared{SameAs: candidate}
+		}
+	}
+	return value
 }

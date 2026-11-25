@@ -68,10 +68,13 @@ func TestStreamTranslationMatrix(t *testing.T) {
 	var cases []goldenCase
 	for _, source := range streamSources() {
 		for _, scenario := range source.scenarios {
-			for _, target := range streamTargets {
+			rows := newMatrix(preferred(source.format, streamTargets), func(target wire.Format) (any, bool) {
+				outcome, _ := runStream(source.format, target, scenario.body, true)
+				return outcome, outcome.Error == nil
+			})
+			for _, target := range rows.stored {
 				cases = append(cases, goldenCase{name: string(source.format) + " to " + string(target) + ", " + scenario.name, run: func(*testing.T) any {
-					outcome, _ := runStream(source.format, target, scenario.body, true)
-					return outcome
+					return rows.row(target)
 				}})
 			}
 		}
@@ -89,11 +92,14 @@ func TestStreamTranslationMatrix(t *testing.T) {
 func TestStreamAggregatesTranslatedResponses(t *testing.T) {
 	t.Parallel()
 	var cases []goldenCase
-	for _, target := range streamTargets {
-		for _, scenario := range []streamScenario{{"tool call", responsesToolStream}, {"refusal", responsesRefusalStream}} {
+	for _, scenario := range []streamScenario{{"tool call", responsesToolStream}, {"refusal", responsesRefusalStream}} {
+		rows := newMatrix(preferred("", streamTargets), func(target wire.Format) (any, bool) {
+			completion, err := protocols.AggregateTranslatedResponses(target, bytes.NewReader(scenario.body), eventLimit, routeModel, nil)
+			return unaryOutcome(completion, err), err == nil
+		})
+		for _, target := range rows.stored {
 			cases = append(cases, goldenCase{name: string(target) + ", " + scenario.name, run: func(*testing.T) any {
-				completion, err := protocols.AggregateTranslatedResponses(target, bytes.NewReader(scenario.body), eventLimit, routeModel, nil)
-				return unaryOutcome(completion, err)
+				return rows.row(target)
 			}})
 		}
 	}
@@ -104,7 +110,6 @@ type decoded struct {
 	Body       any       `json:"body,omitempty"`
 	Error      *failure  `json:"error,omitempty"`
 	Completion *observed `json:"completion,omitempty"`
-	SameAs     string    `json:"same_as,omitempty"`
 }
 
 func unaryOutcome(completion *wire.Completion, err error) decoded {

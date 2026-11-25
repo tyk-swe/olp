@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -49,20 +50,46 @@ func probes() []probe {
 }
 
 type verdict struct {
-	Error  *failure `json:"error,omitempty"`
-	Result any      `json:"result,omitempty"`
+	Error  *failure    `json:"error,omitempty"`
+	Result any         `json:"result,omitempty"`
+	Digest string      `json:"digest,omitempty"`
+	SameAs wire.Format `json:"same_as,omitempty"`
+}
+
+type render func(wire.Format) ([]byte, error)
+
+func memoized(run render) render {
+	cached := map[wire.Format]func() ([]byte, error){}
+	for _, format := range referenceFormats {
+		cached[format] = sync.OnceValues(func() ([]byte, error) { return run(format) })
+	}
+	return func(format wire.Format) ([]byte, error) {
+		if once, ok := cached[format]; ok {
+			return once()
+		}
+		return run(format)
+	}
+}
+
+func earlierReference(format wire.Format, output []byte, rendered render) wire.Format {
+	for _, reference := range referenceFormats {
+		if reference == format {
+			return ""
+		}
+		if expected, err := rendered(reference); err == nil && bytes.Equal(expected, output) {
+			return reference
+		}
+	}
+	return ""
 }
 
 func labelled(format wire.Format, output []byte, rendered render) verdict {
-	if same := sameAs(format, format, output, rendered); same != "" {
-		return verdict{Result: "same as " + same}
-	}
-	return verdict{Result: digest(output)}
+	return verdict{Digest: digest(output), SameAs: earlierReference(format, output, rendered)}
 }
 
 func described(format wire.Format, output []byte, rendered render) verdict {
-	if same := sameAs(format, format, output, rendered); same != "" {
-		return verdict{Result: "same as " + same}
+	if same := earlierReference(format, output, rendered); same != "" {
+		return verdict{Digest: digest(output), SameAs: same}
 	}
 	return verdict{Result: document(output)}
 }
@@ -104,16 +131,26 @@ func collapsed(label string, entries map[string]any) any {
 type column func(wire.Format) any
 
 func perProbe(build func(probe) column) column {
-	shaped := map[string]column{}
+	return shapedBy(build, func(wire.Format, wire.Format) bool { return true })
+}
+
+func perForeignProbe(build func(probe) column) column {
+	return shapedBy(build, func(shape, format wire.Format) bool { return shape != format })
+}
+
+func shapedBy(build func(probe) column, recorded func(shape, format wire.Format) bool) column {
+	shaped := map[wire.Format]column{}
 	for _, probe := range probes() {
-		shaped[string(probe.shape)+" shaped"] = build(probe)
+		shaped[probe.shape] = build(probe)
 	}
 	return func(format wire.Format) any {
 		out := map[string]any{}
-		for name, run := range shaped {
-			out[name] = run(format)
+		for shape, run := range shaped {
+			if recorded(shape, format) {
+				out[string(shape)+" shaped"] = run(format)
+			}
 		}
-		return collapsed("every shape", out)
+		return collapsed("every recorded shape", out)
 	}
 }
 
@@ -225,7 +262,7 @@ func requestReaders() column {
 }
 
 func decodeSourceVerdicts() column {
-	return perProbe(func(probe probe) column {
+	return perForeignProbe(func(probe probe) column {
 		decoded := func(target func(wire.Format) wire.Format) render {
 			return memoized(func(source wire.Format) ([]byte, error) {
 				completion, err := protocols.Decode(source, target(source), probe.response, routeModel, "")
@@ -276,7 +313,7 @@ func streamVerdicts(run func(wire.Format) (streamOutcome, []byte)) column {
 }
 
 func streamSourceVerdicts() column {
-	return perProbe(func(probe probe) column {
+	return perForeignProbe(func(probe probe) column {
 		return streamVerdicts(func(source wire.Format) (streamOutcome, []byte) {
 			return runStream(source, wire.Chat, probe.stream, true)
 		})
@@ -318,6 +355,9 @@ type captureVerdicts struct {
 func captureDispatch(format wire.Format) any {
 	out := captureVerdicts{Unary: map[string]captured{}, UnaryRejected: []string{}, Stream: map[string]captured{}, StreamRejected: []string{}}
 	for _, probe := range probes() {
+		if probe.shape == format {
+			continue
+		}
 		shape := string(probe.shape)
 		if unary := captureUnary(format, probe.response, true, true); unary.Error == nil {
 			out.Unary[shape] = unary
@@ -461,27 +501,31 @@ func TestFormatDispatch(t *testing.T) {
 		return func(_ *testing.T, format wire.Format) any { return run(format) }
 	}
 	columns := []struct {
-		name string
-		run  func(*testing.T, wire.Format) any
+		name           string
+		run            func(*testing.T, wire.Format) any
+		storedInMatrix []wire.Format
 	}{
-		{"facts", pure(formatFacts)},
-		{"parse", pure(parseVerdicts())},
-		{"parse source", pure(parseSourceVerdicts())},
-		{"request readers", pure(requestReaders())},
-		{"encode as source", pure(encodeSourceVerdicts())},
-		{"decode as source", pure(decodeSourceVerdicts())},
-		{"stream as source", pure(streamSourceVerdicts())},
-		{"stream as target", pure(streamTargetVerdicts())},
-		{"aggregate as target", pure(aggregateVerdicts())},
-		{"capture", pure(captureDispatch)},
-		{"meaningful frames", pure(meaningfulVerdicts)},
-		{"workflow", pure(workflowVerdicts)},
-		{"inline media", inlineMediaDispatch},
-		{"embedding defaults", embeddingDefaultVerdicts},
+		{"facts", pure(formatFacts), nil},
+		{"parse", pure(parseVerdicts()), nil},
+		{"parse source", pure(parseSourceVerdicts()), nil},
+		{"request readers", pure(requestReaders()), nil},
+		{"encode as source", pure(encodeSourceVerdicts()), nil},
+		{"decode as source", pure(decodeSourceVerdicts()), nil},
+		{"stream as source", pure(streamSourceVerdicts()), nil},
+		{"stream as target", pure(streamTargetVerdicts()), streamTargets},
+		{"aggregate as target", pure(aggregateVerdicts()), streamTargets},
+		{"capture", pure(captureDispatch), nil},
+		{"meaningful frames", pure(meaningfulVerdicts), nil},
+		{"workflow", pure(workflowVerdicts), nil},
+		{"inline media", inlineMediaDispatch, nil},
+		{"embedding defaults", embeddingDefaultVerdicts, nil},
 	}
 	var cases []goldenCase
 	for _, column := range columns {
 		for _, format := range formats(t) {
+			if slices.Contains(column.storedInMatrix, format) {
+				continue
+			}
 			cases = append(cases, goldenCase{name: column.name + "/" + string(format), run: func(t *testing.T) any { return column.run(t, format) }})
 		}
 	}

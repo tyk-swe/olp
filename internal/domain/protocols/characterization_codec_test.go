@@ -1,10 +1,10 @@
 package protocols_test
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
-	"sync"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols"
@@ -77,39 +77,9 @@ type parsedRequest struct {
 }
 
 type encoded struct {
-	Wire   wire.Format `json:"wire,omitempty"`
-	Body   any         `json:"body,omitempty"`
-	Error  *failure    `json:"error,omitempty"`
-	SameAs string      `json:"same_as,omitempty"`
-}
-
-var referenceFormats = []wire.Format{wire.Chat, wire.Responses, wire.Anthropic, wire.Gemini, wire.Bedrock}
-
-type render func(wire.Format) ([]byte, error)
-
-func memoized(run render, extra ...wire.Format) render {
-	cached := map[wire.Format]func() ([]byte, error){}
-	for _, format := range append(extra, referenceFormats...) {
-		cached[format] = sync.OnceValues(func() ([]byte, error) { return run(format) })
-	}
-	return func(format wire.Format) ([]byte, error) {
-		if once, ok := cached[format]; ok {
-			return once()
-		}
-		return run(format)
-	}
-}
-
-func sameAs(source, target wire.Format, output []byte, rendered render) string {
-	for _, reference := range append([]wire.Format{source}, referenceFormats...) {
-		if reference == target {
-			continue
-		}
-		if expected, err := rendered(reference); err == nil && string(expected) == string(output) {
-			return string(reference)
-		}
-	}
-	return ""
+	Wire  wire.Format `json:"wire,omitempty"`
+	Body  any         `json:"body,omitempty"`
+	Error *failure    `json:"error,omitempty"`
 }
 
 func (f requestFixture) encode(target wire.Format) ([]byte, wire.Format, error) {
@@ -120,22 +90,26 @@ func (f requestFixture) encode(target wire.Format) ([]byte, wire.Format, error) 
 	return protocols.EncodeTarget(request, target, "", "", f.upstream, nil)
 }
 
-func (f requestFixture) rendered() render {
-	return memoized(func(target wire.Format) ([]byte, error) {
-		body, _, err := f.encode(target)
-		return body, err
-	}, f.format)
+func (f requestFixture) outcome(target wire.Format) (any, bool) {
+	body, format, err := f.encode(target)
+	if err != nil {
+		return encoded{Error: classify(err)}, false
+	}
+	return encoded{Wire: format, Body: document(body)}, true
 }
 
-func encodeOutcome(fixture requestFixture, target wire.Format, rendered render) encoded {
-	body, format, err := fixture.encode(target)
-	if err != nil {
-		return encoded{Error: classify(err)}
+func (f requestFixture) reachable(t *testing.T) []wire.Format {
+	t.Helper()
+	if f.targets != nil {
+		return f.targets
 	}
-	if same := sameAs(fixture.format, target, body, rendered); same != "" {
-		return encoded{Wire: format, SameAs: same}
-	}
-	return encoded{Wire: format, Body: document(body)}
+	return formats(t)
+}
+
+func sameOperation(source wire.Format, targets []wire.Format) []wire.Format {
+	return slices.DeleteFunc(slices.Clone(targets), func(target wire.Format) bool {
+		return target.Operation() != source.Operation()
+	})
 }
 
 func TestRequestCodecMatrix(t *testing.T) {
@@ -149,18 +123,30 @@ func TestRequestCodecMatrix(t *testing.T) {
 			}
 			return parsedRequest{Family: request.Family, Route: request.Route, Parameters: slices.Sorted(slices.Values(protocols.ParameterNames(request))), Features: protocols.RequestFeatures(request), Text: protocols.RequestText(request, 1024), StructuredOutput: protocols.StructuredOutputRequested(request)}
 		}})
-		targets := fixture.targets
-		if targets == nil {
-			targets = formats(t)
-		}
-		rendered := fixture.rendered()
-		for _, target := range targets {
+		rows := newMatrix(preferred(fixture.format, sameOperation(fixture.format, fixture.reachable(t))), fixture.outcome)
+		for _, target := range rows.stored {
 			cases = append(cases, goldenCase{name: fixture.name() + " to " + string(target), run: func(*testing.T) any {
-				return encodeOutcome(fixture, target, rendered)
+				return rows.row(target)
 			}})
 		}
 	}
 	checkGolden(t, "testdata/request_codec.golden.json", cases)
+}
+
+func TestRequestsAreRefusedAcrossOperations(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range requestFixtures {
+		for _, target := range fixture.reachable(t) {
+			if target.Operation() == fixture.format.Operation() {
+				continue
+			}
+			_, _, err := fixture.encode(target)
+			var refusal *wire.RequestError
+			if !errors.As(err, &refusal) || refusal.Code != "unsupported_parameter" || refusal.Param != "operation" {
+				t.Errorf("%s (%s) to %s (%s) = %v, want the unsupported operation refusal", fixture.name(), fixture.format.Operation(), target, target.Operation(), err)
+			}
+		}
+	}
 }
 
 type responseFixture struct {
@@ -181,17 +167,21 @@ var responseFixtures = []responseFixture{
 	{wire.Chat, "tool call", `{"id":"chatcmpl-fixture","object":"chat.completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"message":{"role":"assistant","content":"Hello","tool_calls":[{"id":"call_fixture","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Oslo\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":3},"completion_tokens_details":{"reasoning_tokens":2}}}`, nil},
 	{wire.Chat, "refusal", `{"id":"chatcmpl-fixture","object":"chat.completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"message":{"role":"assistant","content":null,"refusal":"I cannot help"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`, nil},
 	{wire.Chat, "text", `{"id":"chatcmpl-fixture","object":"chat.completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`, nil},
+	{wire.Chat, "length stop", `{"id":"chatcmpl-fixture","object":"chat.completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"message":{"role":"assistant","content":"Hel"},"finish_reason":"length"}],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}`, nil},
 	{wire.Completions, "text", `{"id":"cmpl-fixture","object":"text_completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"text":"Hello","finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`, nil},
 	{wire.Responses, "tool call", `{"id":"resp_fixture","object":"response","created_at":1,"model":"fixture-upstream","status":"completed","output":[{"id":"rs_fixture","type":"reasoning","summary":[]},{"id":"msg_fixture","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello","annotations":[]}]},{"id":"fc_fixture","type":"function_call","status":"completed","call_id":"call_fixture","name":"lookup","arguments":"{\"city\":\"Oslo\"}"}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}`, nil},
 	{wire.Responses, "refusal", `{"id":"resp_fixture","object":"response","created_at":1,"model":"fixture-upstream","status":"completed","output":[{"id":"msg_fixture","type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"I cannot help"}]}],"usage":{"input_tokens":11,"output_tokens":4,"total_tokens":15}}`, nil},
 	{wire.Anthropic, "tool call", `{"id":"msg_fixture","type":"message","role":"assistant","model":"fixture-upstream","content":[{"type":"thinking","thinking":"plan","signature":"c2lnbmVk"},{"type":"text","text":"Hello"},{"type":"tool_use","id":"toolu_fixture","name":"lookup","input":{"city":"Oslo"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":11,"output_tokens":7,"cache_read_input_tokens":3}}`, nil},
 	{wire.Anthropic, "refusal", `{"id":"msg_fixture","type":"message","role":"assistant","model":"fixture-upstream","content":[{"type":"text","text":"I cannot help"}],"stop_reason":"refusal","stop_sequence":null,"usage":{"input_tokens":11,"output_tokens":4}}`, nil},
+	{wire.Anthropic, "length stop", `{"id":"msg_fixture","type":"message","role":"assistant","model":"fixture-upstream","content":[{"type":"text","text":"Hel"}],"stop_reason":"max_tokens","stop_sequence":null,"usage":{"input_tokens":11,"output_tokens":2}}`, nil},
 	{wire.Gemini, "tool call", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"plan","thought":true},{"text":"Hello"},{"functionCall":{"name":"lookup","args":{"city":"Oslo"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":18,"cachedContentTokenCount":3}}`, nil},
 	{wire.Gemini, "safety stop", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[]},"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":0,"totalTokenCount":11}}`, nil},
 	{wire.Gemini, "blocked prompt", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":11,"totalTokenCount":11}}`, nil},
-	{wire.GeminiStream, "tool call", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"totalTokenCount":18}}`, nil},
+	{wire.Gemini, "length stop", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Hel"}]},"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":2,"totalTokenCount":13}}`, nil},
+	{wire.GeminiStream, "tool call", `{"responseId":"gemini-fixture","modelVersion":"fixture-upstream","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Hello"},{"functionCall":{"name":"lookup","args":{"city":"Oslo"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"totalTokenCount":18}}`, nil},
 	{wire.Bedrock, "tool call", `{"output":{"message":{"role":"assistant","content":[{"reasoningContent":{"reasoningText":{"text":"plan","signature":"c2lnbmVk"}}},{"text":"Hello"},{"toolUse":{"toolUseId":"tooluse_fixture","name":"lookup","input":{"city":"Oslo"}}}]}},"stopReason":"tool_use","usage":{"inputTokens":11,"outputTokens":7,"totalTokens":18,"cacheReadInputTokens":3},"metrics":{"latencyMs":5}}`, nil},
 	{wire.Bedrock, "guardrail stop", `{"output":{"message":{"role":"assistant","content":[{"text":"I cannot help"}]}},"stopReason":"guardrail_intervened","usage":{"inputTokens":11,"outputTokens":4,"totalTokens":15},"metrics":{"latencyMs":5}}`, nil},
+	{wire.Bedrock, "length stop", `{"output":{"message":{"role":"assistant","content":[{"text":"Hel"}]}},"stopReason":"max_tokens","usage":{"inputTokens":11,"outputTokens":2,"totalTokens":13},"metrics":{"latencyMs":5}}`, nil},
 	{wire.MistralFIM, "text", `{"id":"fim-fixture","object":"chat.completion","created":1,"model":"fixture-upstream","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`, nil},
 	{wire.CohereChat, "tool call", `{"id":"cohere-fixture","finish_reason":"TOOL_CALL","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"tool_calls":[{"id":"call_fixture","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Oslo\"}"}}]},"usage":{"billed_units":{"input_tokens":11,"output_tokens":7},"tokens":{"input_tokens":13,"output_tokens":7}}}`, nil},
 	{wire.InputTokens, "count", `{"object":"response.input_tokens","input_tokens":11}`, nil},
@@ -220,42 +210,40 @@ func (f responseFixture) decode(target wire.Format) (*wire.Completion, error) {
 	return protocols.DecodeRequest(f.format, target, []byte(f.body), routeModel, protocols.EmbeddingEncoding(caller, nil), caller)
 }
 
-func (f responseFixture) rendered() render {
-	return memoized(func(target wire.Format) ([]byte, error) {
-		completion, err := f.decode(target)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(unaryOutcome(completion, nil))
-	}, f.format)
+func (f responseFixture) outcome(target wire.Format) (any, bool) {
+	completion, err := f.decode(target)
+	return unaryOutcome(completion, err), err == nil
 }
 
-func decodeOutcome(fixture responseFixture, target wire.Format, rendered render) decoded {
-	completion, err := fixture.decode(target)
-	outcome := unaryOutcome(completion, err)
-	if err != nil {
-		return outcome
-	}
-	whole, err := json.Marshal(outcome)
-	if err != nil {
-		return decoded{Error: classify(err)}
-	}
-	if same := sameAs(fixture.format, target, whole, rendered); same != "" {
-		return decoded{SameAs: same}
-	}
-	return outcome
+func (f responseFixture) name(target string) string {
+	return string(f.format) + " to " + target + ", " + f.scenario
+}
+
+func (f responseFixture) projects(target wire.Format) bool {
+	return target.Operation() == wire.OperationGeneration || target.Operation() == f.format.Operation()
 }
 
 func TestResponseCodecMatrix(t *testing.T) {
 	t.Parallel()
 	var cases []goldenCase
 	for _, fixture := range responseFixtures {
-		rendered := fixture.rendered()
-		for _, target := range formats(t) {
-			cases = append(cases, goldenCase{name: string(fixture.format) + " to " + string(target) + ", " + fixture.scenario, run: func(*testing.T) any {
-				return decodeOutcome(fixture, target, rendered)
+		all := formats(t)
+		others := slices.DeleteFunc(slices.Clone(all), fixture.projects)
+		rows := newMatrix(preferred(fixture.format, slices.DeleteFunc(slices.Clone(all), func(target wire.Format) bool { return !fixture.projects(target) })), fixture.outcome)
+		for _, target := range rows.stored {
+			cases = append(cases, goldenCase{name: fixture.name(string(target)), run: func(*testing.T) any {
+				return rows.row(target)
 			}})
 		}
+		cases = append(cases, goldenCase{name: fixture.name("any other operation"), run: func(t *testing.T) any {
+			first := rows.row(others[0])
+			for _, target := range others[1:] {
+				if other := rows.row(target); !reflect.DeepEqual(first, other) {
+					t.Errorf("decoding to %s gives %+v, while decoding to %s gives %+v", target, other, others[0], first)
+				}
+			}
+			return first
+		}})
 	}
 	checkGolden(t, "testdata/response_codec.golden.json", cases)
 }
