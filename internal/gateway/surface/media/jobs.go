@@ -111,7 +111,7 @@ func (s surface) admitOwnedVideo(w http.ResponseWriter, r *http.Request, family 
 	x.Route = videoJobRoute(record)
 	ctx, complete, admissionError := s.kernel.AdmitKeyRequest(r.Context(), x, authority, kernel.MaxStreamDuration+jobs.LeaseSlack)
 	if admissionError != nil {
-		release()
+		defer release()
 		s.kernel.Refuse(x, w, admissionError)
 		return nil, nil, nil, nil, false
 	}

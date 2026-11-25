@@ -49,17 +49,19 @@ func (s surface) jsonHandler(decode func([]byte) (*media.Request, *media.Error))
 		if done {
 			return
 		}
-		defer s.kernel.Gate.Release(r.Context())
 		body, e := s.readJSONBody(w, r)
 		if e != nil {
+			s.kernel.Gate.Release(r.Context())
 			s.kernel.Refuse(x, w, e)
 			return
 		}
 		request, failure := decode(body)
 		if failure != nil {
+			s.kernel.Gate.Release(r.Context())
 			s.kernel.Refuse(x, w, mediaError(failure))
 			return
 		}
+		defer s.kernel.Gate.Release(r.Context())
 		sized := estimate.HeuristicBytesTokens(len(body))
 		s.serveMedia(r.Context(), w, x, authority, request, &sized)
 	}
@@ -84,18 +86,20 @@ func (s surface) formHandler(maxFileBytes int64, maxFiles int, decode func(*stag
 		if done {
 			return
 		}
-		defer s.kernel.Gate.Release(r.Context())
 		form, e := s.kernel.ParseMultipartForm(w, r, authority.ID, maxFileBytes, maxFiles)
 		if e != nil {
+			s.kernel.Gate.Release(r.Context())
 			s.kernel.Refuse(x, w, e)
 			return
 		}
 		request, failure := decode(form)
 		if failure != nil {
 			form.Cleanup()
+			s.kernel.Gate.Release(r.Context())
 			s.kernel.Refuse(x, w, mediaError(failure))
 			return
 		}
+		defer s.kernel.Gate.Release(r.Context())
 		form.Disarm()
 		s.serveMedia(r.Context(), w, x, authority, request, nil)
 	}
@@ -106,11 +110,12 @@ func (s surface) videoCreate(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	defer s.kernel.Gate.Release(r.Context())
 	form, request, e := s.readVideoCreate(w, r, authority)
 	if e != nil {
+		s.kernel.Gate.Release(r.Context())
 		s.kernel.Refuse(x, w, e)
 		return
 	}
+	defer s.kernel.Gate.Release(r.Context())
 	s.createVideoJob(w, r, x, authority, form, request)
 }

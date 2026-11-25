@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -26,12 +27,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
+	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness/money"
 )
@@ -70,6 +78,104 @@ type mediaDeadlineFailure struct{ http.ResponseWriter }
 func (w mediaDeadlineFailure) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (mediaDeadlineFailure) SetWriteDeadline(time.Time) error { return io.ErrClosedPipe }
+
+type mediaReadDeadlineWriter struct{ *httptest.ResponseRecorder }
+
+func (mediaReadDeadlineWriter) SetReadDeadline(time.Time) error { return nil }
+
+type mediaTerminalSink func(events.Envelope)
+
+func (s mediaTerminalSink) Terminal(env events.Envelope) { s(env) }
+
+type mediaVideoRows struct {
+	jobs.Querier
+	videoID string
+	keyID   string
+}
+
+type mediaRow func(...any) error
+
+func (r mediaRow) Scan(dest ...any) error { return r(dest...) }
+
+func (q mediaVideoRows) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
+	switch args[0] {
+	case q.videoID:
+		return mediaRow(func(dest ...any) error {
+			*dest[0].(*string) = q.videoID
+			*dest[2].(*string) = q.keyID
+			*dest[7].(*string) = routeSlug
+			*dest[11].(*jobs.Lifecycle) = jobs.Active
+			return nil
+		})
+	case routeSlug:
+		return mediaRow(func(dest ...any) error {
+			*dest[1].(*[]byte) = []byte(`{"mode":"transformed"}`)
+			return nil
+		})
+	default:
+		return mediaRow(func(...any) error { return pgx.ErrNoRows })
+	}
+}
+
+func TestMediaRefusalInferenceCapacity(t *testing.T) {
+	t.Parallel()
+	const (
+		videoID   = "ef8dca4c-206a-448f-8903-aa8a07d139d1"
+		refusalID = "media-refusal"
+		formType  = "multipart/form-data; boundary=empty"
+		emptyForm = "--empty--\r\n"
+	)
+	for _, tc := range []struct {
+		name, method, path, contentType, body string
+		status, concurrentStatus              int
+		errorCode                             string
+	}{
+		{"JSON read", http.MethodPost, "/v1/images/generations", "text/plain", "{", http.StatusUnsupportedMediaType, http.StatusUnsupportedMediaType, "unsupported_media_type"},
+		{"JSON decode", http.MethodPost, "/v1/images/generations", "application/json", "{", http.StatusBadRequest, http.StatusUnsupportedMediaType, ""},
+		{"multipart parse", http.MethodPost, "/v1/images/edits", "multipart/form-data", "", http.StatusBadRequest, http.StatusUnsupportedMediaType, ""},
+		{"multipart decode", http.MethodPost, "/v1/images/edits", formType, emptyForm, http.StatusBadRequest, http.StatusUnsupportedMediaType, ""},
+		{"video create decode", http.MethodPost, "/v1/videos", formType, emptyForm, http.StatusBadRequest, http.StatusUnsupportedMediaType, ""},
+		{"video key admission", http.MethodGet, "/v1/videos/" + videoID, "", "", http.StatusServiceUnavailable, http.StatusServiceUnavailable, "distributed_limits_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			probe := func(want int) {
+				t.Helper()
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/images/generations", nil)
+				req.Header.Set("Authorization", "Bearer "+fullKey)
+				resp := mediaReadDeadlineWriter{httptest.NewRecorder()}
+				mux.ServeHTTP(resp, req)
+				if resp.Code != want {
+					t.Errorf("competing request = %d, want %d: %s", resp.Code, want, resp.Body)
+				}
+			}
+			authority := keyauthority.Authority{
+				ID: "media-key", Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, RequestsPerMinute: new(int64(1))},
+			}
+			sink := mediaTerminalSink(func(env events.Envelope) {
+				if env.RequestID == refusalID {
+					probe(tc.concurrentStatus)
+				}
+			})
+			gw := kernel.New(kernel.Dependencies{
+				Runtime: &surfaceRuntime{keys: map[string]keyauthority.Authority{fullKey: authority}},
+				Egress:  &egress.Policy{}, Log: slog.New(slog.DiscardHandler), Sink: sink,
+				Getenv: func(string) string { return "" }, Uploads: staging.NewAdmission(2048),
+			}, kernel.Config{MaxInFlight: 1, MaxBodyBytes: 1024, MaxMediaBodyBytes: 1024})
+			surfacemedia.Register(gw, mux, &surfacemedia.Deps{Store: jobs.NewStore(mediaVideoRows{videoID: videoID, keyID: authority.ID})})
+			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("X-Request-Id", refusalID)
+			resp := mediaReadDeadlineWriter{httptest.NewRecorder()}
+			mux.ServeHTTP(resp, req)
+			if resp.Code != tc.status || !strings.Contains(resp.Body.String(), tc.errorCode) {
+				t.Fatalf("media refusal = %d, want %d with code %q: %s", resp.Code, tc.status, tc.errorCode, resp.Body)
+			}
+			probe(http.StatusUnsupportedMediaType)
+		})
+	}
+}
 
 type mediaRecordedPart struct {
 	Name        string `json:"name"`
