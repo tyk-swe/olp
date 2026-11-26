@@ -1,18 +1,12 @@
-import { useQueryClient } from '@tanstack/svelte-query';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { expect, it, vi } from 'vitest';
 import { toasts } from '#lib/components/toasts.svelte.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { json, serve } from '#lib/session/test/transport.js';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
 import type { RetrievalBinding } from './api';
 import RetrievalBindings from './RetrievalBindings.svelte';
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  for (const item of toasts.items) toasts.dismiss(item.id);
-});
 
 const bindingFixture: RetrievalBinding = {
   id: '00000000-0000-4000-8000-000000000010',
@@ -37,24 +31,11 @@ function mountBindings(
   operations: readonly ManagementOperation[] = ['read', 'configure']
 ) {
   serve(handler, operations);
-  const target = document.createElement('div');
-  const setup = vi.fn(() => {
-    useQueryClient().setDefaultOptions({ queries: { retry: false } });
-    return mount(RetrievalBindings, {
-      target,
-      context: getAllContexts()
-    });
+  const { target } = mountWithState(RetrievalBindings, undefined, {
+    configureClient: (client) =>
+      client.setDefaultOptions({ queries: { retry: false } })
   });
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  flushSync();
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const button = (label: string) => findButton(target, label);
   const fieldByLabel = <T extends HTMLInputElement | HTMLTextAreaElement>(
     labelPrefix: string
   ) => {
@@ -66,15 +47,6 @@ function mountBindings(
     return control!;
   };
   return { target, button, fieldByLabel };
-}
-
-function setFieldValue(
-  control: HTMLInputElement | HTMLTextAreaElement,
-  value: string
-) {
-  control.value = value;
-  control.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
 }
 
 it('shows list query failures with retry and renders the empty state after recovery', async () => {

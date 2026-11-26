@@ -1,15 +1,13 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, onTestFinished, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import { formatBudget, formatDate } from '#lib/format.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountWithState } from '#test/mount.js';
 import ReconciliationPanel from './ReconciliationPanel.svelte';
 import type { ReconciliationReport } from './reconciliation.js';
 import RoutingReportsPage from './RoutingReportsPage.svelte';
 import UsageDetails from './UsageDetails.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('shows effective key allowances and the state and reset of a weekly cap', () => {
   const target = document.createElement('div');
@@ -116,15 +114,7 @@ it('applies the same supported filters to both reports and distinguishes missing
     },
     ['read', 'usage']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(RoutingReportsPage, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
+  const { target } = mountWithState(RoutingReportsPage);
   await eventually(() =>
     expect(target.querySelector('tbody tr')?.textContent).toContain('0 / 5')
   );
@@ -195,18 +185,9 @@ it('shows the invoice currencies when a mixed-currency day has no total', async 
       ),
     ['read', 'usage']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(ReconciliationPanel, {
-      target,
-      context: getAllContexts(),
-      props: { start: `${day}T00:00:00Z`, end: `${end}T00:00:00Z` }
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
+  const { target } = mountWithState(ReconciliationPanel, {
+    start: `${day}T00:00:00Z`,
+    end: `${end}T00:00:00Z`
   });
   await eventually(() => {
     const invoice = target.querySelector('tbody td:nth-child(3)');

@@ -1,11 +1,13 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import {
+  clickButton,
+  findButton,
+  mountWithState,
+  setFieldValue
+} from '#test/mount.js';
 import ConfigurationPanel from './ConfigurationPanel.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('retires the ready plan when external credential bindings change', async () => {
   const plans = vi.fn<(request: Request) => void>();
@@ -25,38 +27,24 @@ it('retires the ready plan when external credential bindings change', async () =
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(ConfigurationPanel, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (name: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === name
-    );
-  const click = (name: string) => {
-    button(name)?.click();
-    flushSync();
-  };
-  flushSync();
+  const { target } = mountWithState(ConfigurationPanel);
+  const button = (name: string) => findButton(target, name);
+  const click = (name: string) => clickButton(target, name);
   const artifact = target.querySelector<HTMLTextAreaElement>(
     '#promotion-artifact'
   );
   expect(artifact).not.toBeNull();
   if (!artifact) return;
-  artifact.value = JSON.stringify({
-    api_version: 'openllmproxy.dev/config/v2',
-    projects: [],
-    providers: [],
-    routes: [],
-    pricing: null
-  });
-  artifact.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(
+    artifact,
+    JSON.stringify({
+      api_version: 'openllmproxy.dev/config/v2',
+      projects: [],
+      providers: [],
+      routes: [],
+      pricing: null
+    })
+  );
   click('Plan');
   await eventually(() =>
     expect(
@@ -66,10 +54,10 @@ it('retires the ready plan when external credential bindings change', async () =
   await eventually(() => expect(button('Apply')).toBeDefined());
   const external = target.querySelectorAll<HTMLTextAreaElement>('textarea')[1];
   expect(external).toBeDefined();
-  external.value =
-    '{"provider/primary":{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"1"}}';
-  external.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(
+    external,
+    '{"provider/primary":{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"1"}}'
+  );
   expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
   expect(button('Apply')).toBeUndefined();
   click('Plan');
@@ -83,54 +71,39 @@ it('retires the ready plan when external credential bindings change', async () =
 });
 
 it('ignores a deferred plan result after the artifact changed', async () => {
-  let release: (value: Response) => void = () => {};
-  const pending = new Promise<Response>((resolve) => (release = resolve));
+  const pending = Promise.withResolvers<Response>();
   serve(
     (request) => {
       const path = new URL(request.url).pathname;
-      if (path === '/api/v1/configuration/plan') return pending;
+      if (path === '/api/v1/configuration/plan') return pending.promise;
       return json({});
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(ConfigurationPanel, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (name: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === name
-    );
-  const click = (name: string) => {
-    button(name)?.click();
-    flushSync();
-  };
+  const { target } = mountWithState(ConfigurationPanel);
+  const button = (name: string) => findButton(target, name);
+  const click = (name: string) => clickButton(target, name);
   const setArtifact = (id: string) => {
     const field = target.querySelector<HTMLTextAreaElement>(
       '#promotion-artifact'
     );
     if (!field) throw new Error('Missing artifact field');
-    field.value = JSON.stringify({
-      api_version: 'openllmproxy.dev/config/v2',
-      projects: [{ id }],
-      providers: [],
-      routes: [],
-      pricing: null
-    });
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    setFieldValue(
+      field,
+      JSON.stringify({
+        api_version: 'openllmproxy.dev/config/v2',
+        projects: [{ id }],
+        providers: [],
+        routes: [],
+        pricing: null
+      })
+    );
   };
-  flushSync();
   setArtifact('first');
   click('Plan');
   await eventually(() => expect(button('Plan')?.disabled).toBe(true));
   setArtifact('second');
-  release(
+  pending.resolve(
     json({
       digest: 'plan-digest',
       actions: [],
@@ -141,7 +114,6 @@ it('ignores a deferred plan result after the artifact changed', async () => {
   await eventually(() => expect(button('Plan')?.disabled).toBe(false));
   expect(target.querySelector('[data-testid="promotion-plan"]')).toBeNull();
   expect(button('Apply')).toBeUndefined();
-  click('Plan');
 });
 
 it('keeps Apply and Plan disabled until a conflict refresh finishes', async () => {
@@ -161,32 +133,24 @@ it('keeps Apply and Plan disabled until a conflict refresh finishes', async () =
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(ConfigurationPanel, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
+  const { target } = mountWithState(ConfigurationPanel);
   const button = (name: string) =>
     [...target.querySelectorAll('button')].find((item) =>
       item.textContent?.trim().startsWith(name)
     );
-  flushSync();
   const artifact = target.querySelector<HTMLTextAreaElement>(
     '#promotion-artifact'
   )!;
-  artifact.value = JSON.stringify({
-    api_version: 'openllmproxy.dev/config/v2',
-    projects: [],
-    providers: [],
-    routes: [],
-    pricing: null
-  });
-  artifact.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(
+    artifact,
+    JSON.stringify({
+      api_version: 'openllmproxy.dev/config/v2',
+      projects: [],
+      providers: [],
+      routes: [],
+      pricing: null
+    })
+  );
   button('Plan')?.click();
   await eventually(() => expect(button('Apply')?.disabled).toBe(false));
   button('Apply')?.click();

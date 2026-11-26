@@ -3,6 +3,19 @@ import { test as base, type Locator, type Page } from '@playwright/test';
 
 export { expect } from '@playwright/test';
 
+function requireEnv(name: 'OLP_E2E_ORIGIN' | 'OLP_E2E_VENDOR'): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(
+      `${name} is not set. Run browser E2E tests via \`make test-e2e-browser\`.`
+    );
+  }
+  return value;
+}
+
+export const origin = requireEnv('OLP_E2E_ORIGIN');
+const vendorOrigin = requireEnv('OLP_E2E_VENDOR');
+
 export const session = join(
   import.meta.dirname,
   '../../test-results/session.json'
@@ -28,10 +41,9 @@ type Vendor = {
 export const test = base.extend<object, { vendor: Vendor }>({
   vendor: [
     async ({ playwright }, use) => {
-      const origin = process.env.OLP_E2E_VENDOR;
       const api = await playwright.request.newContext();
-      const scripted = await api.get(`${origin}/fixture`);
-      await use({ ...(await scripted.json()), endpoint: `${origin}/v1` });
+      const scripted = await api.get(`${vendorOrigin}/fixture`);
+      await use({ ...(await scripted.json()), endpoint: `${vendorOrigin}/v1` });
       await api.dispose();
     },
     { scope: 'worker' }

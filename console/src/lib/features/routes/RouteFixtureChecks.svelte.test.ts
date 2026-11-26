@@ -1,11 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { expect, it, onTestFinished, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
+import { eventually } from '#test/eventually.js';
 import RouteFixtureChecks from './RouteFixtureChecks.svelte';
 import type { RouteFixturePlan, RouteFixtureReport } from './api.js';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('compares the selected local file and shows the assertion and omitted classifier verdict', async () => {
   const sample = JSON.stringify({

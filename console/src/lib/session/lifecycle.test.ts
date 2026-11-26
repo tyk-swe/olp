@@ -4,7 +4,7 @@ import { ApiProblem } from '#lib/management/http.js';
 import { clearCsrfToken, getCsrfToken } from './csrf';
 import { AuthenticationLifecycle } from './lifecycle';
 import type { AuthenticatedSession } from './state';
-import { eventually } from '../../../tests/unit/support/eventually.js';
+import { eventually } from '#test/eventually.js';
 
 const alice: AuthenticatedSession = {
   user: {

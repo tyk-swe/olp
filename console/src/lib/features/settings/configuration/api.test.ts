@@ -1,5 +1,6 @@
 import { stringifyNativeJSON } from '#lib/nativeJson.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   applyConfiguration,
   exportConfiguration,
@@ -15,12 +16,6 @@ import {
   type ExternalCredentialReference
 } from './api';
 import type { ProblemDetails } from '#lib/management/http.js';
-
-vi.mock('#lib/session/authMiddleware.js', () => ({
-  createAuthMiddleware: () => ({
-    onRequest: ({ request }: { request: Request }) => request
-  })
-}));
 
 type PortableProvider = ConfigurationDocument['providers'][number];
 
@@ -183,36 +178,26 @@ const operations = [
   }
 ] as const;
 
-function respond(handler: (request: Request) => Response | Promise<Response>) {
-  vi.stubGlobal('fetch', vi.fn(handler));
-}
-
-afterEach(() => vi.unstubAllGlobals());
-
 describe('configuration API', () => {
   it('exports the complete artifact and its canonical digest', async () => {
     const exported: ConfigurationExport = { document, digest: plan.digest };
-    respond((request) => {
-      expect(request.method).toBe('GET');
-      expect(new URL(request.url).pathname).toBe(
-        '/api/v1/configuration/export'
-      );
-      return Response.json(exported);
+    serve((request) => {
+      route(request, 'GET', '/api/v1/configuration/export');
+      return json(exported);
     });
     expect(await exportConfiguration()).toEqual(exported);
   });
 
   it('plans with exact secret, external and destination identity bindings', async () => {
-    respond(async (request) => {
-      expect(request.method).toBe('POST');
-      expect(new URL(request.url).pathname).toBe('/api/v1/configuration/plan');
+    serve(async (request) => {
+      route(request, 'POST', '/api/v1/configuration/plan');
       expect(await request.json()).toEqual({
         document,
         secret_bindings: secretBindings,
         external_credential_bindings: externalBindings,
         code_bindings: codeBindings
       });
-      return Response.json(plan);
+      return json(plan);
     });
     expect(
       await planConfiguration(
@@ -226,9 +211,8 @@ describe('configuration API', () => {
   });
 
   it('applies the reviewed bindings with the caller idempotency key', async () => {
-    respond(async (request) => {
-      expect(request.method).toBe('POST');
-      expect(new URL(request.url).pathname).toBe('/api/v1/configuration/apply');
+    serve(async (request) => {
+      route(request, 'POST', '/api/v1/configuration/apply');
       expect(request.headers.get('Idempotency-Key')).toBe(requestId);
       expect(await request.json()).toEqual({
         document,
@@ -236,7 +220,7 @@ describe('configuration API', () => {
         external_credential_bindings: externalBindings,
         code_bindings: codeBindings
       });
-      return Response.json(plan);
+      return json(plan);
     });
     expect(
       await applyConfiguration(
@@ -268,7 +252,7 @@ describe('configuration API', () => {
           ]
         }
       };
-      respond(() => Response.json(problem, { status: problem.status }));
+      serve(() => json(problem, problem.status));
       await expect(execute()).rejects.toMatchObject({
         name: 'ApiProblem',
         problem
@@ -279,7 +263,7 @@ describe('configuration API', () => {
   it.each(operations)(
     'rejects a missing JSON response for $name',
     async ({ execute }) => {
-      respond(() => new Response(null, { status: 204 }));
+      serve(() => new Response(null, { status: 204 }));
       await expect(execute()).rejects.toMatchObject({
         problem: { status: 502, type: 'urn:olp:problem:invalid-api-response' }
       });
@@ -290,7 +274,7 @@ describe('configuration API', () => {
     'forwards cancellation to the $name transport',
     async ({ execute }) => {
       const controller = new AbortController();
-      respond((request) => {
+      serve((request) => {
         if (request.signal.aborted)
           return Promise.reject(request.signal.reason);
         return new Promise<Response>((_resolve, reject) => {
@@ -411,7 +395,7 @@ it('preserves native provider numbers when exporting a configuration document', 
     },
     digest: plan.digest
   };
-  respond(
+  serve(
     () =>
       new Response(
         JSON.stringify(exported).replace('"native-number"', '9007199254740993'),
@@ -427,7 +411,7 @@ it('preserves native provider numbers when exporting a configuration document', 
 it.each(['{', '{"document":{},"document":{}}'])(
   'reports an invalid export response for malformed native JSON',
   async (body) => {
-    respond(
+    serve(
       () =>
         new Response(body, { headers: { 'Content-Type': 'application/json' } })
     );

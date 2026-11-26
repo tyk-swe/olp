@@ -1,12 +1,9 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState } from '#test/mount.js';
 import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
 import type { CapturePolicy } from './api';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 const policy: CapturePolicy = {
   id: '00000000-0000-4000-8000-000000000020',
@@ -50,30 +47,17 @@ it('keeps the stored expiry when an edit leaves the expiry picker untouched', as
     },
     ['read', 'settings']
   );
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(CapturePoliciesPanel, {
-      target,
-      props: {
-        canManageInstallation: true,
-        canManageProjects: true,
-        canMutate: () => true,
-        ownerOnly: true
-      },
-      context: getAllContexts()
-    })
+  mountWithState(
+    CapturePoliciesPanel,
+    {
+      canManageInstallation: true,
+      canManageProjects: true,
+      canMutate: () => true,
+      ownerOnly: true
+    },
+    { attach: true }
   );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-  });
-  const button = (label: string) =>
-    [...document.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const button = (label: string) => findButton(document, label);
 
   await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();

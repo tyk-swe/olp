@@ -1,11 +1,9 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState } from '#test/mount.js';
 import MembersPanel from './MembersPanel.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 const member = {
   id: '00000000-0000-4000-8000-000000000002',
@@ -47,21 +45,8 @@ it('changes a member role only after the change is confirmed', async () => {
     },
     ['read', 'access']
   );
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(MembersPanel, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-  });
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const { target } = mountWithState(MembersPanel, undefined, { attach: true });
+  const button = (label: string) => findButton(target, label);
   const chooseOperator = () => {
     const radio = target.querySelector<HTMLInputElement>(
       'input[name="role"][value="operator"]'

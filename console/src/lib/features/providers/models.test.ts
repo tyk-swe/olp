@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import type { Provider } from './providers';
 import {
   certifyProviderModel,
@@ -14,12 +15,6 @@ import {
   setProviderModel,
   type ProviderModel
 } from './models';
-
-vi.mock('#lib/session/authMiddleware.js', () => ({
-  createAuthMiddleware: () => ({
-    onRequest: ({ request }: { request: Request }) => request
-  })
-}));
 
 const provider: Provider = {
   id: 'provider-fixture',
@@ -46,21 +41,12 @@ const model: ProviderModel = {
   capabilities: []
 };
 
-function respond(handler: (request: Request) => Response | Promise<Response>) {
-  vi.stubGlobal('fetch', vi.fn(handler));
-}
-
-afterEach(() => vi.unstubAllGlobals());
-
 describe('provider model API', () => {
   it.each([['one-model'], ['first-model', 'second-model']])(
     'declares identifiers using the discovery request contract, %j',
     async (...names: string[]) => {
-      respond(async (request) => {
-        expect(new URL(request.url).pathname).toBe(
-          `/api/v1/providers/${provider.id}/discovery`
-        );
-        expect(request.method).toBe('POST');
+      serve(async (request) => {
+        route(request, 'POST', `/api/v1/providers/${provider.id}/discovery`);
         expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
         expect(await request.json()).toEqual({
           models: names.map((name) => ({
@@ -68,21 +54,18 @@ describe('provider model API', () => {
             display_name: name
           }))
         });
-        return Response.json(provider);
+        return json(provider);
       });
       expect(await declareProviderModels(provider, names)).toEqual(provider);
     }
   );
 
   it('requests automatic discovery with an empty model list', async () => {
-    respond(async (request) => {
-      expect(new URL(request.url).pathname).toBe(
-        `/api/v1/providers/${provider.id}/discovery`
-      );
-      expect(request.method).toBe('POST');
+    serve(async (request) => {
+      route(request, 'POST', `/api/v1/providers/${provider.id}/discovery`);
       expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ models: [] });
-      return Response.json(provider);
+      return json(provider);
     });
     expect(await discoverProviderModels(provider)).toEqual(provider);
   });
@@ -102,21 +85,20 @@ describe('provider model API', () => {
       not_listed: [],
       unverified: []
     };
-    respond(async (request) => {
-      expect(new URL(request.url).pathname).toBe(
+    serve(async (request) => {
+      route(
+        request,
+        'POST',
         `/api/v1/providers/${provider.id}/listing-comparison`
       );
-      expect(request.method).toBe('POST');
       expect(request.headers.get('If-Match')).toBeNull();
-      return Response.json(comparison);
+      return json(comparison);
     });
     expect(await compareProviderListing(provider.id)).toEqual(comparison);
   });
 
   it('surfaces rejected model declarations', async () => {
-    respond(() =>
-      Response.json({ title: 'Invalid model', status: 422 }, { status: 422 })
-    );
+    serve(() => json({ title: 'Invalid model', status: 422 }, 422));
     await expect(
       declareProviderModels(provider, ['invalid'])
     ).rejects.toMatchObject({
@@ -134,16 +116,18 @@ describe('provider model API', () => {
     const kinds = [{ kind: provider.configuration.kind, label: provider.name }];
     const controller = new AbortController();
     controller.abort();
-    respond((request) => {
-      expect(request.method).toBe('GET');
+    serve((request) => {
       expect(request.signal.aborted).toBe(true);
       if (new URL(request.url).pathname === '/api/v1/provider-kinds') {
-        return Response.json({ items: kinds });
+        route(request, 'GET', '/api/v1/provider-kinds');
+        return json({ items: kinds });
       }
-      expect(new URL(request.url).pathname).toBe(
+      route(
+        request,
+        'GET',
         `/api/v1/provider-kinds/${provider.configuration.kind}/capabilities`
       );
-      return Response.json(options);
+      return json(options);
     });
     expect(
       await getProviderCapabilityOptions(
@@ -157,14 +141,13 @@ describe('provider model API', () => {
   it('loads model pages with their provider and continuation cursor', async () => {
     const controller = new AbortController();
     controller.abort();
-    respond((request) => {
+    serve((request) => {
+      route(request, 'GET', `/api/v1/providers/${provider.id}/models`);
       const url = new URL(request.url);
-      expect(request.method).toBe('GET');
       expect(request.signal.aborted).toBe(true);
-      expect(url.pathname).toBe(`/api/v1/providers/${provider.id}/models`);
       expect(url.searchParams.get('limit')).toBe(String(PROVIDER_PAGE_SIZE));
       expect(url.searchParams.get('cursor')).toBe('previous-page');
-      return Response.json({
+      return json({
         provider,
         items: [model],
         next_cursor: 'next-page'
@@ -187,11 +170,10 @@ describe('provider model API', () => {
     const controller = new AbortController();
     controller.abort();
     const item = { provider_id: provider.id, model };
-    respond((request) => {
+    serve((request) => {
+      route(request, 'GET', '/api/v1/provider-models');
       const url = new URL(request.url);
-      expect(request.method).toBe('GET');
       expect(request.signal.aborted).toBe(true);
-      expect(url.pathname).toBe('/api/v1/provider-models');
       expect(Object.fromEntries(url.searchParams)).toEqual({
         limit: String(PROVIDER_PAGE_SIZE),
         cursor: 'previous-page',
@@ -199,7 +181,7 @@ describe('provider model API', () => {
         search: 'fixture',
         surface: 'openai'
       });
-      return Response.json({ items: [item], next_cursor: 'next-page' });
+      return json({ items: [item], next_cursor: 'next-page' });
     });
     expect(
       await listProviderModelInventoryPage(
@@ -223,16 +205,16 @@ describe('provider model API', () => {
       provider_id: provider.id,
       model: { ...model, id: 'another-model' }
     };
-    respond((request) => {
+    serve((request) => {
+      route(request, 'GET', '/api/v1/provider-models');
       const url = new URL(request.url);
-      expect(url.pathname).toBe('/api/v1/provider-models');
       expect(url.searchParams.get('enabled')).toBe('true');
       expect(request.signal.aborted).toBe(true);
       if (url.searchParams.has('cursor')) {
         expect(url.searchParams.get('cursor')).toBe('next-page');
-        return Response.json({ items: [second], next_cursor: null });
+        return json({ items: [second], next_cursor: null });
       }
-      return Response.json({ items: [first], next_cursor: 'next-page' });
+      return json({ items: [first], next_cursor: 'next-page' });
     });
     expect(await listProviderModelInventory(true, controller.signal)).toEqual([
       first,
@@ -244,14 +226,15 @@ describe('provider model API', () => {
     const capabilities = [
       { surface: 'openai', operation: 'generation', mode: 'unary' }
     ];
-    respond(async (request) => {
-      expect(new URL(request.url).pathname).toBe(
+    serve(async (request) => {
+      route(
+        request,
+        'PATCH',
         `/api/v1/providers/${provider.id}/models/${model.id}`
       );
-      expect(request.method).toBe('PATCH');
       expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       expect(await request.json()).toEqual({ enabled: true, capabilities });
-      return Response.json(provider);
+      return json(provider);
     });
     expect(
       await setProviderModel(provider, model.id, true, capabilities)
@@ -266,11 +249,12 @@ describe('provider model API', () => {
     };
     const controller = new AbortController();
     controller.abort();
-    respond((request) => {
-      expect(new URL(request.url).pathname).toBe(
+    serve((request) => {
+      route(
+        request,
+        'POST',
         `/api/v1/providers/${provider.id}/models/${model.id}/certify`
       );
-      expect(request.method).toBe('POST');
       expect(request.signal.aborted).toBe(true);
       expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
       return Response.json(result, { headers: { ETag: 'certified-version' } });
@@ -283,7 +267,7 @@ describe('provider model API', () => {
   it.each([undefined, '   '])(
     'rejects certification without a usable provider version, %j',
     async (etag) => {
-      respond(() =>
+      serve(() =>
         Response.json({}, { headers: etag === undefined ? {} : { ETag: etag } })
       );
       await expect(certifyProviderModel(provider, model.id)).rejects.toThrow(

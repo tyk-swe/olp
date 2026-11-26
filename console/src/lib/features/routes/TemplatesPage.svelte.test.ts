@@ -1,15 +1,12 @@
-import { useQueryClient } from '@tanstack/svelte-query';
 import { routeKeys } from './routeKeys';
 import { listRouteDraftPage, listRoutePage } from './api';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
 import TemplatesPage from './TemplatesPage.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('requires confirmation before publishing template placements and displays skipped reasons', async () => {
   const apply = vi.fn<(request: Request) => void>();
@@ -52,26 +49,9 @@ it('requires confirmation before publishing template placements and displays ski
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(TemplatesPage, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  await eventually(() =>
-    expect(
-      [...target.querySelectorAll('button')].some(
-        (item) => item.textContent?.trim() === 'Apply template'
-      )
-    ).toBe(true)
-  );
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const { target } = mountWithState(TemplatesPage);
+  const button = (label: string) => findButton(target, label);
+  await eventually(() => expect(button('Apply template')).toBeDefined());
   button('Apply template')?.click();
   flushSync();
   expect(apply).not.toHaveBeenCalled();
@@ -123,20 +103,8 @@ it.each(['draft', 'conflict', 'project'] as const)(
       },
       ['read', 'configure']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() => ({
-      client: useQueryClient(),
-      component: mount(TemplatesPage, { target, context: getAllContexts() })
-    }));
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value.component);
-      await unmount(harness);
-    });
-    const button = (name: string) =>
-      [...target.querySelectorAll('button')].find(
-        (item) => item.textContent?.trim() === name
-      );
+    const { target, client } = mountWithState(TemplatesPage);
+    const button = (name: string) => findButton(target, name);
     await eventually(() => expect(button('Inspect and edit')).toBeDefined());
     button('Inspect and edit')?.click();
     await eventually(() =>
@@ -156,14 +124,12 @@ it.each(['draft', 'conflict', 'project'] as const)(
       return;
     }
     const name = target.querySelector('form input') as HTMLInputElement;
-    name.value = 'my-draft';
-    name.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    setFieldValue(name, 'my-draft');
     detail.mockImplementation(() =>
       json({ ...value, name: 'remote', etag: 'remote' })
     );
     if (check === 'draft') {
-      await setup.mock.results[0].value.client.invalidateQueries({
+      await client.invalidateQueries({
         queryKey: routeKeys.template(value.id)
       });
     }
@@ -224,34 +190,28 @@ it.each([false, true])(
       },
       ['read', 'configure']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() => ({
-      client: useQueryClient(),
-      component: mount(TemplatesPage, { target, context: getAllContexts() })
-    }));
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value.component);
-      await unmount(harness);
-    });
-    const options = {
-      queryKey: publish ? routeKeys.page() : routeKeys.draftPage(),
-      queryFn: () => (publish ? listRoutePage() : listRouteDraftPage()),
-      staleTime: 60000
-    };
-    const client = setup.mock.results[0].value.client;
-    expect((await client.fetchQuery(options)).items).toEqual([]);
-    const button = (label: string) =>
-      [...target.querySelectorAll('button')].find(
-        (item) => item.textContent?.trim() === label
-      );
+    const { target, client } = mountWithState(TemplatesPage);
+    const fetchListing = () =>
+      publish
+        ? client.fetchQuery({
+            queryKey: routeKeys.page(),
+            queryFn: () => listRoutePage(),
+            staleTime: 60000
+          })
+        : client.fetchQuery({
+            queryKey: routeKeys.draftPage(),
+            queryFn: () => listRouteDraftPage(),
+            staleTime: 60000
+          });
+    expect((await fetchListing()).items).toEqual([]);
+    const button = (label: string) => findButton(target, label);
     await eventually(() => expect(button('Apply template')).toBeDefined());
     button('Apply template')?.click();
     flushSync();
     button('Confirm apply template')?.click();
     await eventually(() => expect(button('Apply template')).toBeDefined());
     expect(applied).toHaveBeenCalledOnce();
-    expect((await client.fetchQuery(options)).items).toEqual([placed]);
+    expect((await fetchListing()).items).toEqual([placed]);
   }
 );
 
@@ -279,19 +239,8 @@ function mountTemplates(operations: ManagementOperation[]) {
       ? json({ items: [storedTemplate] })
       : json(storedTemplate);
   }, operations);
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(TemplatesPage, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (name: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === name
-    );
+  const { target } = mountWithState(TemplatesPage);
+  const button = (name: string) => findButton(target, name);
   return { target, button };
 }
 

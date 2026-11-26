@@ -445,6 +445,26 @@ export class AuthenticationLifecycle {
     this.rotateAuthenticatedRequests();
   }
 
+  reset(): void {
+    this.abortAuthenticationWork();
+    this.channel?.close();
+    this.channel = null;
+    this.hasEstablishedSession = false;
+    this.boundary = null;
+    this.boundaryGeneration = 0;
+    this.listeners.clear();
+    this.authenticationController = null;
+    this.principalExitController = null;
+    this.authenticatedRequestGeneration = 0;
+    this.requestGenerations = new WeakMap();
+    this.validationGeneration = 0;
+    this.authenticationGeneration = 0;
+    this.unauthorizedHandled = false;
+    this.queries = new QueryPartition();
+    clearCsrfToken();
+    this.snapshotValue = anonymousAuthenticationSnapshot();
+  }
+
   private async runPrincipalExit(
     request: PrincipalExitRequest
   ): Promise<boolean> {

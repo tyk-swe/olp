@@ -1,12 +1,14 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import {
+  findButton as button,
+  mountWithState,
+  setFieldValue
+} from '#test/mount.js';
 import ExportSinksPanel from './ExportSinksPanel.svelte';
 import type { ExportSink } from './api';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 const sink: ExportSink = {
   export_sink_id: '00000000-0000-4000-8000-000000000010',
@@ -24,33 +26,17 @@ const sink: ExportSink = {
 };
 
 function renderPanel() {
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(ExportSinksPanel, {
-      target,
-      props: {
-        canManageInstallation: true,
-        canManageProjects: true,
-        canMutate: () => true,
-        memberships: []
-      },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-  });
-  return target;
+  return mountWithState(
+    ExportSinksPanel,
+    {
+      canManageInstallation: true,
+      canManageProjects: true,
+      canMutate: () => true,
+      memberships: []
+    },
+    { attach: true }
+  ).target;
 }
-
-const button = (root: ParentNode, label: string) =>
-  [...root.querySelectorAll('button')].find(
-    (item) => item.textContent?.trim() === label
-  );
 
 it('deletes a sink only after the deletion is confirmed', async () => {
   const deleted = vi.fn();
@@ -125,9 +111,7 @@ it('refreshes a delivery lookup when the same attempt is submitted again', async
   button(target, 'Delivery lookup')?.click();
   flushSync();
   const input = target.querySelector<HTMLInputElement>('#metering-attempt')!;
-  input.value = attempt;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(input, attempt);
   button(target, 'Look up')?.click();
   const result = () => target.querySelector('.delivery-lookup')?.textContent;
   await eventually(() => expect(result()).toContain('Pending'));

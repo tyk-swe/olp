@@ -1,17 +1,12 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { toasts } from '#lib/components/toasts.svelte.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { json, serve } from '#lib/session/test/transport.js';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState } from '#test/mount.js';
 import type { ProviderResource } from './api';
 import RetainedResourceControls from './RetainedResourceControls.svelte';
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  for (const item of toasts.items) toasts.dismiss(item.id);
-});
 
 const cacheResource: ProviderResource = {
   id: 'context_cache_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -44,24 +39,11 @@ function mountControls(
 ) {
   serve(handler, operations);
   const changed = vi.fn();
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(RetainedResourceControls, {
-      target,
-      props: { resource, changed },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
+  const { target } = mountWithState(RetainedResourceControls, {
+    resource,
+    changed
   });
-  flushSync();
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const button = (label: string) => findButton(target, label);
   return { target, changed, button };
 }
 

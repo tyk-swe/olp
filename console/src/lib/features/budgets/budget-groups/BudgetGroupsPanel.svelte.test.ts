@@ -1,11 +1,9 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
 import BudgetGroupsPanel from './BudgetGroupsPanel.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('keeps an edited budget group when another group is retired', async () => {
   const retired = vi.fn();
@@ -43,19 +41,8 @@ it('keeps an edited budget group when another group is retired', async () => {
     },
     ['read', 'keys', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(BudgetGroupsPanel, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const { target } = mountWithState(BudgetGroupsPanel);
+  const button = (label: string) => findButton(target, label);
   await eventually(() => expect(button('Edit')).toBeDefined());
   button('Edit')?.click();
   flushSync();
@@ -64,9 +51,7 @@ it('keeps an edited budget group when another group is retired', async () => {
   );
   expect(name).not.toBeNull();
   if (!name) return;
-  name.value = 'Unsaved group name';
-  name.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(name, 'Unsaved group name');
   button('Retire budget group')?.click();
   flushSync();
   button('Confirm retire budget group')?.click();
@@ -122,21 +107,8 @@ it.each(['create', 'edit'] as const)(
       },
       ['read', 'keys', 'configure']
     );
-    const target = document.createElement('div');
-    document.body.append(target);
-    const setup = vi.fn(() =>
-      mount(BudgetGroupsPanel, { target, context: getAllContexts() })
-    );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-      target.remove();
-    });
-    const button = (label: string) =>
-      [...document.querySelectorAll('button')].find(
-        (x) => x.textContent?.trim() === label
-      )!;
+    mountWithState(BudgetGroupsPanel, undefined, { attach: true });
+    const button = (label: string) => findButton(document, label)!;
     await eventually(() => expect(button('Edit')).toBeDefined());
     button(mode === 'create' ? 'New group' : 'Edit').click();
     flushSync();
@@ -146,16 +118,13 @@ it.each(['create', 'edit'] as const)(
         ['group-daily', '10']
       ]) {
         const input = document.getElementById(id) as HTMLInputElement;
-        input.value = value;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        setFieldValue(input, value);
       }
     }
     const select = document.querySelector<HTMLSelectElement>(
       mode === 'create' ? '#group-basis' : '[aria-label="Budget basis"]'
     )!;
-    select.value = 'charge';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
+    setFieldValue(select, 'charge', 'change');
     button(mode === 'create' ? 'Create group' : 'Save').click();
     await eventually(() => expect(saved).toHaveBeenCalledOnce());
     expect(await saved.mock.calls[0][0].json()).toHaveProperty(

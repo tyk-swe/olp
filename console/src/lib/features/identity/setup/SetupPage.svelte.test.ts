@@ -1,11 +1,8 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountWithState } from '#test/mount.js';
 import SetupPage from './SetupPage.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('holds the owner form until the server can read a setup token', async () => {
   const configured = vi.fn(() => true).mockReturnValueOnce(false);
@@ -17,19 +14,7 @@ it('holds the owner form until the server can read a setup token', async () => {
         })
       : json({ name: 'OpenLLMProxy', logo: '', accent: '#2563eb' })
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(SetupPage, {
-      target,
-      context: getAllContexts(),
-      props: { onDone: vi.fn() }
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
+  const { target } = mountWithState(SetupPage, { onDone: vi.fn() });
 
   await eventually(() =>
     expect(target.querySelector('[role="alert"] h2')?.textContent).toBe(
