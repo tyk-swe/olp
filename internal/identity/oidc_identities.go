@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -13,6 +14,22 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
+
+type oidcIdentityItem struct {
+	ID          string     `json:"id"`
+	Issuer      string     `json:"issuer"`
+	EmailAtLink *string    `json:"email_at_link"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	CanUnlink   bool       `json:"can_unlink"`
+}
+
+type oidcIdentitiesResponse struct {
+	Items                         []oidcIdentityItem `json:"items"`
+	LinkingAvailable              bool               `json:"linking_available"`
+	HasLocalPassword              bool               `json:"has_local_password"`
+	OIDCReauthenticationAvailable bool               `json:"oidc_reauthentication_available"`
+}
 
 func mappedRole(c oidcConfiguration, address string, groups []string) string {
 	return resolveMappedRole(roleMappingPolicy{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, address, groups)
@@ -81,23 +98,11 @@ func usableOIDCIdentities(r *http.Request, q database.Queryer, p authz.Principal
 }
 
 func (s *oidcService) oidcIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	var err error
 	var local, localEnabled, enabled, locallyManaged bool
-	if err = s.access.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management<>'oidc' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
+	if err := s.access.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management<>'oidc' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return httpkit.Reply{}, err
 	}
 	usable, err := usableOIDCIdentities(r, s.access.Pool, p, locallyManaged)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
-        'id',i.id,'issuer',i.issuer,'email_at_link',i.email_at_link,
-        'created_at',i.created_at,'last_login_at',i.last_login_at)
-        FROM olp.oidc_identities i WHERE i.user_id=$1 ORDER BY i.created_at,i.id LIMIT 100`, p.ID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -105,14 +110,60 @@ func (s *oidcService) oidcIdentities(r *http.Request, p authz.Principal) (httpki
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	for _, item := range items {
+	hasFallback := locallyManaged && (local && localEnabled && !s.access.LocalLoginDisabled() || len(samlUsable) > 0)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT id::text,issuer,email_at_link,created_at,last_login_at FROM olp.oidc_identities WHERE user_id=$1 ORDER BY created_at,id LIMIT 100", p.ID)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	defer rows.Close()
+	items := []oidcIdentityItem{}
+	for rows.Next() {
+		var item oidcIdentityItem
+		if err := rows.Scan(&item.ID, &item.Issuer, &item.EmailAtLink, &item.CreatedAt, &item.LastLoginAt); err != nil {
+			return httpkit.Reply{}, err
+		}
 		remaining := len(usable)
-		if usable[item["id"].(string)] {
+		if usable[item.ID] {
 			remaining--
 		}
-		item["can_unlink"] = remaining > 0 || locallyManaged && (local && localEnabled && !s.access.LocalLoginDisabled() || len(samlUsable) > 0)
+		item.CanUnlink = remaining > 0 || hasFallback
+		items = append(items, item)
 	}
-	return httpkit.OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
+	if err := rows.Err(); err != nil {
+		return httpkit.Reply{}, err
+	}
+	return httpkit.OK(oidcIdentitiesResponse{
+		Items:                         items,
+		LinkingAvailable:              enabled,
+		HasLocalPassword:              local,
+		OIDCReauthenticationAvailable: len(usable) > 0,
+	}), nil
+}
+
+func (s *oidcService) ensureRemainingOIDCSignIn(r *http.Request, tx pgx.Tx, p authz.Principal) error {
+	var local, localEnabled, locallyManaged bool
+	if err := tx.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+		return err
+	}
+	if local && locallyManaged && localEnabled && !s.access.LocalLoginDisabled() {
+		return nil
+	}
+	usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
+	if err != nil {
+		return err
+	}
+	// An OIDC-managed account answers to the IdP, so no other sign-in method
+	// may outlive the identity through which the IdP can revoke its role.
+	var samlUsable []string
+	if locallyManaged {
+		if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
+			return err
+		}
+	}
+	if len(usable) == 0 && len(samlUsable) == 0 {
+		return httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
+	}
+	return nil
 }
 
 func (s *oidcService) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -122,40 +173,22 @@ func (s *oidcService) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (ht
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		var owner string
-		if err = tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
+		if err := tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.oidc_identities WHERE id=$1", id).Scan(&owner); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if owner != p.ID {
 			return httpkit.Reply{}, access.Event{}, httpkit.Forbidden()
 		}
-		if err = s.access.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
+		if err := s.access.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
+		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.oidc_identities WHERE id=$1", id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		var local, localEnabled, locallyManaged bool
-		if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+		if err := s.ensureRemainingOIDCSignIn(r, tx, p); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if !local || !locallyManaged || !localEnabled || s.access.LocalLoginDisabled() {
-			usable, err := usableOIDCIdentities(r, tx, p, locallyManaged)
-			if err != nil {
-				return httpkit.Reply{}, access.Event{}, err
-			}
-			// An OIDC-managed account answers to the IdP, so no other sign-in method
-			// may outlive the identity through which the IdP can revoke its role.
-			var samlUsable []string
-			if locallyManaged {
-				if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
-					return httpkit.Reply{}, access.Event{}, err
-				}
-			}
-			if len(usable) == 0 && len(samlUsable) == 0 {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
-			}
-		}
-		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
+		if err := EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		// Removing an identity is no sign-in, so the rotated session keeps the

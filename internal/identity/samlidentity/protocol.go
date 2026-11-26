@@ -20,14 +20,68 @@ import (
 	dsig "github.com/russellhaering/goxmldsig"
 )
 
-const MaxXML = 1 << 20
-const assertionNS = "urn:oasis:names:tc:SAML:2.0:assertion"
-const protocolNS = "urn:oasis:names:tc:SAML:2.0:protocol"
-const metadataNS = "urn:oasis:names:tc:SAML:2.0:metadata"
-const signatureNS = "http://www.w3.org/2000/09/xmldsig#"
-const Skew = 90 * time.Second
+const (
+	MaxXML      = 1 << 20
+	assertionNS = "urn:oasis:names:tc:SAML:2.0:assertion"
+	protocolNS  = "urn:oasis:names:tc:SAML:2.0:protocol"
+	metadataNS  = "urn:oasis:names:tc:SAML:2.0:metadata"
+	signatureNS = "http://www.w3.org/2000/09/xmldsig#"
+	Skew        = 90 * time.Second
+)
 
 var ErrDocument = errors.New("invalid SAML document")
+
+type xmlBoundsState struct {
+	depth int
+	nodes int
+	roots int
+	ids   map[string]bool
+}
+
+func (s *xmlBoundsState) acceptStart(el xml.StartElement) error {
+	if s.depth == 0 {
+		s.roots++
+	}
+	s.depth++
+	s.nodes++
+	if s.depth > 48 || s.nodes > 16384 || s.roots > 1 {
+		return ErrDocument
+	}
+	attrs := make(map[xml.Name]bool, len(el.Attr))
+	for _, a := range el.Attr {
+		if attrs[a.Name] {
+			return ErrDocument
+		}
+		attrs[a.Name] = true
+		if a.Name.Local == "ID" || a.Name.Local == "Id" || a.Name.Local == "id" {
+			if a.Value == "" || s.ids[a.Value] {
+				return ErrDocument
+			}
+			s.ids[a.Value] = true
+		}
+	}
+	return nil
+}
+
+func (s *xmlBoundsState) accept(token xml.Token) error {
+	switch v := token.(type) {
+	case xml.Directive:
+		return ErrDocument
+	case xml.ProcInst:
+		if v.Target != "xml" || s.nodes != 0 {
+			return ErrDocument
+		}
+	case xml.StartElement:
+		return s.acceptStart(v)
+	case xml.EndElement:
+		s.depth--
+	case xml.CharData:
+		if s.depth == 0 && strings.TrimSpace(string(v)) != "" {
+			return ErrDocument
+		}
+	}
+	return nil
+}
 
 // BoundedXML rejects directives, entities, duplicate IDs/attributes, excessive
 // depth and ambiguous singleton structures before signature parsing.
@@ -35,55 +89,21 @@ func BoundedXML(raw []byte) error {
 	if len(raw) == 0 || len(raw) > MaxXML {
 		return ErrDocument
 	}
-	d := xml.NewDecoder(bytes.NewReader(raw))
-	depth, nodes, roots := 0, 0, 0
-	ids := map[string]bool{}
+	decoder := xml.NewDecoder(bytes.NewReader(raw))
+	state := xmlBoundsState{ids: map[string]bool{}}
 	for {
-		token, err := d.Token()
+		token, err := decoder.Token()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return ErrDocument
 		}
-		switch v := token.(type) {
-		case xml.Directive:
-			return ErrDocument
-		case xml.ProcInst:
-			if v.Target != "xml" || nodes != 0 {
-				return ErrDocument
-			}
-		case xml.StartElement:
-			if depth == 0 {
-				roots++
-			}
-			depth++
-			nodes++
-			if depth > 48 || nodes > 16384 || roots > 1 {
-				return ErrDocument
-			}
-			attrs := map[xml.Name]bool{}
-			for _, a := range v.Attr {
-				if attrs[a.Name] {
-					return ErrDocument
-				}
-				attrs[a.Name] = true
-				if a.Name.Local == "ID" || a.Name.Local == "Id" || a.Name.Local == "id" {
-					if a.Value == "" || ids[a.Value] {
-						return ErrDocument
-					}
-					ids[a.Value] = true
-				}
-			}
-		case xml.EndElement:
-			depth--
-		case xml.CharData:
-			if depth == 0 && strings.TrimSpace(string(v)) != "" {
-				return ErrDocument
-			}
+		if err := state.accept(token); err != nil {
+			return err
 		}
 	}
-	if depth != 0 || roots != 1 {
+	if state.depth != 0 || state.roots != 1 {
 		return ErrDocument
 	}
 	return nil
@@ -95,64 +115,92 @@ type Metadata struct {
 	RedirectURL  string
 }
 
-func ParseMetadata(raw []byte) (Metadata, error) {
-	var out Metadata
-	if BoundedXML(raw) != nil {
-		return out, ErrDocument
-	}
-	var root struct{ XMLName xml.Name }
-	if xml.Unmarshal(raw, &root) != nil || root.XMLName.Space != metadataNS || root.XMLName.Local != "EntityDescriptor" {
-		return out, ErrDocument
-	}
-	var m saml.EntityDescriptor
-	if xml.Unmarshal(raw, &m) != nil || m.EntityID == "" || len(m.EntityID) > 2048 || len(m.IDPSSODescriptors) != 1 {
-		return out, ErrDocument
-	}
-	role := m.IDPSSODescriptors[0]
-	if !strings.Contains(role.ProtocolSupportEnumeration, protocolNS) {
-		return out, ErrDocument
-	}
-	for _, ep := range role.SingleSignOnServices {
-		if ep.Binding == saml.HTTPRedirectBinding {
-			if out.RedirectURL != "" && out.RedirectURL != ep.Location {
-				return out, ErrDocument
-			}
-			out.RedirectURL = ep.Location
+func parseRedirectSSOURL(services []saml.Endpoint) (string, error) {
+	redirectURL := ""
+	for _, ep := range services {
+		if ep.Binding != saml.HTTPRedirectBinding {
+			continue
 		}
+		if redirectURL != "" && redirectURL != ep.Location {
+			return "", ErrDocument
+		}
+		redirectURL = ep.Location
 	}
-	for _, kd := range role.KeyDescriptors {
+	if redirectURL == "" {
+		return "", ErrDocument
+	}
+	return redirectURL, nil
+}
+
+func parseSigningCertificate(encoded string) (*x509.Certificate, error) {
+	der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(encoded), ""))
+	if err != nil {
+		return nil, ErrDocument
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, ErrDocument
+	}
+	switch k := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		if k.N.BitLen() < 2048 || k.N.BitLen() > 8192 {
+			return nil, ErrDocument
+		}
+	case *ecdsa.PublicKey:
+		if k.Curve.Params().BitSize < 256 {
+			return nil, ErrDocument
+		}
+	default:
+		return nil, ErrDocument
+	}
+	return cert, nil
+}
+
+func parseSigningCertificates(descriptors []saml.KeyDescriptor) ([]*x509.Certificate, error) {
+	var certs []*x509.Certificate
+	for _, kd := range descriptors {
 		if kd.Use != "" && kd.Use != "signing" {
 			continue
 		}
 		for _, v := range kd.KeyInfo.X509Data.X509Certificates {
-			b, e := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(v.Data), ""))
-			if e != nil {
-				return out, ErrDocument
+			cert, err := parseSigningCertificate(v.Data)
+			if err != nil {
+				return nil, ErrDocument
 			}
-			c, e := x509.ParseCertificate(b)
-			if e != nil {
-				return out, ErrDocument
-			}
-			switch k := c.PublicKey.(type) {
-			case *rsa.PublicKey:
-				if k.N.BitLen() < 2048 || k.N.BitLen() > 8192 {
-					return out, ErrDocument
-				}
-			case *ecdsa.PublicKey:
-				if k.Curve.Params().BitSize < 256 {
-					return out, ErrDocument
-				}
-			default:
-				return out, ErrDocument
-			}
-			out.Certificates = append(out.Certificates, c)
+			certs = append(certs, cert)
 		}
 	}
-	if out.RedirectURL == "" || len(out.Certificates) == 0 || len(out.Certificates) > 8 {
-		return out, ErrDocument
+	if len(certs) == 0 || len(certs) > 8 {
+		return nil, ErrDocument
 	}
-	out.Entity = &m
-	return out, nil
+	return certs, nil
+}
+
+func ParseMetadata(raw []byte) (Metadata, error) {
+	if BoundedXML(raw) != nil {
+		return Metadata{}, ErrDocument
+	}
+	var root struct{ XMLName xml.Name }
+	if xml.Unmarshal(raw, &root) != nil || root.XMLName.Space != metadataNS || root.XMLName.Local != "EntityDescriptor" {
+		return Metadata{}, ErrDocument
+	}
+	var m saml.EntityDescriptor
+	if xml.Unmarshal(raw, &m) != nil || m.EntityID == "" || len(m.EntityID) > 2048 || len(m.IDPSSODescriptors) != 1 {
+		return Metadata{}, ErrDocument
+	}
+	role := m.IDPSSODescriptors[0]
+	if !strings.Contains(role.ProtocolSupportEnumeration, protocolNS) {
+		return Metadata{}, ErrDocument
+	}
+	redirectURL, err := parseRedirectSSOURL(role.SingleSignOnServices)
+	if err != nil {
+		return Metadata{}, err
+	}
+	certs, err := parseSigningCertificates(role.KeyDescriptors)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return Metadata{Entity: &m, Certificates: certs, RedirectURL: redirectURL}, nil
 }
 
 func child(e *etree.Element, ns, name string) []*etree.Element {
@@ -298,29 +346,32 @@ func validateAssertionCore(a *saml.Assertion, metadata Metadata, now time.Time) 
 	return nil
 }
 
-func validateSubject(a *saml.Assertion, sp *saml.ServiceProvider, metadata Metadata, requestID string, now time.Time) error {
-	if a.Subject == nil || a.Subject.NameID == nil {
+func validateNameID(n *saml.NameID, spEntityID, idpEntityID string) error {
+	if n == nil {
 		return docError("missing subject or NameID")
 	}
-	n := a.Subject.NameID
 	if n.Value == "" || len(n.Value) > 1024 || strings.ContainsAny(n.Value, "\x00\r\n") || n.Format == string(saml.TransientNameIDFormat) {
 		return docError("invalid NameID")
 	}
-	if n.NameQualifier != "" && n.NameQualifier != metadata.Entity.EntityID {
+	if n.NameQualifier != "" && n.NameQualifier != idpEntityID {
 		return docError("NameQualifier mismatch")
 	}
-	if n.SPNameQualifier != "" && n.SPNameQualifier != sp.EntityID {
+	if n.SPNameQualifier != "" && n.SPNameQualifier != spEntityID {
 		return docError("SPNameQualifier mismatch")
 	}
-	if len(a.Subject.SubjectConfirmations) != 1 {
+	return nil
+}
+
+func validateSubjectConfirmation(confirmations []saml.SubjectConfirmation, acsURL, requestID string, now time.Time) error {
+	if len(confirmations) != 1 {
 		return docError("subject must carry one SubjectConfirmation")
 	}
-	confirmation := a.Subject.SubjectConfirmations[0]
+	confirmation := confirmations[0]
 	data := confirmation.SubjectConfirmationData
 	if confirmation.Method != "urn:oasis:names:tc:SAML:2.0:cm:bearer" || data == nil {
 		return docError("missing bearer SubjectConfirmationData")
 	}
-	if data.InResponseTo != requestID || data.Recipient != sp.AcsURL.String() {
+	if data.InResponseTo != requestID || data.Recipient != acsURL {
 		return docError("SubjectConfirmationData InResponseTo or Recipient mismatch")
 	}
 	if data.NotOnOrAfter.IsZero() || !now.Before(data.NotOnOrAfter.Add(Skew)) {
@@ -330,6 +381,16 @@ func validateSubject(a *saml.Assertion, sp *saml.ServiceProvider, metadata Metad
 		return docError("SubjectConfirmationData not yet valid")
 	}
 	return nil
+}
+
+func validateSubject(a *saml.Assertion, sp *saml.ServiceProvider, metadata Metadata, requestID string, now time.Time) error {
+	if a.Subject == nil {
+		return docError("missing subject or NameID")
+	}
+	if err := validateNameID(a.Subject.NameID, sp.EntityID, metadata.Entity.EntityID); err != nil {
+		return err
+	}
+	return validateSubjectConfirmation(a.Subject.SubjectConfirmations, sp.AcsURL.String(), requestID, now)
 }
 
 func validateConditions(a *saml.Assertion, sp *saml.ServiceProvider, now time.Time) error {

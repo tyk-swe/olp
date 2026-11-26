@@ -345,14 +345,34 @@ func TestParseMetadataKeepsOnlyUsableSigningKeys(t *testing.T) {
 		t.Errorf("kept %d certificates, want only the signing one", len(metadata.Certificates))
 	}
 
+	unspecifiedUse := keyDescriptor("", provider.certificate)
+	if m, err := ParseMetadata([]byte(descriptor(unspecifiedUse, redirect, redirect))); err != nil || len(m.Certificates) != 1 {
+		t.Errorf("unspecified key use + identical duplicate redirect: err=%v certs=%d", err, len(m.Certificates))
+	}
+	if m, err := ParseMetadata([]byte(descriptor(strings.Repeat(signing, 8), redirect))); err != nil || len(m.Certificates) != 8 {
+		t.Errorf("exact 8 signing keys boundary: err=%v certs=%d", err, len(m.Certificates))
+	}
+	maxEntityID := "https://idp.example/" + strings.Repeat("a", 2048-len("https://idp.example/"))
+	maxEntityDoc := strings.Replace(descriptor(signing, redirect), providerEntity, maxEntityID, 1)
+	if _, err := ParseMetadata([]byte(maxEntityDoc)); err != nil {
+		t.Errorf("2048-byte entityID rejected: %v", err)
+	}
+
 	weak, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 	weakCertificate := certify(t, weak.Public(), provider.key, instant.Add(-time.Hour), instant.Add(time.Hour))
+	weakECDSA, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weakECDSACert := certify(t, weakECDSA.Public(), provider.key, instant.Add(-time.Hour), instant.Add(time.Hour))
+	twoDescriptors := `<EntityDescriptor xmlns="` + metadataNS + `" entityID="` + providerEntity + `"><IDPSSODescriptor protocolSupportEnumeration="` + protocolNS + `">` + signing + redirect + `</IDPSSODescriptor><IDPSSODescriptor protocolSupportEnumeration="` + protocolNS + `">` + signing + redirect + `</IDPSSODescriptor></EntityDescriptor>`
 	for name, raw := range map[string]string{
 		"no signing key":              descriptor(keyDescriptor("encryption", provider.certificate), redirect),
 		"a 1024 bit RSA key":          descriptor(keyDescriptor("signing", weakCertificate), redirect),
+		"a P-224 ECDSA key":           descriptor(keyDescriptor("signing", weakECDSACert), redirect),
 		"more than eight keys":        descriptor(strings.Repeat(signing, 9), redirect),
 		"an unreadable certificate":   descriptor(strings.Replace(signing, "<X509Certificate>", "<X509Certificate>AAAA", 1), redirect),
 		"no redirect endpoint":        descriptor(signing, signOn(saml.HTTPPostBinding, providerSignOn)),
@@ -360,6 +380,9 @@ func TestParseMetadataKeepsOnlyUsableSigningKeys(t *testing.T) {
 		"a role for another protocol": strings.Replace(descriptor(signing, redirect), protocolNS, "urn:oasis:names:tc:SAML:1.1:protocol", 1),
 		"a federation document":       `<EntitiesDescriptor xmlns="` + metadataNS + `">` + descriptor(signing, redirect) + `</EntitiesDescriptor>`,
 		"a document type declaration": `<!DOCTYPE EntityDescriptor>` + descriptor(signing, redirect),
+		"empty entityID":              strings.Replace(descriptor(signing, redirect), providerEntity, "", 1),
+		"oversized entityID":          strings.Replace(descriptor(signing, redirect), providerEntity, maxEntityID+"x", 1),
+		"two IdP descriptors":         twoDescriptors,
 	} {
 		if _, err := ParseMetadata([]byte(raw)); !errors.Is(err, ErrDocument) {
 			t.Errorf("%s: got %v, want %v", name, err, ErrDocument)
@@ -371,19 +394,26 @@ func TestBoundedXMLRefusesAmbiguousDocuments(t *testing.T) {
 	nested := func(depth int) string {
 		return strings.Repeat("<a>", depth) + strings.Repeat("</a>", depth)
 	}
+	exactMaxXML := `<a>` + strings.Repeat("b", MaxXML-len(`<a></a>`)) + `</a>`
 	for raw, accepted := range map[string]bool{
 		`<?xml version="1.0"?><a ID="one"><b ID="two"/></a>`: true,
-		nested(48):                        true,
-		nested(49):                        false,
-		`<a ID="one"><b ID="one"/></a>`:   false,
-		`<a ID="one"><b Id="one"/></a>`:   false,
-		`<a ID=""/>`:                      false,
-		`<a b="1" b="2"/>`:                false,
-		`<a/><b/>`:                        false,
-		`<a/>trailing`:                    false,
-		`<a/><?xml-stylesheet href="x"?>`: false,
+		nested(48):                                     true,
+		nested(49):                                     false,
+		`<a ID="one"><b ID="one"/></a>`:                false,
+		`<a ID="one"><b Id="one"/></a>`:                false,
+		`<a ID="one"><b id="one"/></a>`:                false,
+		`<a ID=""/>`:                                   false,
+		`<a id=""/>`:                                   false,
+		`<a b="1" b="2"/>`:                             false,
+		`<a/><b/>`:                                     false,
+		`<a/>trailing`:                                 false,
+		`leading<a/>`:                                  false,
+		`<a/><?xml-stylesheet href="x"?>`:              false,
+		`<a><?xml version="1.0"?></a>`:                 false,
 		`<!DOCTYPE a [<!ENTITY b "c">]><a>&b;</a>`:     false,
+		exactMaxXML:                                    true,
 		`<a>` + strings.Repeat("b", MaxXML) + `</a>`:   false,
+		`<a>` + strings.Repeat("<b/>", 16383) + `</a>`: true,
 		`<a>` + strings.Repeat("<b/>", 16384) + `</a>`: false,
 		`<a>`: false,
 		``:    false,
