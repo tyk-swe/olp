@@ -701,7 +701,6 @@ func TestPassBoundedWavesConcurrencyAndImmediateHeartbeat(t *testing.T) {
 	var heartbeatViolations []string
 	var maxActive atomic.Int32
 	var currentActive atomic.Int32
-	var checkpoints atomic.Int32
 
 	firstWaveReady := make(chan struct{})
 	firstWaveReadyOnce := sync.Once{}
@@ -780,10 +779,6 @@ func TestPassBoundedWavesConcurrencyAndImmediateHeartbeat(t *testing.T) {
 			mu.Unlock()
 			return nil
 		},
-		checkpointFn: func(context.Context, workerhealth.Outcome) error {
-			checkpoints.Add(1)
-			return nil
-		},
 	}
 
 	worker := &Worker{settlements: store, heartbeatInterval: 5 * time.Millisecond}
@@ -792,9 +787,6 @@ func TestPassBoundedWavesConcurrencyAndImmediateHeartbeat(t *testing.T) {
 	}
 	if got := maxActive.Load(); got != maxConcurrentClaims {
 		t.Fatalf("max concurrent active claims = %d, want %d", got, maxConcurrentClaims)
-	}
-	if got := checkpoints.Load(); got != 0 {
-		t.Fatalf("Pass() called Checkpoint %d times, want 0", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -875,7 +867,7 @@ func TestPassStopsOnPartialWaveAndJoinsWaveErrors(t *testing.T) {
 	}
 }
 
-func TestRunFailedClaimNeverCheckpointsSuccess(t *testing.T) {
+func TestRunSlowFailedClaimKeepsHealthFreshThenCheckpointsFailure(t *testing.T) {
 	t.Parallel()
 
 	okClaim := resources.RetainedClaim{ResourceID: uuid.New(), ClaimID: uuid.New(), Operation: "fine_tuning"}
@@ -884,9 +876,8 @@ func TestRunFailedClaimNeverCheckpointsSuccess(t *testing.T) {
 	var mu sync.Mutex
 	finishedClasses := map[uuid.UUID]string{}
 	var outcomes []workerhealth.Outcome
-	var heartbeats atomic.Int32
-	twoHeartbeats := make(chan struct{})
-	twoHeartbeatsOnce := sync.Once{}
+	renewedTwice := make(chan struct{})
+	renewedTwiceOnce := sync.Once{}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -899,17 +890,14 @@ func TestRunFailedClaimNeverCheckpointsSuccess(t *testing.T) {
 			if c.ResourceID == okClaim.ResourceID {
 				return true, nil
 			}
-			<-twoHeartbeats
+			select {
+			case <-renewedTwice:
+			case <-time.After(5 * time.Second):
+			}
 			return false, nil
 		},
 		resourceFn: func(context.Context, resources.RetainedClaim) (*resources.Resource, error) {
 			return nil, errors.New("resource lookup failed")
-		},
-		heartbeatFn: func(_ context.Context, c resources.RetainedClaim) error {
-			if c.ResourceID == failClaim.ResourceID && heartbeats.Add(1) >= 2 {
-				twoHeartbeatsOnce.Do(func() { close(twoHeartbeats) })
-			}
-			return nil
 		},
 		finishClaimFn: func(_ context.Context, c resources.RetainedClaim, errorClass string) error {
 			mu.Lock()
@@ -919,9 +907,15 @@ func TestRunFailedClaimNeverCheckpointsSuccess(t *testing.T) {
 		},
 		checkpointFn: func(_ context.Context, outcome workerhealth.Outcome) error {
 			mu.Lock()
+			defer mu.Unlock()
 			outcomes = append(outcomes, outcome)
-			mu.Unlock()
-			cancel()
+			if outcome != workerhealth.OutcomeSuccess {
+				cancel()
+				return nil
+			}
+			if len(outcomes) >= 2 {
+				renewedTwiceOnce.Do(func() { close(renewedTwice) })
+			}
 			return nil
 		},
 	}
@@ -931,17 +925,18 @@ func TestRunFailedClaimNeverCheckpointsSuccess(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if heartbeats.Load() < 2 {
-		t.Fatalf("expected at least 2 heartbeats on slow failing claim, got %d", heartbeats.Load())
-	}
 	if finishedClasses[okClaim.ResourceID] != "" {
 		t.Fatalf("ok claim errorClass = %q, want empty", finishedClasses[okClaim.ResourceID])
 	}
 	if finishedClasses[failClaim.ResourceID] != "resource_unavailable" {
 		t.Fatalf("failing claim errorClass = %q, want %q", finishedClasses[failClaim.ResourceID], "resource_unavailable")
 	}
-	if len(outcomes) != 1 || outcomes[0] != workerhealth.OutcomeFailure {
-		t.Fatalf("checkpoint outcomes = %v, want single OutcomeFailure", outcomes)
+	if len(outcomes) < 3 {
+		t.Fatalf("checkpoint outcomes = %v, want lease renewals to checkpoint success before the pass finishes", outcomes)
+	}
+	renewals, final := outcomes[:len(outcomes)-1], outcomes[len(outcomes)-1]
+	if final != workerhealth.OutcomeFailure || slices.ContainsFunc(renewals, func(o workerhealth.Outcome) bool { return o != workerhealth.OutcomeSuccess }) {
+		t.Fatalf("checkpoint outcomes = %v, want successes from lease renewals then a single OutcomeFailure for the pass", outcomes)
 	}
 }
 
@@ -951,6 +946,7 @@ func TestPassHeartbeatFailureCancelsActiveClaim(t *testing.T) {
 	claim := resources.RetainedClaim{ResourceID: uuid.New(), ClaimID: uuid.New(), Operation: "fine_tuning"}
 	var finishCtxErr error
 	var finishClass string
+	var checkpoints atomic.Int32
 
 	store := &fakeSettlementStore{
 		claimFn: func(context.Context, int) ([]resources.RetainedClaim, error) {
@@ -968,6 +964,10 @@ func TestPassHeartbeatFailureCancelsActiveClaim(t *testing.T) {
 			finishClass = errorClass
 			return nil
 		},
+		checkpointFn: func(context.Context, workerhealth.Outcome) error {
+			checkpoints.Add(1)
+			return nil
+		},
 	}
 
 	worker := &Worker{settlements: store, heartbeatInterval: 5 * time.Millisecond}
@@ -977,6 +977,9 @@ func TestPassHeartbeatFailureCancelsActiveClaim(t *testing.T) {
 	}
 	if finishCtxErr != nil || finishClass != "claim_unavailable" {
 		t.Fatalf("FinishClaim ctxErr=%v class=%q, want nil and claim_unavailable", finishCtxErr, finishClass)
+	}
+	if got := checkpoints.Load(); got != 0 {
+		t.Fatalf("lost lease checkpointed health %d times, want 0", got)
 	}
 }
 

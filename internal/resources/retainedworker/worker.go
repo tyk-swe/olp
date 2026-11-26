@@ -175,6 +175,7 @@ func (w *Worker) runHeartbeat(ctx context.Context, cancel context.CancelFunc, se
 				cancel()
 				return
 			}
+			_ = settlements.Checkpoint(ctx, workerhealth.OutcomeSuccess)
 		}
 	}
 }
