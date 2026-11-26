@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,14 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
+type scimListResponse[T any] struct {
+	Schemas      []string `json:"schemas"`
+	TotalResults int64    `json:"totalResults"`
+	StartIndex   int      `json:"startIndex"`
+	ItemsPerPage int      `json:"itemsPerPage"`
+	Resources    []T      `json:"Resources"`
+}
+
 func (s *scimService) scimSQL(group bool) string {
 	if group {
 		return `SELECT g.id,g.etag,g.document || jsonb_build_object('id',g.id,'members',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',u.id,'display',u.display_name,'$ref',` + sqlText(s.access.Origin+"/scim/v2/Users/") + `||u.id::text,'type','User') ORDER BY u.id) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.scim_users su ON su.user_id=u.id WHERE m.group_id=g.id AND su.deleted_at IS NULL AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','Group','created',g.created_at,'lastModified',g.updated_at,'version','W/"'||g.etag::text||'"','location',` + sqlText(s.access.Origin+"/scim/v2/Groups/") + `||g.id::text)) AS resource FROM olp.scim_groups g`
@@ -26,10 +35,10 @@ func (s *scimService) scimSQL(group bool) string {
 // Origin is operator configuration, escaped as a SQL literal, never a request Host.
 func sqlText(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-func (s *scimService) scimRead(r *http.Request, q database.Queryer, group bool, id string) (scim.Document, string, error) {
+func (s *scimService) scimRead(ctx context.Context, q database.Queryer, group bool, id string) (scim.Document, string, error) {
 	var data []byte
 	var etag string
-	err := q.QueryRow(r.Context(), "SELECT resource,etag::text FROM ("+s.scimSQL(group)+") resource WHERE id=$1", id).Scan(&data, &etag)
+	err := q.QueryRow(ctx, "SELECT resource,etag::text FROM ("+s.scimSQL(group)+") resource WHERE id=$1", id).Scan(&data, &etag)
 	if err != nil {
 		return nil, "", err
 	}
@@ -43,7 +52,7 @@ func (s *scimService) scimGet(r *http.Request, _ authz.Principal, group bool) (h
 	if err != nil {
 		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
 	}
-	d, etag, err := s.scimRead(r, s.access.Pool, group, id)
+	d, etag, err := s.scimRead(r.Context(), s.access.Pool, group, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -102,27 +111,44 @@ func scimListValues(r *http.Request) (url.Values, error) {
 
 func scimListWindow(values url.Values) (int, int, error) {
 	start, count := 1, 100
-	var err error
 	if raw := values.Get("startIndex"); raw != "" {
-		start, err = strconv.Atoi(raw)
+		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return 0, 0, scim.Invalid("startIndex must be an integer.")
 		}
-		if start < 1 {
-			start = 1
-		}
+		start = max(1, parsed)
 	}
 	if raw := values.Get("count"); raw != "" {
-		count, err = strconv.Atoi(raw)
+		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return 0, 0, scim.Invalid("count must be an integer.")
 		}
-		count = max(0, min(count, 200))
+		count = max(0, min(parsed, 200))
 	}
 	if start > 10000000 {
 		return 0, 0, scim.Invalid("startIndex exceeds the supported offset.")
 	}
 	return start, count, nil
+}
+
+func scimOrderClause(compiled *scim.SQLFilter, values url.Values) (string, error) {
+	by := values.Get("sortBy")
+	if by == "" {
+		return "id ASC", nil
+	}
+	expression, err := compiled.Sort(by, "resource")
+	if err != nil {
+		return "", err
+	}
+	direction := "ASC"
+	switch values.Get("sortOrder") {
+	case "descending":
+		direction = "DESC"
+	case "", "ascending":
+	default:
+		return "", scim.Invalid("Use ascending or descending sort order.")
+	}
+	return expression + " " + direction + " NULLS LAST,id ASC", nil
 }
 
 func (s *scimService) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
@@ -144,21 +170,9 @@ func (s *scimService) scimList(r *http.Request, _ authz.Principal, group bool) (
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	order := "id ASC"
-	if by := values.Get("sortBy"); by != "" {
-		expression, e := compiled.Sort(by, "resource")
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		direction := "ASC"
-		switch values.Get("sortOrder") {
-		case "descending":
-			direction = "DESC"
-		case "", "ascending":
-		default:
-			return httpkit.Reply{}, scim.Invalid("Use ascending or descending sort order.")
-		}
-		order = expression + " " + direction + " NULLS LAST,id ASC"
+	order, err := scimOrderClause(&compiled, values)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	base := "WITH records AS (" + s.scimSQL(group) + "), selected AS (SELECT * FROM records WHERE " + where + ") "
 	// A single statement gives count and page the same MVCC snapshot.
@@ -173,13 +187,20 @@ func (s *scimService) scimList(r *http.Request, _ authz.Principal, group bool) (
 	if err = json.Unmarshal(data, &resources); err != nil {
 		return httpkit.Reply{}, err
 	}
+	projected := make([]scim.Document, len(resources))
 	for i, d := range resources {
-		resources[i] = projection.Apply(d)
+		projected[i] = projection.Apply(d)
 	}
-	return httpkit.OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(resources), "Resources": resources}), nil
+	return httpkit.OK(scimListResponse[scim.Document]{
+		Schemas:      []string{scim.ListSchema},
+		TotalResults: total,
+		StartIndex:   start,
+		ItemsPerPage: len(projected),
+		Resources:    projected,
+	}), nil
 }
 
-func scimSelector(r *http.Request, tx pgx.Tx) scim.Select {
+func scimSelector(ctx context.Context, tx pgx.Tx) scim.Select {
 	return func(values []any, e filter.Expression) ([]int, error) {
 		body, err := json.Marshal(values)
 		if err != nil {
@@ -191,7 +212,7 @@ func scimSelector(r *http.Request, tx pgx.Tx) scim.Select {
 			return nil, err
 		}
 		var raw []byte
-		err = tx.QueryRow(r.Context(), "SELECT COALESCE(jsonb_agg(item.position-1),'[]'::jsonb) FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY item(value,position) WHERE "+predicate, compiler.Args...).Scan(&raw)
+		err = tx.QueryRow(ctx, "SELECT COALESCE(jsonb_agg(item.position-1),'[]'::jsonb) FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY item(value,position) WHERE "+predicate, compiler.Args...).Scan(&raw)
 		if err != nil {
 			return nil, err
 		}

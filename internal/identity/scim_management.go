@@ -2,7 +2,6 @@ package identity
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -12,21 +11,80 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/identity/scim"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-const scimGroupJSON = `jsonb_build_object('id',g.id,'display_name',g.document->>'displayName','external_id',g.document->>'externalId','mapping',g.document->'` + scim.GroupExtension + `','etag',g.etag,'member_count',(SELECT count(*) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id WHERE m.group_id=g.id AND u.role_management='provisioned'))`
+type scimGroupSummary struct {
+	ID          string             `json:"id"`
+	DisplayName string             `json:"display_name"`
+	ExternalID  *string            `json:"external_id"`
+	Mapping     SCIMGroupExtension `json:"mapping"`
+	ETag        string             `json:"etag"`
+	MemberCount int64              `json:"member_count"`
+}
+
+const scimGroupSummarySelect = `SELECT g.id::text,g.document->>'displayName',g.document->>'externalId',COALESCE(g.document->'` + scim.GroupExtension + `','{}'::jsonb),g.etag::text,(SELECT count(*) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id WHERE m.group_id=g.id AND u.role_management='provisioned') FROM olp.scim_groups g`
+
+func scanSCIMGroupSummary(row pgx.CollectableRow) (scimGroupSummary, error) {
+	var summary scimGroupSummary
+	if err := row.Scan(&summary.ID, &summary.DisplayName, &summary.ExternalID, &summary.Mapping, &summary.ETag, &summary.MemberCount); err != nil {
+		return scimGroupSummary{}, err
+	}
+	if summary.Mapping.Projects == nil {
+		summary.Mapping.Projects = []SCIMGroupProjectRef{}
+	}
+	return summary, nil
+}
+
+func readSCIMGroupSummary(ctx context.Context, q database.Queryer, id string) (scimGroupSummary, error) {
+	var summary scimGroupSummary
+	err := q.QueryRow(ctx, scimGroupSummarySelect+" WHERE g.id=$1", id).Scan(
+		&summary.ID, &summary.DisplayName, &summary.ExternalID, &summary.Mapping, &summary.ETag, &summary.MemberCount,
+	)
+	if err != nil {
+		return scimGroupSummary{}, err
+	}
+	if summary.Mapping.Projects == nil {
+		summary.Mapping.Projects = []SCIMGroupProjectRef{}
+	}
+	return summary, nil
+}
+
+func readSCIMGroupHeader(ctx context.Context, q database.Queryer, id string) (string, string, string, error) {
+	var displayName, externalID, etag string
+	err := q.QueryRow(ctx, "SELECT g.document->>'displayName',COALESCE(g.document->>'externalId',''),g.etag::text FROM olp.scim_groups g WHERE g.id=$1", id).Scan(&displayName, &externalID, &etag)
+	return displayName, externalID, etag, err
+}
+
+func readProvisionedGroupMembers(ctx context.Context, q database.Queryer, id string) ([]string, error) {
+	rows, err := q.Query(ctx, "SELECT u.id::text FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.scim_users su ON su.user_id=u.id WHERE m.group_id=$1 AND su.deleted_at IS NULL AND u.role_management='provisioned' ORDER BY u.id", id)
+	if err != nil {
+		return nil, err
+	}
+	members, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, err
+	}
+	if members == nil {
+		return []string{}, nil
+	}
+	return members, nil
+}
 
 func (s *scimService) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT "+scimGroupJSON+" FROM olp.scim_groups g WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), scimGroupSummarySelect+" WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.JSONRows(rows)
-	return httpkit.ListReply(items, page), err
+	items, err := pgx.CollectRows(rows, scanSCIMGroupSummary)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	return httpkit.ListReplyBy(items, page, func(g scimGroupSummary) string { return g.ID }), nil
 }
 
 func (s *scimService) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -35,14 +93,7 @@ func (s *scimService) scimGroupMapping(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	var input struct {
-		Mapping *struct {
-			Role     *string `json:"role"`
-			Scope    string  `json:"accessScope"`
-			Projects []struct {
-				Value string `json:"value"`
-				Role  string `json:"role"`
-			} `json:"projects"`
-		} `json:"mapping"`
+		Mapping *SCIMGroupExtension `json:"mapping"`
 	}
 	if err = httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err
@@ -51,52 +102,39 @@ func (s *scimService) scimGroupMapping(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, httpkit.Invalid("mapping", "Provide an explicit mapping object.")
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		document, etag, err := s.scimRead(r, tx, true, id)
+		ctx := r.Context()
+		displayName, externalID, etag, err := readSCIMGroupHeader(ctx, tx, id)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = httpkit.Match(r, etag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		data, _ := json.Marshal(input.Mapping)
-		var mapping map[string]any
-		if err = json.Unmarshal(data, &mapping); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		document[scim.GroupExtension] = mapping
-		managed, err := scimManagedProjects(r.Context(), tx)
+		members, err := readProvisionedGroupMembers(ctx, tx, id)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		affected, err := s.writeSCIMGroup(r, tx, id, document, "PUT")
+		extension, err := normalizeSCIMGroupExtension(ctx, tx, *input.Mapping)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+		group := parsedSCIMGroup{display: displayName, external: externalID, extension: extension, members: members}
+		if err = s.applyGroupMapping(ctx, tx, r, p, id, group, false); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = keepSCIMManagers(r.Context(), tx, managed); err != nil {
+		summary, err := readSCIMGroupSummary(ctx, tx, id)
+		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		var body []byte
-		if err = tx.QueryRow(r.Context(), "SELECT "+scimGroupJSON+",g.etag::text FROM olp.scim_groups g WHERE id=$1", id).Scan(&body, &etag); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		return httpkit.Detail(json.RawMessage(body), etag), access.Event{Action: "scim.group.mapping.update", Resource: "scim_group", ID: id}, nil
+		return httpkit.Detail(summary, summary.ETag), access.Event{Action: "scim.group.mapping.update", Resource: "scim_group", ID: id}, nil
 	})
 }
 
-func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
+func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping SCIMGroupExtension) error {
 	return s.scim.storeMapping(ctx, tx, p, name, mapping)
 }
 
-func (s *scimService) storeMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
+func (s *scimService) storeMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping SCIMGroupExtension) error {
 	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
@@ -109,29 +147,38 @@ func (s *scimService) storeMapping(ctx context.Context, tx pgx.Tx, p authz.Princ
 	if err != nil && !create {
 		return err
 	}
-	r := (&http.Request{}).WithContext(ctx)
-	var document scim.Document
-	method := "PUT"
+	extension, err := normalizeSCIMGroupExtension(ctx, tx, mapping)
+	if err != nil {
+		return err
+	}
+	var group parsedSCIMGroup
 	if create {
 		id = ids.New()
-		method = "POST"
-		document = scim.Document{"schemas": []any{scim.GroupSchema}, "displayName": name}
+		group = parsedSCIMGroup{display: name, extension: extension, members: []string{}}
 	} else {
-		document, _, err = s.scimRead(r, tx, true, id)
-		if err != nil {
-			return err
+		displayName, externalID, _, readErr := readSCIMGroupHeader(ctx, tx, id)
+		if readErr != nil {
+			return readErr
 		}
+		members, membersErr := readProvisionedGroupMembers(ctx, tx, id)
+		if membersErr != nil {
+			return membersErr
+		}
+		group = parsedSCIMGroup{display: displayName, external: externalID, extension: extension, members: members}
 	}
-	document[scim.GroupExtension] = mapping
+	return s.applyGroupMapping(ctx, tx, nil, p, id, group, create)
+}
+
+func (s *scimService) applyGroupMapping(ctx context.Context, tx pgx.Tx, r *http.Request, p authz.Principal, id string, group parsedSCIMGroup, create bool) error {
 	managed, err := scimManagedProjects(ctx, tx)
 	if err != nil {
 		return err
 	}
-	affected, err := s.writeSCIMGroup(r, tx, id, document, method)
+	affected, err := s.saveSCIMGroup(ctx, tx, id, group, create)
 	if err != nil {
 		return err
 	}
-	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+	if err = s.reconcileSCIMUsers(ctx, tx, r, p, affected); err != nil {
 		return err
 	}
 	if err = keepSCIMManagers(ctx, tx, managed); err != nil {

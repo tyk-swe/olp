@@ -248,3 +248,114 @@ func FuzzCompileKeepsCallerValuesOutOfSQL(f *testing.F) {
 		}
 	})
 }
+
+func TestNormalizeDoesNotMutateInputSlices(t *testing.T) {
+	innerMap := map[string]any{"USERNAME": "ada", "VALUE": "ada@example.com"}
+	innerSlice := []any{innerMap}
+	input := []any{innerSlice, map[string]any{"DISPLAYNAME": "Ada"}}
+
+	got, err := normalize(input)
+	if err != nil {
+		t.Fatalf("normalize failed: %v", err)
+	}
+	if _, stillUpper := innerMap["USERNAME"]; !stillUpper {
+		t.Fatalf("input map was mutated: %v", innerMap)
+	}
+	if origSlice, ok := input[0].([]any); !ok || origSlice[0].(map[string]any)["USERNAME"] != "ada" {
+		t.Fatalf("input nested slice was mutated in place: %v", input)
+	}
+	want := `[[{"userName":"ada","value":"ada@example.com"}],{"displayName":"Ada"}]`
+	if canonical(t, got) != want {
+		t.Fatalf("normalized = %s, want %s", canonical(t, got), want)
+	}
+}
+
+func TestPatchNestedAndFilteredEdgeCases(t *testing.T) {
+	base := decode(t, `{
+		"schemas": ["`+UserSchema+`"],
+		"id": "user-1",
+		"userName": "ada@example.com",
+		"name": {"givenName": "Ada"},
+		"emails": [
+			{"value": "ada@work.example", "type": "work", "primary": true},
+			{"value": "ada@home.example", "type": "home", "primary": false}
+		]
+	}`)
+
+	selectIndex := func(idx ...int) Select {
+		return func([]any, filter.Expression) ([]int, error) { return idx, nil }
+	}
+
+	t.Run("filtered primary true clears existing primary", func(t *testing.T) {
+		body := decode(t, patch(`{"op":"replace","path":"emails[type eq \"home\"].primary","value":true}`))
+		patched, err := Patch(base, body, false, selectIndex(1))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := `[{"primary":false,"type":"work","value":"ada@work.example"},{"primary":true,"type":"home","value":"ada@home.example"}]`
+		if got := canonical(t, patched["emails"]); got != want {
+			t.Fatalf("emails = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("filtered remove drops selected element", func(t *testing.T) {
+		body := decode(t, patch(`{"op":"remove","path":"emails[type eq \"home\"]"}`))
+		patched, err := Patch(base, body, false, selectIndex(1))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := `[{"primary":true,"type":"work","value":"ada@work.example"}]`
+		if got := canonical(t, patched["emails"]); got != want {
+			t.Fatalf("emails = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("filtered add merges object fields into selected element", func(t *testing.T) {
+		body := decode(t, patch(`{"op":"add","path":"emails[type eq \"work\"]","value":{"display":"Work"}}`))
+		patched, err := Patch(base, body, false, selectIndex(0))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := `[{"display":"Work","primary":true,"type":"work","value":"ada@work.example"},{"primary":false,"type":"home","value":"ada@home.example"}]`
+		if got := canonical(t, patched["emails"]); got != want {
+			t.Fatalf("emails = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("nested complex object add merges keys and multi-valued subattribute updates all items", func(t *testing.T) {
+		body := decode(t, patch(`
+			{"op":"add","path":"name","value":{"familyName":"Lovelace"}},
+			{"op":"replace","path":"emails.type","value":"other"}`))
+		patched, err := Patch(base, body, false, unfiltered)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := canonical(t, patched["name"]), `{"familyName":"Lovelace","givenName":"Ada"}`; got != want {
+			t.Fatalf("name = %s, want %s", got, want)
+		}
+		wantEmails := `[{"primary":true,"type":"other","value":"ada@work.example"},{"primary":false,"type":"other","value":"ada@home.example"}]`
+		if got := canonical(t, patched["emails"]); got != wantEmails {
+			t.Fatalf("emails = %s, want %s", got, wantEmails)
+		}
+	})
+
+	t.Run("filtered subattribute on non-complex item and non-slice target fail", func(t *testing.T) {
+		scalarItems := decode(t, `{"schemas":["`+UserSchema+`"],"userName":"ada@example.com","emails":["raw"]}`)
+		body := decode(t, patch(`{"op":"replace","path":"emails[value eq \"raw\"].value","value":"next"}`))
+		if _, err := Patch(scalarItems, body, false, selectIndex(0)); problem(err) != "invalidPath" {
+			t.Fatalf("got %q, want invalidPath", problem(err))
+		}
+		noEmails := decode(t, `{"schemas":["`+UserSchema+`"],"userName":"ada@example.com"}`)
+		if _, err := Patch(noEmails, body, false, selectIndex(0)); problem(err) != "noTarget" {
+			t.Fatalf("got %q, want noTarget", problem(err))
+		}
+	})
+
+	t.Run("group patch rejects cross-schema filter", func(t *testing.T) {
+		groupDoc := decode(t, `{"schemas":["`+GroupSchema+`"],"displayName":"Eng","members":[{"value":"u1"}]}`)
+		body := decode(t, patch(`{"op":"remove","path":"members[`+UserSchema+`:value eq \"u1\"]"}`))
+		if _, err := Patch(groupDoc, body, true, selectIndex(0)); problem(err) != "invalidFilter" {
+			t.Fatalf("got %q, want invalidFilter", problem(err))
+		}
+	})
+}

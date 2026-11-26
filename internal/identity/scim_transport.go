@@ -15,6 +15,13 @@ import (
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
+type scimErrorResponse struct {
+	Schemas  []string `json:"schemas"`
+	Status   string   `json:"status"`
+	Detail   string   `json:"detail"`
+	SCIMType string   `json:"scimType,omitempty"`
+}
+
 func (s *scimService) register(mux *http.ServeMux) {
 	s.access.Route(mux, "GET /api/v1/scim/groups", s.scimGroups)
 	s.access.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
@@ -32,7 +39,7 @@ func (s *scimService) register(mux *http.ServeMux) {
 	for _, path := range []string{"/scim/v2/ServiceProviderConfig", "/scim/v2/ResourceTypes", "/scim/v2/ResourceTypes/{scim_type}", "/scim/v2/Schemas", "/scim/v2/Schemas/{schema_id}"} {
 		s.scimRoute(mux, "GET "+path, s.scimDiscovery)
 	}
-	mux.HandleFunc("/scim/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/scim/", func(w http.ResponseWriter, _ *http.Request) {
 		WriteSCIMError(w, scim.Fail(404, "", "The SCIM operation does not exist."))
 	})
 }
@@ -40,17 +47,17 @@ func (s *scimService) register(mux *http.ServeMux) {
 func (s *scimService) scimRoute(mux *http.ServeMux, pattern string, h access.Handler) {
 	admit := s.access.Admit(pattern, access.MaxBody(scim.MaxBody), access.AnyOrigin())
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		r, p, cancel, err := admit(w, r)
+		req, p, cancel, err := admit(w, r)
 		defer cancel()
 		var reply httpkit.Reply
-		if err == nil && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH") {
-			typ, _, e := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if e != nil || typ != "application/scim+json" && typ != "application/json" {
+		if err == nil && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
+			typ, _, mediaErr := mime.ParseMediaType(req.Header.Get("Content-Type"))
+			if mediaErr != nil || typ != "application/scim+json" && typ != "application/json" {
 				err = scim.Fail(415, "", "Send application/scim+json or application/json.")
 			}
 		}
 		if err == nil {
-			reply, err = h(r, p)
+			reply, err = h(req, p)
 		}
 		if err != nil {
 			s.writeSCIMError(w, err)
@@ -63,10 +70,11 @@ func (s *scimService) scimRoute(mux *http.ServeMux, pattern string, h access.Han
 		if reply.Location != "" {
 			w.Header().Set("Location", reply.Location)
 		}
-		if reply.Status == 0 {
-			reply.Status = 200
+		status := reply.Status
+		if status == 0 {
+			status = 200
 		}
-		w.WriteHeader(reply.Status)
+		w.WriteHeader(status)
 		if reply.Body != nil {
 			_ = json.NewEncoder(w).Encode(reply.Body)
 		}
@@ -114,16 +122,17 @@ func scimFailureFor(err error) (scimFailure, bool) {
 }
 
 func renderSCIMError(w http.ResponseWriter, f scimFailure) {
-	status, typ, detail := f.status, f.typ, f.detail
-	body := map[string]any{"schemas": []string{scim.ErrorSchema}, "status": strconv.Itoa(status), "detail": detail}
-	if typ != "" {
-		body["scimType"] = typ
+	body := scimErrorResponse{
+		Schemas:  []string{scim.ErrorSchema},
+		Status:   strconv.Itoa(f.status),
+		Detail:   f.detail,
+		SCIMType: f.typ,
 	}
-	if status == 401 {
+	if f.status == 401 {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="SCIM"`)
 	}
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
+	w.WriteHeader(f.status)
 	_ = json.NewEncoder(w).Encode(body)
 }
