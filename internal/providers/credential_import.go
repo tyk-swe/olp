@@ -85,7 +85,7 @@ func (s *enrollmentService) importCredentialsAs(r *http.Request, p authz.Princip
 	}
 	grant, err := s.plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
 	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
-		if auditErr := s.auditFailedEnrollment(r, p.Actor(), id); auditErr != nil {
+		if auditErr := s.auditFailedEnrollment(r, id); auditErr != nil {
 			return httpkit.Reply{}, auditErr
 		}
 		return httpkit.Reply{}, httpkit.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
@@ -114,14 +114,7 @@ func (s *enrollmentService) stageCredentialImport(request *http.Request, current
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
-	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		locked, err := lockProvider(ctx, tx, current.ID)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if err := p.Project(locked.ProjectID, authz.Change); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
+	return access.Transact(s.access, r, changeable(ctx, current.ID), func(tx pgx.Tx, _ authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := httpkit.Match(r, locked.ETag); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -129,13 +122,13 @@ func (s *enrollmentService) stageCredentialImport(request *http.Request, current
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		completed, err := bindGrant(ctx, tx, r, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
-			Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
+		completed, err := bindGrant(ctx, tx, grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+			Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}},
 			httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, access.Event{}, nil
+		return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, access.Event{Action: "provider.grant.import", Resource: "provider_credential", ID: completed.CredentialID}, nil
 	})
 }
 

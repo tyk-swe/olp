@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -31,6 +32,13 @@ func (s *credentialService) storeNetworkCredential(ctx context.Context, tx pgx.T
 	return id, nil
 }
 
+type networkCredentialItem struct {
+	ID        string     `json:"id"`
+	Version   int        `json:"version"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+}
+
 func (s *credentialService) networkCredentials(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -43,19 +51,36 @@ func (s *credentialService) networkCredentials(r *http.Request, principal authz.
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT id::text,version,created_at,revoked_at FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (networkCredentialItem, error) {
+		var item networkCredentialItem
+		err := row.Scan(&item.ID, &item.Version, &item.CreatedAt, &item.RevokedAt)
+		return item, err
+	})
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.ListReply(items, page), nil
+	return httpkit.ListReplyBy(items, page, func(item networkCredentialItem) string { return item.ID }), nil
 }
 
 type networkCredentialRequest struct {
 	Credential string `json:"credential"`
+}
+
+type networkCredentialMutation struct {
+	ProviderID   string `json:"provider_id"`
+	CredentialID string `json:"credential_id"`
+	ETag         string `json:"etag"`
+}
+
+type revokedNetworkCredential struct {
+	ProviderID        string                     `json:"provider_id"`
+	CredentialID      string                     `json:"credential_id"`
+	ETag              string                     `json:"etag"`
+	RuntimeGeneration access.AuthorityGeneration `json:"runtime_generation"`
 }
 
 func (s *credentialService) createNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -75,7 +100,7 @@ func (s *credentialService) createNetworkCredential(r *http.Request, _ authz.Pri
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: map[string]any{"provider_id": id, "credential_id": created.ID, "etag": created.ETag}}, access.Event{Action: "provider.network_credential.create", Resource: "provider", ID: id}, nil
+		return httpkit.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: networkCredentialMutation{ProviderID: id, CredentialID: created.ID, ETag: created.ETag}}, access.Event{Action: "provider.network_credential.create", Resource: "provider", ID: id}, nil
 	})
 }
 
@@ -89,7 +114,7 @@ func (s *credentialService) revokeNetworkCredential(r *http.Request, _ authz.Pri
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		return httpkit.Detail(map[string]any{"provider_id": current.ID, "credential_id": id, "etag": revoked.ETag, "runtime_generation": revoked.Generation}, revoked.ETag), nil
+		return httpkit.Detail(revokedNetworkCredential{ProviderID: current.ID, CredentialID: id, ETag: revoked.ETag, RuntimeGeneration: revoked.Generation}, revoked.ETag), nil
 	})
 }
 

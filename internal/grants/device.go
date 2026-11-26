@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
@@ -57,9 +56,11 @@ type Standing struct {
 	// Credential is the credential version the grant created, once the
 	// enrollment Completed.
 	Credential Credential
-	// Ended is set on the one status request that ended the enrollment
-	// without polling, having found its device authorization Expired.
+	// Ended is set when this status request ended the enrollment.
 	Ended bool
+	// Failure is the problem to return after a terminal poll failure settles
+	// and commits.
+	Failure error
 }
 
 // A Credential is a credential version grant enrollment created.
@@ -189,43 +190,51 @@ func Poll(ctx context.Context, host *plugins.Host, e Enrollment, options map[str
 }
 
 // Settle records why a poll step Watch claimed obtained no grant, or why its
-// grant could not be staged, and returns where the enrollment stands: Pending,
-// polled again after the interval, which grows by 5 seconds, up to 5 minutes,
-// when the upstream asked to slow down; Denied; or Expired. A poll whose
-// status request ctx ended first leaves the enrollment Pending too, since what
-// it found is unknown. Any other failure ends the enrollment and is the
-// problem Settle returns. An enrollment cancelled meanwhile is not found.
-func (e Enrollment) Settle(ctx context.Context, db *pgxpool.Pool, failed error) (Standing, error) {
+// grant could not be staged, inside tx using ctx and returns where the
+// enrollment stands: Pending, polled again after the interval, which grows by
+// 5 seconds, up to 5 minutes, when the upstream asked to slow down; Denied; or
+// Expired. When interrupted is true (the caller's request ended during the
+// poll), the enrollment stays Pending since what the poll found is unknown.
+// Any other failure ends the enrollment and populates Standing.Failure with
+// err == nil so the caller's transaction commits settlement and audit
+// atomically before returning Standing.Failure. An enrollment cancelled
+// meanwhile returns pgx.ErrNoRows.
+func (e Enrollment) Settle(ctx context.Context, tx pgx.Tx, failed error, interrupted bool) (Standing, error) {
 	var code string
 	if reported, ok := errors.AsType[*abi.Error](failed); ok {
 		code = reported.Code
 	}
-	if ctx.Err() != nil {
+	if interrupted {
 		code = abi.CodeAuthorizationPending
 	}
-	ctx = context.WithoutCancel(ctx)
 	switch code {
 	case abi.CodeAuthorizationPending, abi.CodeSlowDown:
-		if code == abi.CodeSlowDown {
-			e.interval = DevicePollInterval(e.interval, true)
+		interval := DevicePollInterval(e.interval, code == abi.CodeSlowDown)
+		if err := e.settle(ctx, tx, "poll_interval=$2::integer,poll_at=now()+$2::integer*interval '1 second'", false, seconds(interval)); err != nil {
+			return Standing{}, err
 		}
-		err := e.settle(ctx, db, "poll_interval=$2::integer,poll_at=now()+$2::integer*interval '1 second'", false, seconds(e.interval))
-		return Standing{Status: Pending, Interval: e.interval}, err
+		return Standing{Status: Pending, Interval: interval}, nil
 	case abi.CodeAccessDenied:
-		return Standing{Status: Denied}, e.settle(ctx, db, "continued_at=now(),outcome='denied'", true)
+		if err := e.settle(ctx, tx, "continued_at=now(),outcome='denied'", true); err != nil {
+			return Standing{}, err
+		}
+		return Standing{Status: Denied, Ended: true}, nil
 	case abi.CodeExpiredToken:
-		return Standing{Status: Expired}, e.settle(ctx, db, "continued_at=now(),outcome='expired'", true)
+		if err := e.settle(ctx, tx, "continued_at=now(),outcome='expired'", true); err != nil {
+			return Standing{}, err
+		}
+		return Standing{Status: Expired, Ended: true}, nil
 	}
-	if err := e.settle(ctx, db, "continued_at=now()", true); err != nil {
+	if err := e.settle(ctx, tx, "continued_at=now()", true); err != nil {
 		return Standing{}, err
 	}
-	return Standing{}, failure(failed)
+	return Standing{Ended: true, Failure: failure(failed)}, nil
 }
 
 // settle updates a pending device authorization, deleting its session state
 // once it has ended.
-func (e Enrollment) settle(ctx context.Context, db *pgxpool.Pool, set string, ended bool, args ...any) error {
-	tag, err := db.Exec(ctx, "UPDATE olp.grant_enrollments SET "+set+" WHERE id=$1 AND continued_at IS NULL", append([]any{e.ID}, args...)...)
+func (e Enrollment) settle(ctx context.Context, tx pgx.Tx, set string, ended bool, args ...any) error {
+	tag, err := tx.Exec(ctx, "UPDATE olp.grant_enrollments SET "+set+" WHERE id=$1 AND continued_at IS NULL", append([]any{e.ID}, args...)...)
 	switch {
 	case err != nil:
 		return err
@@ -234,7 +243,7 @@ func (e Enrollment) settle(ctx context.Context, db *pgxpool.Pool, set string, en
 	case !ended:
 		return nil
 	}
-	_, err = db.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
 	return err
 }
 

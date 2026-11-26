@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -22,6 +24,63 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
 )
+
+type credentialGrantItem struct {
+	PluginDigest string            `json:"plugin_digest"`
+	Principal    string            `json:"principal"`
+	Facts        map[string]string `json:"facts"`
+	ExpiresAt    *time.Time        `json:"expires_at"`
+	LapsedAt     *time.Time        `json:"lapsed_at"`
+}
+
+type credentialItem struct {
+	ID                string                 `json:"id"`
+	Version           int                    `json:"version"`
+	Active            bool                   `json:"active"`
+	DraftSelected     bool                   `json:"draft_selected"`
+	CreatedAt         time.Time              `json:"created_at"`
+	RevokedAt         *time.Time             `json:"revoked_at"`
+	ExternalReference *secretstore.Reference `json:"external_reference"`
+	Grant             *credentialGrantItem   `json:"grant"`
+}
+
+func scanCredentialItem(row pgx.CollectableRow) (credentialItem, error) {
+	var (
+		item                     credentialItem
+		externalRef, grantFacts  []byte
+		pluginDigest, principal  *string
+		grantExpires, grantLapse *time.Time
+	)
+	if err := row.Scan(&item.ID, &item.Version, &item.Active, &item.DraftSelected, &item.CreatedAt, &item.RevokedAt, &externalRef, &pluginDigest, &principal, &grantFacts, &grantExpires, &grantLapse); err != nil {
+		return credentialItem{}, err
+	}
+	if len(externalRef) > 0 {
+		var ref secretstore.Reference
+		if err := json.Unmarshal(externalRef, &ref); err != nil {
+			return credentialItem{}, err
+		}
+		item.ExternalReference = &ref
+	}
+	if pluginDigest != nil {
+		facts := map[string]string{}
+		if len(grantFacts) > 0 {
+			if err := json.Unmarshal(grantFacts, &facts); err != nil {
+				return credentialItem{}, err
+			}
+			if facts == nil {
+				facts = map[string]string{}
+			}
+		}
+		item.Grant = &credentialGrantItem{
+			PluginDigest: *pluginDigest,
+			Principal:    ptr.Value(principal),
+			Facts:        facts,
+			ExpiresAt:    grantExpires,
+			LapsedAt:     grantLapse,
+		}
+	}
+	return item, nil
+}
 
 func (s *credentialService) credentials(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
@@ -35,14 +94,11 @@ func (s *credentialService) credentials(r *http.Request, p authz.Principal) (htt
 	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object(
-		'id',c.id,'version',c.version,
-		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
-		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
-		'created_at',c.created_at,'revoked_at',c.revoked_at,
-		'external_reference',c.external_reference,
-		'grant',CASE WHEN c.plugin_digest IS NOT NULL THEN jsonb_build_object(
-			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at,'lapsed_at',g.lapsed_at) END)
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT c.id::text,c.version,
+		EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
+		EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
+		c.created_at,c.revoked_at,c.external_reference,
+		c.plugin_digest,c.principal,c.grant_facts,g.expires_at,g.lapsed_at
 		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
@@ -50,11 +106,11 @@ func (s *credentialService) credentials(r *http.Request, p authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := pgx.CollectRows(rows, scanCredentialItem)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.ListReply(items, page), nil
+	return httpkit.ListReplyBy(items, page, func(item credentialItem) string { return item.ID }), nil
 }
 
 type rotateRequest struct {
@@ -291,17 +347,25 @@ func (s *credentialService) resolveReference(ctx context.Context, reference secr
 }
 
 func (s *credentialService) material(ctx context.Context, source credentialSource) ([]byte, error) {
-	if reference, external := source.(externalCredential); external {
-		return s.resolveReference(ctx, secretstore.Reference(reference))
+	switch src := source.(type) {
+	case externalCredential:
+		return s.resolveReference(ctx, secretstore.Reference(src))
+	case pastedCredential:
+		return []byte(src), nil
+	default:
+		return nil, fmt.Errorf("unsupported credential source %T", source)
 	}
-	return []byte(source.(pastedCredential)), nil
 }
 
 func (s *credentialService) storeCredential(ctx context.Context, tx pgx.Tx, providerID string, source credentialSource) (string, int, error) {
-	if reference, external := source.(externalCredential); external {
-		return s.storeExternalCredential(ctx, tx, providerID, secretstore.Reference(reference))
+	switch src := source.(type) {
+	case externalCredential:
+		return s.storeExternalCredential(ctx, tx, providerID, secretstore.Reference(src))
+	case pastedCredential:
+		return s.storePlainCredential(ctx, tx, providerID, string(src))
+	default:
+		return "", 0, fmt.Errorf("unsupported credential source %T", source)
 	}
-	return s.storePlainCredential(ctx, tx, providerID, string(source.(pastedCredential)))
 }
 
 func (s *credentialService) storeExternalCredential(ctx context.Context, tx pgx.Tx, providerID string, reference secretstore.Reference) (string, int, error) {
