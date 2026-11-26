@@ -43,8 +43,15 @@ func referenceReading(request *wire.Request, retain int) *input {
 	return in
 }
 
-// The comparison is only worth something if the requests have something to
-// read, which the families that read nothing but a tool catalogue do not.
+var walkerFamilies = []wire.Format{
+	wire.Chat, wire.Responses, wire.InputTokens,
+	wire.Embeddings, wire.Moderation, wire.Rerank,
+	wire.Anthropic, wire.AnthropicCount,
+	wire.Gemini, wire.GeminiStream, wire.GeminiCount,
+	wire.GeminiInteractions, wire.GeminiEmbeddings,
+	wire.Bedrock, wire.BedrockEmbeddings, wire.BedrockInvoke,
+	wire.VertexEmbeddings, wire.ImageGeneration, wire.Speech,
+}
 
 // FuzzWalkerReadsWhatTheReferenceReads reads any JSON object as a request of any
 // family, and any bytes at all as the value of every field of a provider's

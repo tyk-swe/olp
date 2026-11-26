@@ -5,41 +5,6 @@ import (
 	"testing"
 )
 
-// The gateway's admission estimate has charged these since before this
-// package: characters, not bytes, four to a token, rounded up.
-
-// four characters of twelve bytes
-
-// Two, none, one and three: every segment is rounded up on its own, as
-// the gateway has always done, so no field is free.
-
-// unset
-
-// 10.5 rounded up
-
-// The exact part is a whole number of pieces within the bound, and the
-// extrapolation is arithmetic on it.
-
-// about a kilobyte
-
-// One sentence repeated has the same ratio throughout, so the estimate is
-// exact here, up to rounding up.
-
-// What the budget has left is a few bytes, and "hi" would fit in it. It
-// comes after text that did not, so it is part of the tail all the same: the
-// ratio applies to one contiguous tail.
-
-// One unbroken piece longer than the whole budget: nothing is counted
-// exactly, so there is no ratio to scale the rest by, and the meter is a
-// heuristic one, by characters like every heuristic count.
-
-// Later text joins the heuristic count, and nothing is counted twice.
-
-// A head too small to say anything, of any ratio: the run costs what the
-// four-bytes rule says, whatever the head cost per byte.
-
-// A head that is a real sample is a ratio, and the result says so.
-
 // TestAMeterReadsNoMoreThanItsWindow holds a Meter to the contract a walked
 // prompt relies on to keep only part of its text: given the bytes of a segment
 // up to the window past the budget, and how many there are besides, it counts
@@ -86,6 +51,3 @@ func TestAMeterReadsNoMoreThanItsWindow(t *testing.T) {
 		}
 	}
 }
-
-// "<|endoftext|>" is the three pieces "<|", "endoftext" and "|>", never the
-// single end-of-text token, 199999 in o200k_base and 100257 in cl100k_base.

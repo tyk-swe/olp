@@ -226,7 +226,7 @@ func FuzzCompileKeepsCallerValuesOutOfSQL(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value string) {
 		literal, err := json.Marshal(value)
 		if err != nil {
-			t.Skip()
+			t.Fatal(err)
 		}
 		for _, attribute := range []string{"userName", "id", "meta.created", `emails[value`} {
 			for _, operator := range []string{"eq", "ne", "co", "sw", "ew", "gt", "le"} {

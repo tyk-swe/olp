@@ -3,6 +3,7 @@ package estimate
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -74,13 +75,8 @@ func TestOracleFixtures(t *testing.T) {
 func firstDifference(got, want []uint32) string {
 	for i := range min(len(got), len(want)) {
 		if got[i] != want[i] {
-			return "token " + itoa(i) + " is " + itoa(int(got[i])) + ", want " + itoa(int(want[i])) + " (of " + itoa(len(got)) + " and " + itoa(len(want)) + ")"
+			return "token " + strconv.Itoa(i) + " is " + strconv.Itoa(int(got[i])) + ", want " + strconv.Itoa(int(want[i])) + " (of " + strconv.Itoa(len(got)) + " and " + strconv.Itoa(len(want)) + ")"
 		}
 	}
-	return "got " + itoa(len(got)) + " tokens, want " + itoa(len(want))
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
+	return "got " + strconv.Itoa(len(got)) + " tokens, want " + strconv.Itoa(len(want))
 }

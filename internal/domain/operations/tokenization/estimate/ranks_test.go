@@ -12,8 +12,6 @@ func appendUvarint(b []byte, v uint64) []byte {
 	return append(b, byte(v))
 }
 
-// Three tokens, of lengths 1, 1 and 2.
-
 // byteTokens is every single-byte token, which a rank file must start with
 // for newVocab to accept it.
 func byteTokens() (lengths, blob []byte) {
@@ -56,6 +54,3 @@ func TestNewVocabRejectsBadRankFiles(t *testing.T) {
 		})
 	}
 }
-
-// A token with one more byte, or one fewer, is only a token if
-// the list says so.

@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// A default slot can deliberately carry no secret (for example workload identity).
-
 func TestDecodeRevisionSerializationAndPublicationLimits(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`} {
 		provider, err := DecodeProviderRevision(ProviderRevision{ID: "provider", RevisionID: "revision", State: "active", Configuration: []byte(`{"kind":"openai","options":{"limits":{}}}`), Models: []byte(raw), Slots: []byte(raw)})

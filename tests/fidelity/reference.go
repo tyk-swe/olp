@@ -213,8 +213,14 @@ func CompareEvents(expected, observed []byte) error {
 	if err != nil {
 		return fmt.Errorf("invalid observed stream: %w", err)
 	}
-	w, _ := json.Marshal(want)
-	g, _ := json.Marshal(got)
+	w, err := json.Marshal(want)
+	if err != nil {
+		return fmt.Errorf("marshal reference stream: %w", err)
+	}
+	g, err := json.Marshal(got)
+	if err != nil {
+		return fmt.Errorf("marshal observed stream: %w", err)
+	}
 	return compareJSON(w, g)
 }
 

@@ -28,7 +28,10 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-type notificationCaller func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult
+type destinationCallOutcome struct {
+	result apiResult
+	err    error
+}
 
 func TestSavedDestinationTestAcrossReplicas(t *testing.T) {
 	t.Parallel()
@@ -49,7 +52,7 @@ func TestSavedDestinationTestAcrossReplicas(t *testing.T) {
 	})
 }
 
-func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture, first, second notificationCaller, ending string) {
+func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture, first, second *managementClient, ending string) {
 	t.Helper()
 	type received struct{ body, signature string }
 	messages := make(chan received, 8)
@@ -73,8 +76,11 @@ func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture,
 	rule := seedTestIncident(t, pool, fixture, destination)
 	before := testIncidentState(t, pool, rule)
 	path := newNotificationTestPath(destination)
-	original := make(chan apiResult, 1)
-	go func() { original <- first("POST", path, "", "") }()
+	original := make(chan destinationCallOutcome, 1)
+	go func() {
+		res, err := first.tryCall(t.Context(), "POST", path, "", "")
+		original <- destinationCallOutcome{res, err}
+	}()
 
 	checkWebhook := func() {
 		t.Helper()
@@ -87,12 +93,12 @@ func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture,
 		}
 	}
 	checkWebhook()
-	pending := requireTestStatus(t, second("POST", path, "", ""), "pending")
+	pending := requireTestStatus(t, second.call(t, "POST", path, "", ""), "pending")
 	if ending == "interrupted" {
 		if _, err := pool.Exec(t.Context(), `UPDATE olp.notification_destination_tests SET expires_at=now()-interval '1 second' WHERE id=$1`, pending.Id); err != nil {
 			t.Fatal(err)
 		}
-		requireTestStatus(t, second("GET", path, "", ""), "unconfirmed")
+		requireTestStatus(t, second.call(t, "GET", path, "", ""), "unconfirmed")
 	}
 	if ending != "timeout" {
 		close(ack)
@@ -101,7 +107,11 @@ func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture,
 	if ending != "acknowledged" {
 		want = "unconfirmed"
 	}
-	got := requireTestStatus(t, waitTestMessage(t, original), want)
+	outcome := waitTestMessage(t, original)
+	if outcome.err != nil {
+		t.Fatal(outcome.err)
+	}
+	got := requireTestStatus(t, outcome.result, want)
 	if ending == "timeout" {
 		close(ack)
 		if got.Failure == nil || *got.Failure != "timeout" {
@@ -109,7 +119,7 @@ func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture,
 		}
 	}
 	for _, method := range []string{"GET", "POST"} {
-		replayed := requireTestStatus(t, second(method, path, "", ""), want)
+		replayed := requireTestStatus(t, second.call(t, method, path, "", ""), want)
 		if replayed.Id != pending.Id || replayed.Id != got.Id {
 			t.Fatalf("%s returned ID %q, original and concurrent IDs %q and %q", method, replayed.Id, got.Id, pending.Id)
 		}
@@ -119,33 +129,40 @@ func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture,
 		t.Fatalf("replays sent %d extra webhooks", len(messages))
 	}
 	for range 2 {
-		newResult := requireTestStatus(t, first("POST", newNotificationTestPath(destination), "", ""), "delivered")
+		newResult := requireTestStatus(t, first.call(t, "POST", newNotificationTestPath(destination), "", ""), "delivered")
 		if newResult.Id == got.Id {
 			t.Fatal("a separate action reused the previous test record")
 		}
 		checkWebhook()
 	}
-	if limited := first("POST", newNotificationTestPath(destination), "", ""); limited.status != http.StatusTooManyRequests {
+	if limited := first.call(t, "POST", newNotificationTestPath(destination), "", ""); limited.status != http.StatusTooManyRequests {
 		t.Fatalf("fourth new test returned %d %s, want 429", limited.status, limited.body)
 	}
-	requireTestStatus(t, second("POST", path, "", ""), want)
+	requireTestStatus(t, second.call(t, "POST", path, "", ""), want)
 	if len(messages) != 0 || testIncidentState(t, pool, rule) != before {
 		t.Fatal("rate-limited or replayed tests sent a webhook, or tests changed incident or retry state")
 	}
 }
 
-func exerciseEmailTest(t *testing.T, first, second notificationCaller) {
+func exerciseEmailTest(t *testing.T, first, second *managementClient) {
 	t.Helper()
 	url, certificate, messages, ack := openTestSMTPSink(t)
 	destination := saveTestDestination(t, first, fmt.Sprintf(`{"name":"test email","url":%q,"type":"email","configuration":{"from":"alerts@example.invalid","to":["ops@example.invalid"],"ca_certificate":%q}}`, url, certificate))
 	path := newNotificationTestPath(destination)
-	original := make(chan apiResult, 1)
-	go func() { original <- first("POST", path, "", "") }()
+	original := make(chan destinationCallOutcome, 1)
+	go func() {
+		res, err := first.tryCall(t.Context(), "POST", path, "", "")
+		original <- destinationCallOutcome{res, err}
+	}()
 	raw := waitTestMessage(t, messages)
-	pending := requireTestStatus(t, second("POST", path, "", ""), "pending")
+	pending := requireTestStatus(t, second.call(t, "POST", path, "", ""), "pending")
 	close(ack)
-	sent := requireTestStatus(t, waitTestMessage(t, original), "delivered")
-	replayed := requireTestStatus(t, second("POST", path, "", ""), "delivered")
+	outcome := waitTestMessage(t, original)
+	if outcome.err != nil {
+		t.Fatal(outcome.err)
+	}
+	sent := requireTestStatus(t, outcome.result, "delivered")
+	replayed := requireTestStatus(t, second.call(t, "POST", path, "", ""), "delivered")
 	if pending.Id != sent.Id || replayed.Id != sent.Id || len(messages) != 0 {
 		t.Fatal("email replay did not return the original result or the sink received another message")
 	}
@@ -163,7 +180,7 @@ func exerciseEmailTest(t *testing.T, first, second notificationCaller) {
 	assertMarkedTest(t, body)
 }
 
-func testNotificationReplicas(t *testing.T) (*pgxpool.Pool, usageFixture, notificationCaller, notificationCaller) {
+func testNotificationReplicas(t *testing.T) (*pgxpool.Pool, usageFixture, *managementClient, *managementClient) {
 	t.Helper()
 	pool, _ := harness.Database(t)
 	fixture := newUsageFixture(t, pool)
@@ -171,7 +188,7 @@ func testNotificationReplicas(t *testing.T) (*pgxpool.Pool, usageFixture, notifi
 	return pool, fixture, notificationManagementWithPolicy(t, pool, fixture.ownerID, policy), notificationManagementWithPolicy(t, pool, fixture.ownerID, policy)
 }
 
-func checkDestinationTestPermissions(t *testing.T, pool *pgxpool.Pool, f usageFixture, owner notificationCaller) {
+func checkDestinationTestPermissions(t *testing.T, pool *pgxpool.Pool, f usageFixture, owner *managementClient) {
 	t.Helper()
 	id := saveTestDestination(t, owner, fmt.Sprintf(`{"name":"disabled webhook","url":"https://example.test","project_id":%q,"enabled":false}`, f.projectID))
 	user := uuid.NewString()
@@ -182,7 +199,7 @@ func checkDestinationTestPermissions(t *testing.T, pool *pgxpool.Pool, f usageFi
 	member := notificationManagementAs(t, pool, user)
 	path := newNotificationTestPath(id)
 	for _, method := range []string{"GET", "POST"} {
-		if reply := member(method, path, "", ""); reply.status != http.StatusNotFound {
+		if reply := member.call(t, method, path, "", ""); reply.status != http.StatusNotFound {
 			t.Fatalf("out-of-scope %s returned %d %s, want 404", method, reply.status, reply.body)
 		}
 	}
@@ -191,21 +208,21 @@ func checkDestinationTestPermissions(t *testing.T, pool *pgxpool.Pool, f usageFi
 		t.Fatal(err)
 	}
 	for _, method := range []string{"GET", "POST"} {
-		if reply := member(method, path, "", ""); reply.status != http.StatusForbidden {
+		if reply := member.call(t, method, path, "", ""); reply.status != http.StatusForbidden {
 			t.Fatalf("project viewer %s returned %d %s, want 403", method, reply.status, reply.body)
 		}
 	}
-	if reply := owner("POST", path, "", ""); reply.status != http.StatusUnprocessableEntity {
+	if reply := owner.call(t, "POST", path, "", ""); reply.status != http.StatusUnprocessableEntity {
 		t.Fatalf("disabled destination returned %d %s, want 422", reply.status, reply.body)
 	}
-	if reply := owner("GET", path, "", ""); reply.status != http.StatusNotFound {
+	if reply := owner.call(t, "GET", path, "", ""); reply.status != http.StatusNotFound {
 		t.Fatalf("rejected test left a record: %d %s", reply.status, reply.body)
 	}
 }
 
-func saveTestDestination(t *testing.T, call notificationCaller, body string) string {
+func saveTestDestination(t *testing.T, client *managementClient, body string) string {
 	t.Helper()
-	saved := call("POST", "/api/v1/notifications/destinations", "", body)
+	saved := client.call(t, "POST", "/api/v1/notifications/destinations", "", body)
 	var destination struct{ ID string }
 	if err := json.Unmarshal(saved.body, &destination); err != nil || saved.status != http.StatusCreated || destination.ID == "" {
 		t.Fatalf("save destination returned %d %s (%v)", saved.status, saved.body, err)

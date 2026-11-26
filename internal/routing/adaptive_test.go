@@ -17,11 +17,6 @@ func reasonOf(plan Plan, targetID string) string {
 	return ""
 }
 
-// A classifier failure falls through; a forbidden delegate is skipped.
-
-// Without features, as on surfaces that do not compute them, selectors
-// are not evaluated at all.
-
 func TestSpendCapsRemoveOwnersAndNameTheBudgetCondition(t *testing.T) {
 	s, slug, ids := planningFixture()
 	capped := s.Providers[ids[0]]
@@ -149,13 +144,7 @@ func TestCapacityStrategyOrdersSlotsAndTargetsByHeadroom(t *testing.T) {
 	}
 }
 
-// A shadow obeys the request's hard constraints like any target.
-
 // supplyFunc reads supply from a function, as a test stand-in for the gateway.
 type supplyFunc func(SupplyQuery) *SupplyState
 
 func (f supplyFunc) ReadSupply(_ context.Context, query SupplyQuery) *SupplyState { return f(query) }
-
-// A target the request's constraints exclude never sets the baseline.
-
-// Without a matching selector there is nothing to compare.

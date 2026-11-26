@@ -3,11 +3,7 @@ package protocols
 import (
 	"reflect"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
-
-var _ = wire.Chat
 
 func TestGeminiUsageModalityAndGrounding(t *testing.T) {
 	body := `{"candidates":[{"index":0,"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP",

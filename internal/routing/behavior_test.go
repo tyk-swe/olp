@@ -263,9 +263,6 @@ func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
 	}
 }
 
-// A classifier only labels the request, so a strict route may classify
-// with a transformed one, and the classifier adds no serving depth.
-
 func TestRouteWalkKeepsDelegatedFallbacksBehindNestedServingFallbacks(t *testing.T) {
 	named := Route{Slug: "named", Behavior: Behavior{Fallbacks: []Fallback{{Route: "named-backup", On: []string{FallbackRateLimit}}}}}
 	serving := Route{Slug: "serving", Behavior: Behavior{Fallbacks: []Fallback{

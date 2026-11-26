@@ -7,20 +7,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/tests/fixtures"
 )
-
-const vendorFixtures = "../../../tests/fixtures/vendors/"
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	body, err := os.ReadFile(vendorFixtures + name)
+	body, err := fixtures.Files.ReadFile("vendors/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}

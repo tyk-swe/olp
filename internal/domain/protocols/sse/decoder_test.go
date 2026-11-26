@@ -9,8 +9,19 @@ import (
 	"testing"
 )
 
-// This checks framing only. The provider codec tests own the canonical
-// text and usage expectations in the same corpus.
+type fragments struct {
+	reader io.Reader
+	size   int
+}
+
+func (f fragments) Read(p []byte) (int, error) { return f.reader.Read(p[:min(len(p), f.size)]) }
+
+func fragmented(data []byte, size int) io.Reader {
+	if size < 1 {
+		panic("fragment size must be positive")
+	}
+	return fragments{bytes.NewReader(data), size}
+}
 
 func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 	for _, tc := range []struct {

@@ -162,9 +162,6 @@ func TestResponseUsageCompletenessAgreesAcrossResultsAndEvents(t *testing.T) {
 	}
 }
 
-// ResponseCreatedEvent and other lifecycle envelopes contain the
-// SDK's generic Response, including initial or replayed snapshots.
-
 func TestIncompleteToolResponsesPreserveFinishReasonAndUsage(t *testing.T) {
 	for reason, finish := range map[string]string{"max_output_tokens": "length", "content_filter": "content_filter"} {
 		t.Run(reason, func(t *testing.T) {

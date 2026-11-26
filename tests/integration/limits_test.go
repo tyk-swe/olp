@@ -478,3 +478,41 @@ func TestLedgerLeaderLiftsStatementTimeout(t *testing.T) {
 		t.Fatalf("got %v from a pass that outlasted the pool's %s statement timeout, want the leader pass to run under its own budget", err, poolTimeout)
 	}
 }
+
+func TestBlockingStreamReadDoesNotStallOtherCommands(t *testing.T) {
+	t.Parallel()
+	client := harness.Valkey(t)
+	stream := "service:usage:" + uuid.NewString()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := client.Do(ctx, "DEL", stream); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := client.Do(t.Context(), "XGROUP", "CREATE", stream, "readers", "0", "MKSTREAM"); err != nil {
+		t.Fatal(err)
+	}
+	read := make(chan error, 1)
+	go func() {
+		reply, err := client.DoBlocking(t.Context(), "XREADGROUP", "GROUP", "readers", "reader", "BLOCK", "3000", "STREAMS", stream, ">")
+		if err == nil && reply == nil {
+			err = errors.New("blocking read returned no entries")
+		}
+		read <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	started := time.Now()
+	if _, err := client.Do(t.Context(), "PING"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("PING waited %s behind a blocking stream read", elapsed)
+	}
+	if _, err := client.Do(t.Context(), "XADD", stream, "*", "event", "wake"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-read; err != nil {
+		t.Fatal(err)
+	}
+}
