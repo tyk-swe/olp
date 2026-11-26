@@ -16,7 +16,7 @@ import (
 
 const scimGroupJSON = `jsonb_build_object('id',g.id,'display_name',g.document->>'displayName','external_id',g.document->>'externalId','mapping',g.document->'` + scim.GroupExtension + `','etag',g.etag,'member_count',(SELECT count(*) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id WHERE m.group_id=g.id AND u.role_management='provisioned'))`
 
-func (s *Server) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *scimService) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -29,7 +29,7 @@ func (s *Server) scimGroups(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	return httpkit.ListReply(items, page), err
 }
 
-func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *scimService) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -64,7 +64,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		document[scim.GroupExtension] = mapping
-		managed, err := scimManagedProjects(r, tx)
+		managed, err := scimManagedProjects(r.Context(), tx)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -75,7 +75,7 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 		if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = keepSCIMManagers(r, tx, managed); err != nil {
+		if err = keepSCIMManagers(r.Context(), tx, managed); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
@@ -92,19 +92,11 @@ func (s *Server) scimGroupMapping(r *http.Request, _ authz.Principal) (httpkit.R
 	})
 }
 
-// keepSCIMManagers refuses a mapping change that leaves a project it managed
-// through SCIM without a delegated manager, as member changes are refused.
-func keepSCIMManagers(r *http.Request, tx pgx.Tx, projects []string) error {
-	orphaned, err := scimOrphansProject(r, tx, projects)
-	if err == nil && orphaned {
-		err = httpkit.Fail(409, "last_project_manager", "Keep at least one project manager.")
-	}
-	return err
+func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
+	return s.scim.storeMapping(ctx, tx, p, name, mapping)
 }
 
-// StoreSCIMMapping promotes policy only. Directory identities and memberships
-// stay local; an absent named group is created with no members.
-func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
+func (s *scimService) storeMapping(ctx context.Context, tx pgx.Tx, p authz.Principal, name string, mapping map[string]any) error {
 	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
@@ -131,7 +123,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Princi
 		}
 	}
 	document[scim.GroupExtension] = mapping
-	managed, err := scimManagedProjects(r, tx)
+	managed, err := scimManagedProjects(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -142,7 +134,7 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p authz.Princi
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
 		return err
 	}
-	if err = keepSCIMManagers(r, tx, managed); err != nil {
+	if err = keepSCIMManagers(ctx, tx, managed); err != nil {
 		return err
 	}
 	if err = EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {

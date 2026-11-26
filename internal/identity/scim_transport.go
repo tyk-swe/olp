@@ -15,7 +15,9 @@ import (
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
-func (s *Server) registerSCIM(mux *http.ServeMux) {
+func (s *scimService) register(mux *http.ServeMux) {
+	s.access.Route(mux, "GET /api/v1/scim/groups", s.scimGroups)
+	s.access.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
 	for _, kind := range []string{"Users", "Groups"} {
 		group := kind == "Groups"
 		path := "/scim/v2/" + kind
@@ -35,7 +37,7 @@ func (s *Server) registerSCIM(mux *http.ServeMux) {
 	})
 }
 
-func (s *Server) scimRoute(mux *http.ServeMux, pattern string, h access.Handler) {
+func (s *scimService) scimRoute(mux *http.ServeMux, pattern string, h access.Handler) {
 	admit := s.access.Admit(pattern, access.MaxBody(scim.MaxBody), access.AnyOrigin())
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		r, p, cancel, err := admit(w, r)
@@ -76,7 +78,7 @@ type scimFailure struct {
 	typ, detail string
 }
 
-func (s *Server) writeSCIMError(w http.ResponseWriter, err error) {
+func (s *scimService) writeSCIMError(w http.ResponseWriter, err error) {
 	f, known := scimFailureFor(err)
 	if !known {
 		s.access.LogFailure("SCIM request failed", err)

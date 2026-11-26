@@ -66,7 +66,7 @@ func validManagementToken(input managementTokenInput) error {
 const managementTokenFields = `'id',t.id,'lookup_id',t.lookup_id,'name',t.name,'scopes',t.scopes,'all_projects',t.all_projects,'project_ids',t.project_ids,'created_by',t.created_by,'created_by_email',u.email,'etag',t.etag,'expires_at',t.expires_at,'revoked_at',t.revoked_at,'created_at',t.created_at`
 const managementTokenFrom = " FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by"
 
-func (s *Server) managementTokens(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) managementTokens(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -79,7 +79,7 @@ func (s *Server) managementTokens(r *http.Request, _ authz.Principal) (httpkit.R
 	return httpkit.ListReply(items, p), err
 }
 
-func (s *Server) managementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) managementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "management_token_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -90,7 +90,7 @@ func (s *Server) managementToken(r *http.Request, _ authz.Principal) (httpkit.Re
 	return httpkit.Detail(json.RawMessage(data), etag), err
 }
 
-func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) createManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input managementTokenInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -131,7 +131,7 @@ func (s *Server) createManagementToken(r *http.Request, _ authz.Principal) (http
 	})
 }
 
-func (s *Server) revokeManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) revokeManagementToken(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "management_token_id")
 	if err != nil {
 		return httpkit.Reply{}, err

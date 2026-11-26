@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
-func (s *Server) scimSQL(group bool) string {
+func (s *scimService) scimSQL(group bool) string {
 	if group {
 		return `SELECT g.id,g.etag,g.document || jsonb_build_object('id',g.id,'members',COALESCE((SELECT jsonb_agg(jsonb_build_object('value',u.id,'display',u.display_name,'$ref',` + sqlText(s.access.Origin+"/scim/v2/Users/") + `||u.id::text,'type','User') ORDER BY u.id) FROM olp.scim_group_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.scim_users su ON su.user_id=u.id WHERE m.group_id=g.id AND su.deleted_at IS NULL AND u.role_management='provisioned'),'[]'::jsonb),'meta',jsonb_build_object('resourceType','Group','created',g.created_at,'lastModified',g.updated_at,'version','W/"'||g.etag::text||'"','location',` + sqlText(s.access.Origin+"/scim/v2/Groups/") + `||g.id::text)) AS resource FROM olp.scim_groups g`
 	}
@@ -26,7 +26,7 @@ func (s *Server) scimSQL(group bool) string {
 // Origin is operator configuration, escaped as a SQL literal, never a request Host.
 func sqlText(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-func (s *Server) scimRead(r *http.Request, q database.Queryer, group bool, id string) (scim.Document, string, error) {
+func (s *scimService) scimRead(r *http.Request, q database.Queryer, group bool, id string) (scim.Document, string, error) {
 	var data []byte
 	var etag string
 	err := q.QueryRow(r.Context(), "SELECT resource,etag::text FROM ("+s.scimSQL(group)+") resource WHERE id=$1", id).Scan(&data, &etag)
@@ -38,7 +38,7 @@ func (s *Server) scimRead(r *http.Request, q database.Queryer, group bool, id st
 	return d, etag, err
 }
 
-func (s *Server) scimGet(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
+func (s *scimService) scimGet(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "scim_id")
 	if err != nil {
 		return httpkit.Reply{}, scim.Fail(404, "", "The resource was not found.")
@@ -125,7 +125,7 @@ func scimListWindow(values url.Values) (int, int, error) {
 	return start, count, nil
 }
 
-func (s *Server) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
+func (s *scimService) scimList(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	values, err := scimListValues(r)
 	if err != nil {
 		return httpkit.Reply{}, err

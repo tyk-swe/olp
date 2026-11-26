@@ -57,7 +57,7 @@ func usableSAMLOwner(ctx context.Context, q database.Queryer) (bool, error) {
 	return false, rows.Err()
 }
 
-func (s *Server) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'issuer',issuer,'subject',subject,'email_at_link',email_at_link,'created_at',created_at,'last_login_at',last_login_at) FROM olp.saml_identities WHERE user_id=$1 ORDER BY created_at,id`, p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -77,7 +77,7 @@ func (s *Server) samlIdentities(r *http.Request, p authz.Principal) (httpkit.Rep
 	return httpkit.OK(map[string]any{"items": items, "linking_available": err == nil && c.Enabled, "reauthentication_available": len(usable) > 0}), nil
 }
 
-func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "identity_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -150,14 +150,14 @@ func (s *Server) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		}
 		// Removing an identity is no sign-in, so the rotated session keeps the
 		// method and MFA state of the session that asked.
-		strength, err := sessionStrength(r, tx, p.SessionID)
+		strength, err := sessionStrength(r.Context(), tx, p.SessionID)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		session, err := s.newSession(r, tx, p.ID, strength)
+		session, err := s.sessions.newSession(r, tx, p.ID, strength)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

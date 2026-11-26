@@ -49,7 +49,7 @@ func scimSchemas() []map[string]any {
 	}
 }
 
-func (s *Server) scimDiscovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *scimService) scimDiscovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if strings.HasSuffix(r.URL.Path, "/ServiceProviderConfig") {
 		return httpkit.OK(map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": map[string]any{"supported": true}, "bulk": map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0}, "filter": map[string]any{"supported": true, "maxResults": 200}, "changePassword": map[string]any{"supported": false}, "sort": map[string]any{"supported": true}, "etag": map[string]any{"supported": true}, "authenticationSchemes": []any{map[string]any{"type": "oauthbearertoken", "name": "OLP management token", "description": "Installation-wide management token with access scope; creator authority is rechecked on every request.", "primary": true}}, "meta": map[string]any{"resourceType": "ServiceProviderConfig", "location": s.access.Origin + "/scim/v2/ServiceProviderConfig"}}), nil
 	}

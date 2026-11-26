@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
-func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
+func (s *scimService) scimWrite(r *http.Request, _ authz.Principal, group bool) (httpkit.Reply, error) {
 	var body scim.Document
 	var err error
 	if r.Method != "DELETE" {
@@ -58,7 +58,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 				return httpkit.Reply{}, access.Event{}, err
 			}
 		}
-		managed, err := scimManagedProjects(r, tx)
+		managed, err := scimManagedProjects(r.Context(), tx)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -77,7 +77,7 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 		if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if orphaned, err := scimOrphansProject(r, tx, managed); err != nil || orphaned {
+		if orphaned, err := scimOrphansProject(r.Context(), tx, managed); err != nil || orphaned {
 			if err == nil {
 				err = scim.Fail(409, "", "Keep at least one project manager.")
 			}
@@ -107,26 +107,6 @@ func (s *Server) scimWrite(r *http.Request, _ authz.Principal, group bool) (http
 		}
 		return reply, written, nil
 	})
-}
-
-// scimManagedProjects lists the managed projects that a directory change could
-// leave without a manager, because a SCIM group grants their management.
-func scimManagedProjects(r *http.Request, tx pgx.Tx) ([]string, error) {
-	var ids []string
-	err := tx.QueryRow(r.Context(), "SELECT COALESCE(array_agg(DISTINCT project_id::text),'{}'::text[]) FROM olp.effective_project_members WHERE role='manager' AND project_id IN (SELECT project_id FROM olp.scim_group_projects WHERE role='manager')").Scan(&ids)
-	return ids, err
-}
-
-// scimOrphansProject applies the console's last-manager rule to a directory
-// change: it reports whether a project once managed through SCIM has lost every
-// delegated manager.
-func scimOrphansProject(r *http.Request, tx pgx.Tx, projects []string) (bool, error) {
-	if len(projects) == 0 {
-		return false, nil
-	}
-	var orphaned bool
-	err := tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.projects p WHERE p.id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.project_id=p.id AND m.role='manager'))", projects).Scan(&orphaned)
-	return orphaned, err
 }
 
 func boundedSCIMText(v any, max int, required bool) (string, error) {
@@ -245,7 +225,7 @@ func parseSCIMGroupMembers(r *http.Request, tx pgx.Tx, d scim.Document) ([]strin
 	return members, nil
 }
 
-func (s *Server) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Document, method string) ([]string, error) {
+func (s *scimService) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Document, method string) ([]string, error) {
 	affected := []string{}
 	rows, err := tx.Query(r.Context(), "SELECT user_id::text FROM olp.scim_group_members WHERE group_id=$1", id)
 	if err != nil {
@@ -325,7 +305,7 @@ func (s *Server) writeSCIMGroup(r *http.Request, tx pgx.Tx, id string, d scim.Do
 	return affected, nil
 }
 
-func (s *Server) reconcileSCIMUsers(r *http.Request, tx pgx.Tx, p authz.Principal, ids []string) error {
+func (s *scimService) reconcileSCIMUsers(r *http.Request, tx pgx.Tx, p authz.Principal, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -349,7 +329,7 @@ UPDATE olp.users u SET role=CASE d.level WHEN 4 THEN 'owner' WHEN 3 THEN 'operat
 			return err
 		}
 		if !owner {
-			if err = retireIssuedInvitations(r, tx, id, p.Actor(), p.UserID()); err != nil {
+			if err = retireIssuedInvitations(r.Context(), tx, r, id, p.Actor(), p.UserID()); err != nil {
 				return err
 			}
 		}

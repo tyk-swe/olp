@@ -18,7 +18,22 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
-func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *mfaService) register(mux *http.ServeMux) {
+	s.access.Public(mux, "POST /api/v1/auth/mfa/verify", s.mfaVerify)
+	s.access.Public(mux, "POST /api/v1/auth/mfa/enroll", s.mfaBootstrap)
+	routes := map[string]access.Handler{
+		"GET /api/v1/profile/mfa":                        s.mfaStatus,
+		"POST /api/v1/profile/mfa/challenge":             s.mfaManageChallenge,
+		"POST /api/v1/profile/mfa/enroll":                s.mfaEnroll,
+		"POST /api/v1/profile/mfa/recovery-codes":        s.mfaRecovery,
+		"DELETE /api/v1/profile/mfa/factors/{factor_id}": s.mfaRemove,
+	}
+	for pattern, fn := range routes {
+		s.access.Route(mux, pattern, fn)
+	}
+}
+
+func (s *mfaService) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'kind',kind,'name',name,'created_at',created_at,'last_used_at',last_used_at) FROM olp.mfa_factors WHERE user_id=$1 ORDER BY created_at", p.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -37,7 +52,7 @@ func (s *Server) mfaStatus(r *http.Request, p authz.Principal) (httpkit.Reply, e
 	return httpkit.Detail(map[string]any{"factors": factors, "recovery_codes_remaining": remaining, "required": required, "etag": revision, "webauthn_available": webErr == nil}, revision), err
 }
 
-func (s *Server) mfaManageChallenge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *mfaService) mfaManageChallenge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		enabled, err := mfaConfigured(r.Context(), tx, p.ID)
 		if err != nil {
@@ -60,16 +75,16 @@ type mfaEnrollInput struct {
 	Challenge string `json:"challenge,omitempty"`
 }
 
-func (s *Server) mfaEnroll(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *mfaService) mfaEnroll(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginMFAEnrollment(r, false)
 }
 
-func (s *Server) mfaBootstrap(r *http.Request) (httpkit.Reply, error) {
+func (s *mfaService) mfaBootstrap(r *http.Request) (httpkit.Reply, error) {
 	return s.beginMFAEnrollment(r, true)
 }
-func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Reply, error) {
+func (s *mfaService) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Reply, error) {
 	if bootstrap {
-		if err := s.admit(r, "mfa_enrollment", ""); err != nil {
+		if err := admitAuth(s.access, r, "mfa_enrollment", ""); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
@@ -117,7 +132,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (httpkit.Re
 	return httpkit.OK(response), tx.Commit(r.Context())
 }
 
-func (s *Server) resolveMFAEnrollmentSubject(r *http.Request, tx pgx.Tx, bootstrap bool, challenge string, f *mfaFlow) error {
+func (s *mfaService) resolveMFAEnrollmentSubject(r *http.Request, tx pgx.Tx, bootstrap bool, challenge string, f *mfaFlow) error {
 	if !bootstrap {
 		p, err := s.access.Reauthorize(r, tx)
 		if err != nil {
@@ -146,7 +161,7 @@ func (s *Server) resolveMFAEnrollmentSubject(r *http.Request, tx pgx.Tx, bootstr
 	return err
 }
 
-func (s *Server) buildMFAEnrollmentChallenge(r *http.Request, tx pgx.Tx, kind string, u mfaUser, f *mfaFlow) (map[string]any, error) {
+func (s *mfaService) buildMFAEnrollmentChallenge(r *http.Request, tx pgx.Tx, kind string, u mfaUser, f *mfaFlow) (map[string]any, error) {
 	response := map[string]any{"kind": kind}
 	if kind == "totp" {
 		key, err := totp.Generate(totp.GenerateOpts{Issuer: "OpenLLMProxy", AccountName: u.Email, SecretSize: 32})
@@ -190,7 +205,7 @@ func (s *Server) buildMFAEnrollmentChallenge(r *http.Request, tx pgx.Tx, kind st
 	return response, nil
 }
 
-func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *mfaService) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "factor_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -241,7 +256,7 @@ func (s *Server) mfaRemove(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	})
 }
 
-func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal) error {
+func (s *mfaService) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal) error {
 	var revision string
 	if err := tx.QueryRow(r.Context(), "SELECT mfa_revision::text FROM olp.users WHERE id=$1", p.ID).Scan(&revision); err != nil {
 		return err
@@ -249,7 +264,7 @@ func (s *Server) checkMFARevision(r *http.Request, tx pgx.Tx, p authz.Principal)
 	return httpkit.Match(r, revision)
 }
 
-func (s *Server) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *mfaService) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		if err := s.checkMFARevision(r, tx, p); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

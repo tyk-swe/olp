@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/crewjam/saml"
@@ -76,7 +75,21 @@ func loadSAML(ctx context.Context, q database.Queryer) (samlConfiguration, error
 	return c, err
 }
 
-func (s *Server) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) register(mux *http.ServeMux) {
+	s.access.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
+	s.access.Public(mux, "POST /api/v1/saml/acs", s.samlACS, access.MaxBody(2<<20), access.AnyOrigin())
+	s.access.Public(mux, "GET /api/v1/saml/complete", s.completeSAML, access.CrossSiteNavigation())
+	s.access.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
+	s.access.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, access.MaxBody(2<<20))
+	s.access.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
+	s.access.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
+	s.access.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
+	s.access.Route(mux, "POST /api/v1/profile/saml/link", s.beginSAMLLink)
+	s.access.Route(mux, "POST /api/v1/profile/saml/reauthenticate", s.beginSAMLReauthentication)
+	s.access.Route(mux, "DELETE /api/v1/profile/saml-identities/{identity_id}", s.unlinkSAML)
+}
+
+func (s *samlService) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, e := loadSAML(r.Context(), s.access.Pool)
 	return httpkit.Detail(c, c.ETag), e
 }
@@ -109,23 +122,14 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
 		return m, httpkit.Invalid("default_role", "Choose a valid role.")
 	}
-	for field, list := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
-		if len(list) > 500 {
-			return m, httpkit.Invalid(field, "Use at most 500 mappings.")
-		}
-		for i, v := range list {
-			if !authz.ValidRole(v.Role) || httpkit.ValidText(field, v.ClaimValue, 254) != nil || slices.ContainsFunc(list[:i], func(other roleMapping) bool {
-				return other.ClaimValue == v.ClaimValue || field == "email_role_mappings" && strings.EqualFold(other.ClaimValue, v.ClaimValue)
-			}) {
-				return m, httpkit.Invalid(field, "Use unique values and valid roles.")
-			}
-		}
+	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "email_role_mappings", "group_role_mappings", "Use unique values and valid roles."); err != nil {
+		return m, err
 	}
 	return m, nil
 }
 
 func samlMappedRole(c samlConfiguration, email string, groups []string) string {
-	return mappedRole(oidcConfiguration{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, email, groups)
+	return resolveMappedRole(roleMappingPolicy{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, email, groups)
 }
 
 func newSAMLSigningKey() (samlSigningKey, error) {
@@ -147,7 +151,7 @@ func newSAMLSigningKey() (samlSigningKey, error) {
 	return samlSigningKey{Private: priv, Certificate: der}, err
 }
 
-func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
+func (s *samlService) samlProvider(r *http.Request, q database.Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
 	m, err := validateSAML(c)
 	if err != nil {
 		return nil, m, err
@@ -180,7 +184,7 @@ func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfigu
 	return sp, m, nil
 }
 
-func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		SAMLDefinition
 		Rotate bool `json:"rotate_signing_key"`
@@ -203,7 +207,7 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 		} else if r.Header.Get("If-Match") != "" {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "No SAML configuration exists.")
 		}
-		c, err := s.StoreSAMLDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
+		c, err := s.storeDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -212,6 +216,10 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 }
 
 func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
+	return s.saml.storeDefinition(ctx, tx, p, d, rotate)
+}
+
+func (s *samlService) storeDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
 	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.access.Origin + "/api/v1/saml/metadata"}
 	if err := p.Authorize(authz.Access); err != nil {
 		return c, err
@@ -275,7 +283,7 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Pri
 	return c, nil
 }
 
-func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -305,7 +313,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	return httpkit.OK(map[string]any{"metadata_xml": string(b), "idp_entity_id": m.Entity.EntityID}), nil
 }
 
-func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
+func (s *samlService) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
 	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil {
 		return err

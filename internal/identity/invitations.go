@@ -15,25 +15,10 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
-// Invitations are outstanding access grants and cannot outlive the issuer's
-// membership-management authority. Call inside the authority change transaction.
-func retireIssuedInvitations(r *http.Request, tx pgx.Tx, issuer string, actor authz.Actor, revokedBy string) error {
-	result, err := tx.Exec(r.Context(), `UPDATE olp.invitations
-        SET revoked_at=now(),revoked_by=NULLIF($2::text,'')::uuid
-        WHERE invited_by=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at>now()`, issuer, revokedBy)
-	if err != nil {
-		return err
-	}
-	if result.RowsAffected() == 0 {
-		return nil
-	}
-	return access.Audit(r.Context(), tx, r, actor, "invitation.revoke_for_access_loss", "user", issuer, "success")
-}
-
 const invitationJSON = `jsonb_build_object('id',i.id,'email',i.email,'role',i.role,'invited_by',i.invited_by,'invited_by_email',inviter.email,'accepted_by_email',accepted.email,'revoked_by_email',revoker.email,'accepted_at',i.accepted_at,'revoked_at',i.revoked_at,'expires_at',i.expires_at,'created_at',i.created_at,'status',CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked' WHEN i.expires_at<=now() THEN 'expired' ELSE 'pending' END)`
 const invitationFrom = ` FROM olp.invitations i LEFT JOIN olp.users inviter ON inviter.id=i.invited_by LEFT JOIN olp.users accepted ON accepted.id=i.accepted_by LEFT JOIN olp.users revoker ON revoker.id=i.revoked_by`
 
-func (s *Server) invitations(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) invitations(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	p, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -52,7 +37,7 @@ func invitation(r *http.Request, tx pgx.Tx, id string) (any, error) {
 	return json.RawMessage(data), err
 }
 
-func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) createInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Email string `json:"email"`
 		Role  string `json:"role"`
@@ -104,7 +89,7 @@ func (s *Server) createInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	})
 }
 
-func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "invitation_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -129,7 +114,7 @@ func (s *Server) retireInvitation(r *http.Request, _ authz.Principal) (httpkit.R
 	})
 }
 
-func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
+func (s *accountService) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	var input struct {
 		Token       string `json:"token"`
 		DisplayName string `json:"display_name"`
@@ -138,7 +123,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := s.admit(r, "invitation", input.Token); err != nil {
+	if err := admitAuth(s.access, r, "invitation", input.Token); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := password(input.Password); err != nil {
@@ -148,7 +133,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	var hash string
-	if err := s.passwordWork(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
+	if err := s.passwords.run(r, func() { hash = secrets.HashPassword(input.Password) }); err != nil {
 		return httpkit.Reply{}, err
 	}
 	tx, err := s.access.Begin(r)
@@ -177,7 +162,7 @@ func (s *Server) acceptInvitation(r *http.Request) (httpkit.Reply, error) {
 	if err = access.Audit(r.Context(), tx, r, authz.UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	response, err := s.localSession(r, tx, userID)
+	response, err := s.mfa.localSession(r, tx, userID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

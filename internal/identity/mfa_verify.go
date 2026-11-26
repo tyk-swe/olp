@@ -51,7 +51,7 @@ type mfaProof struct {
 	Credential json.RawMessage `json:"credential"`
 }
 
-func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, error) {
+func (s *mfaService) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, error) {
 	switch input.Method {
 	case "totp":
 		var id string
@@ -116,7 +116,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 	}
 }
 
-func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, error) {
+func (s *mfaService) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, error) {
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -129,12 +129,12 @@ func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Repl
 	return httpkit.Reply{}, httpkit.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
 }
 
-func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
+func (s *mfaService) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	var input mfaProof
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := s.admit(r, "mfa_request", ""); err != nil {
+	if err := admitAuth(s.access, r, "mfa_request", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
 	tx, err := s.access.Begin(r)
@@ -146,7 +146,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = s.admit(r, "mfa_verify", f.UserID); err != nil {
+	if err = admitAuth(s.access, r, "mfa_verify", f.UserID); err != nil {
 		return httpkit.Reply{}, err
 	}
 	valid, credential, counter, err := s.evaluateMFAFlow(r, tx, f, input)
@@ -176,7 +176,7 @@ func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	return reply, tx.Commit(r.Context())
 }
 
-func (s *Server) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, *webauthn.Credential, int64, error) {
+func (s *mfaService) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, *webauthn.Credential, int64, error) {
 	switch f.Purpose {
 	case "login", "manage", "reauth":
 		valid, err := s.verifyMFAProof(r, tx, f, input)
@@ -216,17 +216,17 @@ func (s *Server) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mf
 	}
 }
 
-func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
+func (s *mfaService) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
 	var reply httpkit.Reply
 	var err error
 	switch {
 	case f.Purpose == "login" || f.SessionID == nil:
-		if local, e := s.localLoginEnabled(r, tx); e != nil {
+		if local, e := isLocalLoginEnabled(r.Context(), s.access, tx); e != nil {
 			return httpkit.Reply{}, e
 		} else if !local {
 			return httpkit.Reply{}, httpkit.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
 		}
-		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: "local", MFA: true})
+		reply, err = s.sessions.newSession(r, tx, f.UserID, sessionAuth{Method: "local", MFA: true})
 	case f.Purpose == "manage" || f.Purpose == "reauth":
 		p, e := s.access.Authenticate(r, tx)
 		if e != nil {
@@ -236,7 +236,7 @@ func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes
 		if purpose == "" {
 			purpose = "mfa_manage"
 		}
-		reply, err = s.grantRecent(r, tx, p, purpose, f.Data.RecentResource, true)
+		reply, err = s.sessions.grantRecent(r, tx, p, purpose, f.Data.RecentResource, true)
 	default:
 		// Enrollment raises authentication strength: rotate the session rather
 		// than upgrading a previously captured cookie in place.
@@ -247,7 +247,7 @@ func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", *f.SessionID); err != nil {
 			return httpkit.Reply{}, err
 		}
-		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: method, MFA: true})
+		reply, err = s.sessions.newSession(r, tx, f.UserID, sessionAuth{Method: method, MFA: true})
 		reply.Status = 200
 		reply.Body = map[string]any{"enrolled": true, "recovery_codes": codes}
 	}
@@ -260,7 +260,7 @@ func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes
 	return reply, nil
 }
 
-func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {
+func (s *mfaService) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {
 	var count int
 	if err := tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.mfa_factors WHERE user_id=$1", f.UserID).Scan(&count); err != nil {
 		return nil, err

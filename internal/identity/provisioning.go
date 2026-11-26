@@ -24,7 +24,7 @@ func provisioningID(r *http.Request, name, field string, max int) (string, error
 	return value, nil
 }
 
-func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Email       string `json:"email"`
 		DisplayName string `json:"display_name"`
@@ -97,7 +97,7 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !*input.Active || input.Role != "owner" {
-			if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
+			if err = retireIssuedInvitations(r.Context(), tx, r, userID, p.Actor(), p.UserID()); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 		}
@@ -112,7 +112,7 @@ func (s *Server) provisionUser(r *http.Request, _ authz.Principal) (httpkit.Repl
 	})
 }
 
-func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *accountService) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	source, err := provisioningID(r, "source", "source", 100)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -135,7 +135,7 @@ func (s *Server) deprovisionUser(r *http.Request, _ authz.Principal) (httpkit.Re
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", userID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if err = retireIssuedInvitations(r, tx, userID, p.Actor(), p.UserID()); err != nil {
+		if err = retireIssuedInvitations(r.Context(), tx, r, userID, p.Actor(), p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {

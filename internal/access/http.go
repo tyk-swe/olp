@@ -270,7 +270,7 @@ func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
 		return nil, err
 	}
 	if _, err = tx.Exec(r.Context(), "SELECT id FROM olp.installation WHERE singleton FOR UPDATE"); err != nil {
-		tx.Rollback(r.Context())
+		tx.Rollback(context.WithoutCancel(r.Context()))
 		return nil, err
 	}
 	return tx, nil

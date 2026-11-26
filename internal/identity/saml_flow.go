@@ -45,20 +45,20 @@ type samlFlow struct {
 	Facts     *samlFacts `json:"facts,omitempty"`
 }
 
-func (s *Server) beginSAMLLogin(r *http.Request) (httpkit.Reply, error) {
+func (s *samlService) beginSAMLLogin(r *http.Request) (httpkit.Reply, error) {
 	return s.beginSAML(r, "login")
 }
 
-func (s *Server) beginSAMLLink(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) beginSAMLLink(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginSAML(r, "link")
 }
 
-func (s *Server) beginSAMLReauthentication(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) beginSAMLReauthentication(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.beginSAML(r, "reauthenticate")
 }
 
-func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) {
-	if err := s.admit(r, "saml_begin", ""); err != nil {
+func (s *samlService) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) {
+	if err := admitAuth(s.access, r, "saml_begin", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
 	input, err := parseFederatedBeginInput(r, kind, false)
@@ -87,7 +87,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
 	}
-	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+	return access.Serialize(s.access, r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
 		current, err := loadSAML(r.Context(), tx)
 		if err != nil {
 			return httpkit.Reply{}, false, err
@@ -122,11 +122,11 @@ func (s *Server) beginSAML(r *http.Request, kind string) (httpkit.Reply, error) 
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at) VALUES($1,$2,$3,$4,$5,$6)", flow.ID, s.access.Auth.Digest(secrets.SAMLStateDigest, state), s.access.Auth.Digest(secrets.SAMLCookieDigest, browser), c.ETag, request.ID, flow.Expires); err != nil {
 			return httpkit.Reply{}, false, err
 		}
-		return httpkit.Reply{Status: 200, Body: map[string]any{"authorization_url": destination.String()}, Cookies: []*http.Cookie{access.NewCookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, true, nil
+		return httpkit.Reply{Status: 200, Body: authorizationURLResponse{AuthorizationURL: destination.String()}, Cookies: []*http.Cookie{access.NewCookie("__Host-olp_saml_"+flow.ID, browser, samlFlowTTL, true)}}, true, nil
 	})
 }
 
-func (s *Server) readSAMLFlow(r *http.Request, q database.Queryer, state string) (samlFlow, []byte, *time.Time, error) {
+func (s *samlService) readSAMLFlow(r *http.Request, q database.Queryer, state string) (samlFlow, []byte, *time.Time, error) {
 	var f samlFlow
 	var digest []byte
 	var received *time.Time
@@ -149,8 +149,8 @@ func (s *Server) readSAMLFlow(r *http.Request, q database.Queryer, state string)
 	return f, digest, received, err
 }
 
-func (s *Server) samlACS(r *http.Request) (httpkit.Reply, error) {
-	if err := s.admit(r, "saml_callback", ""); err != nil {
+func (s *samlService) samlACS(r *http.Request) (httpkit.Reply, error) {
+	if err := admitAuth(s.access, r, "saml_callback", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if r.URL.RawQuery != "" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") || r.ParseForm() != nil || len(r.PostForm) != 2 || len(r.PostForm["SAMLResponse"]) != 1 || len(r.PostForm["RelayState"]) != 1 {
@@ -178,7 +178,7 @@ func (s *Server) samlACS(r *http.Request) (httpkit.Reply, error) {
 	return s.recordSAMLAssertion(r, c, flow, assertion, state)
 }
 
-func (s *Server) verifySAMLResponse(r *http.Request, c samlConfiguration, flow *samlFlow) (*saml.Assertion, error) {
+func (s *samlService) verifySAMLResponse(r *http.Request, c samlConfiguration, flow *samlFlow) (*saml.Assertion, error) {
 	sp, m, err := s.samlProvider(r, s.access.Pool, c)
 	if err != nil {
 		return nil, err
@@ -216,8 +216,8 @@ func (s *Server) verifySAMLResponse(r *http.Request, c samlConfiguration, flow *
 	return assertion, nil
 }
 
-func (s *Server) recordSAMLAssertion(r *http.Request, c samlConfiguration, flow samlFlow, assertion *saml.Assertion, state string) (httpkit.Reply, error) {
-	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+func (s *samlService) recordSAMLAssertion(r *http.Request, c samlConfiguration, flow samlFlow, assertion *saml.Assertion, state string) (httpkit.Reply, error) {
+	return access.Serialize(s.access, r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
 		current, err := loadSAML(r.Context(), tx)
 		if err != nil {
 			return httpkit.Reply{}, false, err
@@ -263,11 +263,11 @@ func (s *Server) recordSAMLAssertion(r *http.Request, c samlConfiguration, flow 
 	})
 }
 
-func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
+func (s *samlService) completeSAML(r *http.Request) (httpkit.Reply, error) {
 	if len(r.URL.Query()["state"]) != 1 {
 		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
-	return s.runFlowTx(r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+	return access.Serialize(s.access, r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
 		flow, digest, received, err := s.readSAMLFlow(r, tx, r.URL.Query().Get("state"))
 		if err != nil {
 			return httpkit.Reply{}, false, err
@@ -300,7 +300,7 @@ func (s *Server) completeSAML(r *http.Request) (httpkit.Reply, error) {
 	})
 }
 
-func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (httpkit.Reply, error) {
+func (s *samlService) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (httpkit.Reply, error) {
 	userID, identityID, p, err := s.resolveSAMLIdentity(r, tx, c, flow)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -332,7 +332,7 @@ func (s *Server) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration, flo
 	return response, nil
 }
 
-func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (string, string, authz.Principal, error) {
+func (s *samlService) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfiguration, flow samlFlow) (string, string, authz.Principal, error) {
 	var userID, identityID string
 	err := tx.QueryRow(r.Context(), "SELECT user_id::text,id::text FROM olp.saml_identities WHERE issuer=$1 AND subject=$2", c.EntityID, flow.Subject).Scan(&userID, &identityID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -340,7 +340,7 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 	}
 	var p authz.Principal
 	if flow.Kind != "login" {
-		p, err = s.authenticateFlowSession(r, tx, flow.UserID, flow.SessionID, "saml_session_changed", "Your browser session changed during sign-in.")
+		p, err = authenticateFlowSession(s.access, r, tx, flow.UserID, flow.SessionID, "saml_session_changed", "Your browser session changed during sign-in.")
 		if err != nil {
 			return "", "", authz.Principal{}, err
 		}
@@ -389,10 +389,10 @@ func (s *Server) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConfigura
 	return userID, identityID, p, nil
 }
 
-func (s *Server) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p authz.Principal, userID string) (httpkit.Reply, error) {
+func (s *samlService) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p authz.Principal, userID string) (httpkit.Reply, error) {
 	response := httpkit.Reply{Status: 303, Location: flow.ReturnTo}
 	if flow.Kind == "reauthenticate" {
-		grant, err := s.grantRecent(r, tx, p, flow.Purpose, flow.Resource, false)
+		grant, err := s.sessions.grantRecent(r, tx, p, flow.Purpose, flow.Resource, false)
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -408,7 +408,7 @@ func (s *Server) finishSAMLOutcome(r *http.Request, tx pgx.Tx, flow samlFlow, p 
 			return httpkit.Reply{}, err
 		}
 	}
-	session, err := s.newSession(r, tx, userID, sessionAuth{Method: "saml"})
+	session, err := s.sessions.newSession(r, tx, userID, sessionAuth{Method: "saml"})
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

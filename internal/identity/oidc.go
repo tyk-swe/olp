@@ -23,11 +23,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type roleMapping struct {
-	ClaimValue string `json:"claim_value"`
-	Role       string `json:"role"`
-}
-
 // Persist only the verified inputs needed to assess future sign-in eligibility.
 // These facts are private to authorization and are excluded from API responses.
 type oidcRoleClaims struct {
@@ -68,13 +63,30 @@ func loadOIDC(ctx context.Context, q database.Queryer) (oidcConfiguration, error
 	return c, err
 }
 
-func (s *Server) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *oidcService) register(mux *http.ServeMux) {
+	s.access.Public(mux, "GET /api/v1/oidc/login", s.beginOIDCLogin)
+	s.access.Public(mux, "POST /api/v1/oidc/login", s.beginOIDCLogin)
+	s.access.Public(mux, "GET /api/v1/oidc/callback", s.oidcCallback, access.CrossSiteNavigation())
+	routes := map[string]access.Handler{
+		"GET /api/v1/oidc/configuration":               s.oidcConfiguration,
+		"PUT /api/v1/oidc/configuration":               s.putOIDCConfiguration,
+		"POST /api/v1/oidc/link":                       s.beginOIDCLink,
+		"POST /api/v1/oidc/reauthenticate":             s.beginOIDCReauthentication,
+		"GET /api/v1/oidc/identities":                  s.oidcIdentities,
+		"DELETE /api/v1/oidc/identities/{identity_id}": s.unlinkOIDCIdentity,
+	}
+	for pattern, fn := range routes {
+		s.access.Route(mux, pattern, fn)
+	}
+}
+
+func (s *oidcService) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, err := loadOIDC(r.Context(), s.access.Pool)
 	c.DiscoveryBinding = ""
 	return httpkit.Detail(c, c.ETag), err
 }
 
-func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
+func (s *oidcService) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
 	if err := access.CheckIdentityURL(c.DiscoveryURL); err != nil {
 		return nil, nil, httpkit.Invalid("discovery_url", err.Error())
 	}
@@ -183,19 +195,8 @@ func normalizeOIDCConfigInput(input oidcConfigInput) (oidcConfiguration, error) 
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
 		return oidcConfiguration{}, httpkit.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
 	}
-	for field, mappings := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
-		if len(mappings) > 500 {
-			return oidcConfiguration{}, httpkit.Invalid("role_mappings", "Use at most 500 mappings.")
-		}
-		for i, m := range mappings {
-			duplicate := slices.ContainsFunc(mappings[:i], func(previous roleMapping) bool {
-				return previous.ClaimValue == m.ClaimValue ||
-					(field == "email_role_mappings" && strings.EqualFold(previous.ClaimValue, m.ClaimValue))
-			})
-			if !authz.ValidRole(m.Role) || httpkit.ValidText("claim_value", m.ClaimValue, 254) != nil || duplicate {
-				return oidcConfiguration{}, httpkit.Invalid("role_mappings", "Use unique claim values and valid roles.")
-			}
-		}
+	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "role_mappings", "role_mappings", "Use unique claim values and valid roles."); err != nil {
+		return oidcConfiguration{}, err
 	}
 	if input.ClientSecret != nil && len(*input.ClientSecret) > 4096 {
 		return oidcConfiguration{}, httpkit.Invalid("client_secret", "Use at most 4096 bytes.")
@@ -203,7 +204,7 @@ func normalizeOIDCConfigInput(input oidcConfigInput) (oidcConfiguration, error) 
 	return c, nil
 }
 
-func (s *Server) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, c *oidcConfiguration, old oidcConfiguration, secret string) error {
+func (s *oidcService) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, c *oidcConfiguration, old oidcConfiguration, secret string) error {
 	var previous []byte
 	var err error
 	if old.HasClientSecret {
@@ -228,7 +229,7 @@ func (s *Server) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, c *oidcCon
 	return err
 }
 
-func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *oidcService) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input oidcConfigInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err

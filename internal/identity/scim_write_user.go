@@ -182,7 +182,7 @@ func provisionSCIMUser(r *http.Request, tx pgx.Tx, id string, user parsedSCIMUse
 	return id, nil
 }
 
-func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Document, method string) (string, error) {
+func (s *scimService) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Document, method string) (string, error) {
 	if method != "POST" {
 		var management string
 		if err := tx.QueryRow(r.Context(), "SELECT role_management FROM olp.users WHERE id=$1 FOR UPDATE", id).Scan(&management); err != nil {

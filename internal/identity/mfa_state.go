@@ -47,7 +47,7 @@ func (u mfaUser) WebAuthnID() []byte                         { return []byte(u.I
 func (u mfaUser) WebAuthnName() string                       { return u.Email }
 func (u mfaUser) WebAuthnDisplayName() string                { return u.DisplayName }
 func (u mfaUser) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
-func (s *Server) webAuthn() (*webauthn.WebAuthn, error) {
+func (s *mfaService) webAuthn() (*webauthn.WebAuthn, error) {
 	origin, err := url.Parse(s.access.Origin)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (s *Server) webAuthn() (*webauthn.WebAuthn, error) {
 	return webauthn.New(&webauthn.Config{RPDisplayName: "OpenLLMProxy", RPID: origin.Hostname(), RPOrigins: []string{s.access.Origin}, AttestationPreference: protocol.PreferNoAttestation, AuthenticatorSelection: protocol.AuthenticatorSelection{UserVerification: protocol.VerificationRequired}})
 }
 
-func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, error) {
+func (s *mfaService) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, error) {
 	var user mfaUser
 	u, err := access.ScanUser(tx.QueryRow(ctx, "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1 AND active AND oidc_authorized", id))
 	if err != nil {
@@ -96,12 +96,6 @@ func (s *Server) mfaUser(ctx context.Context, tx pgx.Tx, id string) (mfaUser, er
 	return user, nil
 }
 
-func mfaConfigured(ctx context.Context, q database.Queryer, user string) (bool, error) {
-	var enabled bool
-	err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE user_id=$1)", user).Scan(&enabled)
-	return enabled, err
-}
-
 func ReadLocalMFARequired(ctx context.Context, q database.Queryer) (bool, error) {
 	var value string
 	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='auth.mfa_required'),'false')").Scan(&value); err != nil {
@@ -133,7 +127,7 @@ func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p authz.Principal, requ
 	return err
 }
 
-func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, time.Time, error) {
+func (s *mfaService) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, time.Time, error) {
 	// Bound transient state and delete its expired enrollment secrets together.
 	_, err := tx.Exec(r.Context(), `WITH expired AS(DELETE FROM olp.mfa_challenges WHERE expires_at<=clock_timestamp() OR (user_id=$1 AND id IN(SELECT id FROM olp.mfa_challenges WHERE user_id=$1 ORDER BY created_at DESC OFFSET 7)) RETURNING secret_id) DELETE FROM olp.secrets WHERE id IN(SELECT secret_id FROM expired) AND NOT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE mfa_factors.id=secrets.id)`, f.UserID)
 	if err != nil {
@@ -146,7 +140,7 @@ func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, ti
 	return token, until, err
 }
 
-func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow, error) {
+func (s *mfaService) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow, error) {
 	var f mfaFlow
 	if len(token) > 256 {
 		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
@@ -159,7 +153,7 @@ func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow,
 		return f, err
 	}
 	if f.SessionID == nil {
-		enabled, e := s.localLoginEnabled(r, tx)
+		enabled, e := isLocalLoginEnabled(r.Context(), s.access, tx)
 		if e != nil {
 			return f, e
 		}
@@ -176,7 +170,7 @@ func (s *Server) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaFlow,
 	return f, nil
 }
 
-func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string, session *string, data mfaFlowData) (httpkit.Reply, error) {
+func (s *mfaService) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string, session *string, data mfaFlowData) (httpkit.Reply, error) {
 	u, err := s.mfaUser(r.Context(), tx, userID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -214,7 +208,7 @@ func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string
 	return httpkit.Reply{Status: 202, Body: map[string]any{"challenge": token, "expires_at": until, "methods": methods, "enrollment_required": purpose == "bootstrap", "public_key": options, "webauthn_available": webErr == nil}}, nil
 }
 
-func (s *Server) localSession(r *http.Request, tx pgx.Tx, userID string) (httpkit.Reply, error) {
+func (s *mfaService) localSession(r *http.Request, tx pgx.Tx, userID string) (httpkit.Reply, error) {
 	enabled, err := mfaConfigured(r.Context(), tx, userID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -229,10 +223,10 @@ func (s *Server) localSession(r *http.Request, tx pgx.Tx, userID string) (httpki
 	if required {
 		return s.mfaChallenge(r, tx, userID, "bootstrap", nil, mfaFlowData{})
 	}
-	return s.newSession(r, tx, userID)
+	return s.sessions.newSession(r, tx, userID)
 }
 
-func (s *Server) replaceRecoveryCodes(ctx context.Context, tx pgx.Tx, userID string) ([]string, error) {
+func (s *mfaService) replaceRecoveryCodes(ctx context.Context, tx pgx.Tx, userID string) ([]string, error) {
 	if _, err := tx.Exec(ctx, "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1", userID); err != nil {
 		return nil, err
 	}

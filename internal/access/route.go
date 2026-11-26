@@ -209,7 +209,7 @@ func (s *Server) beginMutation(r *http.Request) (pgx.Tx, authz.Principal, error)
 	}
 	principal, err := s.Reauthorize(r, tx)
 	if err != nil {
-		tx.Rollback(r.Context())
+		tx.Rollback(context.WithoutCancel(r.Context()))
 		return nil, authz.Principal{}, err
 	}
 	return tx, principal, nil
