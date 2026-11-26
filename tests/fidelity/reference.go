@@ -157,7 +157,7 @@ func compare(want, got any, path string) error {
 		if !ok {
 			return mismatch("object type")
 		}
-		keys := make([]string, 0, len(w)+len(g))
+		keys := make([]string, 0, max(len(w), len(g)))
 		for k := range w {
 			keys = append(keys, k)
 		}

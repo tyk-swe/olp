@@ -15,6 +15,4 @@ runs:
         bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true
     - name: Install pinned coding clients
       shell: bash
-      run: |
-        scripts/qualification-clients.sh "$RUNNER_TEMP/qualification-clients"
-        printf '%s\n' "$RUNNER_TEMP/qualification-clients" >> "$GITHUB_PATH"
+      run: scripts/qualification-clients.sh "$RUNNER_TEMP/qualification-clients"

@@ -91,4 +91,4 @@ jobs:
           OLP_LIVE_QWEN_CN_MODEL: ${{ secrets.OLP_LIVE_QWEN_CN_MODEL }}
           OLP_LIVE_OPENCODE_GO_KEY: ${{ secrets.OLP_LIVE_OPENCODE_GO_KEY }}
           OLP_LIVE_OPENCODE_GO_MODEL: ${{ secrets.OLP_LIVE_OPENCODE_GO_MODEL }}
-        run: make qualify-code-live
+        run: PATH="$RUNNER_TEMP/qualification-clients:$PATH" make qualify-code-live

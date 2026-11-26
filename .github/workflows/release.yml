@@ -34,7 +34,7 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
       - uses: $/.github/actions/qualification-sandbox
-      - run: make qualify-code
+      - run: PATH="$RUNNER_TEMP/qualification-clients:$PATH" make qualify-code
   qualify-code-live:
     if: vars.OLP_LIVE_QUALIFICATION == 'required'
     needs: qualification
