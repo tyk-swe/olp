@@ -1,14 +1,34 @@
 package providers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 )
+
+func decodeJSONValue(t *testing.T, raw []byte) any {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		t.Fatalf("decode JSON %s: %v", raw, err)
+	}
+	return value
+}
+
+func assertJSONEqual(t *testing.T, got []byte, want string) {
+	t.Helper()
+	if !reflect.DeepEqual(decodeJSONValue(t, got), decodeJSONValue(t, []byte(want))) {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
 
 type unknownCredentialSource struct{}
 
@@ -107,10 +127,7 @@ func TestCredentialAndNetworkRepliesKeepWireContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := `{"id":"cred-1","version":1,"active":true,"draft_selected":true,"created_at":"2026-04-01T12:00:00Z","revoked_at":null,"external_reference":null,"grant":null}`
-		if string(encoded) != want {
-			t.Fatalf("got %s, want %s", encoded, want)
-		}
+		assertJSONEqual(t, encoded, `{"id":"cred-1","version":1,"active":true,"draft_selected":true,"created_at":"2026-04-01T12:00:00Z","revoked_at":null,"external_reference":null,"grant":null}`)
 	})
 
 	t.Run("grant credential encodes empty facts object and nullable timestamps", func(t *testing.T) {
@@ -128,10 +145,7 @@ func TestCredentialAndNetworkRepliesKeepWireContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := `{"id":"cred-2","version":2,"active":false,"draft_selected":false,"created_at":"2026-04-01T12:00:00Z","revoked_at":null,"external_reference":null,"grant":{"plugin_digest":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","principal":"acct-1","facts":{},"expires_at":null,"lapsed_at":null}}`
-		if string(encoded) != want {
-			t.Fatalf("got %s, want %s", encoded, want)
-		}
+		assertJSONEqual(t, encoded, `{"id":"cred-2","version":2,"active":false,"draft_selected":false,"created_at":"2026-04-01T12:00:00Z","revoked_at":null,"external_reference":null,"grant":{"plugin_digest":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","principal":"acct-1","facts":{},"expires_at":null,"lapsed_at":null}}`)
 	})
 
 	t.Run("network credential items and mutations match contract fields", func(t *testing.T) {
@@ -140,17 +154,13 @@ func TestCredentialAndNetworkRepliesKeepWireContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"id":"net-1","version":1,"created_at":"2026-04-01T12:00:00Z","revoked_at":null}`; string(itemJSON) != want {
-			t.Fatalf("item got %s, want %s", itemJSON, want)
-		}
+		assertJSONEqual(t, itemJSON, `{"id":"net-1","version":1,"created_at":"2026-04-01T12:00:00Z","revoked_at":null}`)
 
 		createdJSON, err := json.Marshal(networkCredentialMutation{ProviderID: "prov-1", CredentialID: "net-1", ETag: "etag-1"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"provider_id":"prov-1","credential_id":"net-1","etag":"etag-1"}`; string(createdJSON) != want {
-			t.Fatalf("created got %s, want %s", createdJSON, want)
-		}
+		assertJSONEqual(t, createdJSON, `{"provider_id":"prov-1","credential_id":"net-1","etag":"etag-1"}`)
 
 		revokedJSON, err := json.Marshal(revokedNetworkCredential{
 			ProviderID:        "prov-1",
@@ -161,8 +171,6 @@ func TestCredentialAndNetworkRepliesKeepWireContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"provider_id":"prov-1","credential_id":"net-1","etag":"etag-2","runtime_generation":{"id":"gen-1","sequence":7}}`; string(revokedJSON) != want {
-			t.Fatalf("revoked got %s, want %s", revokedJSON, want)
-		}
+		assertJSONEqual(t, revokedJSON, `{"provider_id":"prov-1","credential_id":"net-1","etag":"etag-2","runtime_generation":{"id":"gen-1","sequence":7}}`)
 	})
 }

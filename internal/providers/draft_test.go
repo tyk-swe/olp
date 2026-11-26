@@ -197,7 +197,5 @@ func TestNormalizeSlotRestrictionsDoesNotMutateInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal normalized restrictions: %v", err)
 	}
-	if want := `{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`; string(raw) != want {
-		t.Fatalf("marshaled restrictions = %s, want %s", raw, want)
-	}
+	assertJSONEqual(t, raw, `{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`)
 }
