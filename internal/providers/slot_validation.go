@@ -11,12 +11,84 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
+type slotValidationInput struct {
+	provider *record
+	slot     *slotRow
+	models   []storedModel
+}
+
+type slotValidationSnapshot struct {
+	slotValidationInput
+	credential []byte
+	reference  *secretstore.Reference
+}
+
+func (s *slotService) prepareSlotValidation(ctx context.Context, p authz.Principal, id, slotID string) (slotValidationInput, []byte, error) {
+	snapshot, err := readTx(ctx, s.access.Pool, func(tx pgx.Tx) (slotValidationSnapshot, error) {
+		current, err := readProvider(ctx, tx, id)
+		if err != nil {
+			return slotValidationSnapshot{}, err
+		}
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return slotValidationSnapshot{}, err
+		}
+		slots, err := loadSlots(ctx, tx, id)
+		if err != nil {
+			return slotValidationSnapshot{}, err
+		}
+		slot := findSlot(slots, slotID)
+		if slot == nil {
+			return slotValidationSnapshot{}, pgx.ErrNoRows
+		}
+		models, err := enabledModels(ctx, tx, id)
+		if err != nil {
+			return slotValidationSnapshot{}, err
+		}
+		var local []byte
+		var ref *secretstore.Reference
+		if cfg := current.Connection.Document(); cfg.CredentialRequired() {
+			if slot.CredentialID == nil {
+				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_required", "This slot has no credential to validate.")
+			}
+			if slot.CredentialRevoked {
+				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_revoked", "This slot references a revoked credential.")
+			}
+			if slot.CredentialLapsed {
+				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
+			}
+			if err = slot.credentialFits(cfg); err != nil {
+				return slotValidationSnapshot{}, err
+			}
+			local, ref, err = s.credentials.readLocalOrRef(ctx, tx, *slot.CredentialID)
+			if err != nil {
+				return slotValidationSnapshot{}, err
+			}
+		}
+		return slotValidationSnapshot{
+			slotValidationInput: slotValidationInput{provider: current, slot: slot, models: models},
+			credential:          local,
+			reference:           ref,
+		}, nil
+	})
+	if err != nil {
+		return slotValidationInput{}, nil, err
+	}
+	if snapshot.reference != nil {
+		credential, err := s.credentials.resolveReference(ctx, *snapshot.reference)
+		if err != nil {
+			return slotValidationInput{}, nil, err
+		}
+		return snapshot.slotValidationInput, credential, nil
+	}
+	return snapshot.slotValidationInput, snapshot.credential, nil
+}
+
 func (s *slotService) validateSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -25,59 +97,16 @@ func (s *slotService) validateSlot(r *http.Request, p authz.Principal) (httpkit.
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := a.Pool.Begin(r.Context())
+	input, credential, err := s.prepareSlotValidation(r.Context(), p, id, slotID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
-	current, err := readProvider(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	slots, err := loadSlots(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	slot := findSlot(slots, slotID)
-	if slot == nil {
-		return httpkit.Reply{}, pgx.ErrNoRows
-	}
-	models, err := enabledModels(r.Context(), tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var credential []byte
-	if current.Connection.Document().CredentialRequired() {
-		if slot.CredentialID == nil {
-			return httpkit.Reply{}, httpkit.Fail(422, "credential_required", "This slot has no credential to validate.")
-		}
-		if slot.CredentialRevoked {
-			return httpkit.Reply{}, httpkit.Fail(422, "credential_revoked", "This slot references a revoked credential.")
-		}
-		if slot.CredentialLapsed {
-			return httpkit.Reply{}, httpkit.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
-		}
-		if err = slot.credentialFits(current.Connection.Document()); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if err = tx.Rollback(r.Context()); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if current.Connection.Document().CredentialRequired() {
-		credential, err = s.credentials.readCredential(r.Context(), a.Pool, *slot.CredentialID)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		defer clear(credential)
-	}
+	defer clear(credential)
+	current, slot, models := input.provider, input.slot, input.models
 	probeErr := validateModelAccess(r.Context(), s.prober, current.target(credential), *slot, models)
 	// Probes run without mutation locks. Only save evidence if its complete
 	// input (credential, transport, restrictions, and models) is still current.
-	result, err := access.Transact(a, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
+	result, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

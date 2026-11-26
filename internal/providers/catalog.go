@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -17,17 +18,17 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// The reference catalog offers its facts beside a provider's models. Accepting
-// them stores operator facts tagged with the catalog's digest. That changes
-// the provider's configuration, so certified capabilities return to declared:
-// the catalog never certifies anything.
-
-func canonicalModel(metadata json.RawMessage) string {
+func canonicalModel(metadata json.RawMessage) (string, error) {
+	if len(bytes.TrimSpace(metadata)) == 0 {
+		return "", nil
+	}
 	var facts struct {
 		CanonicalModel string `json:"canonical_model"`
 	}
-	_ = json.Unmarshal(metadata, &facts)
-	return facts.CanonicalModel
+	if err := json.Unmarshal(metadata, &facts); err != nil {
+		return "", err
+	}
+	return facts.CanonicalModel, nil
 }
 
 type catalogSuggestion struct {
@@ -94,10 +95,15 @@ func sameFact(a, b json.RawMessage) bool {
 
 // Overwriting the source of a privacy declaration would make the catalog look
 // like its evidence.
-func privacyEvidence(stored json.RawMessage) bool {
+func privacyEvidence(stored json.RawMessage) (bool, error) {
+	if len(bytes.TrimSpace(stored)) == 0 {
+		return false, nil
+	}
 	var facts routing.ModelMetadata
-	_ = json.Unmarshal(stored, &facts)
-	return facts.DataCollection != nil || facts.ZeroDataRetention != nil
+	if err := json.Unmarshal(stored, &facts); err != nil {
+		return false, err
+	}
+	return facts.DataCollection != nil || facts.ZeroDataRetention != nil, nil
 }
 
 func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
@@ -105,7 +111,11 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 	out := []catalogSuggestion{}
 	for _, model := range models {
 		stored := cfg.Options.Models[model.UpstreamModel]
-		match, matchedBy, ok := signed.Lookup(vendorID, model.UpstreamModel, canonicalModel(stored))
+		canonical, err := canonicalModel(stored)
+		if err != nil {
+			return nil, err
+		}
+		match, matchedBy, ok := signed.Lookup(vendorID, model.UpstreamModel, canonical)
 		if !ok {
 			continue
 		}
@@ -114,14 +124,26 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 		if err != nil {
 			return nil, err
 		}
-		suggestion := catalogSuggestion{ModelID: model.ID, UpstreamModel: model.UpstreamModel, CatalogModel: match.ID, MatchedBy: string(matchedBy),
-			Facts: facts, Changes: changes, Capabilities: match.Capabilities, Lifecycle: match.Lifecycle.View()}
-		if privacyEvidence(stored) {
-			suggestion.Conflict = new("privacy_evidence")
+		hasPrivacy, err := privacyEvidence(stored)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, suggestion)
+		var conflict *string
+		if hasPrivacy {
+			conflict = new("privacy_evidence")
+		}
+		out = append(out, catalogSuggestion{
+			ModelID: model.ID, UpstreamModel: model.UpstreamModel, CatalogModel: match.ID, MatchedBy: string(matchedBy),
+			Facts: facts, Changes: changes, Capabilities: match.Capabilities, Lifecycle: match.Lifecycle.View(), Conflict: conflict,
+		})
 	}
 	return out, nil
+}
+
+type catalogSuggestionsReply struct {
+	Catalog  catalog.Summary     `json:"catalog"`
+	VendorID string              `json:"vendor_id"`
+	Items    []catalogSuggestion `json:"items"`
 }
 
 func (s *modelService) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -144,7 +166,11 @@ func (s *modelService) catalogSuggestions(r *http.Request, p authz.Principal) (h
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
+	return httpkit.OK(catalogSuggestionsReply{
+		Catalog:  s.catalog.Summary(),
+		VendorID: providerconfig.Value(current.Connection.Document().Options.VendorID),
+		Items:    items,
+	}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -156,7 +182,7 @@ type acceptCatalogRequest struct {
 // acceptance cannot store facts nobody saw.
 func (s *modelService) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input acceptCatalogRequest
-	if err := httpkit.Decode(r, &input); err != nil {
+	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if s.catalog == nil {

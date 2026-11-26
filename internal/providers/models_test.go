@@ -1,11 +1,15 @@
 package providers
 
 import (
+	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
 func TestCertificationSelectsOnlyEligibleSlots(t *testing.T) {
@@ -62,6 +66,63 @@ func TestCertificationSelectsOnlyEligibleSlots(t *testing.T) {
 			}
 			if got.ID != test.want {
 				t.Fatalf("selected slot %q, want %q", got.ID, test.want)
+			}
+		})
+	}
+}
+
+func TestProbeReplyPreservesNullDiscoveredModelsOnFailure(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	cases := map[string]struct {
+		models             []probe.DiscoveredModel
+		err                error
+		wantSucceeded      bool
+		wantDiscoveredJSON string
+	}{
+		"failure encodes explicit null": {
+			err:                errors.New("upstream unavailable"),
+			wantSucceeded:      false,
+			wantDiscoveredJSON: "null",
+		},
+		"empty discovery encodes zero": {
+			models:             []probe.DiscoveredModel{},
+			wantSucceeded:      true,
+			wantDiscoveredJSON: "0",
+		},
+		"non-empty discovery encodes count": {
+			models:             []probe.DiscoveredModel{{Name: "a"}, {Name: "b"}},
+			wantSucceeded:      true,
+			wantDiscoveredJSON: "2",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			succeeded, discovered, detail := probeOutcome(tc.models, tc.err)
+			if succeeded != tc.wantSucceeded {
+				t.Fatalf("succeeded = %v, want %v", succeeded, tc.wantSucceeded)
+			}
+			encoded, err := json.Marshal(probeReply{
+				ProviderID:       "018f1f77-9823-7b8a-b847-3658e91e4d01",
+				Succeeded:        succeeded,
+				CheckedAt:        at,
+				ProbeType:        "models",
+				Detail:           detail,
+				DiscoveredModels: discovered,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatal(err)
+			}
+			got, present := fields["discovered_models"]
+			if !present || string(got) != tc.wantDiscoveredJSON {
+				t.Fatalf("discovered_models present=%v value=%q, want %q (json: %s)", present, string(got), tc.wantDiscoveredJSON, string(encoded))
 			}
 		})
 	}

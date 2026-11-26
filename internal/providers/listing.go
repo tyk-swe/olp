@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -170,51 +171,79 @@ func errListingUnsupported() error {
 	return httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
 }
 
-func (s *modelService) publishedListingTarget(ctx context.Context, current *record) (probe.Target, *revisionRow, listingScope, error) {
-	if current.State != stateActive || current.ActiveRevisionID == nil {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "no_active_revision", "Activate a revision before comparing its published inventory with the upstream listing.")
-	}
-	revision, err := loadRevision(ctx, s.access.Pool, current.ID, *current.ActiveRevisionID)
-	if err != nil {
-		return probe.Target{}, nil, listingScope{}, err
-	}
-	cfg := revision.Configuration
-	contract, known := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID))
-	if (known && !contract.Discovery) || cfg.Kind != connectors.KindAnthropic || cfg.AuthMode != connectors.AuthAPIKey || cfg.CredentialSource == "caller" {
-		return probe.Target{}, nil, listingScope{}, errListingUnsupported()
-	}
-	var enabled []routing.RevisionSlot
-	for _, slot := range revision.Slots {
-		if slot.Enabled {
-			enabled = append(enabled, slot)
+type listingSnapshot struct {
+	revision   *revisionRow
+	cfg        connection.Configuration
+	scope      listingScope
+	credential []byte
+	reference  *secretstore.Reference
+}
+
+func (s *modelService) publishedListingTarget(ctx context.Context, p authz.Principal, id string) (probe.Target, *revisionRow, listingScope, error) {
+	snapshot, err := readTx(ctx, s.access.Pool, func(tx pgx.Tx) (listingSnapshot, error) {
+		current, err := visibleProvider(ctx, tx, p, id)
+		if err != nil {
+			return listingSnapshot{}, err
 		}
-	}
-	if len(enabled) != 1 || enabled[0].CredentialID == nil || enabled[0].CredentialVersion == nil {
-		return probe.Target{}, nil, listingScope{}, errListingUnsupported()
-	}
-	slot := enabled[0]
-	var version int
-	var revoked bool
-	if err := s.access.Pool.QueryRow(ctx, "SELECT version,revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2", *slot.CredentialID, current.ID).Scan(&version, &revoked); err != nil {
-		return probe.Target{}, nil, listingScope{}, err
-	}
-	if revoked {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "credential_revoked", "The published credential version was revoked, so its listing cannot be compared.")
-	}
-	if version != *slot.CredentialVersion {
-		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "credential_mismatch", "The published credential version no longer matches the stored credential.")
-	}
-	credential, err := s.credentials.readCredential(ctx, s.access.Pool, *slot.CredentialID)
+		if err := p.Project(current.ProjectID, authz.Change); err != nil {
+			return listingSnapshot{}, err
+		}
+		if current.State != stateActive || current.ActiveRevisionID == nil {
+			return listingSnapshot{}, httpkit.Fail(422, "no_active_revision", "Activate a revision before comparing its published inventory with the upstream listing.")
+		}
+		revision, err := loadRevision(ctx, tx, current.ID, *current.ActiveRevisionID)
+		if err != nil {
+			return listingSnapshot{}, err
+		}
+		cfg := revision.Configuration
+		contract, known := vendors.Lookup(providerconfig.Value(cfg.Options.VendorID))
+		if (known && !contract.Discovery) || cfg.Kind != connectors.KindAnthropic || cfg.AuthMode != connectors.AuthAPIKey || cfg.CredentialSource == "caller" {
+			return listingSnapshot{}, errListingUnsupported()
+		}
+		var enabled []routing.RevisionSlot
+		for _, slot := range revision.Slots {
+			if slot.Enabled {
+				enabled = append(enabled, slot)
+			}
+		}
+		if len(enabled) != 1 || enabled[0].CredentialID == nil || enabled[0].CredentialVersion == nil {
+			return listingSnapshot{}, errListingUnsupported()
+		}
+		slot := enabled[0]
+		var version int
+		var revoked bool
+		if err := tx.QueryRow(ctx, "SELECT version,revoked_at IS NOT NULL FROM olp.provider_credentials WHERE id=$1 AND provider_id=$2", *slot.CredentialID, current.ID).Scan(&version, &revoked); err != nil {
+			return listingSnapshot{}, err
+		}
+		if revoked {
+			return listingSnapshot{}, httpkit.Fail(422, "credential_revoked", "The published credential version was revoked, so its listing cannot be compared.")
+		}
+		if version != *slot.CredentialVersion {
+			return listingSnapshot{}, httpkit.Fail(422, "credential_mismatch", "The published credential version no longer matches the stored credential.")
+		}
+		local, ref, err := s.credentials.readLocalOrRef(ctx, tx, *slot.CredentialID)
+		if err != nil {
+			return listingSnapshot{}, err
+		}
+		scope := listingScope{
+			endpoint:          providerconfig.Value(cfg.Endpoint),
+			apiVersion:        providerconfig.Value(cfg.APIVersion),
+			credentialID:      *slot.CredentialID,
+			credentialVersion: *slot.CredentialVersion,
+		}
+		return listingSnapshot{revision: revision, cfg: cfg, scope: scope, credential: local, reference: ref}, nil
+	})
 	if err != nil {
 		return probe.Target{}, nil, listingScope{}, err
 	}
-	scope := listingScope{
-		endpoint:          providerconfig.Value(cfg.Endpoint),
-		apiVersion:        providerconfig.Value(cfg.APIVersion),
-		credentialID:      *slot.CredentialID,
-		credentialVersion: *slot.CredentialVersion,
+	if snapshot.reference != nil {
+		credential, err := s.credentials.resolveReference(ctx, *snapshot.reference)
+		if err != nil {
+			return probe.Target{}, nil, listingScope{}, err
+		}
+		return probe.Target{ProviderID: id, Connection: connection.Stored(snapshot.cfg), Credential: credential}, snapshot.revision, snapshot.scope, nil
 	}
-	return probe.Target{ProviderID: current.ID, Connection: connection.Stored(cfg), Credential: credential}, revision, scope, nil
+	return probe.Target{ProviderID: id, Connection: connection.Stored(snapshot.cfg), Credential: snapshot.credential}, snapshot.revision, snapshot.scope, nil
 }
 
 func (s *modelService) publishedRoutesByModel(ctx context.Context, providerID string, p authz.Principal) (map[string][]listingRoute, error) {
@@ -237,14 +266,7 @@ func (s *modelService) compareListing(r *http.Request, p authz.Principal) (httpk
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	current, err := visibleProvider(r.Context(), s.access.Pool, p, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := p.Project(current.ProjectID, authz.Change); err != nil {
-		return httpkit.Reply{}, err
-	}
-	target, revision, scope, err := s.publishedListingTarget(r.Context(), current)
+	target, revision, scope, err := s.publishedListingTarget(r.Context(), p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

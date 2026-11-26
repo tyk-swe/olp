@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -34,10 +35,7 @@ func (s *modelService) models(r *http.Request, p authz.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	d, err := s.drafts.detail(r.Context(), s.access.Pool, id)
+	d, err := s.drafts.visibleDetail(r.Context(), s.access.Pool, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -93,8 +91,82 @@ func (s *modelService) setModel(r *http.Request, _ authz.Principal) (httpkit.Rep
 	})
 }
 
+type certificationInput struct {
+	provider *record
+	model    storedModel
+	slot     slotRow
+}
+
+type certificationSnapshot struct {
+	certificationInput
+	credential []byte
+	reference  *secretstore.Reference
+}
+
+func (s *modelService) prepareCertification(r *http.Request, p authz.Principal, id, modelID string) (certificationInput, []byte, error) {
+	snapshot, err := readTx(r.Context(), s.access.Pool, func(tx pgx.Tx) (certificationSnapshot, error) {
+		current, err := readProbeProvider(r, p, tx, id)
+		if err != nil {
+			return certificationSnapshot{}, err
+		}
+		m, err := readModel(r.Context(), tx, id, modelID)
+		if err != nil {
+			return certificationSnapshot{}, err
+		}
+		if len(m.Capabilities) == 0 {
+			return certificationSnapshot{}, httpkit.Fail(422, "no_capabilities", "Declare at least one capability before certifying.")
+		}
+		slots, err := loadSlots(r.Context(), tx, id)
+		if err != nil {
+			return certificationSnapshot{}, err
+		}
+		cfg := current.Connection.Document()
+		slot := selectProbeSlot(slots, cfg, &m)
+		if slot == nil {
+			return certificationSnapshot{}, httpkit.Fail(422, "credential_required", "Enable the model and configure an enabled credential slot that allows it before certifying.")
+		}
+		if err := checkSlotCredential(cfg, *slot); err != nil {
+			return certificationSnapshot{}, err
+		}
+		var local []byte
+		var ref *secretstore.Reference
+		if cfg.CredentialRequired() {
+			local, ref, err = s.credentials.readLocalOrRef(r.Context(), tx, *slot.CredentialID)
+			if err != nil {
+				return certificationSnapshot{}, err
+			}
+		}
+		return certificationSnapshot{
+			certificationInput: certificationInput{provider: current, model: m, slot: *slot},
+			credential:         local,
+			reference:          ref,
+		}, nil
+	})
+	if err != nil {
+		return certificationInput{}, nil, err
+	}
+	if snapshot.reference != nil {
+		credential, err := s.credentials.resolveReference(r.Context(), *snapshot.reference)
+		if err != nil {
+			return certificationInput{}, nil, err
+		}
+		return snapshot.certificationInput, credential, nil
+	}
+	return snapshot.certificationInput, snapshot.credential, nil
+}
+
+func certifyStatus(certified, total int) string {
+	switch {
+	case certified == 0:
+		return "failed"
+	case certified < total:
+		return "partial"
+	default:
+		return "certified"
+	}
+}
+
 func (s *modelService) certify(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -103,36 +175,16 @@ func (s *modelService) certify(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	current, err := readProbeProvider(r, p, a.Pool, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	m, err := readModel(r.Context(), a.Pool, id, modelID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if len(m.Capabilities) == 0 {
-		return httpkit.Reply{}, httpkit.Fail(422, "no_capabilities", "Declare at least one capability before certifying.")
-	}
-	slots, err := loadSlots(r.Context(), a.Pool, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	cfg := current.Connection.Document()
-	slot := selectProbeSlot(slots, cfg, &m)
-	if slot == nil {
-		return httpkit.Reply{}, httpkit.Fail(422, "credential_required", "Enable the model and configure an enabled credential slot that allows it before certifying.")
-	}
-	credential, err := s.credentials.probeCredential(r.Context(), a.Pool, cfg, *slot)
+	input, credential, err := s.prepareCertification(r, p, id, modelID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	defer clear(credential)
+	current, m, slot := input.provider, input.model, input.slot
+	cfg := current.Connection.Document()
 	target := current.target(credential)
 
 	at := time.Now().UTC()
-	// The route deadline gives each capability a probe budget; the last one
-	// stays reserved so the results are always recorded.
 	probeCtx, cancel := probe.Budget(r.Context())
 	defer cancel()
 	fingerprint := slot.credentialFingerprint(cfg)
@@ -142,15 +194,9 @@ func (s *modelService) certify(r *http.Request, p authz.Principal) (httpkit.Repl
 		capabilities[i], results[i] = s.certifyCapability(probeCtx, target, m.UpstreamModel, c.Capability, fingerprint, at)
 	}
 	certified := countCertified(results)
-	status := "certified"
-	switch {
-	case certified == 0:
-		status = "failed"
-	case certified < len(m.Capabilities):
-		status = "partial"
-	}
+	status := certifyStatus(certified, len(m.Capabilities))
 	reply, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "certification"), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
-		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), *slot, certified, at)
+		etag, err := s.storeCertification(r.Context(), tx, current, m.withCapabilities(capabilities), slot, certified, at)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -158,7 +204,7 @@ func (s *modelService) certify(r *http.Request, p authz.Principal) (httpkit.Repl
 		return httpkit.Detail(certifyReply{ProviderID: id, ModelID: modelID, Status: status, CheckedAt: at, CertifiedCount: certified, AttemptedCount: len(results), Results: results}, etag), event, nil
 	})
 	if err == nil && certified == len(m.Capabilities) {
-		clearValidatedCooldowns(r.Context(), s.quota, s.log, id, *slot)
+		clearValidatedCooldowns(r.Context(), s.quota, s.log, id, slot)
 	}
 	return reply, err
 }
@@ -190,7 +236,10 @@ func (s *modelService) setDraftModel(ctx context.Context, tx pgx.Tx, current *re
 			capabilities = append(capabilities, storedCapability{Capability: connection.Capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode}, Source: "declared"})
 		}
 	}
-	encoded, _ := json.Marshal(capabilities)
+	encoded, err := json.Marshal(capabilities)
+	if err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "UPDATE olp.provider_models SET enabled=$3,capabilities=$4 WHERE provider_id=$1 AND id=$2", current.ID, modelID, input.Enabled, encoded); err != nil {
 		return err
 	}
@@ -227,7 +276,8 @@ func (s *modelService) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, cur
 	if err != nil {
 		return err
 	}
-	if _, err = s.drafts.storeDraftConfiguration(ctx, tx, current.ID, current.Name, prepared); err != nil {
+	changed, err := s.drafts.storeDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
+	if err != nil {
 		return err
 	}
 	if upstream {
@@ -235,8 +285,11 @@ func (s *modelService) storeDiscoveredModels(ctx context.Context, tx pgx.Tx, cur
 			return err
 		}
 	}
-	_, err = touch(ctx, tx, current.ID)
-	return err
+	if !changed {
+		_, err = touch(ctx, tx, current.ID)
+		return err
+	}
+	return nil
 }
 
 type certifyReply struct {

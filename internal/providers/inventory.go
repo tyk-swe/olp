@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,14 +14,24 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 )
 
+type providerKindsReply struct {
+	Items []connection.ListedKind `json:"items"`
+}
+
+type kindCapabilitiesReply struct {
+	ProviderKind connectors.Kind         `json:"provider_kind"`
+	Capabilities []connection.Capability `json:"capabilities"`
+}
+
 func (s *inventoryService) kinds(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	return httpkit.OK(map[string]any{"items": connection.Kinds()}), nil
+	return httpkit.OK(providerKindsReply{Items: connection.Kinds()}), nil
 }
 
 func (s *inventoryService) kindCapabilities(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -28,7 +39,7 @@ func (s *inventoryService) kindCapabilities(r *http.Request, _ authz.Principal) 
 	if _, ok := connection.LookupKind(kind); !ok {
 		return httpkit.Reply{}, httpkit.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return httpkit.OK(map[string]any{"provider_kind": kind, "capabilities": probe.OptionsForKind(kind)}), nil
+	return httpkit.OK(kindCapabilitiesReply{ProviderKind: kind, Capabilities: probe.OptionsForKind(kind)}), nil
 }
 
 func (s *inventoryService) listVendors(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -91,8 +102,12 @@ func (s *inventoryService) inventory(r *http.Request, principal authz.Principal)
 		if err != nil {
 			return inventoryItem{}, err
 		}
+		canonical, err := canonicalModel(metadata)
+		if err != nil {
+			return inventoryItem{}, err
+		}
 		item.Metadata, item.Model = facts, m.reply()
-		item.Lifecycle = s.catalog.Lifecycle(cmp.Or(vendorID, vendors.DefaultFor(item.ProviderKind)), m.UpstreamModel, canonicalModel(metadata))
+		item.Lifecycle = s.catalog.Lifecycle(cmp.Or(vendorID, vendors.DefaultFor(item.ProviderKind)), m.UpstreamModel, canonical)
 		return item, nil
 	})
 	if err != nil {
@@ -111,20 +126,53 @@ type inventoryItem struct {
 	ProviderName string                     `json:"provider_name"`
 }
 
-// generations lists installation-wide runtime releases, which span every
-// project and name their publishers, so it requires installation reach.
+type providerProfilesReply struct {
+	Items []connectors.Profile `json:"items"`
+}
+
 func (s *inventoryService) profiles(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	pluginProfiles, err := plugins.Profiles(r.Context(), s.access.Pool, s.unconfined)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.OK(map[string]any{"items": append(connectors.Profiles(), pluginProfiles...)}), nil
+	return httpkit.OK(providerProfilesReply{Items: ptr.NonNil(slices.Concat(connectors.Profiles(), pluginProfiles))}), nil
+}
+
+type operationDialectReply struct {
+	ID                string          `json:"id"`
+	Revision          string          `json:"revision"`
+	Operation         string          `json:"operation"`
+	OperationRevision string          `json:"operation_revision"`
+	Surface           string          `json:"surface"`
+	Mode              string          `json:"mode"`
+	Label             string          `json:"label"`
+	RequestSchema     json.RawMessage `json:"request_schema"`
+	ResultSchema      json.RawMessage `json:"result_schema"`
+	Documentation     string          `json:"documentation"`
+	Evidence          string          `json:"evidence"`
+}
+
+type operationDialectsReply struct {
+	Items []operationDialectReply `json:"items"`
 }
 
 func (s *inventoryService) operationDialects(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	items := []map[string]any{}
-	for _, d := range operationregistry.Catalog().Dialects() {
-		items = append(items, map[string]any{"id": d.Identity.ID, "revision": d.Identity.Revision, "operation": d.Operation.ID, "operation_revision": d.Operation.Revision, "surface": d.Surface, "mode": "unary", "label": d.Label, "request_schema": d.RequestSchema, "result_schema": d.ResultSchema, "documentation": d.Documentation, "evidence": d.Evidence})
+	dialects := operationregistry.Catalog().Dialects()
+	items := make([]operationDialectReply, len(dialects))
+	for i, d := range dialects {
+		items[i] = operationDialectReply{
+			ID:                d.Identity.ID,
+			Revision:          d.Identity.Revision,
+			Operation:         d.Operation.ID,
+			OperationRevision: d.Operation.Revision,
+			Surface:           d.Surface,
+			Mode:              "unary",
+			Label:             d.Label,
+			RequestSchema:     d.RequestSchema,
+			ResultSchema:      d.ResultSchema,
+			Documentation:     d.Documentation,
+			Evidence:          d.Evidence,
+		}
 	}
-	return httpkit.OK(map[string]any{"items": items}), nil
+	return httpkit.OK(operationDialectsReply{Items: items}), nil
 }

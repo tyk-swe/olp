@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -12,36 +13,69 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// The project scope is decided first, so a provider outside it answers 404
-// before its precondition or credential is consulted.
+type preparedProbe struct {
+	provider   *record
+	slot       *slotRow
+	models     []string
+	credential []byte
+	reference  *secretstore.Reference
+}
+
+// Project scope is checked first so a provider outside it answers 404 before
+// its precondition or credential is consulted.
 func (s *modelService) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, *slotRow, error) {
-	tx, err := s.access.Pool.Begin(r.Context())
+	snapshot, err := readTx(r.Context(), s.access.Pool, func(tx pgx.Tx) (preparedProbe, error) {
+		current, err := readProbeProvider(r, p, tx, id)
+		if err != nil {
+			return preparedProbe{}, err
+		}
+		slots, err := loadSlots(r.Context(), tx, current.ID)
+		if err != nil {
+			return preparedProbe{}, err
+		}
+		cfg := current.Connection.Document()
+		slot := selectProbeSlot(slots, cfg, nil)
+		if slot == nil {
+			return preparedProbe{}, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+		}
+		if err := checkSlotCredential(cfg, *slot); err != nil {
+			return preparedProbe{}, err
+		}
+		rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
+		if err != nil {
+			return preparedProbe{}, err
+		}
+		models, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return preparedProbe{}, err
+		}
+		var local []byte
+		var ref *secretstore.Reference
+		if cfg.CredentialRequired() {
+			local, ref, err = s.credentials.readLocalOrRef(r.Context(), tx, *slot.CredentialID)
+			if err != nil {
+				return preparedProbe{}, err
+			}
+		}
+		return preparedProbe{provider: current, slot: slot, models: models, credential: local, reference: ref}, nil
+	})
 	if err != nil {
 		return nil, probe.Target{}, nil, err
 	}
-	defer tx.Rollback(r.Context())
-	current, err := readProbeProvider(r, p, tx, id)
-	if err != nil {
-		return nil, probe.Target{}, nil, err
+	if snapshot.reference != nil {
+		credential, err := s.credentials.resolveReference(r.Context(), *snapshot.reference)
+		if err != nil {
+			return nil, probe.Target{}, nil, err
+		}
+		return snapshot.provider, snapshot.provider.target(credential, snapshot.models...), snapshot.slot, nil
 	}
-	credential, slot, err := s.credentials.credentialSlotFor(r.Context(), tx, current)
-	if err != nil {
-		return nil, probe.Target{}, nil, err
-	}
-	rows, err := tx.Query(r.Context(), "SELECT upstream_model FROM olp.provider_models WHERE provider_id=$1 ORDER BY enabled DESC,upstream_model LIMIT 2000", id)
-	if err != nil {
-		return nil, probe.Target{}, nil, err
-	}
-	models, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, probe.Target{}, nil, err
-	}
-	return current, current.target(credential, models...), slot, nil
+	return snapshot.provider, snapshot.provider.target(snapshot.credential, snapshot.models...), snapshot.slot, nil
 }
 
 func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, id string) (*record, error) {
@@ -55,6 +89,22 @@ func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, i
 	return current, httpkit.Match(r, current.ETag)
 }
 
+type probeReply struct {
+	ProviderID       string    `json:"provider_id"`
+	Succeeded        bool      `json:"succeeded"`
+	CheckedAt        time.Time `json:"checked_at"`
+	ProbeType        string    `json:"probe_type"`
+	Detail           string    `json:"detail"`
+	DiscoveredModels *int      `json:"discovered_models"`
+}
+
+func probeOutcome(models []probe.DiscoveredModel, err error) (bool, *int, string) {
+	if err != nil {
+		return false, nil, probe.Classify(err).Detail
+	}
+	return true, new(len(models)), fmt.Sprintf("Reached the upstream; %d models listed.", len(models))
+}
+
 func (s *modelService) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -64,21 +114,21 @@ func (s *modelService) probe(r *http.Request, p authz.Principal) (httpkit.Reply,
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	defer clear(target.Credential)
 	at := time.Now().UTC()
 	models, err := s.prober.ListModelFacts(r.Context(), target)
-	var discovered any
-	succeeded := err == nil
-	var detail string
-	if succeeded {
-		discovered = len(models)
-		detail = fmt.Sprintf("Reached the upstream; %d models listed.", len(models))
-	} else {
-		detail = probe.Classify(err).Detail
-	}
+	succeeded, discovered, detail := probeOutcome(models, err)
 	if err = s.recordProbe(r, "provider.probe", id, at, succeeded, detail); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.Detail(map[string]any{"provider_id": id, "succeeded": succeeded, "checked_at": at, "probe_type": "models", "detail": detail, "discovered_models": discovered}, current.ETag), nil
+	return httpkit.Detail(probeReply{
+		ProviderID:       id,
+		Succeeded:        succeeded,
+		CheckedAt:        at,
+		ProbeType:        "models",
+		Detail:           detail,
+		DiscoveredModels: discovered,
+	}, current.ETag), nil
 }
 
 // The upstream call ran without the installation lock, so authority and
@@ -125,21 +175,20 @@ func (s *modelService) discover(r *http.Request, p authz.Principal) (httpkit.Rep
 		if err = connection.ValidModelName("models.upstream_model", m.UpstreamModel); err != nil {
 			return httpkit.Reply{}, err
 		}
-		if m.DisplayName == "" {
-			m.DisplayName = m.UpstreamModel
-		}
-		if err = connection.ValidModelName("models.display_name", m.DisplayName); err != nil {
+		displayName := cmp.Or(m.DisplayName, m.UpstreamModel)
+		if err = connection.ValidModelName("models.display_name", displayName); err != nil {
 			return httpkit.Reply{}, err
 		}
 		if !seen[m.UpstreamModel] {
 			seen[m.UpstreamModel] = true
-			models = append(models, probe.DiscoveredModel{Name: m.UpstreamModel, Display: m.DisplayName})
+			models = append(models, probe.DiscoveredModel{Name: m.UpstreamModel, Display: displayName})
 		}
 	}
 	current, target, slot, err := s.prepare(r, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	defer clear(target.Credential)
 	upstream := len(models) == 0
 	at := time.Now().UTC()
 	var listing *routing.RevisionListing
