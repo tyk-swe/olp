@@ -20,7 +20,6 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
-	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
 )
@@ -397,46 +396,6 @@ func (s *credentialService) readLocalOrRef(ctx context.Context, q database.Query
 	}
 	secret, err := s.access.Keys.Read(ctx, q, s.access.Installation, id, secrets.ProviderCredential)
 	return secret, nil, err
-}
-
-func (s *credentialService) readCredential(ctx context.Context, q database.Queryer, id string) ([]byte, error) {
-	local, reference, err := s.readLocalOrRef(ctx, q, id)
-	if err != nil {
-		return nil, err
-	}
-	if reference != nil {
-		return s.resolveReference(ctx, *reference)
-	}
-	return local, nil
-}
-
-func (s *credentialService) credentialFor(ctx context.Context, q database.Queryer, p *record) ([]byte, error) {
-	credential, _, err := s.credentialSlotFor(ctx, q, p)
-	return credential, err
-}
-
-func (s *credentialService) credentialSlotFor(ctx context.Context, q database.Queryer, p *record) ([]byte, *slotRow, error) {
-	slots, err := loadSlots(ctx, q, p.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	cfg := p.Connection.Document()
-	slot := selectProbeSlot(slots, cfg, nil)
-	if slot == nil {
-		return nil, nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
-	}
-	credential, err := s.probeCredential(ctx, q, cfg, *slot)
-	return credential, slot, err
-}
-
-func (s *credentialService) probeCredential(ctx context.Context, q database.Queryer, cfg connection.Configuration, slot slotRow) ([]byte, error) {
-	if err := checkSlotCredential(cfg, slot); err != nil {
-		return nil, err
-	}
-	if !cfg.CredentialRequired() {
-		return nil, nil
-	}
-	return s.readCredential(ctx, q, *slot.CredentialID)
 }
 
 // The caller owns authorization and the transaction.
