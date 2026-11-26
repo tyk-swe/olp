@@ -11,12 +11,12 @@ import (
 )
 
 func email(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	a, err := mail.ParseAddress(value)
-	if err != nil || a.Address != value || len(value) > 254 {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	a, err := mail.ParseAddress(normalized)
+	if err != nil || a.Address != normalized || len(normalized) > 254 {
 		return "", httpkit.Invalid("email", "Enter a valid email address.")
 	}
-	return value, nil
+	return normalized, nil
 }
 
 func password(value string) error {
@@ -47,4 +47,17 @@ func safeReturn(value string) bool {
 	base := url.URL{Scheme: "https", Host: "console.invalid", Path: "/"}
 	destination := base.ResolveReference(path)
 	return destination.Scheme == base.Scheme && destination.Host == base.Host && destination.User == nil
+}
+
+func validatePurpose(purpose, resource string) error {
+	switch purpose {
+	case "password_enrollment", "oidc_link", "saml_link", "plugin_permit", "mfa_manage":
+		if resource == "" {
+			return nil
+		}
+	case "oidc_unlink", "saml_unlink", "agent_delegation":
+		_, err := httpkit.ParseUUID(resource)
+		return err
+	}
+	return httpkit.Invalid("purpose", "Use a supported security purpose and its required resource ID.")
 }

@@ -1,7 +1,6 @@
 package identity
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +13,50 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
+
+type sessionUser struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	AccessScope string `json:"access_scope"`
+}
+
+type sessionResponse struct {
+	User       sessionUser `json:"user"`
+	SessionID  string      `json:"session_id"`
+	CSRFToken  string      `json:"csrf_token"`
+	Operations []string    `json:"operations"`
+}
+
+type sessionSummary struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	Current     bool      `json:"current"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	BrowserHint string    `json:"browser_hint"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type projectOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type profileResponse struct {
+	ID          string          `json:"id"`
+	Email       string          `json:"email"`
+	DisplayName string          `json:"display_name"`
+	Role        string          `json:"role"`
+	Active      bool            `json:"active"`
+	AccessScope string          `json:"access_scope"`
+	ETag        string          `json:"etag"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Projects    []projectOption `json:"projects"`
+}
 
 func (s *sessionService) register(mux *http.ServeMux) {
 	routes := map[string]access.Handler{
@@ -31,14 +74,26 @@ func (s *sessionService) register(mux *http.ServeMux) {
 	}
 }
 
-func (s *sessionService) sessionBody(r *http.Request, q database.Queryer, u authz.User, token string) (any, error) {
+func (s *sessionService) sessionBody(r *http.Request, q database.Queryer, u authz.User, token string) (sessionResponse, error) {
 	var sessionID string
 	err := q.QueryRow(r.Context(), "SELECT COALESCE((SELECT id::text FROM olp.sessions WHERE digest=$1),'')", s.access.Auth.Digest(secrets.SessionDigest, token)).Scan(&sessionID)
-	operations := []string{}
-	for _, op := range (authz.Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations() {
+	ops := (authz.Principal{User: u, Kind: "user", AllProjects: u.AccessScope == "global"}).Operations()
+	operations := make([]string, 0, len(ops))
+	for _, op := range ops {
 		operations = append(operations, op.String())
 	}
-	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "session_id": sessionID, "csrf_token": s.access.CSRF(token), "operations": operations}, err
+	return sessionResponse{
+		User: sessionUser{
+			ID:          u.ID,
+			Email:       u.Email,
+			DisplayName: u.DisplayName,
+			Role:        u.Role,
+			AccessScope: u.AccessScope,
+		},
+		SessionID:  sessionID,
+		CSRFToken:  s.access.CSRF(token),
+		Operations: operations,
+	}, err
 }
 
 func (s *sessionService) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...sessionAuth) (httpkit.Reply, error) {
@@ -51,7 +106,6 @@ func (s *sessionService) newSession(r *http.Request, tx pgx.Tx, userID string, a
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE expires_at<=now() LIMIT 100)"); err != nil {
 		return httpkit.Reply{}, err
 	}
-	// Bound active sessions per account without retaining expired credentials.
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -63,8 +117,18 @@ func (s *sessionService) newSession(r *http.Request, tx pgx.Tx, userID string, a
 		return httpkit.Reply{}, err
 	}
 	body, err := s.sessionBody(r, tx, u, token)
-	return httpkit.Reply{Status: 201, Body: body, CSRF: s.access.CSRF(token), Cookies: []*http.Cookie{access.NewCookie(access.SessionCookie, token, access.SessionTTL, true), access.NewCookie(access.CSRFCookie, s.access.CSRF(token), access.SessionTTL, false), access.ClearCookie(access.RecentCookie)}}, err
+	return httpkit.Reply{
+		Status: 201,
+		Body:   body,
+		CSRF:   s.access.CSRF(token),
+		Cookies: []*http.Cookie{
+			access.NewCookie(access.SessionCookie, token, access.SessionTTL, true),
+			access.NewCookie(access.CSRFCookie, s.access.CSRF(token), access.SessionTTL, false),
+			access.ClearCookie(access.RecentCookie),
+		},
+	}, err
 }
+
 func (s *sessionService) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, strength sessionAuth) (httpkit.Reply, error) {
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, ids.New()); err != nil {
 		return httpkit.Reply{}, err
@@ -78,82 +142,16 @@ func (s *sessionService) changeSignInMethod(r *http.Request, tx pgx.Tx, userID s
 	return s.newSession(r, tx, userID, strength)
 }
 
-func (s *accountService) login(r *http.Request) (httpkit.Reply, error) {
-	if s.access.LocalLoginDisabled() {
-		return httpkit.Reply{}, httpkit.Fail(404, "local_login_disabled", "Password-based local sign-in is disabled for this installation.")
-	}
-	var input struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := httpkit.Decode(r, &input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
-	if err := admitAuth(s.access, r, "login", input.Email); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var id string
-	var hash *string
-	err := s.access.Pool.QueryRow(r.Context(), "SELECT id::text,password_hash FROM olp.users WHERE email=$1 AND active AND oidc_authorized", input.Email).Scan(&id, &hash)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, err
-	}
-	encoded := s.passwords.dummyHash
-	if hash != nil {
-		encoded = *hash
-	}
-	var valid bool
-	if err = s.passwords.run(r, func() { valid = secrets.VerifyPassword(input.Password, encoded) }); err != nil {
-		return httpkit.Reply{}, err
-	}
-	tx, err := s.access.Begin(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer tx.Rollback(r.Context())
-	local, err := isLocalLoginEnabled(r.Context(), s.access, tx)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var current bool
-	if id != "" {
-		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1 AND active AND oidc_authorized AND password_hash=$2)", id, encoded).Scan(&current); err != nil {
-			return httpkit.Reply{}, err
-		}
-	}
-	if !valid || !current || !local {
-		if err = access.Audit(r.Context(), tx, r, authz.System, "session.login", "session", "", "failure"); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if err = tx.Commit(r.Context()); err != nil {
-			return httpkit.Reply{}, err
-		}
-		return httpkit.Reply{}, httpkit.Fail(401, "invalid_credentials", "Email or password is invalid, or local sign-in is unavailable.")
-	}
-	response, err := s.mfa.localSession(r, tx, id)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	action := "session.login"
-	if response.Status == 202 {
-		action = "mfa.challenge"
-	}
-	if err = access.Audit(r.Context(), tx, r, authz.UserActor(id), action, "user", id, "success"); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return response, tx.Commit(r.Context())
-}
 func (s *sessionService) currentSession(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	var err error
 	if p.SessionID != "" {
-		if _, err = s.access.Pool.Exec(r.Context(), "UPDATE olp.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
+		if _, err := s.access.Pool.Exec(r.Context(), "UPDATE olp.sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at<now()-interval '1 minute'", p.SessionID); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
 	body, err := s.sessionBody(r, s.access.Pool, p.User, p.Token)
 	return httpkit.OK(body), err
 }
+
 func (s *sessionService) sessions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	pagination, err := httpkit.Page(r)
 	if err != nil {
@@ -164,31 +162,49 @@ func (s *sessionService) sessions(r *http.Request, p authz.Principal) (httpkit.R
 		userID = p.ID
 	}
 	if userID != p.ID {
-		if err = p.Authorize(authz.ManageSessions); err != nil {
+		if err := p.Authorize(authz.ManageSessions); err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
 	if _, err := httpkit.ParseUUID(userID); err != nil {
 		return httpkit.Reply{}, err
 	}
-	var sessionID any
+	var currentSession *string
 	if p.SessionID != "" {
-		sessionID = p.SessionID
+		id := p.SessionID
+		currentSession = &id
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'user_id',user_id,'current',id=$1,'expires_at',expires_at,'last_seen_at',last_seen_at,'browser_hint',browser_hint,'created_at',created_at) FROM olp.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4", sessionID, userID, pagination.Before, pagination.Limit+1)
+	rows, err := s.access.Pool.Query(
+		r.Context(),
+		"SELECT id::text,user_id::text,COALESCE(id=$1::uuid,false),expires_at,last_seen_at,browser_hint,created_at FROM olp.sessions WHERE user_id=$2 AND expires_at>now() AND id<$3 ORDER BY id DESC LIMIT $4",
+		currentSession, userID, pagination.Before, pagination.Limit+1,
+	)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.JSONRows(rows)
-	return httpkit.ListReply(items, pagination), err
+	defer rows.Close()
+	items := []sessionSummary{}
+	for rows.Next() {
+		var item sessionSummary
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Current, &item.ExpiresAt, &item.LastSeenAt, &item.BrowserHint, &item.CreatedAt); err != nil {
+			return httpkit.Reply{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return httpkit.Reply{}, err
+	}
+	return httpkit.ListReplyBy(items, pagination, func(item sessionSummary) string { return item.ID }), nil
 }
 
 func (s *sessionService) logout(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.deleteSession(r, true)
 }
+
 func (s *sessionService) revokeSession(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return s.deleteSession(r, false)
 }
+
 func revokedSession(r *http.Request, p authz.Principal, current bool) (string, error) {
 	if current {
 		return p.SessionID, nil
@@ -202,37 +218,34 @@ func (s *sessionService) deleteSession(r *http.Request, current bool) (httpkit.R
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		var id any = session
 		if session == "" {
-			id = nil
+			return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
 		}
 		var userID string
-		if err := tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", id).Scan(&userID); err != nil {
+		if err := tx.QueryRow(r.Context(), "SELECT user_id::text FROM olp.sessions WHERE id=$1", session).Scan(&userID); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		// Another member's session is invisible to a caller who cannot manage it.
 		if userID != p.ID && p.Authorize(authz.ManageSessions) != nil {
 			return httpkit.Reply{}, access.Event{}, pgx.ErrNoRows
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", id); err != nil {
+		if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", session); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		response := httpkit.Reply{Status: 204}
+		var cookies []*http.Cookie
 		if session == p.SessionID {
-			response.Cookies = []*http.Cookie{access.ClearCookie(access.SessionCookie), access.ClearCookie(access.CSRFCookie), access.ClearCookie(access.RecentCookie)}
+			cookies = []*http.Cookie{
+				access.ClearCookie(access.SessionCookie),
+				access.ClearCookie(access.CSRFCookie),
+				access.ClearCookie(access.RecentCookie),
+			}
 		}
-		return response, access.Event{Action: "session.revoke", Resource: "session", ID: session}, nil
+		return httpkit.Reply{Status: 204, Cookies: cookies}, access.Event{Action: "session.revoke", Resource: "session", ID: session}, nil
 	})
 }
 
 func (s *sessionService) profile(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.profileBody(r, s.access.Pool, p)
-}
-
-type projectOption struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
 }
 
 func (s *sessionService) profileBody(r *http.Request, q database.Queryer, p authz.Principal) (httpkit.Reply, error) {
@@ -246,21 +259,33 @@ func (s *sessionService) profileBody(r *http.Request, q database.Queryer, p auth
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
+	defer rows.Close()
 	projects := []projectOption{}
 	for rows.Next() {
 		var option projectOption
-		if err = rows.Scan(&option.ID, &option.Name, &option.Role); err != nil {
-			rows.Close()
+		if err := rows.Scan(&option.ID, &option.Name, &option.Role); err != nil {
 			return httpkit.Reply{}, err
 		}
 		projects = append(projects, option)
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.Detail(map[string]any{"id": p.ID, "email": p.Email, "display_name": p.DisplayName, "role": p.Role, "active": p.Active, "access_scope": p.AccessScope, "etag": p.ETag, "created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "projects": projects}, p.ETag), nil
+	body := profileResponse{
+		ID:          p.ID,
+		Email:       p.Email,
+		DisplayName: p.DisplayName,
+		Role:        p.Role,
+		Active:      p.Active,
+		AccessScope: p.AccessScope,
+		ETag:        p.ETag,
+		CreatedAt:   p.CreatedAt,
+		UpdatedAt:   p.UpdatedAt,
+		Projects:    projects,
+	}
+	return httpkit.Detail(body, p.ETag), nil
 }
+
 func (s *sessionService) updateProfile(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		Name string `json:"display_name"`
@@ -282,171 +307,129 @@ func (s *sessionService) updateProfile(r *http.Request, _ authz.Principal) (http
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		p.User = u
-		reply, err := s.profileBody(r, tx, p)
+		updated := p
+		updated.User = u
+		reply, err := s.profileBody(r, tx, updated)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		return reply, access.Event{Action: "profile.update", Resource: "user", ID: p.ID}, nil
 	})
 }
+
 func (s *sessionService) changePassword(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writePassword(r, p, false)
 }
+
 func (s *sessionService) enrollPassword(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return s.writePassword(r, p, true)
 }
-func (s *sessionService) writePassword(r *http.Request, p authz.Principal, enroll bool) (httpkit.Reply, error) {
-	var err error
+
+func (s *sessionService) preparePasswordWrite(r *http.Request, p authz.Principal, enroll bool) (string, error) {
 	var input struct {
 		Current string `json:"current_password"`
 		New     string `json:"new_password"`
 	}
 	if err := httpkit.Decode(r, &input); err != nil {
-		return httpkit.Reply{}, err
+		return "", err
 	}
 	if err := password(input.New); err != nil {
-		return httpkit.Reply{}, err
+		return "", err
 	}
-	if err = admitAuth(s.access, r, "password", p.ID); err != nil {
-		return httpkit.Reply{}, err
+	if err := admitAuth(s.access, r, "password", p.ID); err != nil {
+		return "", err
 	}
 	var stored *string
-	if err = s.access.Pool.QueryRow(r.Context(), "SELECT password_hash FROM olp.users WHERE id=$1", p.ID).Scan(&stored); err != nil {
-		return httpkit.Reply{}, err
+	if err := s.access.Pool.QueryRow(r.Context(), "SELECT password_hash FROM olp.users WHERE id=$1", p.ID).Scan(&stored); err != nil {
+		return "", err
 	}
 	if enroll && stored != nil {
-		return httpkit.Reply{}, httpkit.Fail(409, "password_already_enrolled", "A local password is already configured.")
+		return "", httpkit.Fail(409, "password_already_enrolled", "A local password is already configured.")
 	}
 	if !enroll && stored == nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "local_password_unavailable", "This profile has no local password.")
+		return "", httpkit.Fail(403, "local_password_unavailable", "This profile has no local password.")
 	}
 	var hash string
 	valid := enroll
-	if err = s.passwords.run(r, func() {
+	err := s.passwords.run(r, func() {
 		if !enroll {
 			valid = secrets.VerifyPassword(input.Current, *stored)
 		}
 		if valid {
 			hash = secrets.HashPassword(input.New)
 		}
-	}); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if !valid {
-		return httpkit.Reply{}, httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
-	}
-	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		if err = httpkit.Match(r, p.ETag); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if enroll {
-			if err = s.access.ConsumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
-				return httpkit.Reply{}, access.Event{}, err
-			}
-		}
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, ids.New(), p.ID); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		strength, err := sessionStrength(r.Context(), tx, p.SessionID)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		response, err := s.newSession(r, tx, p.ID, strength)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		response.Status = 200
-		response.Body = u
-		response.ETag = u.ETag
-		return response, access.Event{Action: "profile.password.update", Resource: "user", ID: p.ID}, nil
 	})
-}
-func validatePurpose(purpose, resource string) error {
-	switch purpose {
-	case "password_enrollment", "oidc_link", "saml_link", "plugin_permit", "mfa_manage":
-		if resource == "" {
-			return nil
-		}
-	case "oidc_unlink", "saml_unlink", "agent_delegation":
-		_, err := httpkit.ParseUUID(resource)
-		return err
-	}
-	return httpkit.Invalid("purpose", "Use a supported security purpose and its required resource ID.")
-}
-func (s *accountService) reauthenticate(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	var err error
-	var input struct {
-		Password string `json:"current_password"`
-		Purpose  string `json:"purpose"`
-		Resource string `json:"resource_id"`
-	}
-	if err := httpkit.Decode(r, &input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := validatePurpose(input.Purpose, input.Resource); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = admitAuth(s.access, r, "reauthentication", p.ID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var hash *string
-	if err = s.access.Pool.QueryRow(r.Context(), "SELECT password_hash FROM olp.users WHERE id=$1", p.ID).Scan(&hash); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if hash == nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "local_password_unavailable", "Use your linked identity to authenticate.")
-	}
-	var valid bool
-	if err = s.passwords.run(r, func() { valid = secrets.VerifyPassword(input.Password, *hash) }); err != nil {
-		return httpkit.Reply{}, err
+	if err != nil {
+		return "", err
 	}
 	if !valid {
-		return httpkit.Reply{}, httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
+		return "", httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
+	}
+	return hash, nil
+}
+
+func (s *sessionService) commitPasswordWrite(r *http.Request, tx pgx.Tx, p authz.Principal, hash string, enroll bool) (httpkit.Reply, access.Event, error) {
+	if err := httpkit.Match(r, p.ETag); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	if enroll {
+		if err := s.access.ConsumeRecent(r, tx, p, "password_enrollment", ""); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+	}
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, ids.New(), p.ID); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	strength, err := sessionStrength(r.Context(), tx, p.SessionID)
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	sessionReply, err := s.newSession(r, tx, p.ID, strength)
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	u, err := access.ScanUser(tx.QueryRow(r.Context(), "SELECT "+access.UserColumns+" FROM olp.users u WHERE id=$1", p.ID))
+	if err != nil {
+		return httpkit.Reply{}, access.Event{}, err
+	}
+	reply := httpkit.Reply{
+		Status:  200,
+		Body:    u,
+		ETag:    u.ETag,
+		CSRF:    sessionReply.CSRF,
+		Cookies: sessionReply.Cookies,
+	}
+	return reply, access.Event{Action: "profile.password.update", Resource: "user", ID: p.ID}, nil
+}
+
+func (s *sessionService) writePassword(r *http.Request, p authz.Principal, enroll bool) (httpkit.Reply, error) {
+	hash, err := s.preparePasswordWrite(r, p, enroll)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		var current bool
-		if err := tx.QueryRow(r.Context(), "SELECT COALESCE(password_hash=$2,false) FROM olp.users WHERE id=$1", p.ID, *hash).Scan(&current); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if !current {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(403, "current_password_invalid", "Authenticate again with the current password.")
-		}
-		configured, err := mfaConfigured(r.Context(), tx, p.ID)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if configured {
-			reply, err := s.mfa.mfaChallenge(r, tx, p.ID, "reauth", &p.SessionID, mfaFlowData{RecentPurpose: input.Purpose, RecentResource: input.Resource})
-			return reply, access.Event{}, err
-		}
-		response, err := s.sessions.grantRecent(r, tx, p, input.Purpose, input.Resource, false)
-		return response, access.Event{Action: "session.reauthenticate", Resource: "session", ID: p.SessionID}, err
+		return s.commitPasswordWrite(r, tx, p, hash, enroll)
 	})
 }
 
 func (s *sessionService) grantRecent(r *http.Request, tx pgx.Tx, p authz.Principal, purpose, resource string, factorVerified bool) (httpkit.Reply, error) {
 	if purpose == "mfa_manage" && !factorVerified {
-		configured, e := mfaConfigured(r.Context(), tx, p.ID)
-		if e != nil {
-			return httpkit.Reply{}, e
+		configured, err := mfaConfigured(r.Context(), tx, p.ID)
+		if err != nil {
+			return httpkit.Reply{}, err
 		}
 		if configured {
 			return httpkit.Reply{}, httpkit.Fail(403, "mfa_factor_required", "Verify an enrolled factor or recovery code to manage local MFA.")
 		}
 	}
-
 	token := secrets.Token()
-	var target any
+	var target *string
 	if resource != "" {
-		target = resource
+		res := resource
+		target = &res
 	}
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.recent_auth WHERE session_id=$1 OR expires_at<=now()", p.SessionID); err != nil {
 		return httpkit.Reply{}, err
