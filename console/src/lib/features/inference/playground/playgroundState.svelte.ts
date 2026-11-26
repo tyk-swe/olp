@@ -1,19 +1,13 @@
 import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
+import { readResult } from '#lib/editing/result.js';
+import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
 import {
-  routeKeys,
   listRoutes,
+  routeKeys,
   selectActiveRoutes,
-  simulateRouting,
-  inspectionDialects
+  simulateRouting
 } from '#lib/features/routes/index.js';
-import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
-import {
-  nativeObject,
-  parseNativeJSON,
-  replaceNative,
-  type NativeObject
-} from '#lib/nativeJson.js';
 import { abortError, errorMessage } from '#lib/management/http.js';
 import {
   inspectRouting,
@@ -25,140 +19,26 @@ import {
   type PlaygroundStreamDone
 } from './api';
 import {
-  nativeDialects,
-  nativeOperationRequest,
-  publicNativeOperations,
-  type NativeOperation
-} from './nativeOperation';
+  resolvePlaygroundPlan,
+  type Composer,
+  type Mode,
+  type PlaygroundSurface
+} from './playgroundPlan';
 import { playgroundTemplates, templateFor } from './templates';
 import {
-  parseMaxOutputTokens,
-  parseResponseSchema,
-  parseTemperature,
-  parseTools
+  buildInspectionInput,
+  buildPlaygroundRequest,
+  parseRoutingPreferences
 } from './validation';
 
-type Mode = 'text' | 'tools' | 'structured';
-type Composer = 'basic' | 'advanced';
+const defaultToolsJson =
+  '[\n  {\n    "name": "get_weather",\n    "description": "Get weather for a city",\n    "input_schema": {\n      "type": "object",\n      "properties": { "city": { "type": "string" } },\n      "required": ["city"]\n    }\n  }\n]';
 
-type PlaygroundPlanInput = {
-  composer: Composer;
-  operation: PlaygroundOperation;
-  surface: 'openai' | 'anthropic' | 'gemini';
-  strict: boolean;
-  template: string;
-  nativeDialect: string;
-  inspectDialect: string;
-  stream: boolean;
-  operationKnown: boolean;
-};
-type PlaygroundClient =
-  | { kind: 'composer'; advanced: boolean }
-  | { kind: 'native'; operation: NativeOperation; dialect: string }
-  | { kind: 'strict' }
-  | { kind: 'audio' }
-  | { kind: 'realtime' }
-  | { kind: 'unavailable' };
-export type PlaygroundPlan = PlaygroundClient & {
-  activeOperation: PlaygroundOperation;
-  submissionError: string | null;
-  inspection: {
-    surface: InspectRoutingInput['surface'];
-    mode: InspectRoutingInput['mode'];
-    dialect: InspectRoutingInput['dialect'] | undefined;
-    registeredNative: boolean;
-    clientContract: string | undefined;
-    dialects: readonly string[];
-  };
-};
+const defaultSchemaJson =
+  '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}';
 
-export function resolvePlaygroundPlan(
-  input: PlaygroundPlanInput
-): PlaygroundPlan {
-  const advanced = input.composer === 'advanced';
-  const operation = advanced ? input.operation : 'generation';
-  const options = nativeDialects(operation);
-  const nativeDialect = options.includes(input.nativeDialect)
-    ? input.nativeDialect
-    : (options[0] ?? '');
-  const registeredNative =
-    advanced &&
-    (input.strict || publicNativeOperations.has(operation)) &&
-    options.length > 0;
-  const inspectOptions = inspectionDialects(operation, input.surface);
-  const dialect = registeredNative
-    ? nativeDialect
-    : advanced &&
-        (inspectOptions as readonly string[]).includes(input.inspectDialect)
-      ? input.inspectDialect
-      : undefined;
-  const inspectionSurface = !registeredNative
-    ? input.surface
-    : publicNativeOperations.has(operation)
-      ? ((['openai', 'gemini'] as const).find((surface) =>
-          inspectionDialects(operation, surface).includes(nativeDialect)
-        ) ?? 'native')
-      : 'native';
-  const client: PlaygroundClient =
-    operation === 'realtime'
-      ? { kind: 'realtime' }
-      : operation === 'translation'
-        ? { kind: 'audio' }
-        : input.strict || publicNativeOperations.has(operation)
-          ? advanced && operation === 'generation' && input.surface === 'openai'
-            ? input.template === 'legacy-completions'
-              ? {
-                  kind: 'native',
-                  operation: 'completions',
-                  dialect: 'openai-completions'
-                }
-              : { kind: 'strict' }
-            : advanced && options.length > 0
-              ? {
-                  kind: 'native',
-                  operation: operation as NativeOperation,
-                  dialect: nativeDialect
-                }
-              : { kind: 'unavailable' }
-          : { kind: 'composer', advanced };
-  const submissionError =
-    advanced && !input.operationKnown
-      ? `The route does not offer the ${operation} operation.`
-      : input.strict && operation !== 'realtime'
-        ? 'Use the qualified public client below for this strict route.'
-        : client.kind === 'audio'
-          ? 'Use the audio upload form below.'
-          : client.kind === 'realtime'
-            ? 'Use the local realtime event viewer below; it does not open a provider session.'
-            : client.kind !== 'composer' ||
-                operation === 'classification' ||
-                operation === 'scoring'
-              ? 'Use the public native client below with a route certified for this operation.'
-              : null;
-  return {
-    ...client,
-    activeOperation: operation,
-    submissionError,
-    inspection: {
-      surface: inspectionSurface,
-      mode:
-        operation === 'realtime'
-          ? 'realtime'
-          : registeredNative
-            ? 'unary'
-            : input.stream
-              ? 'streaming'
-              : 'unary',
-      dialect: dialect as InspectRoutingInput['dialect'] | undefined,
-      registeredNative,
-      clientContract:
-        registeredNative && operation === 'embeddings'
-          ? 'raw-vector-storage/1'
-          : undefined,
-      dialects: registeredNative ? options : inspectOptions
-    }
-  };
-}
+const streamVerifyFailed =
+  'Streaming capability could not be verified; the route may reject the stream.';
 
 export class PlaygroundState {
   private routingPreferences = $state('{}');
@@ -173,12 +53,13 @@ export class PlaygroundState {
   mode = $state<Mode>('text');
   composer = $state<Composer>('basic');
   operation = $state<PlaygroundOperation>('generation');
-  surface = $state<'openai' | 'anthropic' | 'gemini'>('openai');
+  surface = $state<PlaygroundSurface>('openai');
   model = $state('');
   input = $state('');
   rawJson = $state(JSON.stringify(playgroundTemplates[0].request, null, 2));
   templateKey = $state(playgroundTemplates[0].key);
   nativeDialect = $state('');
+  inspectDialect = $state('');
   streamEnabled = $state(false);
   streamCheck = $state<'idle' | 'checking' | 'ok' | 'unsupported' | 'unknown'>(
     'idle'
@@ -189,17 +70,11 @@ export class PlaygroundState {
   streamDone = $state<PlaygroundStreamDone | null>(null);
   streamProblem = $state<string | null>(null);
   private streamAbort: AbortController | null = null;
-  // Bumped whenever a streaming check is started or invalidated, so a slower,
-  // older check cannot overwrite the verdict for the current inputs.
   private streamCheckSerial = 0;
   temperature = $state('');
   maxOutputTokens = $state('');
-  toolsJson = $state(
-    '[\n  {\n    "name": "get_weather",\n    "description": "Get weather for a city",\n    "input_schema": {\n      "type": "object",\n      "properties": { "city": { "type": "string" } },\n      "required": ["city"]\n    }\n  }\n]'
-  );
-  schemaJson = $state(
-    '{\n  "type": "object",\n  "properties": {\n    "answer": { "type": "string" }\n  },\n  "required": ["answer"],\n  "additionalProperties": false\n}'
-  );
+  toolsJson = $state(defaultToolsJson);
+  schemaJson = $state(defaultSchemaJson);
   validationError = $state('');
   completedRequest = $state<PlaygroundRequest | null>(null);
   routes = createQuery(() => ({
@@ -228,7 +103,6 @@ export class PlaygroundState {
     this.routeOperations == null ||
       this.routeOperations.includes(this.activeOperation)
   );
-  inspectDialect = $state('');
   plan = $derived(
     resolvePlaygroundPlan({
       composer: this.composer,
@@ -242,16 +116,13 @@ export class PlaygroundState {
       operationKnown: this.operationKnown
     })
   );
-  streamSelectable = $derived(this.activeOperation === 'generation');
   simulation = createMutation(() => ({
-    // Wrapped so the mutation context is not passed as the abort signal.
     mutationFn: (input: InspectRoutingInput) => inspectRouting(input)
   }));
   simulateKeyId = $state('');
   simulateSeed = $state('');
   private inspectedInputs = $state('');
   simulationError = $state('');
-  // A dry run is the most recent action when its inputs still match; a run resets it.
   explanation = $derived(
     this.simulation.data?.length &&
       this.inspectedInputs === this.inspectionInputs()
@@ -274,47 +145,67 @@ export class PlaygroundState {
     this.rawJson = JSON.stringify(template.request, null, 2);
   };
 
+  private resetStreamCheck() {
+    this.streamCheckSerial++;
+    this.streamCheck = 'idle';
+    this.streamCheckMessage = '';
+  }
+
+  private resetOutput() {
+    this.streamFrames = [];
+    this.streamDone = null;
+    this.streamProblem = null;
+    this.mutation.reset();
+  }
+
+  private setStreamStatus(status: 'unknown' | 'unsupported', message: string) {
+    this.streamCheck = status;
+    this.streamCheckMessage = message;
+  }
+
   private async checkStreamCapability() {
     const serial = ++this.streamCheckSerial;
     this.streamCheckMessage = '';
     if (!this.selectedRoute) {
-      this.streamCheck = 'unknown';
-      this.streamCheckMessage =
-        'The route slug is not an active route, so streaming support cannot be verified.';
+      this.setStreamStatus(
+        'unknown',
+        'The route slug is not an active route, so streaming support cannot be verified.'
+      );
+      return;
+    }
+    const preferences = parseRoutingPreferences(this.routing || '{}');
+    if (!preferences.ok) {
+      this.setStreamStatus('unknown', streamVerifyFailed);
       return;
     }
     this.streamCheck = 'checking';
-    try {
-      const decisions = await simulateRouting({
+    const result = await readResult(() =>
+      simulateRouting({
         route: this.model.trim(),
         surface: this.surface,
         mode: 'streaming',
-        preferences: JSON.parse(this.routing || '{}')
-      });
-      if (serial !== this.streamCheckSerial) return;
-      if (decisions.some((decision) => decision.eligible)) {
-        this.streamCheck = 'ok';
-      } else {
-        this.streamCheck = 'unsupported';
-        this.streamCheckMessage =
-          'No published target reports streaming eligibility for this route and surface.';
-      }
-    } catch {
-      if (serial !== this.streamCheckSerial) return;
-      this.streamCheck = 'unknown';
-      this.streamCheckMessage =
-        'Streaming capability could not be verified; the route may reject the stream.';
+        preferences: preferences.value
+      })
+    );
+    if (serial !== this.streamCheckSerial) return;
+    if (!result.ok) {
+      this.setStreamStatus('unknown', streamVerifyFailed);
+      return;
     }
+    if (result.value.some((decision) => decision.eligible)) {
+      this.streamCheck = 'ok';
+      return;
+    }
+    this.setStreamStatus(
+      'unsupported',
+      'No published target reports streaming eligibility for this route and surface.'
+    );
   }
 
   toggleStream = (enabled: boolean) => {
     this.streamEnabled = enabled;
     if (enabled) void this.checkStreamCapability();
-    else {
-      this.streamCheckSerial++;
-      this.streamCheck = 'idle';
-      this.streamCheckMessage = '';
-    }
+    else this.resetStreamCheck();
   };
 
   cancelStream = () => {
@@ -323,10 +214,7 @@ export class PlaygroundState {
 
   clearResult = () => {
     this.streamAbort?.abort();
-    this.streamFrames = [];
-    this.streamDone = null;
-    this.streamProblem = null;
-    this.mutation.reset();
+    this.resetOutput();
     this.completedRequest = null;
   };
 
@@ -346,105 +234,50 @@ export class PlaygroundState {
     ]);
   }
 
-  // The inspector dialect only applies while it belongs to the current
-  // operation and surface; a stale choice is dropped rather than sent.
-  currentInspectDialect = (): string | undefined =>
-    this.composer === 'advanced' &&
-    (inspectionDialects(this.operation, this.surface) as string[]).includes(
-      this.inspectDialect
-    )
-      ? this.inspectDialect
-      : undefined;
-
-  currentNativeDialect = (): string => {
-    const options = nativeDialects(this.operation);
-    return options.includes(this.nativeDialect)
-      ? this.nativeDialect
-      : (options[0] ?? '');
-  };
-
-  private advancedRequest(): Record<string, unknown> {
-    if (this.operation === 'translation') return { model: this.model.trim() };
-    const raw = parseNativeJSON(this.rawJson);
-    if (!nativeObject(raw))
-      throw new Error('The request document must be a JSON object.');
-    return raw;
-  }
-
-  private requestControls() {
-    return {
-      temperature: parseTemperature(this.temperature),
-      max_output_tokens: parseMaxOutputTokens(this.maxOutputTokens),
-      tools: this.mode === 'tools' ? parseTools(this.toolsJson) : undefined,
-      response_format:
-        this.mode === 'structured'
-          ? parseResponseSchema(this.schemaJson)
-          : undefined
-    };
-  }
-
-  private inspectionNativeRequest(dialect: string): NativeObject {
-    const request = nativeOperationRequest(
-      this.rawJson,
-      this.model.trim(),
-      dialect
-    );
-    return dialect === 'openai-completions'
-      ? (replaceNative(request, ['stream'], this.streamEnabled) as NativeObject)
-      : request;
-  }
-
   explain = async () => {
     this.simulationError = '';
     if (!this.model.trim()) {
       this.simulationError = 'Enter an active route slug.';
       return;
     }
-    try {
-      const version = this.inspectionInputs();
-      const plan = this.plan;
-      const input: InspectRoutingInput = {
-        route: this.model.trim(),
-        operation: this.activeOperation,
-        surface: plan.inspection.surface,
-        mode: plan.inspection.mode,
-        preferences: JSON.parse(this.routing),
-        apiKeyId: this.simulateKeyId || null,
-        seed: this.simulateSeed,
-        clientContract: plan.inspection.clientContract,
-        ...(this.composer === 'advanced' && plan.kind !== 'realtime'
-          ? {
-              request:
-                plan.inspection.registeredNative ||
-                plan.inspection.dialect === 'openai-completions'
-                  ? this.inspectionNativeRequest(plan.inspection.dialect ?? '')
-                  : this.advancedRequest(),
-              dialect: plan.inspection.dialect
-            }
-          : {})
-      };
-      await this.simulation.mutateAsync(input);
-      this.inspectedInputs = version;
-    } catch (error) {
+    const version = this.inspectionInputs();
+    const input = buildInspectionInput({
+      composer: this.composer,
+      model: this.model,
+      operation: this.activeOperation,
+      rawJson: this.rawJson,
+      routing: this.routing,
+      stream: this.streamEnabled,
+      simulateKeyId: this.simulateKeyId,
+      simulateSeed: this.simulateSeed,
+      plan: this.plan
+    });
+    if (!input.ok) {
+      this.simulationError = input.error;
+      return;
+    }
+    const result = await readResult(() =>
+      this.simulation.mutateAsync(input.value)
+    );
+    if (!result.ok) {
       this.simulationError = errorMessage(
-        error,
+        result.error,
         'The routing explanation could not be produced.'
       );
+      return;
     }
+    this.inspectedInputs = version;
   };
 
   private async runStream(request: PlaygroundRequest) {
     const abort = new AbortController();
     this.streamAbort = abort;
-    this.mutation.reset();
+    this.resetOutput();
     this.streaming = true;
-    this.streamFrames = [];
-    this.streamDone = null;
-    this.streamProblem = null;
     this.completedRequest = request;
     let terminal = false;
-    try {
-      await streamPlayground(
+    const result = await readResult(() =>
+      streamPlayground(
         request,
         {
           frame: (frame) => {
@@ -461,27 +294,25 @@ export class PlaygroundState {
           }
         },
         abort.signal
-      );
-      // A clean close without done or error means the response was cut short.
-      if (!terminal && !abort.signal.aborted)
-        this.streamProblem = 'The stream ended before completion.';
-    } catch (error) {
-      if (!abortError(error))
+      )
+    );
+    if (!result.ok) {
+      if (!abortError(result.error)) {
         this.streamProblem = errorMessage(
-          error,
+          result.error,
           'The playground stream failed.'
         );
-    } finally {
-      this.streaming = false;
-      this.streamAbort = null;
+      }
+    } else if (!terminal && !abort.signal.aborted) {
+      this.streamProblem = 'The stream ended before completion.';
     }
+    this.streaming = false;
+    this.streamAbort = null;
   }
 
   submit = async (event: SubmitEvent) => {
     event.preventDefault();
     this.validationError = '';
-    // The run that follows produces its own explanation, so the dry run stops
-    // competing for the panel.
     this.simulation.reset();
     this.simulationError = '';
     if (!this.model.trim()) {
@@ -498,51 +329,35 @@ export class PlaygroundState {
         'Streaming has not been verified as available for this route.';
       return;
     }
-    let request: PlaygroundRequest;
-    try {
-      if (plan.kind === 'composer' && plan.advanced) {
-        request = {
-          routing: JSON.parse(this.routing),
-          model: this.model.trim(),
-          surface: this.surface,
-          operation: this.activeOperation as PlaygroundRequest['operation'],
-          request: this.advancedRequest(),
-          stream: this.streamEnabled ? true : undefined
-        };
-      } else {
-        if (!this.input.trim()) {
-          this.validationError = 'Enter a prompt.';
-          return;
-        }
-        request = {
-          routing: JSON.parse(this.routing),
-          model: this.model.trim(),
-          input: this.input,
-          surface: this.surface,
-          stream: this.streamEnabled ? true : undefined,
-          ...this.requestControls()
-        };
-      }
-    } catch (error) {
-      this.validationError = errorMessage(error, 'Check the request fields.');
+    const built = buildPlaygroundRequest({
+      advanced: plan.kind === 'composer' && plan.advanced,
+      model: this.model,
+      surface: this.surface,
+      operation: this.activeOperation,
+      routing: this.routing,
+      rawJson: this.rawJson,
+      input: this.input,
+      mode: this.mode,
+      temperature: this.temperature,
+      maxOutputTokens: this.maxOutputTokens,
+      toolsJson: this.toolsJson,
+      schemaJson: this.schemaJson,
+      stream: this.streamEnabled
+    });
+    if (!built.ok) {
+      this.validationError = built.error;
       return;
     }
-    this.streamFrames = [];
-    this.streamDone = null;
-    this.streamProblem = null;
-    this.mutation.reset();
-    this.completedRequest = request;
+    this.resetOutput();
+    this.completedRequest = built.value;
     if (this.streamEnabled) {
-      await this.runStream(request);
+      await this.runStream(built.value);
       return;
     }
-    // A transport or route failure is rendered by the result panel; rethrowing
-    // here would leave an unhandled rejection with nothing to catch it.
-    try {
-      await this.mutation.mutateAsync(request);
-    } catch {
-      this.validationError = '';
-    }
+    const result = await readResult(() =>
+      this.mutation.mutateAsync(built.value)
+    );
+    if (!result.ok) this.validationError = '';
   };
 
   constructor() {
@@ -550,10 +365,8 @@ export class PlaygroundState {
       void this.model;
       void this.surface;
       void this.activeOperation;
-      this.streamCheckSerial++;
       this.streamEnabled = false;
-      this.streamCheck = 'idle';
-      this.streamCheckMessage = '';
+      this.resetStreamCheck();
     });
 
     $effect(() => {
@@ -561,8 +374,9 @@ export class PlaygroundState {
         this.activeOperation !== 'generation' &&
         this.activeOperation !== 'token_count' &&
         this.surface !== 'openai'
-      )
+      ) {
         this.surface = 'openai';
+      }
     });
 
     onDestroy(() => {

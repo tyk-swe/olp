@@ -1,10 +1,23 @@
 <script lang="ts">
-  import OperationResult from './OperationResult.svelte';
-  import { errorMessage } from '#lib/management/http.js';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { formatInteger } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import OperationResult from './OperationResult.svelte';
   import type { PlaygroundState } from './playgroundState.svelte';
 
   let { playground }: { playground: PlaygroundState } = $props();
+
+  const hasResultContent = $derived(
+    Boolean(
+      playground.mutation.data?.refusal ||
+      playground.mutation.data?.output_text ||
+      playground.mutation.data?.tool_calls?.length ||
+      playground.mutation.data?.response !== undefined ||
+      (playground.mutation.data?.structured_output !== undefined &&
+        playground.mutation.data?.structured_output !== null)
+    )
+  );
 </script>
 
 <section class="card result" aria-labelledby="result-title" aria-live="polite">
@@ -70,21 +83,21 @@
       )}
     </div>
   {:else if playground.mutation.data}
-    {#if playground.mutation.data.refusal}<div class="refusal" role="alert">
-        <strong>The model refused this request</strong>
-        <p>{playground.mutation.data.refusal}</p>
-      </div>{/if}
-    {#if !playground.mutation.data.refusal && !playground.mutation.data.output_text && !playground.mutation.data.tool_calls?.length && playground.mutation.data.response === undefined && (playground.mutation.data.structured_output === undefined || playground.mutation.data.structured_output === null)}<div
-        class="empty-state"
-      >
-        <div>
-          <strong>No content returned</strong>
-          <p>
-            The route answered without text, a tool call, or structured output.
-            The finish reason below says why.
-          </p>
-        </div>
-      </div>{/if}
+    {#if playground.mutation.data.refusal}
+      <div class="output" role="alert">
+        <Callout tone="warning" title="The model refused this request">
+          <p>{playground.mutation.data.refusal}</p>
+        </Callout>
+      </div>
+    {/if}
+    {#if !hasResultContent}
+      <div class="output">
+        <EmptyState title="No content returned">
+          The route answered without text, a tool call, or structured output.
+          The finish reason below says why.
+        </EmptyState>
+      </div>
+    {/if}
     {#if playground.mutation.data.response !== undefined}<div class="output">
         <OperationResult
           operation={playground.completedRequest?.operation ?? 'generation'}
@@ -144,9 +157,7 @@
       </div>
       <div>
         <dt>Output tokens</dt>
-        <dd>
-          {formatInteger(playground.mutation.data.usage?.output_tokens)}
-        </dd>
+        <dd>{formatInteger(playground.mutation.data.usage?.output_tokens)}</dd>
       </div>
       <div>
         <dt>Reasoning tokens</dt>
@@ -159,34 +170,18 @@
         <dd>{formatInteger(playground.mutation.data.usage?.total_tokens)}</dd>
       </div>
     </dl>
-  {:else}<div class="empty-state">
-      <div>
-        <strong>Ready to test</strong>
-        <p>
-          Choose a mode, enter an active route slug, and run an ephemeral
-          request.
-        </p>
-      </div>
-    </div>{/if}
+  {:else}
+    <div class="output">
+      <EmptyState title="Ready to test">
+        Choose a mode, enter an active route slug, and run an ephemeral request.
+      </EmptyState>
+    </div>
+  {/if}
 </section>
 
 <style>
   .result {
     padding: 1.5rem;
-  }
-  .refusal {
-    margin-top: 1rem;
-    padding: 0.85rem 1rem;
-    border: 1px solid var(--warning);
-    border-radius: var(--radius-control);
-    background: var(--warning-soft);
-    color: var(--foreground);
-  }
-  .refusal strong {
-    color: var(--warning);
-  }
-  .refusal p {
-    margin: 0.25rem 0 0;
   }
   .result-heading {
     display: flex;

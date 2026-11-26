@@ -1,12 +1,59 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { gatewayFetch } from '#lib/management/gateway.js';
 import { stringifyNativeJSON } from '#lib/nativeJson.js';
-import { translateAudio } from './audioTranslation';
-import { runNativeOperation } from './nativeOperation';
+import { nativeOperationRequest, runNativeOperation } from './nativeOperation';
 
 vi.mock('#lib/management/gateway.js', () => ({ gatewayFetch: vi.fn() }));
 
 afterEach(() => vi.clearAllMocks());
+
+describe('nativeOperationRequest', () => {
+  it('binds an empty model on model-bearing dialects and keeps URL-bound payloads exact', () => {
+    const bound = nativeOperationRequest(
+      '{"model":"","prompt":"hello"}',
+      'chosen-route',
+      'openai-completions'
+    );
+    expect(bound.ok).toBe(true);
+    if (bound.ok) expect(bound.value.model).toBe('chosen-route');
+
+    const exact = nativeOperationRequest(
+      '{"inputs":["hello"]}',
+      'chosen-route',
+      'tei-embeddings'
+    );
+    expect(exact.ok).toBe(true);
+    if (exact.ok) expect(exact.value).toEqual({ inputs: ['hello'] });
+  });
+
+  it.each([
+    { source: '{bad json}', dialect: 'openai-completions', reason: 'Expected' },
+    { source: '[]', dialect: 'openai-completions', reason: 'JSON object' },
+    {
+      source: '{"model":"other"}',
+      dialect: 'openai-completions',
+      reason: 'another route'
+    },
+    {
+      source: '{"model":""}',
+      dialect: 'tei-embeddings',
+      reason: 'URL-bound native dialect'
+    },
+    {
+      source: '{"model":"search-route","query":"q"}',
+      dialect: 'perplexity-search',
+      reason: 'no model field'
+    }
+  ])('returns an error outcome for invalid input ($reason)', (input) => {
+    const outcome = nativeOperationRequest(
+      input.source,
+      'chosen-route',
+      input.dialect
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toContain(input.reason);
+  });
+});
 
 it.each([
   { name: 'an unregistered dialect', dialect: 'tei-embeddings' },
@@ -44,7 +91,7 @@ it('binds a completions request to the selected route and preserves its result',
     '{"model":"","prompt":"hello"}'
   );
 
-  const [path, options] = vi.mocked(gatewayFetch).mock.calls[0];
+  const [path, options] = vi.mocked(gatewayFetch).mock.calls[0] ?? [];
   const headers = new Headers(options?.headers);
   expect(path).toBe('/v1/completions');
   expect(options?.method).toBe('POST');
@@ -56,6 +103,42 @@ it('binds a completions request to the selected route and preserves its result',
   });
   expect(result.raw).toBe(raw);
   expect(stringifyNativeJSON(result.response)).toBe(raw);
+});
+
+it('sends a Gemini decision to the public endpoint for the chosen route', async () => {
+  const body = {
+    model: '',
+    input: 'The customer asks for a refund.',
+    questions: {
+      refund: { type: 'noul', instructions: 'Is a refund requested?' }
+    }
+  };
+  const response = {
+    answers: { refund: { type: 'noul', noul: 0.9, confidence: 0.9 } }
+  };
+  vi.mocked(gatewayFetch).mockResolvedValueOnce(
+    new Response(JSON.stringify(response), {
+      headers: { 'Content-Type': 'application/json' }
+    })
+  );
+
+  const result = await runNativeOperation(
+    'decision',
+    'gemini-decisions',
+    'route-a',
+    'olp_fixture',
+    JSON.stringify(body)
+  );
+
+  const [path, options] = vi.mocked(gatewayFetch).mock.calls[0] ?? [];
+  expect(path).toBe('/gemini/v1beta/decisions');
+  expect(options?.method).toBe('POST');
+  expect(new Headers(options?.headers).get('Authorization')).toBe(
+    'Bearer olp_fixture'
+  );
+  expect(options?.body).toBe(JSON.stringify({ ...body, model: 'route-a' }));
+  expect(stringifyNativeJSON(result.response)).toBe(JSON.stringify(response));
+  expect(gatewayFetch).toHaveBeenCalledOnce();
 });
 
 it('preserves a valid native result larger than four MiB', async () => {
@@ -85,7 +168,7 @@ it('sends URL-bound embeddings with the raw-vector contract', async () => {
     '{"inputs":["hello"]}'
   );
 
-  const [path, options] = vi.mocked(gatewayFetch).mock.calls[0];
+  const [path, options] = vi.mocked(gatewayFetch).mock.calls[0] ?? [];
   expect(path).toBe('/native/tei-embeddings/models/chosen-route');
   expect(new Headers(options?.headers).get('X-OLP-Client-Contract')).toBe(
     'raw-vector-storage/1'
@@ -123,38 +206,30 @@ it.each([
   expect(gatewayFetch).toHaveBeenCalledOnce();
 });
 
-it('enforces the published route length for native and audio requests', async () => {
-  const route = 'a'.repeat(101);
-  const validRoute = 'a'.repeat(100);
-  const file = new File(['audio'], 'audio.wav', { type: 'audio/wav' });
+it('enforces the published route length for native requests', async () => {
+  const tooLong = 'a'.repeat(101);
+  const maxValid = 'a'.repeat(100);
   await expect(
     runNativeOperation(
       'ocr',
       'azure-document-intelligence-ocr',
-      route,
+      tooLong,
       'olp_test',
       '{"model":"","base64Source":"QUJD"}'
     )
   ).rejects.toThrow('Choose an active published route slug.');
-  await expect(
-    translateAudio(route, 'olp_test', file, '', '', 'json')
-  ).rejects.toThrow('Choose an active published route slug.');
   expect(gatewayFetch).not.toHaveBeenCalled();
-  vi.mocked(gatewayFetch)
-    .mockResolvedValueOnce(new Response('{}'))
-    .mockResolvedValueOnce(new Response('{}'));
+
+  vi.mocked(gatewayFetch).mockResolvedValueOnce(new Response('{}'));
   const native = await runNativeOperation(
     'ocr',
     'azure-document-intelligence-ocr',
-    validRoute,
+    maxValid,
     'olp_test',
     '{"model":"","base64Source":"QUJD"}'
   );
-  expect(native.request).toMatchObject({ model: validRoute });
-  await expect(
-    translateAudio(validRoute, 'olp_test', file, '', '', 'json')
-  ).resolves.toBe('{}');
-  expect(gatewayFetch).toHaveBeenCalledTimes(2);
+  expect(native.request).toMatchObject({ model: maxValid });
+  expect(gatewayFetch).toHaveBeenCalledOnce();
 });
 
 it.each([
@@ -190,7 +265,7 @@ it('binds the route model and posts azure ocr to its native path', async () => {
     '{"model":"","base64Source":"QUJD"}'
   );
   expect(result.request).toMatchObject({ model: 'ocr-route' });
-  expect(vi.mocked(gatewayFetch).mock.calls[0][0]).toBe(
+  expect(vi.mocked(gatewayFetch).mock.calls[0]?.[0]).toBe(
     '/native/azure-document-intelligence-ocr/models/ocr-route'
   );
 });

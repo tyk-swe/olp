@@ -1,13 +1,63 @@
-import { nativeObject, stringifyNativeJSON } from '#lib/nativeJson.js';
+import {
+  nativeAt,
+  nativeObject,
+  stringifyNativeJSON,
+  type NativeObject,
+  type NativeValue
+} from '#lib/nativeJson.js';
 
-function field(value: unknown, key: string): unknown {
-  return nativeObject(value) && Object.hasOwn(value, key)
-    ? value[key]
-    : undefined;
-}
+const maxRows = 128;
 
-function member(value: unknown, ...path: string[]): unknown {
-  return path.reduce<unknown>((at, key) => field(at, key), value);
+const dimensionPaths: readonly (readonly string[])[] = [
+  ['dimensions'],
+  ['output_dimension'],
+  ['outputDimensionality'],
+  ['parameters', 'outputDimensionality']
+];
+
+const typedEmbeddingKeys: ReadonlySet<string> = new Set([
+  'float',
+  'int8',
+  'uint8',
+  'binary',
+  'ubinary',
+  'base64'
+]);
+
+const countFieldNames = [
+  'input_tokens',
+  'inputTokens',
+  'totalTokens',
+  'total_tokens',
+  'token_count',
+  'tokenCount',
+  'cachedContentTokenCount'
+] as const;
+
+type VectorShape = {
+  layout: string;
+  logicalShape: string;
+  storageShape: string;
+};
+
+type VectorRow = VectorShape & {
+  position: number;
+  inputIndex: string;
+  dtype: string;
+};
+
+type RerankRow = {
+  position: number;
+  inputIndex: string;
+  inputId: string;
+  score: string;
+};
+
+function atPath(
+  value: unknown,
+  path: readonly string[]
+): NativeValue | undefined {
+  return nativeObject(value) ? nativeAt(value, path) : undefined;
 }
 
 function exact(value: unknown): string {
@@ -15,13 +65,8 @@ function exact(value: unknown): string {
 }
 
 function dimension(request: unknown): string | null {
-  for (const path of [
-    ['dimensions'],
-    ['output_dimension'],
-    ['outputDimensionality'],
-    ['parameters', 'outputDimensionality']
-  ]) {
-    const value = member(request, ...path);
+  for (const path of dimensionPaths) {
+    const value = atPath(request, path);
     if (value !== undefined && value !== null) return exact(value);
   }
   return null;
@@ -41,150 +86,175 @@ function base64Bytes(value: string): number | null {
   );
 }
 
-export type VectorRow = {
-  position: number;
-  inputIndex: string;
-  layout: string;
-  dtype: string;
-  logicalShape: string;
-  storageShape: string;
-};
+function isPackedDtype(dtype: string): boolean {
+  return dtype === 'binary' || dtype === 'ubinary';
+}
 
-/** Shape is descriptive only. Dtype/dimensions are reported as known only when
- * the native request or observed storage establishes them. Raw result bytes
- * remain available separately and are never converted to float vectors. */
-export function vectorRows(response: unknown, request?: unknown): VectorRow[] {
-  const fromData = field(response, 'data');
-  const fromPredictions = field(response, 'predictions');
-  const fromEmbeddings = field(response, 'embeddings');
-  if (nativeObject(fromEmbeddings)) {
-    const typed = Object.entries(fromEmbeddings).filter(([type]) =>
-      ['float', 'int8', 'uint8', 'binary', 'ubinary', 'base64'].includes(type)
-    );
-    if (typed.length) {
-      const rows: VectorRow[] = [];
-      const declared = dimension(request);
-      for (const [dtype, group] of typed) {
-        if (!Array.isArray(group)) continue;
-        for (const [index, storage] of group.entries()) {
-          if (rows.length === 128) return rows;
-          const packed = dtype === 'binary' || dtype === 'ubinary';
-          const bytes =
-            typeof storage === 'string' ? base64Bytes(storage) : null;
-          const stored = Array.isArray(storage) ? storage.length : null;
-          const logical =
-            declared ??
-            (stored !== null ? String(stored * (packed ? 8 : 1)) : 'Unknown');
-          rows.push({
-            position: rows.length,
-            inputIndex: String(index),
-            layout: packed
-              ? 'Packed binary'
-              : dtype === 'base64'
-                ? 'Base64 storage'
-                : 'Dense array',
-            dtype,
-            logicalShape: logical,
-            storageShape:
-              stored !== null
-                ? packed
-                  ? `${stored} stored byte${stored === 1 ? '' : 's'}`
-                  : `${stored} stored values`
-                : bytes !== null
-                  ? `${bytes} stored bytes`
-                  : 'Opaque encoded value'
-          });
-        }
-      }
-      return rows;
-    }
+function isSparseCoordinates(value: unknown): value is readonly unknown[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => nativeObject(entry) && Object.hasOwn(entry, 'index'))
+  );
+}
+
+function isNestedArray(value: unknown): value is readonly unknown[][] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry): entry is unknown[] => Array.isArray(entry))
+  );
+}
+
+function formatDenseArrayShape(
+  length: number,
+  dtype: string,
+  declared: string | null
+): VectorShape {
+  const packed = isPackedDtype(dtype);
+  return {
+    layout: packed ? 'Packed binary' : 'Dense array',
+    logicalShape: declared ?? String(length * (packed ? 8 : 1)),
+    storageShape: packed
+      ? `${length} stored byte${length === 1 ? '' : 's'}`
+      : `${length} stored values`
+  };
+}
+
+function inferBase64LogicalShape(bytes: number | null, dtype: string): string {
+  if (bytes === null) return 'Unknown';
+  if (isPackedDtype(dtype)) return String(bytes * 8);
+  if (dtype === 'int8' || dtype === 'uint8') return String(bytes);
+  if (dtype === 'float' && bytes % 4 === 0) return String(bytes / 4);
+  return 'Unknown';
+}
+
+function formatBase64Shape(
+  encoded: string,
+  dtype: string,
+  declared: string | null
+): VectorShape {
+  const bytes = base64Bytes(encoded);
+  return {
+    layout: 'Base64 storage',
+    logicalShape: declared ?? inferBase64LogicalShape(bytes, dtype),
+    storageShape:
+      bytes === null ? 'Opaque encoded value' : `${bytes} stored bytes`
+  };
+}
+
+function formatMultivectorShape(
+  vectors: readonly unknown[][],
+  declared: string | null
+): VectorShape {
+  const lengths = vectors.map((entry) => entry.length);
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  const uniform = lengths.every((length) => length === lengths[0]);
+  return {
+    layout: 'Multivector',
+    logicalShape:
+      declared ?? (uniform ? `${lengths.length} × ${lengths[0]}` : 'Unknown'),
+    storageShape: `${lengths.length} token vectors · ${total} stored values`
+  };
+}
+
+function describeVectorStorage(
+  observed: unknown,
+  dtype: string,
+  declared: string | null
+): VectorShape {
+  if (isSparseCoordinates(observed)) {
+    return {
+      layout: 'Sparse coordinates',
+      logicalShape: declared ?? 'Unknown',
+      storageShape: `${observed.length} index/value pairs`
+    };
   }
-  const items = Array.isArray(fromData)
-    ? fromData
-    : Array.isArray(fromPredictions)
-      ? fromPredictions
-      : Array.isArray(fromEmbeddings)
-        ? fromEmbeddings
-        : Array.isArray(response)
-          ? response
-          : [response];
-  const dtypeValue = field(request, 'output_dtype');
+  if (isNestedArray(observed)) {
+    return formatMultivectorShape(observed, declared);
+  }
+  if (Array.isArray(observed)) {
+    return formatDenseArrayShape(observed.length, dtype, declared);
+  }
+  if (typeof observed === 'string') {
+    return formatBase64Shape(observed, dtype, declared);
+  }
+  return {
+    layout: 'Native / unknown',
+    logicalShape: declared ?? 'Unknown',
+    storageShape: 'Unknown'
+  };
+}
+
+function extractVectorItems(response: unknown): readonly unknown[] {
+  const fromData = atPath(response, ['data']);
+  if (Array.isArray(fromData)) return fromData;
+  const fromPredictions = atPath(response, ['predictions']);
+  if (Array.isArray(fromPredictions)) return fromPredictions;
+  const fromEmbeddings = atPath(response, ['embeddings']);
+  if (Array.isArray(fromEmbeddings)) return fromEmbeddings;
+  return Array.isArray(response) ? response : [response];
+}
+
+function typedVectorRows(
+  embeddings: NativeObject,
+  declared: string | null
+): VectorRow[] | null {
+  const groups = Object.entries(embeddings).filter(([type]) =>
+    typedEmbeddingKeys.has(type)
+  );
+  if (groups.length === 0) return null;
+  return groups
+    .flatMap(([dtype, group]) =>
+      Array.isArray(group)
+        ? group.slice(0, maxRows).map((storage, index) => ({
+            inputIndex: String(index),
+            dtype,
+            ...describeVectorStorage(storage, dtype, declared)
+          }))
+        : []
+    )
+    .slice(0, maxRows)
+    .map((row, position) => ({ position, ...row }));
+}
+
+function standardVectorRows(
+  response: unknown,
+  request: unknown,
+  declared: string | null
+): VectorRow[] {
+  const items = extractVectorItems(response);
+  const dtypeValue = atPath(request, ['output_dtype']);
   const dtype = typeof dtypeValue === 'string' ? dtypeValue : 'Not declared';
-  const declaredDimensions = dimension(request);
-  return items.slice(0, 128).map((item, position) => {
+  return items.slice(0, maxRows).map((item, position) => {
     const observed =
-      field(item, 'embedding') ??
-      member(item, 'embeddings', 'values') ??
-      field(item, 'values') ??
+      atPath(item, ['embedding']) ??
+      atPath(item, ['embeddings', 'values']) ??
+      atPath(item, ['values']) ??
       item;
-    const inputIndex = field(item, 'index');
-    const sparse =
-      Array.isArray(observed) &&
-      observed.length > 0 &&
-      observed.every(
-        (entry) => nativeObject(entry) && Object.hasOwn(entry, 'index')
-      );
-    const multi =
-      Array.isArray(observed) &&
-      observed.length > 0 &&
-      observed.every((entry) => Array.isArray(entry));
-    let layout = 'Native / unknown';
-    let logicalShape = declaredDimensions ?? 'Unknown';
-    let storageShape = 'Unknown';
-    if (sparse) {
-      layout = 'Sparse coordinates';
-      storageShape = `${observed.length} index/value pairs`;
-    } else if (multi) {
-      layout = 'Multivector';
-      const lengths = (observed as unknown[][]).map((entry) => entry.length);
-      storageShape = `${lengths.length} token vectors · ${lengths.reduce((sum, length) => sum + length, 0)} stored values`;
-      if (
-        !declaredDimensions &&
-        lengths.every((length) => length === lengths[0])
-      )
-        logicalShape = `${lengths.length} × ${lengths[0]}`;
-    } else if (Array.isArray(observed)) {
-      const packed = dtype === 'binary' || dtype === 'ubinary';
-      layout = packed ? 'Packed binary' : 'Dense array';
-      storageShape = `${observed.length} ${packed ? 'stored bytes' : 'stored values'}`;
-      if (!declaredDimensions)
-        logicalShape = String(observed.length * (packed ? 8 : 1));
-    } else if (typeof observed === 'string') {
-      layout = 'Base64 storage';
-      const bytes = base64Bytes(observed);
-      storageShape =
-        bytes === null ? 'Opaque encoded value' : `${bytes} stored bytes`;
-      if (!declaredDimensions && bytes !== null) {
-        if (dtype === 'binary' || dtype === 'ubinary')
-          logicalShape = String(bytes * 8);
-        else if (dtype === 'int8' || dtype === 'uint8')
-          logicalShape = String(bytes);
-        else if (dtype === 'float' && bytes % 4 === 0)
-          logicalShape = String(bytes / 4);
-      }
-    }
+    const inputIndex = atPath(item, ['index']);
     return {
       position,
       inputIndex: inputIndex === undefined ? 'Not reported' : exact(inputIndex),
-      layout,
       dtype,
-      logicalShape,
-      storageShape
+      ...describeVectorStorage(observed, dtype, declared)
     };
   });
 }
 
-export type RerankRow = {
-  position: number;
-  inputIndex: string;
-  inputId: string;
-  score: string;
-};
+export function vectorRows(response: unknown, request?: unknown): VectorRow[] {
+  const declared = dimension(request);
+  const fromEmbeddings = atPath(response, ['embeddings']);
+  if (nativeObject(fromEmbeddings)) {
+    const typed = typedVectorRows(fromEmbeddings, declared);
+    if (typed !== null) return typed;
+  }
+  return standardVectorRows(response, request, declared);
+}
 
-/** Preserve result order and native numeric score spelling, including ties. */
 export function rerankRows(response: unknown, request?: unknown): RerankRow[] {
-  const results = field(response, 'results');
-  const data = field(response, 'data');
+  const results = atPath(response, ['results']);
+  const data = atPath(response, ['data']);
   const items = Array.isArray(results)
     ? results
     : Array.isArray(data)
@@ -192,16 +262,16 @@ export function rerankRows(response: unknown, request?: unknown): RerankRow[] {
       : Array.isArray(response)
         ? response
         : [];
-  const documents = field(request, 'documents');
-  return items.slice(0, 128).map((item, position) => {
-    const index = field(item, 'index');
+  const documents = atPath(request, ['documents']);
+  return items.slice(0, maxRows).map((item, position) => {
+    const index = atPath(item, ['index']);
     const parsed = index === undefined ? NaN : Number(exact(index));
     const document =
       Array.isArray(documents) && Number.isSafeInteger(parsed)
         ? documents[parsed]
         : undefined;
-    const originalId = field(document, 'id');
-    const returnedId = field(item, 'id');
+    const originalId = atPath(document, ['id']);
+    const returnedId = atPath(item, ['id']);
     return {
       position,
       inputIndex: index === undefined ? 'Unknown' : exact(index),
@@ -211,7 +281,7 @@ export function rerankRows(response: unknown, request?: unknown): RerankRow[] {
           : returnedId !== undefined
             ? exact(returnedId)
             : 'Not reported',
-      score: exact(field(item, 'relevance_score') ?? field(item, 'score'))
+      score: exact(atPath(item, ['relevance_score']) ?? atPath(item, ['score']))
     };
   });
 }
@@ -220,17 +290,8 @@ export function nativeCountFields(
   response: unknown
 ): { name: string; value: string }[] {
   if (!nativeObject(response)) return [];
-  const names = [
-    'input_tokens',
-    'inputTokens',
-    'totalTokens',
-    'total_tokens',
-    'token_count',
-    'tokenCount',
-    'cachedContentTokenCount'
-  ];
-  return names.flatMap((name) => {
-    const value = field(response, name);
+  return countFieldNames.flatMap((name) => {
+    const value = nativeAt(response, [name]);
     return value === undefined ? [] : [{ name, value: exact(value) }];
   });
 }

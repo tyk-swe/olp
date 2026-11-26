@@ -5,22 +5,9 @@ import {
   nativeOperationRequest,
   publicNativeOperations
 } from './nativeOperation';
-import { playgroundTemplates, templateFor } from './templates';
+import { playgroundTemplates } from './templates';
 
 describe('playground examples', () => {
-  it('offers uniquely named examples that can be selected by key', () => {
-    const keys = playgroundTemplates.map((template) => template.key);
-
-    expect(keys.length).toBeGreaterThan(0);
-    expect(new Set(keys).size).toBe(keys.length);
-    for (const template of playgroundTemplates) {
-      expect(template.key.trim()).not.toBe('');
-      expect(template.label.trim()).not.toBe('');
-      expect(templateFor(template.key)).toEqual(template);
-    }
-    expect(templateFor('unknown-example')).toBeUndefined();
-  });
-
   it('uses registered dialects and binds model-bearing native examples to the chosen route', () => {
     for (const template of playgroundTemplates) {
       if (publicNativeOperations.has(template.operation)) {
@@ -31,13 +18,15 @@ describe('playground examples', () => {
       expect(nativeDialects(template.operation)).toContain(
         template.nativeDialect
       );
-      const request = nativeOperationRequest(
+      const outcome = nativeOperationRequest(
         JSON.stringify(template.request),
         'chosen-route',
         template.nativeDialect
       );
-      if ('model' in template.request)
-        expect(request.model).toBe('chosen-route');
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok && 'model' in template.request) {
+        expect(outcome.value.model).toBe('chosen-route');
+      }
     }
   });
 

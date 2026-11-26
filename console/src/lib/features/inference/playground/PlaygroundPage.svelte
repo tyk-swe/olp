@@ -1,17 +1,18 @@
 <script lang="ts">
-  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import Callout from '#lib/components/Callout.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import {
     RoutingDecisions,
     decisionRows
   } from '#lib/features/routes/index.js';
-  import RealtimeTrace from './RealtimeTrace.svelte';
-  import StrictToolPlayground from './StrictToolPlayground.svelte';
-  import NativeOperationPlayground from './NativeOperationPlayground.svelte';
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import AudioTranslationPlayground from './AudioTranslationPlayground.svelte';
-  import { PlaygroundState } from './playgroundState.svelte';
+  import NativeOperationPlayground from './NativeOperationPlayground.svelte';
   import PlaygroundComposer from './PlaygroundComposer.svelte';
   import PlaygroundResult from './PlaygroundResult.svelte';
+  import RealtimeTrace from './RealtimeTrace.svelte';
+  import StrictToolPlayground from './StrictToolPlayground.svelte';
+  import { PlaygroundState } from './playgroundState.svelte';
 
   const playground = new PlaygroundState();
 </script>
@@ -22,15 +23,16 @@
   title="Playground"
   description="Test an active route from the console. Basic runs use your signed-in session."
 />
+
 <div class="privacy-note">
-  <span aria-hidden="true">◉</span>
-  <p>
-    <strong>Request retention</strong><br />When request metadata retention is
-    enabled, Request Explorer can show route, timing, and usage information.
-    Standard runs keep prompts and outputs out of request history. Negotiated
-    tool recovery can retain the source request and original response encrypted
-    for up to 24 hours.
-  </p>
+  <Callout tone="success" title="Request retention">
+    <p>
+      When request metadata retention is enabled, Request Explorer can show
+      route, timing, and usage information. Standard runs keep prompts and
+      outputs out of request history. Negotiated tool recovery can retain the
+      source request and original response encrypted for up to 24 hours.
+    </p>
+  </Callout>
 </div>
 
 <div class="playground-grid">
@@ -90,23 +92,7 @@
     font-size: var(--text-caption);
   }
   .privacy-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
     margin-top: 1.25rem;
-    padding: 0.85rem 1rem;
-    border: 1px solid var(--success);
-    border-radius: var(--radius-control);
-    background: var(--success-soft);
-    color: var(--foreground);
-    line-height: 1.5;
-  }
-  .privacy-note span,
-  .privacy-note strong {
-    color: var(--success);
-  }
-  .privacy-note p {
-    margin: 0;
   }
   .playground-grid {
     display: grid;

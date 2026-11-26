@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { gatewayFetch } from '#lib/management/gateway.js';
-import { stringifyNativeJSON } from '#lib/nativeJson.js';
+import { stringifyNativeJSON, type NativeObject } from '#lib/nativeJson.js';
 import {
   continuationVersion,
   nativeChatRequest,
@@ -19,32 +19,66 @@ const source =
   '"tools":[{"type":"function","function":{"name":"lookup"}}],' +
   '"stream_options":{"include_usage":true},"seed":9007199254740993}';
 
+function validChatRequest(body = source, route = 'weather'): NativeObject {
+  const outcome = nativeChatRequest(body, route);
+  if (!outcome.ok) throw new Error(outcome.error);
+  return outcome.value;
+}
+
+function fragmentedStreamResponse(
+  events: readonly unknown[],
+  chunkSize: number
+): Response {
+  const body = `${events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join('')}data: [DONE]\r\n\r\n`;
+  const bytes = new TextEncoder().encode(body);
+  const fragments = Array.from(
+    { length: Math.ceil(bytes.length / chunkSize) },
+    (_, i) => bytes.slice(i * chunkSize, i * chunkSize + chunkSize)
+  );
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        fragments.forEach((fragment) => controller.enqueue(fragment));
+        controller.close();
+      }
+    })
+  );
+}
+
 beforeEach(() => {
   vi.mocked(gatewayFetch).mockReset();
 });
 
 describe('native chat requests', () => {
   it('binds the selected route without losing native number precision', () => {
-    const request = nativeChatRequest(source, 'weather');
+    const outcome = nativeChatRequest(source, 'weather');
 
-    expect(stringifyNativeJSON(request)).toContain('"model":"weather"');
-    expect(stringifyNativeJSON(request)).toContain('"seed":9007199254740993');
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(stringifyNativeJSON(outcome.value)).toContain('"model":"weather"');
+    expect(stringifyNativeJSON(outcome.value)).toContain(
+      '"seed":9007199254740993'
+    );
   });
 
   it.each([
+    ['{bad json}', 'Expected'],
     ['[]', 'JSON object'],
     ['{"model":"other","messages":[{}],"tools":[{}]}', 'another route'],
     ['{"messages":[],"tools":[{}]}', 'ordered messages'],
     ['{"messages":[{}],"tools":[]}', 'nonempty tools']
   ])('rejects an invalid request before dispatch', (body, reason) => {
-    expect(() => nativeChatRequest(body, 'weather')).toThrow(reason);
+    const outcome = nativeChatRequest(body, 'weather');
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toContain(reason);
     expect(gatewayFetch).not.toHaveBeenCalled();
   });
 });
 
 describe('streamed continuation', () => {
   it('assembles fragmented events into a ready turn and submits ordered tool results', async () => {
-    const request = nativeChatRequest(source, 'weather');
+    const request = validChatRequest();
     const events = [
       {
         olp: {
@@ -105,21 +139,8 @@ describe('streamed continuation', () => {
         choices: [{ delta: {}, finish_reason: 'tool_calls' }]
       }
     ];
-    const body = `${events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join('')}data: [DONE]\r\n\r\n`;
-    const bytes = new TextEncoder().encode(body);
-    const fragments = Array.from(
-      { length: Math.ceil(bytes.length / 5) },
-      (_, i) => bytes.slice(i * 5, i * 5 + 5)
-    );
     vi.mocked(gatewayFetch).mockResolvedValueOnce(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            fragments.forEach((fragment) => controller.enqueue(fragment));
-            controller.close();
-          }
-        })
-      )
+      fragmentedStreamResponse(events, 5)
     );
 
     const turn = await streamTurn('olp_test', request, submission);
@@ -149,19 +170,29 @@ describe('streamed continuation', () => {
     expect(options?.method).toBe('POST');
     const headers = new Headers(options?.headers);
     expect(headers.get('Authorization')).toBe('Bearer olp_test');
+    expect(headers.get('Cache-Control')).toBe('no-store');
     expect(headers.get('X-OLP-Continuation')).toBe(continuationVersion);
     expect(headers.get('X-OLP-Submission-ID')).toBe(submission);
     expect(options?.body).toContain('"stream":true');
     expect(options?.body).toContain('"seed":9007199254740993');
 
-    expect(() => nextTurn(turn, [])).toThrow('one result');
-    expect(() =>
-      nextTurn(turn, [{ tool_call_id: 'wrong', content: 'rain' }])
-    ).toThrow('call order and identity');
+    const empty = nextTurn(turn, []);
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.error).toContain('one result');
+
+    const mismatched = nextTurn(turn, [
+      { tool_call_id: 'wrong', content: 'rain' }
+    ]);
+    expect(mismatched.ok).toBe(false);
+    if (!mismatched.ok)
+      expect(mismatched.error).toContain('call order and identity');
+
     const next = nextTurn(turn, [
       { tool_call_id: 'call_123', content: 'rain' }
     ]);
-    expect(JSON.parse(stringifyNativeJSON(next))).toMatchObject({
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(JSON.parse(stringifyNativeJSON(next.value))).toMatchObject({
       model: 'weather',
       messages: [
         { role: 'user', content: 'Weather?' },
@@ -169,8 +200,10 @@ describe('streamed continuation', () => {
         { role: 'tool', tool_call_id: 'call_123', content: 'rain' }
       ]
     });
-    expect(stringifyNativeJSON(next)).not.toContain('"stream_options"');
-    expect(stringifyNativeJSON(next)).toContain('"seed":9007199254740993');
+    expect(stringifyNativeJSON(next.value)).not.toContain('"stream_options"');
+    expect(stringifyNativeJSON(next.value)).toContain(
+      '"seed":9007199254740993'
+    );
     expect(stringifyNativeJSON(request)).toContain('"stream_options"');
   });
 
@@ -192,7 +225,7 @@ describe('streamed continuation', () => {
     vi.mocked(gatewayFetch).mockResolvedValueOnce(new Response(body));
 
     await expect(
-      streamTurn('olp_test', nativeChatRequest(source, 'weather'), submission)
+      streamTurn('olp_test', validChatRequest(), submission)
     ).rejects.toThrow(reason);
   });
 
@@ -202,7 +235,7 @@ describe('streamed continuation', () => {
     );
 
     await expect(
-      streamTurn('olp_test', nativeChatRequest(source, 'weather'), submission)
+      streamTurn('olp_test', validChatRequest(), submission)
     ).rejects.toThrow('Public inference request failed (502).');
   });
 });
@@ -228,7 +261,7 @@ describe('follow-up and recovery', () => {
   };
 
   it('sends a follow-up under its parent handle and returns the committed result', async () => {
-    const request = nativeChatRequest(source, 'weather');
+    const request = validChatRequest();
     const signal = new AbortController().signal;
     vi.mocked(gatewayFetch).mockResolvedValueOnce(
       new Response(JSON.stringify(delivery))
@@ -262,7 +295,7 @@ describe('follow-up and recovery', () => {
   });
 
   it('recovers an existing unary delivery without starting a new inference', async () => {
-    const request = nativeChatRequest(source, 'weather');
+    const request = validChatRequest();
     vi.mocked(gatewayFetch).mockResolvedValueOnce(
       new Response(JSON.stringify(recovery))
     );
@@ -286,7 +319,7 @@ describe('follow-up and recovery', () => {
   });
 
   it('recovers a committed streamed delivery', async () => {
-    const request = nativeChatRequest(source, 'weather');
+    const request = validChatRequest();
     const streamed = {
       ...recovery,
       delivery: {
@@ -339,11 +372,7 @@ describe('follow-up and recovery', () => {
       );
 
       await expect(
-        recoverTurn(
-          'olp_test',
-          submission,
-          nativeChatRequest(source, 'weather')
-        )
+        recoverTurn('olp_test', submission, validChatRequest())
       ).rejects.toThrow(reason);
       expect(vi.mocked(gatewayFetch).mock.calls[0]?.[1]?.method).toBe('GET');
     }
@@ -358,12 +387,7 @@ describe('follow-up and recovery', () => {
     );
 
     await expect(
-      unaryTurn(
-        'olp_test',
-        nativeChatRequest(source, 'weather'),
-        submission,
-        handle
-      )
+      unaryTurn('olp_test', validChatRequest(), submission, handle)
     ).rejects.toThrow('This key needs provider-state permission.');
   });
 });

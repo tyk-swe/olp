@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
-import { stringifyNativeJSON } from '#lib/nativeJson.js';
-import { runNativeOperation } from './nativeOperation';
 import {
   inspectRouting,
   runPlayground,
@@ -18,44 +16,15 @@ const request: PlaygroundRequest = {
   surface: 'openai'
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+function createStreamHandlers() {
+  return {
+    frame: vi.fn<(data: string) => void>(),
+    done: vi.fn<(meta: PlaygroundStreamDone) => void>(),
+    error: vi.fn<(problem: PlaygroundStreamProblem) => void>()
+  };
+}
 
 describe('playground requests', () => {
-  it('sends a Gemini decision to the public endpoint for the chosen route', async () => {
-    const body = {
-      model: '',
-      input: 'The customer asks for a refund.',
-      questions: {
-        refund: { type: 'noul', instructions: 'Is a refund requested?' }
-      }
-    };
-    const response = {
-      answers: { refund: { type: 'noul', noul: 0.9, confidence: 0.9 } }
-    };
-    const fetch = vi.fn(async (path: string, init: RequestInit) => {
-      expect(path).toBe('/gemini/v1beta/decisions');
-      expect(init.method).toBe('POST');
-      expect(new Headers(init.headers).get('Authorization')).toBe(
-        'Bearer olp_fixture'
-      );
-      expect(init.body).toBe(JSON.stringify({ ...body, model: 'route-a' }));
-      return json(response);
-    });
-    vi.stubGlobal('fetch', fetch);
-
-    const result = await runNativeOperation(
-      'decision',
-      'gemini-decisions',
-      'route-a',
-      'olp_fixture',
-      JSON.stringify(body)
-    );
-    expect(stringifyNativeJSON(result.response)).toBe(JSON.stringify(response));
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
   it('disables caching and returns the playground response', async () => {
     const response = {
       id: 'result',
@@ -114,11 +83,7 @@ describe('playground requests', () => {
     const split = payload.indexOf(0xc3) + 1;
     const fragments = [payload.slice(0, split), payload.slice(split)];
     const controller = new AbortController();
-    const handlers = {
-      frame: vi.fn<(data: string) => void>(),
-      done: vi.fn<(meta: PlaygroundStreamDone) => void>(),
-      error: vi.fn<(problem: PlaygroundStreamProblem) => void>()
-    };
+    const handlers = createStreamHandlers();
     serve(async (received) => {
       route(received, 'POST', '/api/v1/playground/stream');
       expect(received.cache).toBe('no-store');
@@ -152,11 +117,7 @@ describe('playground requests', () => {
   });
 
   it('reports a rejected stream without dispatching events', async () => {
-    const handlers = {
-      frame: vi.fn<(data: string) => void>(),
-      done: vi.fn<(meta: PlaygroundStreamDone) => void>(),
-      error: vi.fn<(problem: PlaygroundStreamProblem) => void>()
-    };
+    const handlers = createStreamHandlers();
     serve((received) => {
       route(received, 'POST', '/api/v1/playground/stream');
       return json({ title: 'Unavailable', status: 503 }, 503);

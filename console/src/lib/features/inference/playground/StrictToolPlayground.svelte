@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { useAction } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
-  import { onDestroy } from 'svelte';
+  import PublicKeyField from './PublicKeyField.svelte';
   import {
     nativeChatRequest,
     nextTurn,
@@ -11,12 +9,16 @@
     unaryTurn,
     type ReadyTurn
   } from './browserContinuation';
+  import { usePublicClientAction } from './usePublicClientAction.svelte';
 
   let { route, requestText }: { route: string; requestText: string } = $props();
   let key = $state('');
-  const turnAction = useAction();
-  const busy = $derived(turnAction.key);
-  let error = $state('');
+  const client = usePublicClientAction(
+    'The public inference request could not be completed.',
+    () => {
+      key = '';
+    }
+  );
   let turns = $state<ReadyTurn[]>([]);
   let activeIndex = $state(0);
   let results = $state<string[]>([]);
@@ -24,23 +26,12 @@
     submission: string;
     request: ReadyTurn['request'];
   } | null>(null);
-  let abort: AbortController | null = null;
-  let epoch = 0;
 
   const active = $derived(turns[activeIndex]);
   const calls = $derived(active?.assistant.tool_calls ?? []);
 
-  function problem(reason: unknown) {
-    return reason instanceof Error
-      ? reason.message
-      : 'The public inference request could not be completed.';
-  }
-
   function reset() {
-    epoch += 1;
-    abort?.abort();
-    abort = null;
-    error = '';
+    client.reset();
     pending = null;
     turns = [];
     results = [];
@@ -54,93 +45,64 @@
     pending = null;
   }
 
-  async function runTurn(
-    actionKey: string,
-    owner: number,
-    send: (signal: AbortSignal) => Promise<ReadyTurn>
-  ) {
-    const controller = new AbortController();
-    abort = controller;
-    await turnAction.run(
-      () => send(controller.signal),
-      (turn, current) => {
-        if (owner === epoch && current()) addTurn(turn);
-      },
-      {
-        key: actionKey,
-        failure: (reason) => (owner === epoch ? problem(reason) : error)
-      }
-    );
-    if (owner === epoch) {
-      error = turnAction.error;
-      abort = null;
-    }
-  }
-
   async function begin() {
-    if (busy) return;
+    if (client.busy) return;
     reset();
-    const owner = epoch;
-    const built = captureResult(() => nativeChatRequest(requestText, route));
+    const built = nativeChatRequest(requestText, route);
     if (!built.ok) {
-      error = problem(built.error);
+      client.setError(built.error);
       return;
     }
     const request = built.value;
     const submission = submissionID();
     pending = { submission, request };
-    await runTurn('first', owner, (signal) =>
-      streamTurn(key, request, submission, signal)
+    await client.run(
+      (signal) => streamTurn(key, request, submission, signal),
+      addTurn,
+      'first'
     );
   }
 
   async function continueWithResults() {
-    if (busy || !active || !calls.length) return;
-    const owner = epoch;
-    const built = captureResult(() =>
-      nextTurn(
-        active,
-        calls.map((call, index) => ({
-          tool_call_id: call.id,
-          content: results[index] ?? ''
-        }))
-      )
+    if (client.busy || !active || !calls.length) return;
+    const built = nextTurn(
+      active,
+      calls.map((call, index) => ({
+        tool_call_id: call.id,
+        content: results[index] ?? ''
+      }))
     );
     if (!built.ok) {
-      error = problem(built.error);
+      client.setError(built.error);
       return;
     }
     const request = built.value;
     const submission = submissionID();
     pending = { submission, request };
-    error = '';
     const handle = active.handle;
-    await runTurn('next', owner, (signal) =>
-      unaryTurn(key, request, submission, handle, signal)
+    await client.run(
+      (signal) => unaryTurn(key, request, submission, handle, signal),
+      addTurn,
+      'next'
     );
   }
 
   async function recover() {
-    if (busy || !pending) return;
-    const owner = epoch;
-    error = '';
+    if (client.busy || !pending) return;
     const pendingTurn = pending;
-    await runTurn('recover', owner, (signal) =>
-      recoverTurn(key, pendingTurn.submission, pendingTurn.request, signal)
+    await client.run(
+      (signal) =>
+        recoverTurn(key, pendingTurn.submission, pendingTurn.request, signal),
+      addTurn,
+      'recover'
     );
   }
 
   function select(index: number) {
     activeIndex = index;
     results = turns[index]?.assistant.tool_calls?.map(() => '') ?? [];
-    error = '';
+    client.clearError();
   }
-
-  onDestroy(() => {
-    epoch += 1;
-    abort?.abort();
-    key = '';
-  });
 </script>
 
 <section class="card strict-client" aria-labelledby="strict-client-heading">
@@ -152,24 +114,12 @@
     for encrypted state to become ready, and sends one result for each tool
     call. It does not execute tools for you.
   </p>
-  <div class="form-field">
-    <label for="strict-api-key">
-      Inference API key with provider-state permission
-    </label>
-    <input
-      id="strict-api-key"
-      type="password"
-      bind:value={key}
-      autocomplete="off"
-      spellcheck="false"
-      aria-describedby="strict-key-help"
-    />
-    <small id="strict-key-help">
-      Use a key allowed for this route with inference and provider-state
-      permission. It stays in this tab and is sent only to the same-origin
-      public API.
-    </small>
-  </div>
+  <PublicKeyField
+    id="strict-api-key"
+    label="Inference API key with provider-state permission"
+    help="Use a key allowed for this route with inference and provider-state permission. It stays in this tab and is sent only to the same-origin public API."
+    bind:value={key}
+  />
   <p class="scope-note">
     The Advanced request JSON above is the complete native Chat request. Its
     model must be empty or name <code>{route}</code>. The first turn streams;
@@ -180,16 +130,16 @@
       type="button"
       class="button button-primary"
       onclick={begin}
-      disabled={Boolean(busy) || !key || !route}
+      disabled={client.busy || !key || !route}
     >
-      {busy === 'first'
+      {client.key === 'first'
         ? 'Waiting for ready continuation…'
         : 'Run strict first turn'}
     </button>
-    {#if busy}<button
+    {#if client.busy}<button
         type="button"
         class="button button-secondary"
-        onclick={() => abort?.abort()}
+        onclick={client.cancel}
       >
         Cancel delivery
       </button>{/if}
@@ -201,8 +151,10 @@
         Clear interaction
       </button>{/if}
   </div>
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if pending && !busy}
+  {#if client.error}<p class="inline-problem" role="alert">
+      {client.error}
+    </p>{/if}
+  {#if pending && !client.busy}
     <div class="recovery" role="status">
       <p>
         The request may have reached the provider. Recover the same submission
@@ -304,11 +256,11 @@
           type="button"
           class="button button-primary"
           onclick={continueWithResults}
-          disabled={Boolean(busy) ||
+          disabled={client.busy ||
             !key ||
             results.some((value) => !value?.trim())}
         >
-          {busy === 'next'
+          {client.key === 'next'
             ? 'Submitting tool results…'
             : 'Submit ordered tool results'}
         </button>

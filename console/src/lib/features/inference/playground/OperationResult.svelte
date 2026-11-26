@@ -30,14 +30,6 @@
     operation === 'token_count' ? nativeCountFields(response) : []
   );
   const raw = $derived(responseRaw ?? stringifyNativeJSON(response));
-  const media = $derived(
-    operation.startsWith('image_') ||
-      operation.startsWith('video_') ||
-      operation === 'speech' ||
-      operation === 'transcription' ||
-      operation === 'translation'
-  );
-  const realtime = $derived(operation === 'realtime');
 
   function download() {
     downloadBlob(
@@ -114,16 +106,6 @@
           <dd><code>{count.value}</code></dd>
         </div>{/each}
     </dl>
-  {:else if media}
-    <p class="scope-note">
-      Media resources and lifecycle fields remain in the native result below.
-      The response is not resized, transcoded, sampled, or decoded for preview.
-    </p>
-  {:else if realtime}
-    <p class="scope-note">
-      Native event order, turn boundaries, interruption, VAD, and media timing
-      remain in the result below. No event is synthesized from a final message.
-    </p>
   {/if}
   <details>
     <summary>Native result JSON</summary>
