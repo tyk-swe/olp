@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
@@ -33,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/plugin/abi"
 	"github.com/tyk-swe/olp/tests/harness"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
@@ -596,6 +598,7 @@ func (s *stubExternalSecrets) Resolve(ctx context.Context, ref secretstore.Refer
 
 type providerAPITestEnv struct {
 	pool      *pgxpool.Pool
+	access    *access.Server
 	auth      *secrets.AuthKey
 	server    *providers.Server
 	http      *httptest.Server
@@ -641,7 +644,7 @@ func newProviderAPITestEnv(t *testing.T, external *stubExternalSecrets) provider
 	server.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)
-	return providerAPITestEnv{pool: pool, auth: auth, server: server, http: httpServer, ownerID: ownerID, sessionID: sessionID, token: token}
+	return providerAPITestEnv{pool: pool, access: accessServer, auth: auth, server: server, http: httpServer, ownerID: ownerID, sessionID: sessionID, token: token}
 }
 
 func (e providerAPITestEnv) call(t *testing.T, method, path, body, ifMatch, idempotencyKey string) apiResult {
@@ -937,4 +940,230 @@ func TestProviderSlotWriteRejectsAmbiguousPastedCredentialAndVersion(t *testing.
 	if credCount != 1 {
 		t.Fatalf("provider credentials count = %d, want 1", credCount)
 	}
+}
+
+func TestGrantEnrollmentSettlePersistsStandingAndSecretState(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	providerID, slotID := uuid.NewString(), uuid.NewString()
+	etag := uuid.NewString()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'settle-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, providerEndpoint, etag, env.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits) VALUES($1,$2,true,0,'default',true,0,1,'{}','{}')`,
+		slotID, providerID); err != nil {
+		t.Fatal(err)
+	}
+
+	claimDevice := func(t *testing.T, intervalSeconds int64) grants.Enrollment {
+		t.Helper()
+		id := uuid.NewString()
+		expires := time.Now().Add(10 * time.Minute)
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		if err := env.access.Keys.Store(ctx, tx, env.access.Installation, id, secrets.GrantEnrollment, []byte("device-session"), &expires); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at,poll_interval,poll_at)
+			VALUES($1,$2,$3,repeat('0',64),'fixture-profile',$4,$5,$6,now()-interval '1 second')`,
+			id, providerID, slotID, env.ownerID, expires, intervalSeconds); err != nil {
+			t.Fatal(err)
+		}
+		claimed, standing, err := grants.Watch(ctx, tx, env.access, providerID, id, env.ownerID)
+		if err != nil || claimed == nil {
+			t.Fatalf("Watch claimed=%v standing=%+v err=%v", claimed, standing, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return *claimed
+	}
+
+	settle := func(t *testing.T, enrollment grants.Enrollment, failed error, interrupted bool) (grants.Standing, error) {
+		t.Helper()
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		standing, err := enrollment.Settle(ctx, tx, failed, interrupted)
+		if err != nil {
+			return standing, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return standing, nil
+	}
+
+	type persistedState struct {
+		pollInterval int64
+		continued    bool
+		outcome      *string
+		secretCount  int
+	}
+	readState := func(t *testing.T, id string) persistedState {
+		t.Helper()
+		var s persistedState
+		if err := env.pool.QueryRow(ctx, `SELECT poll_interval,continued_at IS NOT NULL,outcome,
+			(SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose=$2)
+			FROM olp.grant_enrollments WHERE id=$1`, id, secrets.GrantEnrollment).Scan(&s.pollInterval, &s.continued, &s.outcome, &s.secretCount); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	t.Run("authorization_pending keeps enrollment and secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAuthorizationPending, Message: "wait"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 10*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 10s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 10 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with interval 10 and secret kept", state)
+		}
+	})
+
+	t.Run("slow_down increases persisted interval and keeps secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeSlowDown, Message: "slower"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 15*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 15s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 15 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with interval 15 and secret kept", state)
+		}
+	})
+
+	t.Run("interrupted poll leaves terminal failure pending and keeps secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: "server_error", Message: "aborted"}, true)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 10*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 10s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 10 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with secret kept", state)
+		}
+	})
+
+	t.Run("access_denied ends enrollment and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAccessDenied, Message: "denied"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Denied || !standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want denied ended", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome == nil || *state.outcome != "denied" || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want denied with secret deleted", state)
+		}
+	})
+
+	t.Run("expired_token ends enrollment and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeExpiredToken, Message: "expired"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Expired || !standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want expired ended", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome == nil || *state.outcome != "expired" || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want expired with secret deleted", state)
+		}
+	})
+
+	t.Run("terminal abi error commits settlement and returns problem on Standing.Failure", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: "server_error", Message: "upstream refused"}, false)
+		if err != nil {
+			t.Fatalf("expected nil tx error so caller commits, got: %v", err)
+		}
+		if !standing.Ended || standing.Status != "" {
+			t.Fatalf("standing = %+v, want ended terminal failure", standing)
+		}
+		problem, ok := errors.AsType[*httpkit.Problem](standing.Failure)
+		if !ok || problem.Status != 422 || problem.Code != "grant_enrollment_failed" {
+			t.Fatalf("Standing.Failure = %#v, want 422 grant_enrollment_failed", standing.Failure)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome != nil || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want ended without outcome and secret deleted", state)
+		}
+	})
+
+	t.Run("terminal non-abi error preserves problem and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		stale := httpkit.Fail(409, "grant_enrollment_stale", "slot changed")
+		standing, err := settle(t, enrollment, stale, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if !standing.Ended || !errors.Is(standing.Failure, stale) {
+			t.Fatalf("standing = %+v, want ended with stale problem", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome != nil || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want ended with secret deleted", state)
+		}
+	})
+
+	t.Run("rolled back transaction leaves enrollment pending and secret intact", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		standing, err := enrollment.Settle(ctx, tx, &abi.Error{Code: abi.CodeAccessDenied}, false)
+		if err != nil || standing.Status != grants.Denied {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("Settle = (%+v, %v), want denied", standing, err)
+		}
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.secretCount != 1 {
+			t.Fatalf("persisted state after rollback = %+v, want pending with secret intact", state)
+		}
+	})
+
+	t.Run("cancelled enrollment returns pgx.ErrNoRows", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		cancelTx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := grants.Cancel(ctx, cancelTx, providerID, enrollment.ID, env.ownerID); err != nil {
+			_ = cancelTx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if err := cancelTx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAccessDenied}, false)
+		if !errors.Is(err, pgx.ErrNoRows) || standing != (grants.Standing{}) {
+			t.Fatalf("Settle after cancel = (%+v, %v), want (zero, pgx.ErrNoRows)", standing, err)
+		}
+	})
 }
