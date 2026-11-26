@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -17,17 +18,17 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-// The reference catalog offers its facts beside a provider's models. Accepting
-// them stores operator facts tagged with the catalog's digest. That changes
-// the provider's configuration, so certified capabilities return to declared:
-// the catalog never certifies anything.
-
-func canonicalModel(metadata json.RawMessage) string {
+func canonicalModel(metadata json.RawMessage) (string, error) {
+	if len(bytes.TrimSpace(metadata)) == 0 {
+		return "", nil
+	}
 	var facts struct {
 		CanonicalModel string `json:"canonical_model"`
 	}
-	_ = json.Unmarshal(metadata, &facts)
-	return facts.CanonicalModel
+	if err := json.Unmarshal(metadata, &facts); err != nil {
+		return "", err
+	}
+	return facts.CanonicalModel, nil
 }
 
 type catalogSuggestion struct {
@@ -94,10 +95,15 @@ func sameFact(a, b json.RawMessage) bool {
 
 // Overwriting the source of a privacy declaration would make the catalog look
 // like its evidence.
-func privacyEvidence(stored json.RawMessage) bool {
+func privacyEvidence(stored json.RawMessage) (bool, error) {
+	if len(bytes.TrimSpace(stored)) == 0 {
+		return false, nil
+	}
 	var facts routing.ModelMetadata
-	_ = json.Unmarshal(stored, &facts)
-	return facts.DataCollection != nil || facts.ZeroDataRetention != nil
+	if err := json.Unmarshal(stored, &facts); err != nil {
+		return false, err
+	}
+	return facts.DataCollection != nil || facts.ZeroDataRetention != nil, nil
 }
 
 func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models []storedModel) ([]catalogSuggestion, error) {
@@ -105,7 +111,11 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 	out := []catalogSuggestion{}
 	for _, model := range models {
 		stored := cfg.Options.Models[model.UpstreamModel]
-		match, matchedBy, ok := signed.Lookup(vendorID, model.UpstreamModel, canonicalModel(stored))
+		canonical, err := canonicalModel(stored)
+		if err != nil {
+			return nil, err
+		}
+		match, matchedBy, ok := signed.Lookup(vendorID, model.UpstreamModel, canonical)
 		if !ok {
 			continue
 		}
@@ -114,17 +124,29 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 		if err != nil {
 			return nil, err
 		}
-		suggestion := catalogSuggestion{ModelID: model.ID, UpstreamModel: model.UpstreamModel, CatalogModel: match.ID, MatchedBy: string(matchedBy),
-			Facts: facts, Changes: changes, Capabilities: match.Capabilities, Lifecycle: match.Lifecycle.View()}
-		if privacyEvidence(stored) {
-			suggestion.Conflict = new("privacy_evidence")
+		hasPrivacy, err := privacyEvidence(stored)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, suggestion)
+		var conflict *string
+		if hasPrivacy {
+			conflict = new("privacy_evidence")
+		}
+		out = append(out, catalogSuggestion{
+			ModelID: model.ID, UpstreamModel: model.UpstreamModel, CatalogModel: match.ID, MatchedBy: string(matchedBy),
+			Facts: facts, Changes: changes, Capabilities: match.Capabilities, Lifecycle: match.Lifecycle.View(), Conflict: conflict,
+		})
 	}
 	return out, nil
 }
 
-func (s *Server) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+type catalogSuggestionsReply struct {
+	Catalog  catalog.Summary     `json:"catalog"`
+	VendorID string              `json:"vendor_id"`
+	Items    []catalogSuggestion `json:"items"`
+}
+
+func (s *modelService) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if s.catalog == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
@@ -144,7 +166,11 @@ func (s *Server) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.OK(map[string]any{"catalog": s.catalog.Summary(), "vendor_id": providerconfig.Value(current.Connection.Document().Options.VendorID), "items": items}), nil
+	return httpkit.OK(catalogSuggestionsReply{
+		Catalog:  s.catalog.Summary(),
+		VendorID: providerconfig.Value(current.Connection.Document().Options.VendorID),
+		Items:    items,
+	}), nil
 }
 
 type acceptCatalogRequest struct {
@@ -154,9 +180,9 @@ type acceptCatalogRequest struct {
 
 // The caller names the catalog it reviewed, so an upgrade between review and
 // acceptance cannot store facts nobody saw.
-func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input acceptCatalogRequest
-	if err := httpkit.Decode(r, &input); err != nil {
+	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if s.catalog == nil {
@@ -165,15 +191,15 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (h
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
 		return httpkit.Reply{}, httpkit.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return httpkit.Reply{}, err
 		}
-		return s.detailReply(ctx, tx, current.ID)
+		return s.drafts.detailReply(ctx, tx, current.ID)
 	})
 }
 
-func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
+func (s *modelService) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
 	if input.CatalogSHA256 != s.catalog.SHA256 {
 		return httpkit.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
@@ -207,9 +233,10 @@ func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *rec
 		}
 		next.Options.Models[name] = merged
 	}
-	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), next)
+	prepared, err := connection.Prepare(ctx, s.drafts.connectionPolicy(tx), next)
 	if err != nil {
 		return err
 	}
-	return s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
+	_, err = s.drafts.storeDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
+	return err
 }

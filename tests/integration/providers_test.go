@@ -3,15 +3,18 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,15 +24,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/plugin/abi"
 	"github.com/tyk-swe/olp/tests/harness"
+	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
 const providerEndpoint = `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":"http://127.0.0.1:9/v1"}`
@@ -569,4 +576,594 @@ func TestProviderListingComparisonUsesThePublishedRevisionAndWritesNothing(t *te
 func strconvQuote(value string) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+type stubExternalSecrets struct {
+	mu      sync.Mutex
+	resolve func(context.Context, secretstore.Reference) ([]byte, error)
+}
+
+func (s *stubExternalSecrets) set(fn func(context.Context, secretstore.Reference) ([]byte, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolve = fn
+}
+
+func (s *stubExternalSecrets) Resolve(ctx context.Context, ref secretstore.Reference) ([]byte, error) {
+	s.mu.Lock()
+	fn := s.resolve
+	s.mu.Unlock()
+	return fn(ctx, ref)
+}
+
+type providerAPITestEnv struct {
+	pool      *pgxpool.Pool
+	access    *access.Server
+	auth      *secrets.AuthKey
+	server    *providers.Server
+	http      *httptest.Server
+	ownerID   string
+	sessionID string
+	token     string
+}
+
+func newProviderAPITestEnv(t *testing.T, external *stubExternalSecrets) providerAPITestEnv {
+	t.Helper()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	ownerID := uuid.NewString()
+	sessionID := uuid.NewString()
+	token := "provider-regression-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1::uuid,$1::text||'@example.com','Owner','owner',$1::uuid)`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`,
+		sessionID, ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
+		t.Fatal(err)
+	}
+	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	quiet := slog.New(slog.DiscardHandler)
+	accessServer := access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: quiet})
+	deps := providers.Deps{
+		Access:    accessServer,
+		Egress:    &policy,
+		Getenv:    func(string) string { return "" },
+		Activated: func(context.Context, pgx.Tx, string, string) error { return nil },
+		Log:       quiet,
+	}
+	if external != nil {
+		deps.ExternalSecrets = external
+	}
+	server := providers.New(deps)
+	mux := http.NewServeMux()
+	server.Register(mux)
+	httpServer := httptest.NewServer(mux)
+	t.Cleanup(httpServer.Close)
+	return providerAPITestEnv{pool: pool, access: accessServer, auth: auth, server: server, http: httpServer, ownerID: ownerID, sessionID: sessionID, token: token}
+}
+
+func (e providerAPITestEnv) call(t *testing.T, method, path, body, ifMatch, idempotencyKey string) apiResult {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	r, err := http.NewRequestWithContext(t.Context(), method, e.http.URL+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		r.Header.Set("Content-Type", "application/json")
+	}
+	if ifMatch != "" {
+		r.Header.Set("If-Match", `"`+ifMatch+`"`)
+	}
+	if idempotencyKey != "" {
+		r.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	r.Header.Set("Origin", "https://test.example")
+	r.Header.Set("X-CSRF-Token", base64.RawURLEncoding.EncodeToString(e.auth.Digest(secrets.CSRFDigest, e.token)))
+	r.AddCookie(&http.Cookie{Name: access.SessionCookie, Value: e.token})
+	response, err := e.http.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return apiResult{status: response.StatusCode, body: raw}
+}
+
+func assertInstallationLockFree(ctx context.Context, pool *pgxpool.Pool) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin lock check: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var id string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.installation WHERE singleton FOR UPDATE NOWAIT").Scan(&id); err != nil {
+		return fmt.Errorf("installation lock was held during external resolution: %w", err)
+	}
+	return nil
+}
+
+func TestProviderExternalSecretActivationRunsWithoutInstallationLock(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	upstream := httptest.NewServer(vendor.Handler())
+	t.Cleanup(upstream.Close)
+
+	external := &stubExternalSecrets{}
+	env := newProviderAPITestEnv(t, external)
+	providerID, slotID, modelID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	initialETag := uuid.NewString()
+	cfgJSON := `{"kind":"openai_compatible","auth_mode":"api_key","endpoint":` + strconvQuote(upstream.URL+"/v1") + `}`
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'external-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, cfgJSON, initialETag, env.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	ref := secretstore.Reference{Store: "gcp", SecretID: "projects/test-project/secrets/provider-key", Version: "1"}
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	credID, _, err := env.server.StoreExternalCredential(ctx, tx, providerID, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,true,0,'default',true,0,1,$3,'{}','{}')`,
+		slotID, providerID, credID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,'Fixture Model',true,'[{"operation":"generation","surface":"openai","mode":"unary","source":"declared"}]')`,
+		modelID, providerID, vendor.Model); err != nil {
+		t.Fatal(err)
+	}
+
+	var probeCalls atomic.Int32
+	external.set(func(resolveCtx context.Context, got secretstore.Reference) ([]byte, error) {
+		probeCalls.Add(1)
+		if got != ref {
+			return nil, fmt.Errorf("unexpected reference %+v", got)
+		}
+		if err := assertInstallationLockFree(resolveCtx, env.pool); err != nil {
+			return nil, err
+		}
+		return []byte(vendor.Secret), nil
+	})
+	probeRes := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/probe", "", initialETag, "")
+	if probeRes.status != http.StatusOK {
+		t.Fatalf("probe HTTP %d: %s", probeRes.status, probeRes.body)
+	}
+	if probeCalls.Load() != 1 {
+		t.Fatalf("probe external resolve calls = %d, want 1", probeCalls.Load())
+	}
+
+	certRes := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/models/"+modelID+"/certify", "", initialETag, "")
+	if certRes.status != http.StatusOK {
+		t.Fatalf("certify HTTP %d: %s", certRes.status, certRes.body)
+	}
+	var certified struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(certRes.body, &certified); err != nil || certified.Status != "certified" {
+		t.Fatalf("certify body = %s, want status certified", certRes.body)
+	}
+	currentETag := func() string {
+		t.Helper()
+		var etag string
+		if err := env.pool.QueryRow(ctx, `SELECT etag::text FROM olp.providers WHERE id=$1`, providerID).Scan(&etag); err != nil {
+			t.Fatal(err)
+		}
+		return etag
+	}
+
+	etagBeforeConflict := currentETag()
+	external.set(func(resolveCtx context.Context, got secretstore.Reference) ([]byte, error) {
+		if err := assertInstallationLockFree(resolveCtx, env.pool); err != nil {
+			return nil, err
+		}
+		if _, err := env.pool.Exec(resolveCtx, `UPDATE olp.providers SET etag=$2 WHERE id=$1`, providerID, uuid.NewString()); err != nil {
+			return nil, err
+		}
+		return []byte(vendor.Secret), nil
+	})
+	conflictRes := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/activate", "", etagBeforeConflict, uuid.NewString())
+	if conflictRes.status != http.StatusPreconditionFailed || !strings.Contains(string(conflictRes.body), "/etag_mismatch") {
+		t.Fatalf("concurrent edit during activate returned HTTP %d: %s, want 412 etag_mismatch", conflictRes.status, conflictRes.body)
+	}
+	var state string
+	if err := env.pool.QueryRow(ctx, `SELECT state FROM olp.providers WHERE id=$1`, providerID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "draft" {
+		t.Fatalf("provider state after conflicted activate = %q, want draft", state)
+	}
+
+	var activateCalls atomic.Int32
+	external.set(func(resolveCtx context.Context, got secretstore.Reference) ([]byte, error) {
+		activateCalls.Add(1)
+		if err := assertInstallationLockFree(resolveCtx, env.pool); err != nil {
+			return nil, err
+		}
+		return []byte(vendor.Secret), nil
+	})
+	activateKey := uuid.NewString()
+	etagBeforeActivate := currentETag()
+	first := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/activate", "", etagBeforeActivate, activateKey)
+	if first.status != http.StatusOK {
+		t.Fatalf("activate HTTP %d: %s", first.status, first.body)
+	}
+	if activateCalls.Load() != 1 {
+		t.Fatalf("activate external resolve calls = %d, want 1", activateCalls.Load())
+	}
+	var activated struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(first.body, &activated); err != nil || activated.State != "active" {
+		t.Fatalf("activate body = %s, want active", first.body)
+	}
+	replay := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/activate", "", etagBeforeActivate, activateKey)
+	if replay.status != http.StatusOK || string(replay.body) != string(first.body) {
+		t.Fatalf("activate replay HTTP %d %s, want 200 %s", replay.status, replay.body, first.body)
+	}
+	if activateCalls.Load() != 1 {
+		t.Fatalf("activate replay invoked external Resolve again: calls = %d, want 1", activateCalls.Load())
+	}
+}
+
+func TestProviderExpiredEnrollmentPollSettlesAtomicallyAndRejectsRevokedSession(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	providerID, slotID := uuid.NewString(), uuid.NewString()
+	etag := uuid.NewString()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'enrollment-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, providerEndpoint, etag, env.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits) VALUES($1,$2,true,0,'default',true,0,1,'{}','{}')`,
+		slotID, providerID); err != nil {
+		t.Fatal(err)
+	}
+	insertExpired := func() string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := env.pool.Exec(ctx, `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,'grant_enrollment',1,'\x00',now()+interval '1 hour')`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at,poll_interval,poll_at)
+			VALUES($1,$2,$3,repeat('0',64),'fixture-profile',$4,now()-interval '1 minute',5,now()-interval '1 minute')`, id, providerID, slotID, env.ownerID); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	expiredID := insertExpired()
+	untouchedID := insertExpired()
+
+	res := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/grant-enrollments/"+expiredID+"/poll", "", "", "")
+	if res.status != http.StatusOK {
+		t.Fatalf("expired poll HTTP %d: %s", res.status, res.body)
+	}
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(res.body, &status); err != nil || status.Status != "expired" {
+		t.Fatalf("expired poll body = %s, want status expired", res.body)
+	}
+	var outcome *string
+	var continued bool
+	var secretCount, auditCount int
+	if err := env.pool.QueryRow(ctx, `SELECT outcome,continued_at IS NOT NULL,(SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='grant_enrollment'),
+		(SELECT count(*) FROM olp.audit WHERE action='provider.grant.enroll' AND resource_type='provider' AND resource_id=$2 AND outcome='failure')
+		FROM olp.grant_enrollments WHERE id=$1`, expiredID, providerID).Scan(&outcome, &continued, &secretCount, &auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if outcome == nil || *outcome != "expired" || !continued || secretCount != 0 || auditCount != 1 {
+		t.Fatalf("settled state outcome=%v continued=%v secrets=%d audits=%d, want expired/true/0/1", outcome, continued, secretCount, auditCount)
+	}
+
+	if _, err := env.pool.Exec(ctx, `DELETE FROM olp.sessions WHERE id=$1`, env.sessionID); err != nil {
+		t.Fatal(err)
+	}
+	revokedRes := env.call(t, http.MethodPost, "/api/v1/providers/"+providerID+"/grant-enrollments/"+untouchedID+"/poll", "", "", "")
+	if revokedRes.status != http.StatusUnauthorized {
+		t.Fatalf("revoked session poll HTTP %d: %s, want 401", revokedRes.status, revokedRes.body)
+	}
+	if err := env.pool.QueryRow(ctx, `SELECT outcome,continued_at IS NOT NULL,(SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='grant_enrollment'),
+		(SELECT count(*) FROM olp.audit WHERE action='provider.grant.enroll' AND resource_type='provider' AND resource_id=$2 AND outcome='failure')
+		FROM olp.grant_enrollments WHERE id=$1`, untouchedID, providerID).Scan(&outcome, &continued, &secretCount, &auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != nil || continued || secretCount != 1 || auditCount != 1 {
+		t.Fatalf("revoked session mutated enrollment outcome=%v continued=%v secrets=%d audits=%d, want nil/false/1/1", outcome, continued, secretCount, auditCount)
+	}
+}
+
+func TestProviderSlotWriteRejectsAmbiguousPastedCredentialAndVersion(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	providerID, slotID := uuid.NewString(), uuid.NewString()
+	etag := uuid.NewString()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'slot-write-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, providerEndpoint, etag, env.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	credID, _, err := env.server.StoreCredential(ctx, tx, providerID, "sk-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,true,0,'default',true,0,1,$3,'{}','{}')`,
+		slotID, providerID, credID); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := `{"slot":{"name":"default","credential_version_id":` + strconvQuote(credID) + `},"credential":"sk-pasted-conflict"}`
+	res := env.call(t, http.MethodPut, "/api/v1/providers/"+providerID+"/credential-slots/"+slotID, payload, etag, uuid.NewString())
+	if res.status != http.StatusUnprocessableEntity {
+		t.Fatalf("ambiguous slot write HTTP %d: %s, want 422", res.status, res.body)
+	}
+	var problem struct {
+		Type   string           `json:"type"`
+		Errors map[string][]any `json:"errors"`
+	}
+	if err := json.Unmarshal(res.body, &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(problem.Type, "/validation_failed") || len(problem.Errors["credential"]) == 0 {
+		t.Fatalf("ambiguous slot write problem = %s, want validation_failed on credential", res.body)
+	}
+	var credCount int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM olp.provider_credentials WHERE provider_id=$1`, providerID).Scan(&credCount); err != nil {
+		t.Fatal(err)
+	}
+	if credCount != 1 {
+		t.Fatalf("provider credentials count = %d, want 1", credCount)
+	}
+}
+
+func TestGrantEnrollmentSettlePersistsStandingAndSecretState(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	providerID, slotID := uuid.NewString(), uuid.NewString()
+	etag := uuid.NewString()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'settle-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, providerEndpoint, etag, env.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits) VALUES($1,$2,true,0,'default',true,0,1,'{}','{}')`,
+		slotID, providerID); err != nil {
+		t.Fatal(err)
+	}
+
+	claimDevice := func(t *testing.T, intervalSeconds int64) grants.Enrollment {
+		t.Helper()
+		id := uuid.NewString()
+		expires := time.Now().Add(10 * time.Minute)
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		if err := env.access.Keys.Store(ctx, tx, env.access.Installation, id, secrets.GrantEnrollment, []byte("device-session"), &expires); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at,poll_interval,poll_at)
+			VALUES($1,$2,$3,repeat('0',64),'fixture-profile',$4,$5,$6,now()-interval '1 second')`,
+			id, providerID, slotID, env.ownerID, expires, intervalSeconds); err != nil {
+			t.Fatal(err)
+		}
+		claimed, standing, err := grants.Watch(ctx, tx, env.access, providerID, id, env.ownerID)
+		if err != nil || claimed == nil {
+			t.Fatalf("Watch claimed=%v standing=%+v err=%v", claimed, standing, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return *claimed
+	}
+
+	settle := func(t *testing.T, enrollment grants.Enrollment, failed error, interrupted bool) (grants.Standing, error) {
+		t.Helper()
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		standing, err := enrollment.Settle(ctx, tx, failed, interrupted)
+		if err != nil {
+			return standing, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return standing, nil
+	}
+
+	type persistedState struct {
+		pollInterval int64
+		continued    bool
+		outcome      *string
+		secretCount  int
+	}
+	readState := func(t *testing.T, id string) persistedState {
+		t.Helper()
+		var s persistedState
+		if err := env.pool.QueryRow(ctx, `SELECT poll_interval,continued_at IS NOT NULL,outcome,
+			(SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose=$2)
+			FROM olp.grant_enrollments WHERE id=$1`, id, secrets.GrantEnrollment).Scan(&s.pollInterval, &s.continued, &s.outcome, &s.secretCount); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	t.Run("authorization_pending keeps enrollment and secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAuthorizationPending, Message: "wait"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 10*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 10s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 10 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with interval 10 and secret kept", state)
+		}
+	})
+
+	t.Run("slow_down increases persisted interval and keeps secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeSlowDown, Message: "slower"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 15*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 15s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 15 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with interval 15 and secret kept", state)
+		}
+	})
+
+	t.Run("interrupted poll leaves terminal failure pending and keeps secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 10)
+		standing, err := settle(t, enrollment, &abi.Error{Code: "server_error", Message: "aborted"}, true)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Pending || standing.Interval != 10*time.Second || standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want pending 10s", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.pollInterval != 10 || state.secretCount != 1 {
+			t.Fatalf("persisted state = %+v, want pending with secret kept", state)
+		}
+	})
+
+	t.Run("access_denied ends enrollment and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAccessDenied, Message: "denied"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Denied || !standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want denied ended", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome == nil || *state.outcome != "denied" || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want denied with secret deleted", state)
+		}
+	})
+
+	t.Run("expired_token ends enrollment and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeExpiredToken, Message: "expired"}, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if standing.Status != grants.Expired || !standing.Ended || standing.Failure != nil {
+			t.Fatalf("standing = %+v, want expired ended", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome == nil || *state.outcome != "expired" || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want expired with secret deleted", state)
+		}
+	})
+
+	t.Run("terminal abi error commits settlement and returns problem on Standing.Failure", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		standing, err := settle(t, enrollment, &abi.Error{Code: "server_error", Message: "upstream refused"}, false)
+		if err != nil {
+			t.Fatalf("expected nil tx error so caller commits, got: %v", err)
+		}
+		if !standing.Ended || standing.Status != "" {
+			t.Fatalf("standing = %+v, want ended terminal failure", standing)
+		}
+		problem, ok := errors.AsType[*httpkit.Problem](standing.Failure)
+		if !ok || problem.Status != 422 || problem.Code != "grant_enrollment_failed" {
+			t.Fatalf("Standing.Failure = %#v, want 422 grant_enrollment_failed", standing.Failure)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome != nil || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want ended without outcome and secret deleted", state)
+		}
+	})
+
+	t.Run("terminal non-abi error preserves problem and deletes secret", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		stale := httpkit.Fail(409, "grant_enrollment_stale", "slot changed")
+		standing, err := settle(t, enrollment, stale, false)
+		if err != nil {
+			t.Fatalf("Settle error: %v", err)
+		}
+		if !standing.Ended || !errors.Is(standing.Failure, stale) {
+			t.Fatalf("standing = %+v, want ended with stale problem", standing)
+		}
+		state := readState(t, enrollment.ID)
+		if !state.continued || state.outcome != nil || state.secretCount != 0 {
+			t.Fatalf("persisted state = %+v, want ended with secret deleted", state)
+		}
+	})
+
+	t.Run("rolled back transaction leaves enrollment pending and secret intact", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		standing, err := enrollment.Settle(ctx, tx, &abi.Error{Code: abi.CodeAccessDenied}, false)
+		if err != nil || standing.Status != grants.Denied {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("Settle = (%+v, %v), want denied", standing, err)
+		}
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		state := readState(t, enrollment.ID)
+		if state.continued || state.outcome != nil || state.secretCount != 1 {
+			t.Fatalf("persisted state after rollback = %+v, want pending with secret intact", state)
+		}
+	})
+
+	t.Run("cancelled enrollment returns pgx.ErrNoRows", func(t *testing.T) {
+		enrollment := claimDevice(t, 5)
+		cancelTx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := grants.Cancel(ctx, cancelTx, providerID, enrollment.ID, env.ownerID); err != nil {
+			_ = cancelTx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if err := cancelTx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		standing, err := settle(t, enrollment, &abi.Error{Code: abi.CodeAccessDenied}, false)
+		if !errors.Is(err, pgx.ErrNoRows) || standing != (grants.Standing{}) {
+			t.Fatalf("Settle after cancel = (%+v, %v), want (zero, pgx.ErrNoRows)", standing, err)
+		}
+	})
 }

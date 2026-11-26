@@ -2,21 +2,20 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
-	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 // A table of its own keeps API credential slots from selecting TLS keys.
-func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
+func (s *credentialService) storeNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
 		return "", httpkit.Invalid("credential", "Network credentials must fit within 64 KiB.")
 	}
@@ -33,7 +32,14 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 	return id, nil
 }
 
-func (s *Server) networkCredentials(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+type networkCredentialItem struct {
+	ID        string     `json:"id"`
+	Version   int        `json:"version"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+}
+
+func (s *credentialService) networkCredentials(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -45,22 +51,39 @@ func (s *Server) networkCredentials(r *http.Request, principal authz.Principal) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object('id',id,'version',version,'created_at',created_at,'revoked_at',revoked_at) FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
+	rows, err := s.access.Pool.Query(r.Context(), "SELECT id::text,version,created_at,revoked_at FROM olp.provider_network_credentials WHERE provider_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3", id, page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (networkCredentialItem, error) {
+		var item networkCredentialItem
+		err := row.Scan(&item.ID, &item.Version, &item.CreatedAt, &item.RevokedAt)
+		return item, err
+	})
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return httpkit.ListReply(items, page), nil
+	return httpkit.ListReplyBy(items, page, func(item networkCredentialItem) string { return item.ID }), nil
 }
 
 type networkCredentialRequest struct {
 	Credential string `json:"credential"`
 }
 
-func (s *Server) createNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+type networkCredentialMutation struct {
+	ProviderID   string `json:"provider_id"`
+	CredentialID string `json:"credential_id"`
+	ETag         string `json:"etag"`
+}
+
+type revokedNetworkCredential struct {
+	ProviderID        string                     `json:"provider_id"`
+	CredentialID      string                     `json:"credential_id"`
+	ETag              string                     `json:"etag"`
+	RuntimeGeneration access.AuthorityGeneration `json:"runtime_generation"`
+}
+
+func (s *credentialService) createNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input networkCredentialRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
@@ -77,12 +100,12 @@ func (s *Server) createNetworkCredential(r *http.Request, _ authz.Principal) (ht
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		return httpkit.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: map[string]any{"provider_id": id, "credential_id": created.ID, "etag": created.ETag}}, access.Event{Action: "provider.network_credential.create", Resource: "provider", ID: id}, nil
+		return httpkit.Reply{Status: http.StatusCreated, ETag: created.ETag, Body: networkCredentialMutation{ProviderID: id, CredentialID: created.ID, ETag: created.ETag}}, access.Event{Action: "provider.network_credential.create", Resource: "provider", ID: id}, nil
 	})
 }
 
-func (s *Server) revokeNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.network_credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, principal authz.Principal, current *record) (httpkit.Reply, error) {
+func (s *credentialService) revokeNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.network_credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, principal authz.Principal, current *record) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, "credential_id")
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -91,37 +114,22 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ authz.Principal) (ht
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		return httpkit.Detail(map[string]any{"provider_id": current.ID, "credential_id": id, "etag": revoked.ETag, "runtime_generation": revoked.Generation}, revoked.ETag), nil
+		return httpkit.Detail(revokedNetworkCredential{ProviderID: current.ID, CredentialID: id, ETag: revoked.ETag, RuntimeGeneration: revoked.Generation}, revoked.ETag), nil
 	})
-}
-
-func validateNetworkReference(ctx context.Context, q database.Queryer, providerID string, network *egress.ConnectionOptions) error {
-	if network == nil || network.CredentialID == "" {
-		return nil
-	}
-	var valid bool
-	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", network.CredentialID, providerID).Scan(&valid)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !valid {
-		return httpkit.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
-	}
-	return err
 }
 
 type networkSecrets struct{ server *access.Server }
 
 func (n networkSecrets) NetworkSecret(ctx context.Context, providerID, credentialID string) ([]byte, error) {
-	tx, err := n.server.Pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if err := validateNetworkReference(ctx, tx, providerID, &egress.ConnectionOptions{CredentialID: credentialID}); err != nil {
-		return nil, err
-	}
-	return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
+	return readTx(ctx, n.server.Pool, func(tx pgx.Tx) ([]byte, error) {
+		if err := validateNetworkReference(ctx, tx, providerID, &egress.ConnectionOptions{CredentialID: credentialID}); err != nil {
+			return nil, err
+		}
+		return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
+	})
 }
 
-func (s *Server) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
+func (s *credentialService) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
 	var version int
 	if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
 		return revokedCredential{}, err
@@ -142,8 +150,8 @@ type createdNetworkCredential struct {
 	ETag string
 }
 
-func (s *Server) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
-	id, err := s.StoreNetworkCredential(ctx, tx, providerID, credential)
+func (s *credentialService) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
+	id, err := s.storeNetworkCredential(ctx, tx, providerID, credential)
 	if err != nil {
 		return createdNetworkCredential{}, err
 	}

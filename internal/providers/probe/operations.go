@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations"
+	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -106,6 +107,58 @@ func Operation(transport connectors.Config) string {
 
 func Probeable(transport connectors.Config, tuple connection.Capability) bool {
 	return ConfigurationCertifiable(transport, tuple) && transport.Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+}
+
+func InitialCapabilities(transport connectors.Config) []connection.Capability {
+	surface, operation := initialSurface(transport), Operation(transport)
+	if transport.ProfileID != "" {
+		surface, operation = profileInitialTuple(transport, surface, operation)
+	}
+	mode := "unary"
+	if transport.ProfileID != "" && !Probeable(transport, connection.Capability{Operation: operation, Surface: surface, Mode: mode}) {
+		if tuple := DefaultTuple(transport); Probeable(transport, tuple) {
+			operation, surface, mode = tuple.Operation, tuple.Surface, tuple.Mode
+		}
+	}
+	capabilities := []connection.Capability{{Operation: operation, Surface: surface, Mode: mode}}
+	if operation == "generation" {
+		capabilities = append(capabilities, connection.Capability{Operation: operation, Surface: surface, Mode: "streaming"})
+	}
+	return capabilities
+}
+
+func initialSurface(transport connectors.Config) string {
+	switch transport.Kind {
+	case connectors.KindAnthropic:
+		return "anthropic"
+	case connectors.KindGemini, connectors.KindVertexAI:
+		return "gemini"
+	default:
+		return "openai"
+	}
+}
+
+func profileInitialTuple(transport connectors.Config, defaultSurface, defaultOperation string) (string, string) {
+	profile, err := transport.Profile()
+	if err != nil {
+		return defaultSurface, defaultOperation
+	}
+	switch profile.Dialect {
+	case "openai-chat", "openai-responses":
+		return "openai", defaultOperation
+	case "anthropic-messages":
+		return "anthropic", defaultOperation
+	case "gemini-generate-content":
+		return "gemini", defaultOperation
+	case "bedrock-converse":
+		return "bedrock", defaultOperation
+	case "bedrock-invoke":
+		return "bedrock", "bedrock_invoke"
+	}
+	if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && defaultOperation == "generation" {
+		return "native", defaultOperation
+	}
+	return defaultSurface, defaultOperation
 }
 
 func (p *Prober) certifyOperation(ctx context.Context, t Target, model string, tuple connection.Capability, codec operations.Dialect) error {

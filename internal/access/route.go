@@ -187,10 +187,10 @@ func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, au
 	return r, p, req.Admits(p)
 }
 
-// Reauthorize resolves the caller again inside tx, after begin has taken the
+// reauthorize resolves the caller again inside tx, after begin has taken the
 // installation lock, and checks the route requirement again, so a mutation
 // never commits under authority revoked since the request was admitted.
-func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error) {
+func (s *Server) reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error) {
 	req, ok := r.Context().Value(requirementKey{}).(Requirement)
 	if !ok {
 		return authz.Principal{}, fmt.Errorf("%s was not admitted by a secured route", r.Pattern)
@@ -207,7 +207,7 @@ func (s *Server) beginMutation(r *http.Request) (pgx.Tx, authz.Principal, error)
 	if err != nil {
 		return nil, authz.Principal{}, err
 	}
-	principal, err := s.Reauthorize(r, tx)
+	principal, err := s.reauthorize(r, tx)
 	if err != nil {
 		tx.Rollback(context.WithoutCancel(r.Context()))
 		return nil, authz.Principal{}, err

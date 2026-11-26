@@ -153,3 +153,63 @@ func TestGeminiDecisionsCertifyThePublicSurface(t *testing.T) {
 		t.Fatalf("issued %d certification requests, want one", probes.Load())
 	}
 }
+
+func TestInitialCapabilitiesFollowsTransportAndProfile(t *testing.T) {
+	t.Parallel()
+	generation := func(surface string) []connection.Capability {
+		return []connection.Capability{
+			{Operation: "generation", Surface: surface, Mode: "unary"},
+			{Operation: "generation", Surface: surface, Mode: "streaming"},
+		}
+	}
+	cases := map[string]struct {
+		transport connectors.Config
+		want      []connection.Capability
+	}{
+		"openai default": {
+			transport: connectors.Config{Kind: connectors.KindOpenAI},
+			want:      generation("openai"),
+		},
+		"anthropic default": {
+			transport: connectors.Config{Kind: connectors.KindAnthropic},
+			want:      generation("anthropic"),
+		},
+		"gemini default": {
+			transport: connectors.Config{Kind: connectors.KindGemini},
+			want:      generation("gemini"),
+		},
+		"vertex openai profile overrides gemini surface": {
+			transport: connectors.Config{Kind: connectors.KindVertexAI, ProfileID: "vertex-openai", ProfileRevision: connectors.ProfileRevision},
+			want:      generation("openai"),
+		},
+		"vertex anthropic profile selects anthropic surface": {
+			transport: connectors.Config{Kind: connectors.KindVertexAI, ProfileID: "vertex-anthropic", ProfileRevision: connectors.ProfileRevision},
+			want:      generation("anthropic"),
+		},
+		"bedrock converse selects bedrock generation": {
+			transport: connectors.Config{Kind: connectors.KindBedrock, ProfileID: "bedrock-converse", ProfileRevision: connectors.ProfileRevision},
+			want:      generation("bedrock"),
+		},
+		"bedrock invoke selects unary bedrock_invoke": {
+			transport: connectors.Config{Kind: connectors.KindBedrock, ProfileID: "bedrock-invoke", ProfileRevision: connectors.ProfileRevision},
+			want:      []connection.Capability{{Operation: "bedrock_invoke", Surface: "bedrock", Mode: "unary"}},
+		},
+		"native generation profile selects native surface": {
+			transport: connectors.Config{Kind: connectors.KindOpenAICompatible, ProfileID: "cohere-v2", ProfileRevision: connectors.ProfileRevision},
+			want:      generation("native"),
+		},
+		"dedicated decision profile falls back to default tuple": {
+			transport: connectors.Config{Kind: connectors.KindGemini, ProfileID: "gemini-decisions", ProfileRevision: connectors.ProfileRevision},
+			want:      []connection.Capability{{Operation: "decision", Surface: "gemini", Mode: "unary"}},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := InitialCapabilities(tc.transport)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("InitialCapabilities(%+v) = %+v, want %+v", tc.transport, got, tc.want)
+			}
+		})
+	}
+}

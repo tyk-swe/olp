@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -58,7 +59,6 @@ func scanRevision(row pgx.Row) (*revisionRow, error) {
 	return &v, nil
 }
 
-// loadRevision accepts a revision id or number scoped to the provider.
 func loadRevision(ctx context.Context, q database.Queryer, providerID, ref string) (*revisionRow, error) {
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
@@ -109,12 +109,35 @@ type revisionDetail struct {
 	SourceETag    string                   `json:"source_etag"`
 }
 
+type revisionDiffReply struct {
+	FromRevision                 int      `json:"from_revision"`
+	ToRevision                   int      `json:"to_revision"`
+	NetworkConfigurationChanged  bool     `json:"network_configuration_changed"`
+	ProfileChanged               bool     `json:"profile_changed"`
+	PluginChanged                bool     `json:"plugin_changed"`
+	PluginOptionsChanged         bool     `json:"plugin_options_changed"`
+	SemanticConfigurationChanged bool     `json:"semantic_configuration_changed"`
+	ServingBindingChanged        bool     `json:"serving_binding_changed"`
+	NameChanged                  bool     `json:"name_changed"`
+	EndpointChanged              bool     `json:"endpoint_changed"`
+	CloudContextChanged          bool     `json:"cloud_context_changed"`
+	DeploymentChanged            bool     `json:"deployment_changed"`
+	APIVersionChanged            bool     `json:"api_version_changed"`
+	ConnectorChanged             bool     `json:"connector_changed"`
+	CredentialChanged            bool     `json:"credential_changed"`
+	ModelsAdded                  []string `json:"models_added"`
+	ModelsRemoved                []string `json:"models_removed"`
+	ModelsChanged                []string `json:"models_changed"`
+	CapabilitiesAdded            []string `json:"capabilities_added"`
+	CapabilitiesRemoved          []string `json:"capabilities_removed"`
+}
+
 func (v *revisionRow) summary() revisionSummary {
 	models, capabilities, certified := v.counts()
 	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
-func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -143,7 +166,7 @@ func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, e
 	return httpkit.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
-func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -158,7 +181,7 @@ func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	return httpkit.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
-func (s *Server) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -188,7 +211,131 @@ func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+type revisionModelDiff struct {
+	added       []string
+	removed     []string
+	changed     []string
+	capsAdded   []string
+	capsRemoved []string
+}
+
+func diffRevisionModels(fromList, toList []routing.RevisionModel) (revisionModelDiff, error) {
+	fromModels := make(map[string]routing.RevisionModel, len(fromList))
+	for _, m := range fromList {
+		fromModels[m.UpstreamModel] = m
+	}
+	toModels := make(map[string]routing.RevisionModel, len(toList))
+	for _, m := range toList {
+		toModels[m.UpstreamModel] = m
+	}
+	diff := revisionModelDiff{
+		added:       []string{},
+		removed:     []string{},
+		changed:     []string{},
+		capsAdded:   []string{},
+		capsRemoved: []string{},
+	}
+	fromCaps, toCaps := map[string]bool{}, map[string]bool{}
+	for name, m := range fromModels {
+		for _, c := range m.Capabilities {
+			fromCaps[capabilityKey(name, c)] = true
+		}
+		if _, ok := toModels[name]; !ok {
+			diff.removed = append(diff.removed, name)
+		}
+	}
+	for name, m := range toModels {
+		for _, c := range m.Capabilities {
+			toCaps[capabilityKey(name, c)] = true
+		}
+		before, ok := fromModels[name]
+		if !ok {
+			diff.added = append(diff.added, name)
+			continue
+		}
+		same, err := sameJSON(before, m)
+		if err != nil {
+			return revisionModelDiff{}, err
+		}
+		if !same {
+			diff.changed = append(diff.changed, name)
+		}
+	}
+	for key := range toCaps {
+		if !fromCaps[key] {
+			diff.capsAdded = append(diff.capsAdded, key)
+		}
+	}
+	for key := range fromCaps {
+		if !toCaps[key] {
+			diff.capsRemoved = append(diff.capsRemoved, key)
+		}
+	}
+	for _, list := range []*[]string{&diff.added, &diff.removed, &diff.changed, &diff.capsAdded, &diff.capsRemoved} {
+		slices.Sort(*list)
+	}
+	return diff, nil
+}
+
+func diffRevisions(from, to *revisionRow) (revisionDiffReply, error) {
+	models, err := diffRevisionModels(from.Models, to.Models)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	a, b := from.Configuration, to.Configuration
+	networkSame, err := sameJSON(a.Options.Network, b.Options.Network)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	pluginOptionsSame, err := sameJSON(a.Options.PluginOptions, b.Options.PluginOptions)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	semanticHeadersSame, err := sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	querySettingsSame, err := sameJSON(a.Options.QuerySettings, b.Options.QuerySettings)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	operationDefaultsSame, err := sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	bindingsSame, err := sameJSON(a.Options.Bindings, b.Options.Bindings)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	batchStorageSame, err := sameJSON(a.BatchStorage, b.BatchStorage)
+	if err != nil {
+		return revisionDiffReply{}, err
+	}
+	return revisionDiffReply{
+		FromRevision:                 from.Revision,
+		ToRevision:                   to.Revision,
+		NetworkConfigurationChanged:  !networkSame,
+		ProfileChanged:               a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
+		PluginChanged:                a.PluginDigest() != b.PluginDigest(),
+		PluginOptionsChanged:         !pluginOptionsSame,
+		SemanticConfigurationChanged: !semanticHeadersSame || !querySettingsSame || !operationDefaultsSame,
+		ServingBindingChanged:        !bindingsSame || routing.ObservedPrincipal(from.Slots) != routing.ObservedPrincipal(to.Slots),
+		NameChanged:                  from.Name != to.Name,
+		EndpointChanged:              ptr.Value(a.Endpoint) != ptr.Value(b.Endpoint),
+		CloudContextChanged:          ptr.Value(a.CloudRegion) != ptr.Value(b.CloudRegion) || ptr.Value(a.CloudProject) != ptr.Value(b.CloudProject) || !batchStorageSame,
+		DeploymentChanged:            ptr.Value(a.Deployment) != ptr.Value(b.Deployment),
+		APIVersionChanged:            ptr.Value(a.APIVersion) != ptr.Value(b.APIVersion),
+		ConnectorChanged:             a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
+		CredentialChanged:            ptr.Value(from.CredentialVersion) != ptr.Value(to.CredentialVersion),
+		ModelsAdded:                  models.added,
+		ModelsRemoved:                models.removed,
+		ModelsChanged:                models.changed,
+		CapabilitiesAdded:            models.capsAdded,
+		CapabilitiesRemoved:          models.capsRemoved,
+	}, nil
+}
+
+func (s *revisionService) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -204,77 +351,23 @@ func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	a, b := from.Configuration, to.Configuration
-	fromModels := map[string]routing.RevisionModel{}
-	for _, m := range from.Models {
-		fromModels[m.UpstreamModel] = m
+	diff, err := diffRevisions(from, to)
+	if err != nil {
+		return httpkit.Reply{}, err
 	}
-	toModels := map[string]routing.RevisionModel{}
-	for _, m := range to.Models {
-		toModels[m.UpstreamModel] = m
-	}
-	added, removed, changed, capsAdded, capsRemoved := []string{}, []string{}, []string{}, []string{}, []string{}
-	fromCaps, toCaps := map[string]bool{}, map[string]bool{}
-	for name, m := range fromModels {
-		for _, c := range m.Capabilities {
-			fromCaps[capabilityKey(name, c)] = true
-		}
-		if _, ok := toModels[name]; !ok {
-			removed = append(removed, name)
-		}
-	}
-	for name, m := range toModels {
-		for _, c := range m.Capabilities {
-			toCaps[capabilityKey(name, c)] = true
-		}
-		before, ok := fromModels[name]
-		if !ok {
-			added = append(added, name)
-			continue
-		}
-		x, _ := json.Marshal(before)
-		y, _ := json.Marshal(m)
-		if string(x) != string(y) {
-			changed = append(changed, name)
-		}
-	}
-	for key := range toCaps {
-		if !fromCaps[key] {
-			capsAdded = append(capsAdded, key)
-		}
-	}
-	for key := range fromCaps {
-		if !toCaps[key] {
-			capsRemoved = append(capsRemoved, key)
-		}
-	}
-	for _, list := range []*[]string{&added, &removed, &changed, &capsAdded, &capsRemoved} {
-		slices.Sort(*list)
-	}
-	return httpkit.OK(map[string]any{
-		"from_revision": from.Revision, "to_revision": to.Revision,
-		"network_configuration_changed":  !sameJSON(a.Options.Network, b.Options.Network),
-		"profile_changed":                a.ProfileID != b.ProfileID || a.ProfileRevision != b.ProfileRevision,
-		"plugin_changed":                 a.PluginDigest() != b.PluginDigest(),
-		"plugin_options_changed":         !sameJSON(a.Options.PluginOptions, b.Options.PluginOptions),
-		"semantic_configuration_changed": !sameJSON(a.Options.SemanticHeaders, b.Options.SemanticHeaders) || !sameJSON(a.Options.QuerySettings, b.Options.QuerySettings) || !sameJSON(a.Options.OperationDefaults, b.Options.OperationDefaults),
-		"serving_binding_changed":        !sameJSON(a.Options.Bindings, b.Options.Bindings) || routing.ObservedPrincipal(from.Slots) != routing.ObservedPrincipal(to.Slots),
-		"name_changed":                   from.Name != to.Name,
-		"endpoint_changed":               ptr.Value(a.Endpoint) != ptr.Value(b.Endpoint),
-		"cloud_context_changed":          ptr.Value(a.CloudRegion) != ptr.Value(b.CloudRegion) || ptr.Value(a.CloudProject) != ptr.Value(b.CloudProject) || !sameJSON(a.BatchStorage, b.BatchStorage),
-		"deployment_changed":             ptr.Value(a.Deployment) != ptr.Value(b.Deployment),
-		"api_version_changed":            ptr.Value(a.APIVersion) != ptr.Value(b.APIVersion),
-		"connector_changed":              a.Kind != b.Kind || a.AuthMode != b.AuthMode || !slices.Equal(a.Options.CredentialHeaders, b.Options.CredentialHeaders),
-		"credential_changed":             ptr.Value(from.CredentialVersion) != ptr.Value(to.CredentialVersion),
-		"models_added":                   added, "models_removed": removed, "models_changed": changed,
-		"capabilities_added": capsAdded, "capabilities_removed": capsRemoved,
-	}), nil
+	return httpkit.OK(diff), nil
 }
 
-func sameJSON(a, b any) bool {
-	left, _ := json.Marshal(a)
-	right, _ := json.Marshal(b)
-	return string(left) == string(right)
+func sameJSON[T any](a, b T) (bool, error) {
+	left, err := json.Marshal(a)
+	if err != nil {
+		return false, err
+	}
+	right, err := json.Marshal(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(left, right), nil
 }
 
 type ProviderSnapshot struct {

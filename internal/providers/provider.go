@@ -13,97 +13,11 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/providers/connection"
-	"github.com/tyk-swe/olp/internal/providers/probe"
-	"github.com/tyk-swe/olp/internal/release"
 )
-
-type providerState string
-
-const (
-	stateDraft  providerState = "draft"
-	stateActive providerState = "active"
-)
-
-type record struct {
-	ID               string
-	Name             string
-	Kind             string
-	State            providerState
-	Connection       connection.Prepared
-	ETag             string
-	SlotsETag        string
-	DraftDirty       bool
-	ActiveRevision   *int
-	ActiveRevisionID *string
-	LastProbeAt      *time.Time
-	LastProbeStatus  *string
-	LastProbeDetail  *string
-	CreatedBy        string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	ProjectID        *string
-}
-
-var recordColumns = "p.id::text,p.name,p.kind,p.state,p.configuration,p.etag::text,p.slots_etag::text,p.draft_dirty,p.active_revision,p.active_revision_id::text,p.last_probe_at,p.last_probe_status,p.last_probe_detail,p.created_by::text,p.created_at,p.updated_at,p.project_id::text," + release.PluginColumn("p")
-
-func scanRecord(row pgx.Row) (*record, error) {
-	var p record
-	var configuration, plugin []byte
-	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin)
-	if err != nil {
-		return nil, err
-	}
-	p.Connection, err = connection.Load(configuration, plugin)
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-var recordQuery = "SELECT " + recordColumns + " FROM olp.providers p WHERE p.id=$1"
-
-func readProvider(ctx context.Context, q database.Queryer, id string) (*record, error) {
-	return scanRecord(q.QueryRow(ctx, recordQuery, id))
-}
-
-func lockProvider(ctx context.Context, tx pgx.Tx, id string) (*record, error) {
-	return scanRecord(tx.QueryRow(ctx, recordQuery+" FOR UPDATE", id))
-}
-
-// A provider outside p's scope is reported missing.
-func visibleProvider(ctx context.Context, q database.Queryer, p authz.Principal, id string) (*record, error) {
-	current, err := readProvider(ctx, q, id)
-	if err != nil {
-		return nil, err
-	}
-	if err = p.Project(current.ProjectID, authz.View); err != nil {
-		return nil, err
-	}
-	return current, nil
-}
-
-func touch(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := ids.New()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag)
-	return etag, err
-}
-
-func touchSlots(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	etag := ids.New()
-	_, err := tx.Exec(ctx, "UPDATE olp.providers SET etag=$2,slots_etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", id, etag, ids.New())
-	return etag, err
-}
-
-type credentialState struct {
-	ID      *string
-	Version *int
-	Revoked bool
-}
 
 type providerSummary struct {
 	ID                       string        `json:"id"`
@@ -150,15 +64,14 @@ var detailQuery = "SELECT " + recordColumns + ",pr.name,u.email," +
 	" LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id" +
 	" LEFT JOIN olp.provider_credentials rc ON rc.provider_id=p.id AND rc.version=r.credential_version"
 
-func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
+func (s *draftService) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
-	var draft credentialState
 	var usableCredential bool
 	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin,
 		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
-		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
+		&d.DraftCredentialID, &d.DraftCredentialVersion, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -173,18 +86,28 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	d.Configuration = document
 	d.PendingActivation = p.DraftDirty
 	d.ActiveRevision = p.ActiveRevision
-	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
 	d.ConnectorReady = p.Connection.Transport().Validate(s.egress) == nil && (!document.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 
-func (s *Server) detail(ctx context.Context, q database.Queryer, id string) (*detail, error) {
+func (s *draftService) detail(ctx context.Context, q database.Queryer, id string) (*detail, error) {
 	return s.scanDetail(q.QueryRow(ctx, detailQuery+" WHERE p.id=$1", id))
 }
 
-func (s *Server) detailReply(ctx context.Context, q database.Queryer, id string) (httpkit.Reply, error) {
+func (s *draftService) visibleDetail(ctx context.Context, q database.Queryer, p authz.Principal, id string) (*detail, error) {
+	d, err := s.detail(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Project(d.ProjectID, authz.View); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (s *draftService) detailReply(ctx context.Context, q database.Queryer, id string) (httpkit.Reply, error) {
 	d, err := s.detail(ctx, q, id)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -192,11 +115,7 @@ func (s *Server) detailReply(ctx context.Context, q database.Queryer, id string)
 	return httpkit.Detail(d, d.ETag), nil
 }
 
-func (p *record) target(credential []byte, probeModels ...string) probe.Target {
-	return probe.Target{ProviderID: p.ID, Connection: p.Connection, Credential: credential, ProbeModels: probeModels}
-}
-
-func (s *Server) providers(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+func (s *draftService) providers(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	page, err := httpkit.Page(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -224,63 +143,16 @@ func (s *Server) providers(r *http.Request, principal authz.Principal) (httpkit.
 	return httpkit.ListReplyBy(items, page, func(item providerSummary) string { return item.ID }), nil
 }
 
-func (s *Server) provider(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *draftService) provider(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err = visibleProvider(r.Context(), s.access.Pool, p, id); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return s.detailReply(r.Context(), s.access.Pool, id)
-}
-
-func (s *Server) mutation(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error)) (httpkit.Reply, error) {
-	id, err := httpkit.IDParam(r, "provider_id")
+	d, err := s.visibleDetail(r.Context(), s.access.Pool, p, id)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	return access.Mutate(s.access, r, input, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
-		if err := httpkit.Match(r, current.ETag); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		reply, err := fn(r.Context(), tx, p, current)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		return reply, access.Event{Action: action, Resource: "provider", ID: id}, nil
-	})
-}
-
-// A stored replay discloses the provider, so the project check also guards
-// replays.
-func changeable(ctx context.Context, id string) func(pgx.Tx, authz.Principal) (*record, error) {
-	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
-		current, err := lockProvider(ctx, tx, id)
-		if err != nil {
-			return nil, err
-		}
-		if err := p.Project(current.ProjectID, authz.Change); err != nil {
-			return nil, err
-		}
-		return current, nil
-	}
-}
-
-// unchangedSince locks a provider that a probe read without the lock and
-// refuses to store the outcome once the provider has moved on.
-func unchangedSince(ctx context.Context, read *record, during string) func(pgx.Tx, authz.Principal) (*record, error) {
-	lock := changeable(ctx, read.ID)
-	return func(tx pgx.Tx, p authz.Principal) (*record, error) {
-		current, err := lock(tx, p)
-		if err != nil {
-			return nil, err
-		}
-		if current.ETag != read.ETag {
-			return nil, httpkit.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
-		}
-		return current, nil
-	}
+	return httpkit.Detail(d, d.ETag), nil
 }
 
 func ReadProviderNames(ctx context.Context, q database.Queryer) (map[string]string, error) {
@@ -326,7 +198,7 @@ func ReadProviderProjects(ctx context.Context, q database.Queryer) (map[string]*
 
 // Deletion is deliberately separate from disable: it removes an unused draft,
 // while published revisions and retained evidence remain addressable.
-func (s *Server) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *draftService) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -359,8 +231,7 @@ func (s *Server) deleteProvider(r *http.Request, _ authz.Principal) (httpkit.Rep
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.providers WHERE id=$1", id); err != nil {
-			var constraint *pgconn.PgError
-			if errors.As(err, &constraint) && constraint.Code == "23503" {
+			if constraint, ok := errors.AsType[*pgconn.PgError](err); ok && constraint.Code == "23503" {
 				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
 			}
 			return httpkit.Reply{}, access.Event{}, err

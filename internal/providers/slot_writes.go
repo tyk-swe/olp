@@ -96,7 +96,21 @@ func credentialVersionID(given *string) (*string, error) {
 	return &id, nil
 }
 
-func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func validateSlotCredentialSource(slot slotInput, source credentialSource) error {
+	if slot.CredentialVersionID == nil || source == nil {
+		return nil
+	}
+	switch source.(type) {
+	case externalCredential:
+		return httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
+	case pastedCredential:
+		return httpkit.Invalid("credential", "Choose a new credential or an existing credential version.")
+	default:
+		return httpkit.Invalid("credential", "Choose a new credential or an existing credential version.")
+	}
+}
+
+func (s *slotService) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -119,8 +133,8 @@ func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, external := source.(externalCredential); external && slot.CredentialVersionID != nil {
-		return httpkit.Reply{}, httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
+	if err = validateSlotCredentialSource(slot, source); err != nil {
+		return httpkit.Reply{}, err
 	}
 	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
 		slots, err := loadSlots(r.Context(), tx, id)
@@ -147,7 +161,7 @@ func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	})
 }
 
-func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
+func (s *slotService) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
 	if existing == nil && slotCount >= maxSlots {
 		return httpkit.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
@@ -157,8 +171,14 @@ func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, 
 	if err != nil {
 		return err
 	}
-	restrictions, _ := json.Marshal(SlotRestrictions{AllowedAPIKeys: ptr.NonNil(slot.AllowedAPIKeys), AllowedModels: ptr.NonNil(slot.AllowedModels), AllowedRoutes: ptr.NonNil(slot.AllowedRoutes)})
-	limits, _ := json.Marshal(slot.limits())
+	restrictions, err := json.Marshal(SlotRestrictions{AllowedAPIKeys: ptr.NonNil(slot.AllowedAPIKeys), AllowedModels: ptr.NonNil(slot.AllowedModels), AllowedRoutes: ptr.NonNil(slot.AllowedRoutes)})
+	if err != nil {
+		return err
+	}
+	limits, err := json.Marshal(slot.limits())
+	if err != nil {
+		return err
+	}
 	if existing == nil {
 		if _, err = tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
 			return err
@@ -173,7 +193,7 @@ func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, 
 	return err
 }
 
-func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
+func (s *slotService) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
 	switch {
 	case source != nil:
 		if !current.Connection.Document().CredentialRequired() {
@@ -182,7 +202,7 @@ func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record,
 		if current.Connection.Document().Grant() {
 			return nil, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
-		stored, _, err := s.storeCredential(ctx, tx, current.ID, source)
+		stored, _, err := s.credentials.storeCredential(ctx, tx, current.ID, source)
 		return &stored, err
 	case slot.CredentialVersionID != nil:
 		var revoked, lapsed bool
@@ -213,7 +233,7 @@ func matchSlot(r *http.Request, current *record, slot *slotRow) error {
 	return httpkit.Match(r, slot.ETag)
 }
 
-func (s *Server) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -241,7 +261,7 @@ func (s *Server) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, err
 	}{slot.reply(), providerID, slot.Default, slot.ETag}, slot.ETag), nil
 }
 
-func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -271,15 +291,14 @@ func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	})
 }
 
-func (s *Server) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
-	var err error
+func (s *slotService) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
 	if slot.Default {
 		return "", httpkit.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
 	}
-	if err = grants.DiscardSlotEnrollments(ctx, tx, providerID, slotID); err != nil {
+	if err := grants.DiscardSlotEnrollments(ctx, tx, providerID, slotID); err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
 		return "", err
 	}
 	return touchSlots(ctx, tx, providerID)
