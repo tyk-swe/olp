@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
@@ -26,13 +25,6 @@ func TestBillingImportJourney(t *testing.T) {
 	providerID := provider["id"].(string)
 	path := "/api/v1/providers/" + providerID + "/billing-import"
 	const key = "sk-admin-billing-0123456789"
-	stable := func(document map[string]any) string {
-		raw, err := json.Marshal(document)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	}
 
 	s.Want(owner, "GET", path, nil, nil, http.StatusNotFound)
 	for field, body := range map[string]map[string]any{
@@ -55,20 +47,20 @@ func TestBillingImportJourney(t *testing.T) {
 	status := created["status"].(map[string]any)
 	delete(created, "etag")
 	delete(status, "next_import_at")
-	if got, want := stable(created), `{"credential_configured":true,"enabled":true,"provider_id":"`+providerID+`","scope":{"project_ids":["proj_b","proj_a"]},"source":"openai_costs","status":{"imported_from":null,"imported_through":null,"last_error_code":null,"last_import_at":null,"last_success_at":null,"source_revision":null}}`; got != want {
+	if got, want := sameJSON(t, created), `{"credential_configured":true,"enabled":true,"provider_id":"`+providerID+`","scope":{"project_ids":["proj_b","proj_a"]},"source":"openai_costs","status":{"imported_from":null,"imported_through":null,"last_error_code":null,"last_import_at":null,"last_success_at":null,"source_revision":null}}`; got != want {
 		t.Fatalf("created import:\n%s\nwant\n%s", got, want)
 	}
 	created["etag"] = createdETag
 
 	paused := s.Want(owner, "PUT", path, map[string]any{"enabled": false}, harness.Idempotent(harness.ETag(created)), http.StatusOK)
-	if paused["enabled"] != false || paused["credential_configured"] != true || stable(paused["scope"].(map[string]any)) != `{"project_ids":["proj_b","proj_a"]}` {
+	if paused["enabled"] != false || paused["credential_configured"] != true || sameJSON(t, paused["scope"]) != `{"project_ids":["proj_b","proj_a"]}` {
 		t.Fatalf("pausing kept %v, want the stored credential and scope", paused)
 	}
 	refused := s.Want(owner, "POST", path+"/run", nil, harness.Idempotent(), http.StatusConflict)
 	if refused["type"] != "https://openllmproxy.dev/problems/billing_import_disabled" {
 		t.Fatalf("run refused with %v, want billing_import_disabled", refused)
 	}
-	if unchanged := s.Want(owner, "GET", path, nil, nil, http.StatusOK); stable(unchanged) != stable(paused) {
+	if unchanged := s.Want(owner, "GET", path, nil, nil, http.StatusOK); sameJSON(t, unchanged) != sameJSON(t, paused) {
 		t.Fatalf("running a disabled import changed it: %v", unchanged)
 	}
 
@@ -87,11 +79,11 @@ func TestBillingImportJourney(t *testing.T) {
 	for _, item := range invoiced["items"].([]any) {
 		delete(item.(map[string]any), "fetched_at")
 	}
-	if got, want := stable(invoiced), `{"items":[{"amount":"2.25","currency":"USD","day":"`+day(-4)+`","line_item":"gpt-5 input","source":"openai_costs"},{"amount":"0.25","currency":"USD","day":"`+day(-4)+`","line_item":"gpt-5 output","source":"openai_costs"},{"amount":"1","currency":"EUR","day":"`+day(-3)+`","line_item":"gpt-5 input","source":"openai_costs"}]}`; got != want {
+	if got, want := sameJSON(t, invoiced), `{"items":[{"amount":"2.25","currency":"USD","day":"`+day(-4)+`","line_item":"gpt-5 input","source":"openai_costs"},{"amount":"0.25","currency":"USD","day":"`+day(-4)+`","line_item":"gpt-5 output","source":"openai_costs"},{"amount":"1","currency":"EUR","day":"`+day(-3)+`","line_item":"gpt-5 input","source":"openai_costs"}]}`; got != want {
 		t.Fatalf("invoiced costs:\n%s\nwant\n%s", got, want)
 	}
 	report := s.Want(owner, "GET", "/api/v1/usage/reconciliation"+window, nil, nil, http.StatusOK)
-	if got, want := stable(report), `{"currency":"USD","end":"`+day(0)+`","items":[{"attributed_cost":"0","capture_rate":"0","capture_rate_unavailable_reason":null,"day":"`+day(-4)+`","excluded_caller_attempts":0,"import":{"last_error_code":null,"last_success_at":null},"incomplete_attempts":0,"invoiced_cost":"2.5","invoiced_currency":"USD","priced_attempts":0,"provider_id":"`+providerID+`","provisional":false,"unpriced_attempts":0,"unpriced_share":null},{"attributed_cost":"0","capture_rate":null,"capture_rate_unavailable_reason":"currency_mismatch","day":"`+day(-3)+`","excluded_caller_attempts":0,"import":{"last_error_code":null,"last_success_at":null},"incomplete_attempts":0,"invoiced_cost":"1","invoiced_currency":"EUR","priced_attempts":0,"provider_id":"`+providerID+`","provisional":false,"unpriced_attempts":0,"unpriced_share":null}],"start":"`+day(-5)+`","totals":[{"attributed_cost":"0","attributed_cost_covered":"0","capture_rate":null,"capture_rate_unavailable_reason":"currency_mismatch","invoiced_cost":null,"provider_id":"`+providerID+`","unpriced_share":null}]}`; got != want {
+	if got, want := sameJSON(t, report), `{"currency":"USD","end":"`+day(0)+`","items":[{"attributed_cost":"0","capture_rate":"0","capture_rate_unavailable_reason":null,"day":"`+day(-4)+`","excluded_caller_attempts":0,"import":{"last_error_code":null,"last_success_at":null},"incomplete_attempts":0,"invoiced_cost":"2.5","invoiced_currency":"USD","priced_attempts":0,"provider_id":"`+providerID+`","provisional":false,"unpriced_attempts":0,"unpriced_share":null},{"attributed_cost":"0","capture_rate":null,"capture_rate_unavailable_reason":"currency_mismatch","day":"`+day(-3)+`","excluded_caller_attempts":0,"import":{"last_error_code":null,"last_success_at":null},"incomplete_attempts":0,"invoiced_cost":"1","invoiced_currency":"EUR","priced_attempts":0,"provider_id":"`+providerID+`","provisional":false,"unpriced_attempts":0,"unpriced_share":null}],"start":"`+day(-5)+`","totals":[{"attributed_cost":"0","attributed_cost_covered":"0","capture_rate":null,"capture_rate_unavailable_reason":"currency_mismatch","invoiced_cost":null,"provider_id":"`+providerID+`","unpriced_share":null}]}`; got != want {
 		t.Fatalf("reconciliation:\n%s\nwant\n%s", got, want)
 	}
 

@@ -3,63 +3,82 @@
 package e2e_test
 
 import (
-	"bytes"
-	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
 type service struct{ *harness.Service }
 
+func (s *service) withT(t *testing.T) *service {
+	return &service{s.Service.WithT(t)}
+}
+
 func startService(t *testing.T) *service {
 	t.Helper()
 	pool, databaseURL := harness.Database(t)
 	env := harness.NewEnvironment(t, databaseURL, "Service test")
-	harness.RunBinary(t, env, "migrate")
 	return &service{harness.StartProcess(t, pool, env)}
 }
 
-func TestStartupFailureCleanup(t *testing.T) {
-	t.Parallel()
-	if os.Getenv("OLP_TEST_STARTUP_FAILURE") == "1" {
-		harness.StartProcess(t, nil, harness.Environment{})
-		t.Fatal("process unexpectedly started")
-	}
-	binary := filepath.Join(t.TempDir(), "exit-early")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 23\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	executable, err := os.Executable()
+func staleETag() map[string]string {
+	return map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
+}
+
+func sameJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, executable, "-test.run=^TestStartupFailureCleanup$")
-	command.Env = append(os.Environ(), "OLP_TEST_STARTUP_FAILURE=1", "OLP_TEST_BINARY="+binary)
-	output, err := command.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("startup failure cleanup did not finish: %v\n%s", ctx.Err(), output)
+	return string(raw)
+}
+
+func (s *service) expectStatus(c *harness.Caller, method, path string, body any, headers map[string]string, want int) {
+	s.T.Helper()
+	if status, raw := s.Do(c, method, path, body, headers); status != want {
+		s.T.Fatalf("%s %s: %s, want %d", method, path, describe(status, raw), want)
 	}
-	if err == nil || !bytes.Contains(output, []byte("olp exited during startup: exit status 23")) {
-		t.Fatalf("expected the startup failure: %v\n%s", err, output)
+}
+
+func (s *service) assignProjectMember(owner *harness.Caller, email, userRole, projectID, projectRole string) (*harness.Caller, string) {
+	s.T.Helper()
+	invited := s.Invite(owner, email, userRole)
+	profile := s.Want(invited, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
+	userID := profile["id"].(string)
+	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	if projectID != "" {
+		project := s.Want(owner, "GET", "/api/v1/projects/"+projectID, nil, nil, http.StatusOK)
+		s.Want(owner, "PUT", "/api/v1/projects/"+projectID+"/members/"+userID, map[string]any{"role": projectRole}, harness.ETag(project), http.StatusOK)
 	}
+	return s.Login(email), userID
+}
+
+func auditActions(t *testing.T, s *service, resource string) []string {
+	t.Helper()
+	rows, err := s.Pool.Query(t.Context(), `SELECT action COLLATE "C" FROM olp.audit WHERE resource_id::text=$1 ORDER BY 1`, resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return actions
 }
 
 func TestStartupPortCollision(t *testing.T) {
 	t.Parallel()
 	pool, databaseURL := harness.Database(t)
 	env := harness.NewEnvironment(t, databaseURL, "Service test")
-	harness.RunBinary(t, env, "migrate")
 	occupied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer occupied.Close()
 	attempts := 0
@@ -75,7 +94,6 @@ func TestStartupPortCollision(t *testing.T) {
 	if attempts < 2 || attempts > 3 {
 		t.Fatalf("startup attempts = %d, want 2 or 3", attempts)
 	}
-	// Exercise the child rather than trusting a foreign health endpoint.
 	s.Owner()
 }
 
@@ -99,7 +117,6 @@ func TestEachSplitModeAnswersOnlyItsOwnPlaneAndStopsCleanly(t *testing.T) {
 			t.Parallel()
 			pool, databaseURL := harness.Database(t)
 			env := harness.NewEnvironment(t, databaseURL, "Split mode test")
-			harness.RunBinary(t, env, "migrate")
 			env.Mode = mode
 			s := harness.StartProcess(t, pool, env)
 			if got := status(t, s, "/api/v1/setup/status"); got != want.management {

@@ -16,7 +16,7 @@ func TestMemberTokenInvitationAndProfileWritesReplayGuardStaleAndAudit(t *testin
 	t.Parallel()
 	s := startService(t)
 	owner := s.Owner()
-	stale := map[string]string{"If-Match": `"00000000-0000-4000-8000-000000000000"`}
+	stale := staleETag()
 	refused := func(what string, caller *harness.Caller, method, path string, body any, headers map[string]string, status int, code string) {
 		t.Helper()
 		got, raw := s.Do(caller, method, path, body, headers)

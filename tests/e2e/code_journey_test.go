@@ -111,10 +111,7 @@ func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, pro
 		t.Fatalf("unexpected drain progress on an unused account: %v", initial)
 	}
 	const viewerEmail = "code-viewer@example.com"
-	viewer := s.Invite(owner, viewerEmail, authz.RoleViewer)
-	profile := s.Want(viewer, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
-	user := profile["id"].(string)
-	s.Want(owner, "PATCH", "/api/v1/users/"+user, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	_, user := s.assignProjectMember(owner, viewerEmail, authz.RoleViewer, project, "viewer")
 	projectPath := "/api/v1/projects/" + project
 	membership := projectPath + "/members/" + user
 	currentProject := func() map[string]any {
@@ -125,7 +122,6 @@ func codeAccountDrainWrites(t *testing.T, s *service, owner *harness.Caller, pro
 		t.Helper()
 		s.Want(owner, "PUT", membership, map[string]any{"role": "viewer"}, harness.ETag(currentProject()), http.StatusOK)
 	}
-	grantAccess()
 	binding := seedCodeAccountPin(t, s, project, id, user, initial["provider_id"].(string))
 	path := "/api/v1/code/accounts/" + id + "/drain"
 	start, stop := map[string]bool{"draining": true}, map[string]bool{"draining": false}
@@ -243,8 +239,7 @@ func TestCodeBudgetWritesReplayGuardStaleAndAuditEachWrite(t *testing.T) {
 	}
 	id := created["id"].(string)
 	path := "/api/v1/code/budgets/" + id
-	stale := map[string]string{"If-Match": `"` + uuid.NewString() + `"`}
-	if status, raw := s.Do(owner, "PUT", path, budget(home, 200), harness.Idempotent(stale)); status != http.StatusPreconditionFailed {
+	if status, raw := s.Do(owner, "PUT", path, budget(home, 200), harness.Idempotent(staleETag())); status != http.StatusPreconditionFailed {
 		t.Fatalf("stale update: %s", describe(status, raw))
 	}
 	if status, raw := s.Do(owner, "PUT", path, budget(other, 200), harness.Idempotent(harness.ETag(created))); status != http.StatusUnprocessableEntity {

@@ -55,21 +55,32 @@ func create(t testing.TB, statement string) (*pgxpool.Pool, string) {
 	}
 	name := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	identifier := pgx.Identifier{name}.Sanitize()
-	if _, err := admin.Exec(t.Context(), strings.Replace(statement, "%s", identifier, 1)); err != nil {
-		t.Fatal(err)
+	_, createErr := admin.Exec(t.Context(), strings.Replace(statement, "%s", identifier, 1))
+	_ = admin.Close(t.Context())
+	if createErr != nil {
+		t.Fatal(createErr)
+	}
+	drop := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, err := pgx.Connect(ctx, raw)
+		if err != nil {
+			t.Errorf("connect to drop database: %v", err)
+			return
+		}
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+identifier+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop database: %v", err)
+		}
 	}
 	pool, address, err := open(t.Context(), raw, name)
 	if err != nil {
+		drop()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if _, err := admin.Exec(ctx, "DROP DATABASE "+identifier+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop database: %v", err)
-		}
-		admin.Close(ctx)
+		drop()
 	})
 	return pool, address
 }

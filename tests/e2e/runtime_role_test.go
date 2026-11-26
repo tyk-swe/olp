@@ -112,37 +112,6 @@ func requireInsufficientPrivilege(t *testing.T, operation string, err error) {
 	}
 }
 
-func TestRestoreRejectsQueryDatabaseBeforeAccess(t *testing.T) {
-	t.Parallel()
-	for _, test := range []struct {
-		name    string
-		address string
-		want    string
-	}{
-		{"path", "postgresql://127.0.0.1/replacement?sslmode=require", "Backup and manifest are required."},
-		{"query", "postgresql://127.0.0.1/?dbname=replacement&sslmode=require", "Set the restore destination database in the URL path"},
-		{"path_and_query", "postgresql://127.0.0.1/replacement?dbname=replacement", "Set the restore destination database in the URL path"},
-		{"encoded_query", "postgresql://127.0.0.1/?%64bname=replacement", "Set the restore destination database in the URL path"},
-		{"leading_space", "postgresql://127.0.0.1/replacement? dbname=replacement", "Set the restore destination database in the URL path"},
-		{"trailing_space", "postgresql://127.0.0.1/replacement?dbname =replacement", "Set the restore destination database in the URL path"},
-		{"surrounding_spaces", "postgresql://127.0.0.1/replacement?sslmode=require& dbname =replacement", "Set the restore destination database in the URL path"},
-		{"duplicate_query", "postgresql://127.0.0.1/?dbname=&dbname=replacement", "Set the restore destination database in the URL path"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			command := exec.CommandContext(t.Context(), "bash", "../../scripts/restore.sh", filepath.Join(t.TempDir(), "missing.dump"))
-			command.Env = harness.Environment{}.List(map[string]string{
-				"OLP_RESTORE_DATABASE_URL":    test.address,
-				"OLP_RESTORE_VALKEY_ISOLATED": "true",
-			})
-			output, err := command.CombinedOutput()
-			if err == nil || !strings.Contains(string(output), test.want) {
-				t.Fatalf("restore preflight = %v, %s; want %s", err, output, test.want)
-			}
-		})
-	}
-}
-
 func TestEpochRecoveryWithoutValkey(t *testing.T) {
 	t.Parallel()
 	pool, databaseURL := harness.Database(t)

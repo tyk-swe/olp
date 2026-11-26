@@ -34,14 +34,14 @@ func TestProviderLifecycleJourney(t *testing.T) {
 	}
 	journey := func(t *testing.T) (*service, string) {
 		t.Parallel()
-		s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
+		s := parent.withT(t)
 		provider := s.activeProvider(owner, uniqueName("provider"), upstream, project)
 		return s, "/api/v1/providers/" + provider["id"].(string)
 	}
 
 	t.Run("template_preserves_route_retirement", func(t *testing.T) {
 		t.Parallel()
-		s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
+		s := parent.withT(t)
 		project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": uniqueName("retired-template")}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 		prefix := uniqueName("retired-template")
 		s.Want(owner, "POST", "/api/v1/route-templates", map[string]any{
@@ -156,7 +156,7 @@ func TestProviderLifecycleJourney(t *testing.T) {
 
 	t.Run("discovered_facts_reset_certified_evidence", func(t *testing.T) {
 		t.Parallel()
-		s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
+		s := parent.withT(t)
 		reportsFacts := atomic.Bool{}
 		fixture := vendor.Handler()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -302,13 +302,8 @@ func TestAReplayedCredentialRotationIsRefusedOnceTheCallerNoLongerManagesItsProj
 	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "handed-over"}, harness.Idempotent(), http.StatusCreated)
 	projectID := project["id"].(string)
 	const email = "former-manager@example.com"
-	invited := s.Invite(owner, email, authz.RoleOperator)
-	profile := s.Want(invited, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
-	userID := profile["id"].(string)
-	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
+	manager, userID := s.assignProjectMember(owner, email, authz.RoleOperator, projectID, "manager")
 	membership := "/api/v1/projects/" + projectID + "/members/" + userID
-	s.Want(owner, "PUT", membership, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
-	manager := s.Login(email)
 
 	draft := s.Want(manager, "POST", "/api/v1/providers", map[string]any{
 		"name": uniqueName("rotated"), "credential": vendor.Secret, "model": vendor.Model, "project_id": projectID,

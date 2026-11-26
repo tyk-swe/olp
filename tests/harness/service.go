@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -120,6 +121,10 @@ type Service struct {
 	Env    Environment
 }
 
+func (s *Service) WithT(t *testing.T) *Service {
+	return &Service{T: t, Pool: s.Pool, Origin: s.Origin, Env: s.Env}
+}
+
 func StartProcess(t *testing.T, pool *pgxpool.Pool, env Environment) *Service {
 	t.Helper()
 	return StartProcessAttempt(t, pool, env, FreeAddresses, time.Now().Add(StartupLimit), 3)
@@ -138,6 +143,7 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 	command.Env = env.List(map[string]string{"OLP_LISTEN_ADDR": public, "OLP_OBSERVABILITY_LISTEN_ADDR": private, "OLP_PUBLIC_ORIGIN": origin, "OLP_LOG_LEVEL": "info"})
 	command.Stdout, command.Stderr = logFile, logFile
 	if err = command.Start(); err != nil {
+		_ = logFile.Close()
 		t.Fatal(err)
 	}
 	exited := make(chan error, 1)
@@ -149,7 +155,7 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 		content, _ := os.ReadFile(logPath)
 		return string(content)
 	}
-	t.Cleanup(func() {
+	stopChild := func() {
 		defer logFile.Close()
 		if t.Failed() {
 			t.Logf("olp log:\n%s", dumpLog())
@@ -165,18 +171,19 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 			<-exited
 			t.Errorf("olp did not stop within its shutdown limit")
 		}
-	})
+	}
 	client := http.Client{Timeout: time.Second}
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-exited:
 			log := dumpLog()
+			_ = logFile.Close()
 			// Only address collisions are retried. Authentication, migration,
 			// configuration and other startup failures must remain visible.
 			if remaining > 1 && strings.Contains(log, "bind ") && strings.Contains(log, "listener:") && strings.Contains(log, "address already in use") {
 				return StartProcessAttempt(t, pool, env, addresses, deadline, remaining-1)
 			}
-			t.Fatalf("olp exited during startup: %v\n%s", err, dumpLog())
+			t.Fatalf("olp exited during startup: %v\n%s", err, log)
 		default:
 		}
 		// A different process may have acquired the released private address.
@@ -189,17 +196,17 @@ func StartProcessAttempt(t *testing.T, pool *pgxpool.Pool, env Environment, addr
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == http.StatusOK {
+				t.Cleanup(stopChild)
 				return &Service{T: t, Pool: pool, Origin: origin, Env: env}
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	stopChild()
 	t.Fatalf("olp was not live after %s\n%s", StartupLimit, dumpLog())
 	return nil
 }
 
-// Caller is one authenticated management identity: a browser session, or a
-// management token when Token is set.
 type Caller struct {
 	Name    string
 	Cookies map[string]*http.Cookie
@@ -212,19 +219,18 @@ var client = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-func (s *Service) Do(c *Caller, method, path string, body any, headers map[string]string) (int, []byte) {
-	s.T.Helper()
+func (s *Service) TryDo(c *Caller, method, path string, body any, headers map[string]string) (int, []byte, error) {
 	var payload []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			s.T.Fatal(err)
+			return 0, nil, err
 		}
 		payload = encoded
 	}
 	request, err := http.NewRequest(method, s.Origin+path, bytes.NewReader(payload))
 	if err != nil {
-		s.T.Fatal(err)
+		return 0, nil, err
 	}
 	request.Header.Set("Origin", s.Origin)
 	request.Header.Set("Content-Type", "application/json")
@@ -242,17 +248,26 @@ func (s *Service) Do(c *Caller, method, path string, body any, headers map[strin
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		s.T.Fatalf("%s %s: %v", method, path, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
 	if err != nil {
-		s.T.Fatalf("%s %s: %v", method, path, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	if c != nil && c.Token == "" {
 		c.remember(response, raw)
 	}
-	return response.StatusCode, raw
+	return response.StatusCode, raw, nil
+}
+
+func (s *Service) Do(c *Caller, method, path string, body any, headers map[string]string) (int, []byte) {
+	s.T.Helper()
+	status, raw, err := s.TryDo(c, method, path, body, headers)
+	if err != nil {
+		s.T.Fatal(err)
+	}
+	return status, raw
 }
 
 func (c *Caller) remember(response *http.Response, raw []byte) {
@@ -303,7 +318,11 @@ func Idempotent(headers ...map[string]string) map[string]string {
 }
 
 func ETag(record map[string]any) map[string]string {
-	return map[string]string{"If-Match": `"` + record["etag"].(string) + `"`}
+	etag, ok := record["etag"].(string)
+	if !ok || etag == "" {
+		panic(fmt.Sprintf("harness.ETag: record missing string etag: %v", record))
+	}
+	return map[string]string{"If-Match": `"` + etag + `"`}
 }
 
 func (s *Service) Owner() *Caller {

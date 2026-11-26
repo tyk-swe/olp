@@ -14,7 +14,7 @@ import (
 )
 
 func testGuardrailJourney(t *testing.T, parent *service, owner *harness.Caller) {
-	s := &service{&harness.Service{T: t, Pool: parent.Pool, Origin: parent.Origin, Env: parent.Env}}
+	s := parent.withT(t)
 	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": uniqueName("guardrails")}, harness.Idempotent(), http.StatusCreated)["id"].(string)
 
 	credential := s.Want(owner, "POST", "/api/v1/guardrail-credentials", map[string]any{
@@ -182,15 +182,6 @@ func listedAttachment(t *testing.T, s *service, owner *harness.Caller, id string
 	}
 	t.Fatalf("attachment %s is not listed", id)
 	return nil
-}
-
-func sameJSON(t *testing.T, value any) string {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(raw)
 }
 
 func testGuardrailPluginPins(t *testing.T, s *service, owner *harness.Caller, project string) {
