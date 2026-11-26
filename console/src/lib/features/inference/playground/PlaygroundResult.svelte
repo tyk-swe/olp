@@ -32,15 +32,13 @@
         {playground.mutation.data.latency_ms} ms
       </span>{/if}
   </div>
-  {#if playground.streaming || playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem}
+  {#if playground.streaming || playground.streamText || playground.streamDone || playground.streamProblem}
     {#if playground.streamProblem}<div class="inline-problem" role="alert">
         {playground.streamProblem}
       </div>{/if}
-    {#if playground.streamFrames.length > 0}<div class="output">
+    {#if playground.streamText}<div class="output">
         <h3>Frames</h3>
-        <pre data-testid="stream-frames">{playground.streamFrames.join(
-            ''
-          )}</pre>
+        <pre data-testid="stream-frames">{playground.streamText}</pre>
       </div>{/if}
     {#if playground.streaming}<div class="loading-state" role="status">
         Streaming response…
