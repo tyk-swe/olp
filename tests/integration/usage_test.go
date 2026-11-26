@@ -41,6 +41,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/resources"
+	resourcesmanage "github.com/tyk-swe/olp/internal/resources/manage"
 	"github.com/tyk-swe/olp/internal/resources/retainedworker"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -119,7 +120,7 @@ func testRetainedManagement(t *testing.T, fixture usageFixture, resource *resour
 	}
 	const origin = "https://test.example"
 	mux := http.NewServeMux()
-	management := resources.Management{Access: access.New(access.Config{Pool: pool, Installation: installation, Origin: origin, Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), Pool: pool}
+	management := resourcesmanage.New(access.New(access.Config{Pool: pool, Installation: installation, Origin: origin, Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}))
 	management.Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -145,6 +146,30 @@ func testRetainedManagement(t *testing.T, fixture usageFixture, resource *resour
 		return response.StatusCode, reply
 	}
 	testRetainedUsageEvidence(t, fixture, resource, post)
+	listReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/provider-resources?kind=fine_tuning_job&api_key_id=%s&provider_id=%s", server.URL, fixture.keyID, fixture.providerID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listReq.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
+	listResp, err := server.Client().Do(listReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listResp.Body.Close()
+	listBody, err := io.ReadAll(listResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed contract.ProviderResourceListResponse
+	if err := json.Unmarshal(listBody, &listed); err != nil || listResp.StatusCode != http.StatusOK || len(listed.Items) != 1 || listed.Items[0].Id != resource.ID || listed.Items[0].ApiKeyId.String() != fixture.keyID || listed.Items[0].ProviderId.String() != fixture.providerID || listed.Items[0].RetainedSettlement == nil {
+		t.Fatalf("list provider resources = %d %s, want 200 with %s", listResp.StatusCode, listBody, resource.ID)
+	}
+	oversizedStatus, oversizedBody := post("reconcile", fmt.Sprintf(`{"upstream_id":%q}`, strings.Repeat("x", 513)))
+	var oversizedProblem struct{ Type string }
+	if err := json.Unmarshal(oversizedBody, &oversizedProblem); err != nil || oversizedStatus != http.StatusUnprocessableEntity || !strings.HasSuffix(oversizedProblem.Type, "/validation_failed") {
+		t.Fatalf("reconcile oversized hint = %d %s, want 422 validation_failed", oversizedStatus, oversizedBody)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed' WHERE resource_id=$1`, resource.UUID); err != nil {
 		t.Fatal(err)
 	}

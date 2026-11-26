@@ -429,6 +429,45 @@ func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
 	}
 }
 
+func TestDetachGeminiResultAndCloseUndispatchedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	store := resources.New(pool)
+
+	missing := fixture.resource(resources.KindFile, fixture.keyID, "files/missing#output")
+	missing.UUID = uuid.New()
+	if detached, err := store.DetachGeminiResultView(ctx, missing, "files/missing"); detached || !errors.Is(err, resources.ErrNotFound) {
+		t.Fatalf("DetachGeminiResultView on missing row = (%t, %v), want (false, ErrNotFound)", detached, err)
+	}
+
+	settlementResource, err := store.Put(ctx, fixture.resource("fine_tuning_job", fixture.keyID, "pending:undispatched"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO olp.retained_settlements
+		(resource_id,operation,templates,token_consuming,poll_after) VALUES($1,'fine_tuning','{}'::jsonb,false,now()-interval '1 second')`,
+		settlementResource.UUID); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := store.Settlements().Claim(ctx, 1)
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("Claim = (%+v, %v), want 1 claim", claims, err)
+	}
+	mismatched := claims[0]
+	mismatched.ClaimID = uuid.New()
+	if closed, err := store.Settlements().CloseUndispatched(ctx, mismatched); closed || !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("CloseUndispatched on mismatched claim = (%t, %v), want (false, ErrSubmissionConflict)", closed, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET lease_until=now()-interval '1 second' WHERE resource_id=$1`, settlementResource.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if closed, err := store.Settlements().CloseUndispatched(ctx, claims[0]); closed || !errors.Is(err, resources.ErrSubmissionConflict) {
+		t.Fatalf("CloseUndispatched on expired claim = (%t, %v), want (false, ErrSubmissionConflict)", closed, err)
+	}
+}
+
 type listedRuntime struct {
 	release atomic.Pointer[release.Release]
 	inputs  *routinginputs.Inputs
