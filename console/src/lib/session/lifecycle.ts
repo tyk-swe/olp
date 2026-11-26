@@ -178,6 +178,22 @@ export class AuthenticationLifecycle {
     this.apply({ type: 'authenticated', session, validatedAt: Date.now() });
   }
 
+  async revalidateWhenStale(): Promise<void> {
+    if (this.validationIsCurrent()) return;
+    await this.validateSession({ passive: true });
+  }
+
+  private validationIsCurrent(): boolean {
+    return (
+      this.snapshotValue.phase === 'authenticated' &&
+      !this.snapshotValue.error &&
+      sessionIsFresh(
+        this.snapshotValue.lastValidatedAt,
+        Boolean(getCsrfToken())
+      )
+    );
+  }
+
   async validateSession(
     options: ValidateOptions = {}
   ): Promise<AuthenticatedSession | null> {
@@ -195,11 +211,9 @@ export class AuthenticationLifecycle {
     this.unauthorizedHandled = false;
     const authenticatedSnapshot =
       this.snapshotValue.phase === 'authenticated' ? this.snapshotValue : null;
-    if (authenticatedSnapshot) {
+    if (!authenticatedSnapshot) this.apply({ type: 'gate', phase: 'checking' });
+    else if (authenticatedSnapshot.error)
       this.setSnapshot({ ...authenticatedSnapshot, error: '' });
-    } else {
-      this.apply({ type: 'gate', phase: 'checking' });
-    }
 
     const validation = (async (): Promise<AuthenticatedSession | null> => {
       try {
@@ -290,15 +304,7 @@ export class AuthenticationLifecycle {
       );
     }
     const startingPartition = this.queries.current();
-    if (
-      !this.activeValidation &&
-      !this.snapshotValue.error &&
-      sessionIsFresh(
-        this.snapshotValue.lastValidatedAt,
-        Boolean(getCsrfToken())
-      )
-    )
-      return;
+    if (!this.activeValidation && this.validationIsCurrent()) return;
     const session = await (this.activeValidation ?? this.validateSession());
     if (!session)
       throw new Error(

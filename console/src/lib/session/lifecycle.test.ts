@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiProblem } from '#lib/management/http.js';
 import { clearCsrfToken, getCsrfToken } from './csrf';
 import { AuthenticationLifecycle } from './lifecycle';
+import { SESSION_FRESHNESS_MS } from './sessionFreshness';
 import type { AuthenticatedSession } from './state';
 import { eventually } from '../../../tests/unit/support/eventually.js';
 
@@ -45,6 +46,7 @@ function request(path: string, method = 'GET', signal?: AbortSignal) {
 
 afterEach(() => {
   clearCsrfToken();
+  vi.useRealTimers();
 });
 
 describe('authentication lifecycle', () => {
@@ -156,6 +158,33 @@ describe('authentication lifecycle', () => {
     await expect(
       lifecycle.prepareRequest(request('/api/v1/providers', 'POST'))
     ).rejects.toThrow('Connection unavailable');
+  });
+
+  it('revalidates on refocus only once the session is stale or failed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const lifecycle = new AuthenticationLifecycle();
+    const service = boundary();
+    lifecycle.registerBoundary(service);
+    lifecycle.establishSession(alice);
+
+    await lifecycle.revalidateWhenStale();
+    expect(service.loadSession).not.toHaveBeenCalled();
+
+    vi.setSystemTime(Date.now() + SESSION_FRESHNESS_MS + 1);
+    await lifecycle.revalidateWhenStale();
+    await lifecycle.revalidateWhenStale();
+    expect(service.loadSession).toHaveBeenCalledOnce();
+
+    service.loadSession.mockRejectedValueOnce(
+      new Error('Connection unavailable')
+    );
+    await lifecycle.validateSession();
+    await lifecycle.revalidateWhenStale();
+    expect(service.loadSession).toHaveBeenCalledTimes(3);
+    expect(lifecycle.snapshot()).toMatchObject({
+      phase: 'authenticated',
+      error: ''
+    });
   });
 
   it('shows an unavailable state when the initial session cannot be loaded', async () => {

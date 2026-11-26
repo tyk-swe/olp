@@ -66,7 +66,7 @@ export class PlaygroundState {
   );
   streamCheckMessage = $state('');
   streaming = $state(false);
-  streamFrames = $state<string[]>([]);
+  streamText = $state('');
   streamDone = $state<PlaygroundStreamDone | null>(null);
   streamProblem = $state<string | null>(null);
   private streamAbort: AbortController | null = null;
@@ -152,7 +152,7 @@ export class PlaygroundState {
   }
 
   private resetOutput() {
-    this.streamFrames = [];
+    this.streamText = '';
     this.streamDone = null;
     this.streamProblem = null;
     this.mutation.reset();
@@ -281,7 +281,7 @@ export class PlaygroundState {
         request,
         {
           frame: (frame) => {
-            this.streamFrames = [...this.streamFrames, frame];
+            this.streamText += frame;
           },
           done: (meta) => {
             terminal = true;
