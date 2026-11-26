@@ -1,29 +1,51 @@
-// Package retainedworker reconciles provider-retained paid work. It never
-// repeats a paid mutation, estimates a charge from snapshots, or drops liability.
 package retainedworker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/platform/workerhealth"
+	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/platform/egress"
-	"github.com/tyk-swe/olp/internal/providerinvoke"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/retainedapi"
-	"github.com/tyk-swe/olp/internal/routing"
+)
+
+const (
+	maxClaimsPerPass         = 16
+	maxConcurrentClaims      = 4
+	maxWavesPerPass          = maxClaimsPerPass / maxConcurrentClaims
+	defaultPassInterval      = 5 * time.Second
+	defaultPollTimeout       = 5 * time.Minute
+	defaultHeartbeatInterval = 30 * time.Second
+	defaultFinishTimeout     = 10 * time.Second
+)
+
+type settlementStore interface {
+	Claim(ctx context.Context, limit int) ([]resources.RetainedClaim, error)
+	Resource(ctx context.Context, c resources.RetainedClaim) (*resources.Resource, error)
+	Heartbeat(ctx context.Context, c resources.RetainedClaim) error
+	FinishClaim(ctx context.Context, c resources.RetainedClaim, errorClass string) error
+	CommitPoll(ctx context.Context, c resources.RetainedClaim, r *resources.Resource, observation resources.RetainedObservation, adopt bool) error
+	CloseUndispatched(ctx context.Context, c resources.RetainedClaim) (bool, error)
+	HasUnresolvedMutations(ctx context.Context, id uuid.UUID) (bool, error)
+	Checkpoint(ctx context.Context, outcome workerhealth.Outcome) error
+}
+
+type resourceStore interface {
+	GetByUUID(ctx context.Context, id uuid.UUID, owner string) (*resources.Resource, error)
+	DiscoverRetainedModels(ctx context.Context, parent *resources.Resource, source oif.Document) error
+}
+
+var (
+	_ settlementStore = (*resources.SettlementStore)(nil)
+	_ resourceStore   = (*resources.Store)(nil)
 )
 
 type Worker struct {
@@ -34,21 +56,22 @@ type Worker struct {
 	Egress      *egress.Policy
 	Connections *egress.ConnectionClientCache
 	Log         *slog.Logger
+
+	settlements       settlementStore
+	resources         resourceStore
+	heartbeatInterval time.Duration
+	now               func() time.Time
 }
 
 func (w *Worker) Run(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(defaultPassInterval)
 	defer ticker.Stop()
+	settlements := w.settlementClient()
 	for {
-		err := w.Pass(ctx)
-		outcome := workerhealth.OutcomeSuccess
-		if err != nil {
-			outcome = workerhealth.OutcomeFailure
-			if ctx.Err() == nil && w.Log != nil {
-				w.Log.Warn("retained reconciliation failed", "error", err)
-			}
+		outcome := w.runPass(ctx)
+		if settlements != nil {
+			_ = settlements.Checkpoint(ctx, outcome)
 		}
-		_ = w.Store.CheckpointRetained(ctx, outcome)
 		select {
 		case <-ctx.Done():
 			return
@@ -56,58 +79,142 @@ func (w *Worker) Run(ctx context.Context) {
 		}
 	}
 }
-func (w *Worker) Pass(ctx context.Context) error {
-	claims, err := w.Store.ClaimRetained(ctx, 16)
-	if err != nil {
-		return err
+
+func (w *Worker) runPass(ctx context.Context) workerhealth.Outcome {
+	err := w.Pass(ctx)
+	if err == nil {
+		return workerhealth.OutcomeSuccess
 	}
-	sem := make(chan struct{}, 4)
+	if ctx.Err() == nil && w.Log != nil {
+		w.Log.Warn("retained reconciliation failed", "error", err)
+	}
+	return workerhealth.OutcomeFailure
+}
+
+func (w *Worker) Pass(ctx context.Context) error {
+	settlements := w.settlementClient()
+	if settlements == nil {
+		return errors.New("settlement store unavailable")
+	}
+	var failures []error
+	for range maxWavesPerPass {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+		claims, err := settlements.Claim(ctx, maxConcurrentClaims)
+		if err != nil {
+			failures = append(failures, err)
+			break
+		}
+		if len(claims) == 0 {
+			break
+		}
+		if waveErr := w.runWave(ctx, settlements, claims); waveErr != nil {
+			failures = append(failures, waveErr)
+		}
+		if len(claims) < maxConcurrentClaims {
+			break
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (w *Worker) runWave(ctx context.Context, settlements settlementStore, claims []resources.RetainedClaim) error {
 	results := make(chan error, len(claims))
 	var wg sync.WaitGroup
 	for _, claim := range claims {
 		wg.Go(func() {
-			work, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			defer cancel()
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				t := time.NewTicker(30 * time.Second)
-				defer t.Stop()
-				for {
-					select {
-					case <-work.Done():
-						return
-					case <-t.C:
-						_ = w.Store.CheckpointRetained(work, workerhealth.OutcomeSuccess)
-						if w.Store.HeartbeatRetained(work, claim) != nil {
-							cancel()
-							return
-						}
-					}
-				}
-			}()
-			var class string
-			select {
-			case sem <- struct{}{}:
-				class = w.poll(work, claim)
-				<-sem
-			case <-work.Done():
-				class = "poll_cancelled"
-			}
-			cancel()
-			<-done
-			finish, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			defer stop()
-			finishErr := w.Store.FinishRetainedClaim(finish, claim, class)
-			if class != "" {
-				results <- errors.Join(errors.New(class), finishErr)
-				return
-			}
-			results <- finishErr
+			results <- w.executeClaim(ctx, settlements, claim)
 		})
 	}
 	wg.Wait()
 	close(results)
+	return collectErrors(results)
+}
+
+func (w *Worker) executeClaim(ctx context.Context, settlements settlementStore, claim resources.RetainedClaim) error {
+	class := w.claimClass(ctx, settlements, claim)
+	finish, stop := context.WithTimeout(context.WithoutCancel(ctx), defaultFinishTimeout)
+	defer stop()
+	finishErr := settlements.FinishClaim(finish, claim, class)
+	if class != "" {
+		return errors.Join(errors.New(class), finishErr)
+	}
+	return finishErr
+}
+
+func (w *Worker) claimClass(ctx context.Context, settlements settlementStore, claim resources.RetainedClaim) string {
+	if ctx.Err() != nil {
+		return "poll_cancelled"
+	}
+	return w.pollWithHeartbeat(ctx, settlements, claim)
+}
+
+func (w *Worker) pollWithHeartbeat(ctx context.Context, settlements settlementStore, claim resources.RetainedClaim) string {
+	work, cancel := context.WithTimeout(ctx, defaultPollTimeout)
+	defer cancel()
+	done := make(chan struct{})
+	go w.runHeartbeat(work, cancel, settlements, claim, done)
+	class := w.poll(work, settlements, claim)
+	cancel()
+	<-done
+	return class
+}
+
+func (w *Worker) runHeartbeat(ctx context.Context, cancel context.CancelFunc, settlements settlementStore, claim resources.RetainedClaim, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(w.heartbeatPeriod())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if settlements.Heartbeat(ctx, claim) != nil {
+				cancel()
+				return
+			}
+			_ = settlements.Checkpoint(ctx, workerhealth.OutcomeSuccess)
+		}
+	}
+}
+
+func (w *Worker) settlementClient() settlementStore {
+	if w.settlements != nil {
+		return w.settlements
+	}
+	if w.Store == nil {
+		return nil
+	}
+	return w.Store.Settlements()
+}
+
+func (w *Worker) resourceClient() resourceStore {
+	if w.resources != nil {
+		return w.resources
+	}
+	if w.Store == nil {
+		return nil
+	}
+	return w.Store
+}
+
+func (w *Worker) heartbeatPeriod() time.Duration {
+	if w.heartbeatInterval > 0 {
+		return w.heartbeatInterval
+	}
+	return defaultHeartbeatInterval
+}
+
+func (w *Worker) utcNow() time.Time {
+	if w.now != nil {
+		return w.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func collectErrors(results <-chan error) error {
 	var failures []error
 	for result := range results {
 		if result != nil {
@@ -115,215 +222,4 @@ func (w *Worker) Pass(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
-}
-func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
-	closed, err := w.Store.CloseUndispatchedRetained(ctx, c)
-	if err != nil {
-		return "claim_unavailable"
-	}
-	if closed {
-		return ""
-	}
-	r, err := w.Store.RetainedClaimResource(ctx, c)
-	if err != nil {
-		return "resource_unavailable"
-	}
-	pin, err := w.Resolver.ResolveCurrent(ctx, r, c.Operation)
-	if err != nil {
-		return "credential_or_pin_unavailable"
-	}
-	if w.Egress == nil || w.Auth == nil {
-		return "connection_unavailable"
-	}
-	provider, slot := pin.Invocation.Provider, pin.Invocation.Slot
-	config := provider.Connector()
-	if slot.CredentialID != nil && (w.Credentials == nil || w.Credentials.Eligibility(*slot.CredentialID) != routing.Eligible) || slot.CredentialID == nil && connectors.SecretRequired(config.AuthMode) {
-		return "credential_unavailable"
-	}
-	if provider.Network != nil && provider.Network.CredentialID != "" && (w.Credentials == nil || w.Credentials.Eligibility(provider.Network.CredentialID) != routing.Eligible) {
-		return "credential_unavailable"
-	}
-	resolver := providerinvoke.Resolver{Credentials: w.Credentials, Policy: w.Egress, Connections: w.Connections,
-		HeaderTimeout: 2 * time.Minute, Scope: provider.ID + "/" + provider.RevisionID + "/" + slot.ID}
-	target, err := resolver.Bind(nil, pin.Invocation, nil).Resolve(ctx)
-	if err != nil {
-		var failure *providerinvoke.ResolutionError
-		if errors.As(err, &failure) && !failure.Connection {
-			return "credential_unavailable"
-		}
-		return "connection_unavailable"
-	}
-	model, secret, client := pin.Invocation.Model, target.Credential.Secret, target.Client
-	upstream := r.UpstreamID
-	adopt := strings.HasPrefix(upstream, "pending:")
-	if adopt {
-		if c.Hint == "" {
-			return "submission_unknown"
-		}
-		upstream = c.Hint
-	}
-	path, e, err := w.path(ctx, r, upstream)
-	if err != nil {
-		return "unsupported_observation"
-	}
-	endpoint, err := config.ResourceURL(model, path, nil)
-	if err != nil {
-		return "endpoint_unavailable"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return "invalid_endpoint"
-	}
-	if _, err = w.Auth.Apply(ctx, req, config, secret, nil); err != nil {
-		return "credential_unavailable"
-	}
-	response, err := client.Do(req)
-	if err != nil {
-		return "poll_failed"
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound && !adopt {
-		// Missing asynchronous jobs do not prove execution has stopped.
-		if !resources.RetainedDeletionTerminates(r.Kind) {
-			return "remote_termination_unverified"
-		}
-		// Storage disappearance verifies termination, never its usage.
-		pendingMutation, mutationErr := w.Store.HasUnresolvedRetainedMutations(ctx, r.UUID)
-		if mutationErr != nil {
-			return "mutation_evidence_unavailable"
-		}
-		canExpire := !pendingMutation && (!c.RemoteTerminated || c.TerminalAt != nil && r.ExpiresAt != nil && !c.TerminalAt.Before(*r.ExpiresAt))
-		observation, expiryErr := resources.ObserveRetainedExpiry(r, time.Now().UTC(), canExpire && r.State != resources.StateDeleted)
-		if expiryErr != nil {
-			return "invalid_expiry_evidence"
-		}
-		if !observation.RemoteTerminated {
-			observation = resources.RetainedObservation{RemoteTerminated: true, ObservedAt: time.Now().UTC()}
-		}
-		if err = w.Store.CommitRetainedPoll(ctx, c, r, observation, false); err != nil {
-			return "settlement_failed"
-		}
-		if observation.CoverageComplete {
-			return ""
-		}
-		return "usage_evidence_missing"
-	}
-	return w.observePollResponse(ctx, c, r, e, upstream, adopt, response)
-}
-func (w *Worker) observePollResponse(ctx context.Context, c resources.RetainedClaim, r *resources.Resource, e retainedapi.Endpoint, upstream string, adopt bool, response *http.Response) string {
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "poll_failed"
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (4<<20)+1))
-	if err != nil || len(data) > 4<<20 {
-		return "invalid_observation"
-	}
-	document, err := oif.ParseJSON(data, oif.Limits{MaxBytes: 4 << 20})
-	if err != nil {
-		return "invalid_observation"
-	}
-	identityField, present := document.Root().Lookup(e.Identity)
-	identity, validIdentity := identityField.Text()
-	if !present || !validIdentity || identity != upstream {
-		return "resource_identity_mismatch"
-	}
-	if adopt {
-		var native struct {
-			ID       string            `json:"id"`
-			Name     string            `json:"name"`
-			Metadata map[string]string `json:"metadata"`
-			Labels   map[string]string `json:"labels"`
-		}
-		if json.Unmarshal(data, &native) != nil {
-			return "uncorrelated_resource"
-		}
-		marker := native.Metadata[resources.RetainedSubmissionMarkerField]
-		if r.Kind == "vertex_tuning_job" {
-			marker = native.Labels[resources.RetainedSubmissionMarkerField]
-		}
-		if marker != r.UUID.String() {
-			return "uncorrelated_resource"
-		}
-		identity := native.ID
-		if e.Identity == "name" {
-			identity = native.Name
-		}
-		if identity != upstream {
-			return "uncorrelated_resource"
-		}
-		r.UpstreamID = upstream
-		r.State = "active"
-	}
-	if err = resources.EnrichRetained(r, e, document, time.Now().UTC()); err != nil {
-		return "invalid_observation"
-	}
-	if err = w.Store.DiscoverRetainedModels(ctx, r, document); err != nil {
-		return "model_discovery_failed"
-	}
-	observation, err := resources.ObserveRetained(r, e, document, time.Now().UTC())
-	if err != nil {
-		return "invalid_evidence"
-	}
-	if err = w.Store.CommitRetainedPoll(ctx, c, r, observation, adopt); err != nil {
-		return "settlement_failed"
-	}
-	return ""
-}
-func (w *Worker) path(ctx context.Context, r *resources.Resource, upstream string) (string, retainedapi.Endpoint, error) {
-	var family retainedapi.Family
-	for _, f := range retainedapi.Families() {
-		if f.Kind == r.Kind {
-			family = f
-			break
-		}
-		for _, child := range f.Children {
-			if child.Kind == r.Kind {
-				family = child
-				family.Operation = f.Operation
-				family.Surface = f.Surface
-			}
-		}
-	}
-	e := retainedapi.Endpoint{Family: family, Action: "get", Method: http.MethodGet}
-	if family.Kind == "" {
-		return "", e, errors.New("unknown retained family")
-	}
-	var path string
-	switch r.Kind {
-	case "fine_tuning_job":
-		path = "fine_tuning/jobs/" + url.PathEscape(upstream)
-	case "vertex_tuning_job":
-		parts := strings.Split(upstream, "/tuningJobs/")
-		path = "tuningJobs/" + url.PathEscape(parts[len(parts)-1])
-	case "vector_store":
-		path = "vector_stores/" + url.PathEscape(upstream)
-	case "container":
-		path = "containers/" + url.PathEscape(upstream)
-	case "context_cache":
-		path = "cachedContents/" + url.PathEscape(strings.TrimPrefix(upstream, "cachedContents/"))
-	case "eval_run", "vector_store_file", "vector_store_batch", "container_file":
-		if r.ParentID == nil {
-			return "", e, errors.New("missing parent")
-		}
-		parent, err := w.Store.GetByUUID(ctx, *r.ParentID, r.APIKeyID)
-		if err != nil {
-			return "", e, err
-		}
-		prefix := "vector_stores"
-		child := "files"
-		if r.Kind == "eval_run" {
-			prefix = "evals"
-			child = "runs"
-		}
-		if r.Kind == "vector_store_batch" {
-			child = "file_batches"
-		}
-		if r.Kind == "container_file" {
-			prefix = "containers"
-		}
-		path = prefix + "/" + url.PathEscape(parent.UpstreamID) + "/" + child + "/" + url.PathEscape(upstream)
-	default:
-		return "", e, errors.New("unqualified retained observation")
-	}
-	return path, e, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 )
@@ -51,12 +52,17 @@ type Lifecycle struct {
 	fresh      bool
 }
 
+type preparedLifecycle struct {
+	resource *Resource
+	fresh    bool
+}
+
 func (s *Store) BeginCreate(ctx context.Context, candidate *Resource, submission Submission) (*Lifecycle, error) {
-	resource, fresh, err := s.prepareLifecycle(ctx, candidate, submission.Operation, submission.Key, submission.Digest)
+	prepared, err := s.prepareLifecycle(ctx, candidate, submission.Operation, submission.Key, submission.Digest)
 	if err != nil {
 		return nil, err
 	}
-	return &Lifecycle{store: s, resource: resource, submission: submission, action: lifecycleCreate, fresh: fresh}, nil
+	return &Lifecycle{store: s, resource: prepared.resource, submission: submission, action: lifecycleCreate, fresh: prepared.fresh}, nil
 }
 
 func (s *Store) BeginMutation(ctx context.Context, resource *Resource, submission Submission) (*Lifecycle, error) {
@@ -70,16 +76,21 @@ func (s *Store) BeginDeletion(ctx context.Context, resource *Resource) (*Lifecyc
 	if resource == nil || resource.Kind != "context_cache" {
 		return nil, ErrContract
 	}
-	identity, err := uuid.NewV7()
+	identity, err := newUUIDv7()
 	if err != nil {
 		return nil, err
 	}
 	key := identity.String()
 	digest := sha256.Sum256([]byte(resource.ID + ":delete:" + key))
-	lifecycle := &Lifecycle{store: s, resource: resource, action: lifecycleMutation,
-		submission: Submission{Operation: "context_cache:delete", Key: key, Digest: digest[:]},
+	if err := s.prepareRetainedMutation(ctx, resource, "context_cache:delete", key, digest[:], false); err != nil {
+		return nil, err
 	}
-	return lifecycle, s.prepareRetainedMutation(ctx, resource, "context_cache:delete", key, digest[:], false)
+	return &Lifecycle{
+		store:      s,
+		resource:   resource,
+		action:     lifecycleMutation,
+		submission: Submission{Operation: "context_cache:delete", Key: key, Digest: digest[:]},
+	}, nil
 }
 
 func (s *Store) OpenOwned(ctx context.Context, kind, owner, id string) (*Lifecycle, error) {
@@ -170,8 +181,6 @@ func (l *Lifecycle) PrepareCreated(result CreationResult) (*PreparedCreation, er
 	return &PreparedCreation{resource: &resource, children: children, store: l.store}, nil
 }
 
-// LookupLifecycle resolves the caller's original submission before any fresh
-// target selection. The stored digest describes caller input, not its binding.
 func (s *Store) LookupLifecycle(ctx context.Context, owner, operation, key string, digest []byte) (*Resource, error) {
 	return lookupLifecycle(ctx, s.pool, owner, operation, key, digest)
 }
@@ -195,47 +204,45 @@ func lookupLifecycle(ctx context.Context, query resourceRowQuerier, owner, opera
 	return scan(query.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, id, owner))
 }
 
-// prepareLifecycle atomically creates the owner mapping and submission fence.
-// A replay can inspect its original resource, but never acquires dispatch rights.
-func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, operation, key string, digest []byte) (*Resource, bool, error) {
-	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
-		return nil, false, ErrSubmissionConflict
+func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, operation, key string, digest []byte) (preparedLifecycle, error) {
+	if resource == nil || len(key) < 1 || len(key) > 128 || len(digest) != 32 {
+		return preparedLifecycle{}, ErrSubmissionConflict
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	defer tx.Rollback(ctx)
-	// The same caller-supplied key may race on different gateway replicas.
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, resource.APIKeyID+":"+operation+":"+key); err != nil {
-		return nil, false, err
-	}
-	prior, err := lookupLifecycle(ctx, tx, resource.APIKeyID, operation, key, digest)
-	if err == nil {
-		return prior, false, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return nil, false, err
-	}
-	if resource.UUID == uuid.Nil {
-		resource.UUID = uuid.Must(uuid.NewV7())
-	}
-	resource.UpstreamID, resource.State = "pending:"+resource.UUID.String(), "submitting"
-	out, err := s.PutTx(ctx, tx, resource)
-	if err != nil {
-		return nil, false, err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO olp.retained_submissions(resource_id,api_key_id,operation,submission_key,request_digest,state) VALUES($1,$2,$3,$4,$5,'prepared')`, out.UUID, out.APIKeyID, operation, key, digest)
-	if err != nil {
-		return nil, false, err
-	}
-	if err = s.prepareRetainedTx(ctx, tx, resource); err != nil {
-		return nil, false, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+	return withTxValue(ctx, s.pool, func(tx pgx.Tx) (preparedLifecycle, error) {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, resource.APIKeyID+":"+operation+":"+key); err != nil {
+			return preparedLifecycle{}, err
+		}
+		prior, err := lookupLifecycle(ctx, tx, resource.APIKeyID, operation, key, digest)
+		if err == nil {
+			return preparedLifecycle{resource: prior, fresh: false}, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return preparedLifecycle{}, err
+		}
+		candidate := *resource
+		if candidate.UUID == uuid.Nil {
+			id, err := newUUIDv7()
+			if err != nil {
+				return preparedLifecycle{}, err
+			}
+			candidate.UUID = id
+		}
+		candidate.UpstreamID = "pending:" + candidate.UUID.String()
+		candidate.State = "submitting"
+		out, err := s.PutTx(ctx, tx, &candidate)
+		if err != nil {
+			return preparedLifecycle{}, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.retained_submissions(resource_id,api_key_id,operation,submission_key,request_digest,state) VALUES($1,$2,$3,$4,$5,'prepared')`, out.UUID, out.APIKeyID, operation, key, digest); err != nil {
+			return preparedLifecycle{}, err
+		}
+		persisted := *out
+		persisted.RetainedAccounting = resource.RetainedAccounting
+		if err = s.prepareRetainedTx(ctx, tx, &persisted); err != nil {
+			return preparedLifecycle{}, err
+		}
+		return preparedLifecycle{resource: out, fresh: true}, nil
+	})
 }
 
 func (s *Store) dispatchLifecycle(ctx context.Context, id uuid.UUID) error {
@@ -254,34 +261,35 @@ func (s *Store) unknownLifecycle(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// completeLifecycleChildren commits multi-object create results under the same
-// submission fence. The primary identity and all siblings become visible at once.
 func (s *Store) completeLifecycleChildren(ctx context.Context, r *Resource, children []*Resource) error {
-	if r.UpstreamID == "" || len(r.UpstreamID) > 512 || len(r.Metadata) > metadataLimit {
+	if r == nil || r.UpstreamID == "" || len(r.UpstreamID) > 512 || len(r.Metadata) > metadataLimit {
 		return ErrContract
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE olp.retained_submissions SET state='accepted',updated_at=now() WHERE resource_id=$1 AND state IN ('dispatched','submission_unknown')`, r.UUID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() != 1 {
-		return ErrSubmissionConflict
-	}
-	err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=clock_timestamp() WHERE id=$1 RETURNING updated_at`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt).Scan(&r.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("complete retained resource: %w", err)
-	}
-	for _, child := range children {
-		if _, err = s.PutTx(ctx, tx, child); err != nil {
-			return err
+	updated, err := withTxValue(ctx, s.pool, func(tx pgx.Tx) (time.Time, error) {
+		tag, err := tx.Exec(ctx, `UPDATE olp.retained_submissions SET state='accepted',updated_at=now() WHERE resource_id=$1 AND state IN ('dispatched','submission_unknown')`, r.UUID)
+		if err != nil {
+			return time.Time{}, err
 		}
+		if tag.RowsAffected() != 1 {
+			return time.Time{}, ErrSubmissionConflict
+		}
+		var updatedAt time.Time
+		err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET upstream_id=$2,state=$3,metadata=$4,expires_at=$5,updated_at=clock_timestamp() WHERE id=$1 RETURNING updated_at`, r.UUID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt).Scan(&updatedAt)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("complete retained resource: %w", err)
+		}
+		for _, child := range children {
+			if _, err = s.PutTx(ctx, tx, child); err != nil {
+				return time.Time{}, err
+			}
+		}
+		return updatedAt, nil
+	})
+	if err != nil {
+		return err
 	}
-	return tx.Commit(ctx)
+	r.UpdatedAt = updated
+	return nil
 }
 
 func (s *Store) GetByUUID(ctx context.Context, id uuid.UUID, owner string) (*Resource, error) {
@@ -292,73 +300,84 @@ func (s *Store) GetByUUID(ctx context.Context, id uuid.UUID, owner string) (*Res
 	return r, err
 }
 
-// BindDiscovered is only for a provider-generated child observed through its
-// owner-authorized parent. Serializing discovery makes repeated pages stable.
 // A correlated in-flight submission keeps its original ownership and billing
-// pins; discovery queues reconciliation rather than inserting another identity.
+// pins and queues reconciliation rather than inserting a duplicate identity.
 func (s *Store) BindDiscovered(ctx context.Context, child *Resource, submission ...uuid.UUID) (*Resource, error) {
-	if child.ParentID == nil {
+	if child == nil || child.ParentID == nil {
 		return nil, ErrContract
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, child.APIKeyID+":"+child.ParentID.String()+":"+child.Kind+":"+child.UpstreamID); err != nil {
-		return nil, err
-	}
-	bound, err := s.getByUpstream(ctx, tx, child.NativeIdentity(), newestUpstream())
-	if err == nil {
-		return bound, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return nil, err
-	}
-	if len(submission) > 0 {
-		original, lookupErr := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, submission[0], child.APIKeyID))
-		if lookupErr == nil {
-			if original.Kind != child.Kind || original.RouteSlug != child.RouteSlug || original.RouteRevisionID != child.RouteRevisionID || original.ProviderID != child.ProviderID || original.ProviderRevisionID != child.ProviderRevisionID || original.TargetID != child.TargetID || original.SlotID != child.SlotID || !sameOptional(original.CredentialID, child.CredentialID) || original.ParentID == nil || *original.ParentID != *child.ParentID || !sameOptional(original.ContractVersion, child.ContractVersion) {
-				return nil, ErrContract
-			}
-			if original.UpstreamID != child.UpstreamID {
-				if original.UpstreamID != "pending:"+original.UUID.String() || original.State == "not_accepted" {
-					return nil, ErrContract
-				}
-				var state string
-				if err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_submissions WHERE resource_id=$1`, original.UUID).Scan(&state); err != nil {
-					return nil, err
-				}
-				if state == "accepted" {
-					current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, original.UUID, child.APIKeyID))
-					if err != nil {
-						return nil, err
-					}
-					if current.UpstreamID != child.UpstreamID {
-						return nil, ErrContract
-					}
-					original = current
-				} else if state != "dispatched" && state != "submission_unknown" {
-					return nil, ErrContract
-				} else if err := s.RequestRetainedReconciliationTx(ctx, tx, original.UUID, child.UpstreamID); err != nil {
-					return nil, err
-				}
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return nil, err
-			}
-			return original, nil
+	return withTxValue(ctx, s.pool, func(tx pgx.Tx) (*Resource, error) {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, child.APIKeyID+":"+child.ParentID.String()+":"+child.Kind+":"+child.UpstreamID); err != nil {
+			return nil, err
 		}
-		if !errors.Is(lookupErr, pgx.ErrNoRows) {
-			return nil, lookupErr
+		bound, err := s.getByUpstream(ctx, tx, child.NativeIdentity(), newestUpstream())
+		if err == nil {
+			return bound, nil
 		}
+		if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+		if len(submission) > 0 {
+			original, found, err := s.bindPendingSubmission(ctx, tx, child, submission[0])
+			if err != nil || found {
+				return original, err
+			}
+		}
+		return s.PutTx(ctx, tx, child)
+	})
+}
+
+func (s *Store) bindPendingSubmission(ctx context.Context, tx pgx.Tx, child *Resource, submissionID uuid.UUID) (*Resource, bool, error) {
+	original, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, submissionID, child.APIKeyID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
 	}
-	bound, err = s.PutTx(ctx, tx, child)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
+	if !matchesDiscoveryPin(original, child) {
+		return nil, false, ErrContract
 	}
-	return bound, nil
+	if original.UpstreamID == child.UpstreamID {
+		return original, true, nil
+	}
+	if original.UpstreamID != "pending:"+original.UUID.String() || original.State == "not_accepted" {
+		return nil, false, ErrContract
+	}
+	var state string
+	if err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_submissions WHERE resource_id=$1`, original.UUID).Scan(&state); err != nil {
+		return nil, false, err
+	}
+	switch state {
+	case "accepted":
+		current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, original.UUID, child.APIKeyID))
+		if err != nil {
+			return nil, false, err
+		}
+		if current.UpstreamID != child.UpstreamID {
+			return nil, false, ErrContract
+		}
+		return current, true, nil
+	case "dispatched", "submission_unknown":
+		if err := s.Settlements().RequestReconciliationTx(ctx, tx, original.UUID, child.UpstreamID); err != nil {
+			return nil, false, err
+		}
+		return original, true, nil
+	default:
+		return nil, false, ErrContract
+	}
+}
+
+func matchesDiscoveryPin(original, child *Resource) bool {
+	return original.Kind == child.Kind &&
+		original.RouteSlug == child.RouteSlug &&
+		original.RouteRevisionID == child.RouteRevisionID &&
+		original.ProviderID == child.ProviderID &&
+		original.ProviderRevisionID == child.ProviderRevisionID &&
+		original.TargetID == child.TargetID &&
+		original.SlotID == child.SlotID &&
+		sameOptional(original.CredentialID, child.CredentialID) &&
+		original.ParentID != nil &&
+		*original.ParentID == *child.ParentID &&
+		sameOptional(original.ContractVersion, child.ContractVersion)
 }

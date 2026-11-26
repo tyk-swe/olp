@@ -76,7 +76,7 @@ import (
 	promotionserve "github.com/tyk-swe/olp/internal/promotion/serve"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/release"
-	"github.com/tyk-swe/olp/internal/resources"
+	resourcesmanage "github.com/tyk-swe/olp/internal/resources/manage"
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routes/modelcatalog"
@@ -219,7 +219,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
 	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
-	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
+	resourcesmanage.New(m.Access).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
 	health := &observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}
 	if m.Limits != nil {

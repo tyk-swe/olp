@@ -10,57 +10,55 @@ import (
 )
 
 func (s *Store) prepareRetainedMutation(ctx context.Context, r *Resource, operation, key string, digest []byte, paid bool) error {
-	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
+	if r == nil || len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return ErrSubmissionConflict
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, r.APIKeyID+":"+operation+":"+key); err != nil {
-		return err
-	}
-	// Serialize lifecycle mutations with settlement's final coverage check.
-	var settlementState string
-	err = tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, r.UUID).Scan(&settlementState)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	if paid && settlementState == "closed" {
-		return ErrSubmissionConflict
-	}
-	var exists bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE api_key_id=$1 AND operation=$2 AND submission_key=$3)`, r.APIKeyID, operation, key).Scan(&exists); err != nil {
-		return err
-	}
-	if exists {
-		return ErrSubmissionConflict
-	}
-	version := r.MutationVersion
-	if paid {
-		err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET mutation_version=mutation_version+1 WHERE id=$1 AND api_key_id=$2 AND state<>'deleted' RETURNING mutation_version`, r.UUID, r.APIKeyID).Scan(&version)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrSubmissionConflict
+	version, err := withTxValue(ctx, s.pool, func(tx pgx.Tx) (int64, error) {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, r.APIKeyID+":"+operation+":"+key); err != nil {
+			return 0, err
 		}
-		if err != nil {
-			return err
+		var settlementState string
+		err := tx.QueryRow(ctx, `SELECT state FROM olp.retained_settlements WHERE resource_id=$1 FOR UPDATE`, r.UUID).Scan(&settlementState)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
 		}
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO olp.retained_mutations(api_key_id,operation,submission_key,resource_id,request_digest,state) VALUES($1,$2,$3,$4,$5,'dispatched')`, r.APIKeyID, operation, key, r.UUID, digest)
+		if paid && settlementState == "closed" {
+			return 0, ErrSubmissionConflict
+		}
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE api_key_id=$1 AND operation=$2 AND submission_key=$3)`, r.APIKeyID, operation, key).Scan(&exists); err != nil {
+			return 0, err
+		}
+		if exists {
+			return 0, ErrSubmissionConflict
+		}
+		nextVersion := r.MutationVersion
+		if paid {
+			err = tx.QueryRow(ctx, `UPDATE olp.provider_resources SET mutation_version=mutation_version+1 WHERE id=$1 AND api_key_id=$2 AND state<>'deleted' RETURNING mutation_version`, r.UUID, r.APIKeyID).Scan(&nextVersion)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return 0, ErrSubmissionConflict
+			}
+			if err != nil {
+				return 0, err
+			}
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.retained_mutations(api_key_id,operation,submission_key,resource_id,request_digest,state) VALUES($1,$2,$3,$4,$5,'dispatched')`, r.APIKeyID, operation, key, r.UUID, digest); err != nil {
+			return 0, err
+		}
+		return nextVersion, nil
+	})
 	if err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
 	r.MutationVersion = version
 	return nil
 }
+
 func (s *Store) unknownRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE olp.retained_mutations SET state='submission_unknown',updated_at=now() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, id, key, operation)
 	return err
 }
+
 func (s *Store) acceptRetainedMutation(ctx context.Context, id uuid.UUID, key, operation string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE olp.retained_mutations SET state='accepted',updated_at=now() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, id, key, operation)
 	if err != nil {
@@ -72,14 +70,10 @@ func (s *Store) acceptRetainedMutation(ctx context.Context, id uuid.UUID, key, o
 	return nil
 }
 
-// SaveRetainedResult fences observations against newer observations and paid
-// mutations. A delayed read cannot overwrite an accepted expiry change.
 func (s *Store) SaveRetainedResult(ctx context.Context, r *Resource) error {
 	return s.saveRetainedResult(ctx, r, false)
 }
 
-// SaveRetainedMutationResult accepts the response belonging to the latest paid
-// mutation even when a GET or worker refreshed its observation timestamp.
 func (s *Store) SaveRetainedMutationResult(ctx context.Context, r *Resource) error {
 	if r == nil || r.MutationVersion == 0 {
 		return ErrContract
@@ -103,25 +97,15 @@ func (s *Store) saveRetainedResult(ctx context.Context, r *Resource, mutation bo
 	return nil
 }
 
-func (s *Store) HasUnresolvedRetainedMutations(ctx context.Context, id uuid.UUID) (bool, error) {
-	var pending bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_mutations WHERE resource_id=$1 AND state IN ('dispatched','submission_unknown'))`, id).Scan(&pending)
-	return pending, err
-}
-
-// rejectRetained records definitive transport/provider non-acceptance, never a
-// timeout or an ambiguous server failure. Only the original dispatch owner calls
-// it, before returning the provider's rejection to the client.
 func (s *Store) rejectRetained(ctx context.Context, r *Resource, key, operation string, create bool) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if create {
-		tag, e := tx.Exec(ctx, `UPDATE olp.retained_submissions SET state='not_accepted',updated_at=now() WHERE resource_id=$1 AND state='dispatched'`, r.UUID)
-		if e != nil {
-			return e
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if !create {
+			_, err := tx.Exec(ctx, `UPDATE olp.retained_mutations SET state='not_accepted',updated_at=clock_timestamp() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, r.UUID, key, operation)
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE olp.retained_submissions SET state='not_accepted',updated_at=now() WHERE resource_id=$1 AND state='dispatched'`, r.UUID)
+		if err != nil {
+			return err
 		}
 		if tag.RowsAffected() != 1 {
 			return ErrSubmissionConflict
@@ -129,13 +113,7 @@ func (s *Store) rejectRetained(ctx context.Context, r *Resource, key, operation 
 		if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state='not_accepted',updated_at=clock_timestamp() WHERE id=$1`, r.UUID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed',updated_at=clock_timestamp() WHERE resource_id=$1`, r.UUID); err != nil {
-			return err
-		}
-	} else {
-		if _, err = tx.Exec(ctx, `UPDATE olp.retained_mutations SET state='not_accepted',updated_at=clock_timestamp() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, r.UUID, key, operation); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
+		_, err = tx.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed',updated_at=clock_timestamp() WHERE resource_id=$1`, r.UUID)
+		return err
+	})
 }

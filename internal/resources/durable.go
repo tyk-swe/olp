@@ -40,7 +40,7 @@ func (r BatchRecovery) UpstreamID() string { return r.resource.UpstreamID }
 
 func (r BatchRecovery) Persist(ctx context.Context, tx pgx.Tx) error {
 	if r.resource.Kind == KindStrictBatch {
-		_, err := r.store.PutRecoveredDurableContractTx(ctx, tx, &r.resource, r.payload)
+		_, err := r.store.putRecoveredDurableContractTx(ctx, tx, &r.resource, r.payload)
 		return err
 	}
 	_, err := r.store.PutTx(ctx, tx, &r.resource)
@@ -56,7 +56,7 @@ func (s *Store) PrepareBatchRecovery(ctx context.Context, candidate Resource, ev
 	if evidence.SubmittedFileID == "" || candidate.UpstreamID == "" || evidence.ObservedFileID != evidence.SubmittedFileID || wire.BatchStageOf(evidence.NativeStatus) == wire.BatchUnknown {
 		return BatchRecovery{}, ErrContract
 	}
-	staged, err := s.ReadStagedDurableContract(ctx, candidate.UUID)
+	staged, err := s.readStagedDurableContract(ctx, candidate.UUID)
 	if err != nil {
 		return BatchRecovery{}, err
 	}
@@ -100,8 +100,17 @@ func recoverBatchContract(staged []byte, inputFileID string, body []byte) ([]byt
 func durableKind(kind string) bool { return kind == KindStrictFile || kind == KindStrictBatch }
 
 func (s *Store) validateDurable(r *Resource, payload []byte) error {
-	if !s.Encrypted() || r == nil || !durableKind(r.Kind) || r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion ||
-		r.SubmissionID != nil || r.ExpiresAt == nil || !r.ExpiresAt.After(time.Now()) || r.ExpiresAt.After(time.Now().Add(DurableLifetime)) {
+	return validateDurableAt(s.Encrypted(), r, payload, time.Now())
+}
+
+func validateDurableAt(encrypted bool, r *Resource, payload []byte, now time.Time) error {
+	if !encrypted || r == nil || !durableKind(r.Kind) {
+		return ErrContract
+	}
+	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion || r.SubmissionID != nil {
+		return ErrContract
+	}
+	if r.ExpiresAt == nil || !r.ExpiresAt.After(now) || r.ExpiresAt.After(now.Add(DurableLifetime)) {
 		return ErrContract
 	}
 	if len(payload) == 0 || len(payload) > MaxContinuationBytes {
@@ -113,35 +122,20 @@ func (s *Store) validateDurable(r *Resource, payload []byte) error {
 	return nil
 }
 
-// PutDurableContract atomically publishes a provider-accepted file or batch
-// identity and its encrypted native source/result. No local ID can escape
-// before both records commit. The caller owns the provider Attempt.
 func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []byte) (*Resource, error) {
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	copy := *r
-	out, err := s.PutDurableContractTx(ctx, tx, &copy, payload)
-	if err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return withTxValue(ctx, s.pool, func(tx pgx.Tx) (*Resource, error) {
+		return s.PutDurableContractTx(ctx, tx, r, payload)
+	})
 }
 
 func (s *Store) PutDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
 	return s.putDurableContractTx(ctx, tx, r, payload, true)
 }
 
-// The caller must hold the fenced batch settlement claim in tx.
-func (s *Store) PutRecoveredDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
+func (s *Store) putRecoveredDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {
 	if r == nil || r.Kind != KindStrictBatch {
 		return nil, ErrContract
 	}
@@ -152,40 +146,40 @@ func (s *Store) putDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
-	if r.TargetID == "" || r.Kind == KindStrictBatch && wire.BatchStageOf(r.State) == wire.BatchUnknown {
+	if r.TargetID == "" || (r.Kind == KindStrictBatch && wire.BatchStageOf(r.State) == wire.BatchUnknown) {
 		return nil, ErrContract
 	}
-	if r.UUID == uuid.Nil {
-		r.UUID = uuid.Must(uuid.NewV7())
+	prepared := *r
+	if prepared.UUID == uuid.Nil {
+		id, err := newUUIDv7()
+		if err != nil {
+			return nil, err
+		}
+		prepared.UUID = id
 	}
 	if authorize {
-		if err := s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
+		if err := authorizeOwner(ctx, tx, prepared.APIKeyID); err != nil {
 			return nil, err
 		}
 	}
-	if len(r.Metadata) == 0 {
-		r.Metadata = []byte(`{}`)
+	if len(prepared.Metadata) == 0 {
+		prepared.Metadata = []byte(`{}`)
 	}
-	return s.insertSealedContract(ctx, tx, r, payload)
+	return s.insertSealedContract(ctx, tx, &prepared, payload)
 }
 
 func (s *Store) StageDurableContract(ctx context.Context, id uuid.UUID, payload []byte, expiresAt *time.Time) error {
-	if !s.Encrypted() || id == uuid.Nil || expiresAt == nil || !expiresAt.After(time.Now()) ||
-		expiresAt.After(time.Now().Add(DurableLifetime)) || len(payload) == 0 || len(payload) > MaxContinuationBytes {
+	now := time.Now()
+	if !s.Encrypted() || id == uuid.Nil || expiresAt == nil || !expiresAt.After(now) ||
+		expiresAt.After(now.Add(DurableLifetime)) || len(payload) == 0 || len(payload) > MaxContinuationBytes {
 		return ErrContract
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, expiresAt); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		return s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, expiresAt)
+	})
 }
 
-func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]byte, error) {
+func (s *Store) readStagedDurableContract(ctx context.Context, id uuid.UUID) ([]byte, error) {
 	if !s.Encrypted() || id == uuid.Nil {
 		return nil, ErrContract
 	}
@@ -196,8 +190,6 @@ func (s *Store) ReadStagedDurableContract(ctx context.Context, id uuid.UUID) ([]
 	return payload, nil
 }
 
-// ReadDurableContract checks the current owner before decrypting. The gateway
-// additionally resolves the historical serving pin and current revocation.
 func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID string) (*Resource, []byte, error) {
 	if !durableKind(kind) {
 		return nil, nil, ErrContract
@@ -207,52 +199,79 @@ func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID st
 	})
 }
 
-// UpdateDurableContract commits the latest native result with the status in
-// one transaction. Once a batch reaches a terminal result, a delayed poll or
-// cancellation response cannot replace it with an earlier state.
-func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID, state string, payload []byte) (*Resource, []byte, error) {
-	if !s.Encrypted() || !durableKind(kind) || state == "" || kind == KindStrictBatch && wire.BatchStageOf(state) == wire.BatchUnknown || len(payload) == 0 || len(payload) > MaxContinuationBytes {
-		return nil, nil, ErrContract
+func batchUpdateRegresses(kind, current, next string) bool {
+	if kind != KindStrictBatch {
+		return false
 	}
-	id, err := parseLocal(localID)
-	if err != nil || LocalID(kind, id) != localID {
-		return nil, nil, ErrNotFound
+	return wire.BatchStageOf(current) == wire.BatchTerminal || wire.BatchStageOf(next) < wire.BatchStageOf(current)
+}
+
+func validateDurableUpdate(encrypted bool, kind, state string, payload []byte) error {
+	if !encrypted || !durableKind(kind) || state == "" {
+		return ErrContract
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, err
+	if kind == KindStrictBatch && wire.BatchStageOf(state) == wire.BatchUnknown {
+		return ErrContract
 	}
-	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, owner); err != nil {
-		return nil, nil, err
+	if len(payload) == 0 || len(payload) > MaxContinuationBytes {
+		return ErrContract
+	}
+	return nil
+}
+
+func (s *Store) readDurablePayload(ctx context.Context, tx pgx.Tx, id uuid.UUID) ([]byte, error) {
+	current, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
+	if err != nil || len(current) == 0 || len(current) > MaxContinuationBytes {
+		return nil, ErrContract
+	}
+	return current, nil
+}
+
+func (s *Store) updateDurableContractTx(ctx context.Context, tx pgx.Tx, id uuid.UUID, kind, owner, state string, payload []byte) (sealedContract, error) {
+	if err := authorizeOwner(ctx, tx, owner); err != nil {
+		return sealedContract{}, err
 	}
 	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
  WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR UPDATE`, id, kind, owner, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
+		return sealedContract{}, ErrNotFound
+	}
+	if err != nil {
+		return sealedContract{}, err
+	}
+	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
+		return sealedContract{}, ErrContract
+	}
+	if batchUpdateRegresses(kind, r.State, state) {
+		current, err := s.readDurablePayload(ctx, tx, id)
+		if err != nil {
+			return sealedContract{}, err
+		}
+		return sealedContract{resource: r, payload: current}, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, id, state); err != nil {
+		return sealedContract{}, err
+	}
+	if err := s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, r.ExpiresAt); err != nil {
+		return sealedContract{}, err
+	}
+	r.State = state
+	return sealedContract{resource: r, payload: payload}, nil
+}
+
+func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID, state string, payload []byte) (*Resource, []byte, error) {
+	if err := validateDurableUpdate(s.Encrypted(), kind, state, payload); err != nil {
+		return nil, nil, err
+	}
+	parsedKind, id, err := ParseLocalID(localID)
+	if err != nil || parsedKind != kind {
 		return nil, nil, ErrNotFound
 	}
+	updated, err := withTxValue(ctx, s.pool, func(tx pgx.Tx) (sealedContract, error) {
+		return s.updateDurableContractTx(ctx, tx, id, kind, owner, state, payload)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
-		return nil, nil, ErrContract
-	}
-	if kind == KindStrictBatch && (wire.BatchStageOf(r.State) == wire.BatchTerminal || wire.BatchStageOf(state) < wire.BatchStageOf(r.State)) {
-		current, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
-		if err != nil || len(current) == 0 || len(current) > MaxContinuationBytes {
-			return nil, nil, ErrContract
-		}
-		return r, current, nil
-	}
-	if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1`, id, state); err != nil {
-		return nil, nil, err
-	}
-	if err = s.keys.Store(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation, payload, r.ExpiresAt); err != nil {
-		return nil, nil, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, nil, err
-	}
-	r.State = state
-	return r, payload, nil
+	return updated.resource, updated.payload, nil
 }
