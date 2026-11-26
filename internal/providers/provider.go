@@ -19,12 +19,6 @@ import (
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
-type credentialState struct {
-	ID      *string
-	Version *int
-	Revoked bool
-}
-
 type providerSummary struct {
 	ID                       string        `json:"id"`
 	Name                     string        `json:"name"`
@@ -74,11 +68,10 @@ func (s *draftService) scanDetail(row pgx.Row) (*detail, error) {
 	var p record
 	var configuration, plugin []byte
 	var d detail
-	var draft credentialState
 	var usableCredential bool
 	err := row.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &configuration, &p.ETag, &p.SlotsETag, &p.DraftDirty, &p.ActiveRevision, &p.ActiveRevisionID, &p.LastProbeAt, &p.LastProbeStatus, &p.LastProbeDetail, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt, &p.ProjectID, &plugin,
 		&d.ProjectName, &d.CreatedByEmail, &d.ModelCount, &d.EnabledModelCount, &d.CapabilityCount, &d.CertifiedCapabilityCount,
-		&draft.ID, &draft.Version, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
+		&d.DraftCredentialID, &d.DraftCredentialVersion, &usableCredential, &d.RuntimeCredentialID, &d.RuntimeCredentialVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +86,6 @@ func (s *draftService) scanDetail(row pgx.Row) (*detail, error) {
 	d.Configuration = document
 	d.PendingActivation = p.DraftDirty
 	d.ActiveRevision = p.ActiveRevision
-	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
 	d.ConnectorReady = p.Connection.Transport().Validate(s.egress) == nil && (!document.CredentialRequired() || usableCredential)
@@ -239,8 +231,7 @@ func (s *draftService) deleteProvider(r *http.Request, _ authz.Principal) (httpk
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.providers WHERE id=$1", id); err != nil {
-			var constraint *pgconn.PgError
-			if errors.As(err, &constraint) && constraint.Code == "23503" {
+			if constraint, ok := errors.AsType[*pgconn.PgError](err); ok && constraint.Code == "23503" {
 				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
 			}
 			return httpkit.Reply{}, access.Event{}, err
