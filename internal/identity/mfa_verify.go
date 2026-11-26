@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,29 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
+
+type mfaProof struct {
+	Challenge  string          `json:"challenge"`
+	Method     string          `json:"method"`
+	Code       string          `json:"code"`
+	Credential json.RawMessage `json:"credential"`
+}
+
+type mfaVerification struct {
+	valid      bool
+	credential *webauthn.Credential
+	counter    int64
+}
+
+type mfaEnrolledResponse struct {
+	Enrolled      bool     `json:"enrolled"`
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+type mfaBootstrapEnrolledResponse struct {
+	Session       any      `json:"session"`
+	RecoveryCodes []string `json:"recovery_codes"`
+}
 
 // totpCounter returns a fresh RFC 6238 counter within one 30-second step of
 // the server clock. A caller atomically persists it to prevent cross-gateway replay.
@@ -44,223 +68,258 @@ func totpCounter(secret, code string, now time.Time, last int64) (int64, bool) {
 	return 0, false
 }
 
-type mfaProof struct {
-	Challenge  string          `json:"challenge"`
-	Method     string          `json:"method"`
-	Code       string          `json:"code"`
-	Credential json.RawMessage `json:"credential"`
-}
-
-func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, error) {
+func (s *mfaService) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, error) {
 	switch input.Method {
 	case "totp":
-		var id string
-		var last int64
-		err := tx.QueryRow(r.Context(), "SELECT id::text,last_counter FROM olp.mfa_factors WHERE user_id=$1 AND kind='totp' FOR UPDATE", f.UserID).Scan(&id, &last)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		secret, err := s.access.Keys.Read(r.Context(), tx, s.access.Installation, id, secrets.MFATOTP)
-		if err != nil {
-			return false, err
-		}
-		counter, valid := totpCounter(string(secret), input.Code, time.Now(), last)
-		clear(secret)
-		if !valid {
-			return false, nil
-		}
-		_, err = tx.Exec(r.Context(), "UPDATE olp.mfa_factors SET last_counter=$2,last_used_at=now() WHERE id=$1", id, counter)
-		return err == nil, err
+		return s.verifyTOTPProof(r.Context(), tx, f.UserID, input.Code)
 	case "recovery":
-		code := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(input.Code), "-", ""))
-		if len(code) != 32 {
-			return false, nil
-		}
-		deleted, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1 AND digest=$2", f.UserID, s.access.Auth.Digest(secrets.MFARecoveryDigest, f.UserID+":"+code))
-		return err == nil && deleted.RowsAffected() == 1, err
+		return s.verifyRecoveryProof(r.Context(), tx, f.UserID, input.Code)
 	case "webauthn":
-		if f.Data.WebAuthn == nil || len(input.Credential) == 0 {
-			return false, nil
-		}
-		parsed, err := protocol.ParseCredentialRequestResponseBytes(input.Credential)
-		if err != nil {
-			return false, nil
-		}
-		user, err := s.mfaUser(r.Context(), tx, f.UserID)
-		if err != nil {
-			return false, err
-		}
-		w, err := s.webAuthn()
-		if err != nil {
-			return false, err
-		}
-		credential, err := w.ValidateLogin(user, *f.Data.WebAuthn, parsed)
-		if err != nil || credential.Authenticator.CloneWarning {
-			return false, nil
-		}
-		var id string
-		if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.mfa_factors WHERE user_id=$1 AND credential_id=$2 FOR UPDATE", f.UserID, credential.ID).Scan(&id); err != nil {
-			return false, err
-		}
-		raw, _ := json.Marshal(credential)
-		if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
-			return false, err
-		}
-		_, err = tx.Exec(r.Context(), "UPDATE olp.mfa_factors SET last_used_at=now() WHERE id=$1", id)
-		return err == nil, err
+		return s.verifyWebAuthnProof(r.Context(), tx, f, input.Credential)
 	default:
 		return false, nil
 	}
 }
 
-func (s *Server) mfaFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, error) {
-	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
-		return httpkit.Reply{}, err
+func (s *mfaService) verifyTOTPProof(ctx context.Context, tx pgx.Tx, userID, code string) (bool, error) {
+	var id string
+	var last int64
+	err := tx.QueryRow(ctx, "SELECT id::text,last_counter FROM olp.mfa_factors WHERE user_id=$1 AND kind='totp' FOR UPDATE", userID).Scan(&id, &last)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
 	}
-	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
-		return httpkit.Reply{}, err
+	if err != nil {
+		return false, err
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		return httpkit.Reply{}, err
+	secret, err := s.access.Keys.Read(ctx, tx, s.access.Installation, id, secrets.MFATOTP)
+	if err != nil {
+		return false, err
 	}
-	return httpkit.Reply{}, httpkit.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
+	counter, valid := totpCounter(string(secret), code, time.Now(), last)
+	clear(secret)
+	if !valid {
+		return false, nil
+	}
+	_, err = tx.Exec(ctx, "UPDATE olp.mfa_factors SET last_counter=$2,last_used_at=now() WHERE id=$1", id, counter)
+	return err == nil, err
 }
 
-func (s *Server) mfaVerify(r *http.Request) (httpkit.Reply, error) {
+func (s *mfaService) verifyRecoveryProof(ctx context.Context, tx pgx.Tx, userID, rawCode string) (bool, error) {
+	code, ok := normalizeRecoveryCode(rawCode)
+	if !ok {
+		return false, nil
+	}
+	deleted, err := tx.Exec(ctx, "DELETE FROM olp.mfa_recovery_codes WHERE user_id=$1 AND digest=$2", userID, s.access.Auth.Digest(secrets.MFARecoveryDigest, userID+":"+code))
+	return err == nil && deleted.RowsAffected() == 1, err
+}
+
+func (s *mfaService) verifyWebAuthnProof(ctx context.Context, tx pgx.Tx, f mfaFlow, rawCredential json.RawMessage) (bool, error) {
+	if f.Data.WebAuthn == nil || len(rawCredential) == 0 {
+		return false, nil
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(rawCredential)
+	if err != nil {
+		return false, nil
+	}
+	user, err := s.mfaUser(ctx, tx, f.UserID)
+	if err != nil {
+		return false, err
+	}
+	w, err := s.webAuthn()
+	if err != nil {
+		return false, err
+	}
+	credential, err := w.ValidateLogin(user, *f.Data.WebAuthn, parsed)
+	if err != nil || credential.Authenticator.CloneWarning {
+		return false, nil
+	}
+	var id string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.mfa_factors WHERE user_id=$1 AND credential_id=$2 FOR UPDATE", f.UserID, credential.ID).Scan(&id); err != nil {
+		return false, err
+	}
+	raw, err := json.Marshal(credential)
+	if err != nil {
+		return false, err
+	}
+	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
+		return false, err
+	}
+	_, err = tx.Exec(ctx, "UPDATE olp.mfa_factors SET last_used_at=now() WHERE id=$1", id)
+	return err == nil, err
+}
+
+func (s *mfaService) recordMFAFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, bool, error) {
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.mfa_challenges SET attempts=attempts+1 WHERE id=$1 AND attempts<5", f.ID); err != nil {
+		return httpkit.Reply{}, false, err
+	}
+	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
+		return httpkit.Reply{}, false, err
+	}
+	return httpkit.Reply{}, true, httpkit.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
+}
+
+func (s *mfaService) mfaVerify(r *http.Request) (httpkit.Reply, error) {
 	var input mfaProof
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := s.admit(r, "mfa_request", ""); err != nil {
+	if err := admitAuth(s.access, r, "mfa_request", ""); err != nil {
 		return httpkit.Reply{}, err
 	}
-	tx, err := s.access.Begin(r)
+	preflight, err := s.readMFAFlow(r, s.access.Pool, input.Challenge, false)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	defer tx.Rollback(r.Context())
+	if err := admitAuth(s.access, r, "mfa_verify", preflight.UserID); err != nil {
+		return httpkit.Reply{}, err
+	}
+	return access.Serialize(s.access, r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
+		return s.finishMFAVerify(r, tx, input)
+	})
+}
+
+func (s *mfaService) finishMFAVerify(r *http.Request, tx pgx.Tx, input mfaProof) (httpkit.Reply, bool, error) {
 	f, err := s.loadMFAFlow(r, tx, input.Challenge)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return httpkit.Reply{}, false, err
 	}
-	if err = s.admit(r, "mfa_verify", f.UserID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	valid, credential, counter, err := s.evaluateMFAFlow(r, tx, f, input)
+	result, err := s.evaluateMFAFlow(r, tx, f, input)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return httpkit.Reply{}, false, err
 	}
-	if !valid {
-		return s.mfaFailure(r, tx, f)
+	if !result.valid {
+		return s.recordMFAFailure(r, tx, f)
 	}
 	var codes []string
 	if strings.HasPrefix(f.Purpose, "enroll_") {
-		codes, err = s.activateMFA(r, tx, f, credential, counter)
+		codes, err = s.activateMFA(r, tx, f, result.credential, result.counter)
 		if err != nil {
-			return httpkit.Reply{}, err
+			return httpkit.Reply{}, false, err
 		}
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", f.ID); err != nil {
-		return httpkit.Reply{}, err
+	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", f.ID); err != nil {
+		return httpkit.Reply{}, false, err
 	}
 	reply, err := s.completeMFAOutcome(r, tx, f, codes)
 	if err != nil {
-		return httpkit.Reply{}, err
+		return httpkit.Reply{}, false, err
 	}
-	if err = access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
-		return httpkit.Reply{}, err
+	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "success"); err != nil {
+		return httpkit.Reply{}, false, err
 	}
-	return reply, tx.Commit(r.Context())
+	return reply, true, nil
 }
 
-func (s *Server) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (bool, *webauthn.Credential, int64, error) {
+func (s *mfaService) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, input mfaProof) (mfaVerification, error) {
 	switch f.Purpose {
 	case "login", "manage", "reauth":
 		valid, err := s.verifyMFAProof(r, tx, f, input)
-		return valid, nil, 0, err
+		return mfaVerification{valid: valid}, err
 	case "enroll_totp":
-		if input.Method != "totp" || f.SecretID == nil {
-			return false, nil, 0, nil
-		}
-		secret, err := s.access.Keys.Read(r.Context(), tx, s.access.Installation, *f.SecretID, secrets.MFATOTP)
-		if err != nil {
-			return false, nil, 0, err
-		}
-		counter, valid := totpCounter(string(secret), input.Code, time.Now(), -1)
-		clear(secret)
-		return valid, nil, counter, nil
+		return s.verifyTOTPEnrollment(r.Context(), tx, f, input)
 	case "enroll_webauthn":
-		if input.Method != "webauthn" || f.Data.WebAuthn == nil {
-			return false, nil, 0, nil
-		}
-		parsed, err := protocol.ParseCredentialCreationResponseBytes(input.Credential)
-		if err != nil {
-			return false, nil, 0, nil
-		}
-		user, err := s.mfaUser(r.Context(), tx, f.UserID)
-		if err != nil {
-			return false, nil, 0, err
-		}
-		w, err := s.webAuthn()
-		if err != nil {
-			return false, nil, 0, err
-		}
-		credential, err := w.CreateCredential(user, *f.Data.WebAuthn, parsed)
-		valid := err == nil && len(credential.ID) > 0 && len(credential.ID) <= 1024
-		return valid, credential, 0, nil
+		return s.verifyWebAuthnEnrollment(r.Context(), tx, f, input)
 	default:
-		return false, nil, 0, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return mfaVerification{}, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 }
 
-func (s *Server) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
-	var reply httpkit.Reply
-	var err error
-	switch {
-	case f.Purpose == "login" || f.SessionID == nil:
-		if local, e := s.localLoginEnabled(r, tx); e != nil {
-			return httpkit.Reply{}, e
-		} else if !local {
-			return httpkit.Reply{}, httpkit.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
-		}
-		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: "local", MFA: true})
-	case f.Purpose == "manage" || f.Purpose == "reauth":
-		p, e := s.access.Authenticate(r, tx)
-		if e != nil {
-			return httpkit.Reply{}, e
-		}
-		purpose := f.Data.RecentPurpose
-		if purpose == "" {
-			purpose = "mfa_manage"
-		}
-		reply, err = s.grantRecent(r, tx, p, purpose, f.Data.RecentResource, true)
-	default:
-		// Enrollment raises authentication strength: rotate the session rather
-		// than upgrading a previously captured cookie in place.
-		var method string
-		if err = tx.QueryRow(r.Context(), "SELECT auth_method FROM olp.sessions WHERE id=$1", *f.SessionID).Scan(&method); err != nil {
-			return httpkit.Reply{}, err
-		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", *f.SessionID); err != nil {
-			return httpkit.Reply{}, err
-		}
-		reply, err = s.newSession(r, tx, f.UserID, sessionAuth{Method: method, MFA: true})
-		reply.Status = 200
-		reply.Body = map[string]any{"enrolled": true, "recovery_codes": codes}
+func (s *mfaService) verifyTOTPEnrollment(ctx context.Context, tx pgx.Tx, f mfaFlow, input mfaProof) (mfaVerification, error) {
+	if input.Method != "totp" || f.SecretID == nil {
+		return mfaVerification{}, nil
 	}
+	secret, err := s.access.Keys.Read(ctx, tx, s.access.Installation, *f.SecretID, secrets.MFATOTP)
+	if err != nil {
+		return mfaVerification{}, err
+	}
+	counter, valid := totpCounter(string(secret), input.Code, time.Now(), -1)
+	clear(secret)
+	return mfaVerification{valid: valid, counter: counter}, nil
+}
+
+func (s *mfaService) verifyWebAuthnEnrollment(ctx context.Context, tx pgx.Tx, f mfaFlow, input mfaProof) (mfaVerification, error) {
+	if input.Method != "webauthn" || f.Data.WebAuthn == nil {
+		return mfaVerification{}, nil
+	}
+	parsed, err := protocol.ParseCredentialCreationResponseBytes(input.Credential)
+	if err != nil {
+		return mfaVerification{}, nil
+	}
+	user, err := s.mfaUser(ctx, tx, f.UserID)
+	if err != nil {
+		return mfaVerification{}, err
+	}
+	w, err := s.webAuthn()
+	if err != nil {
+		return mfaVerification{}, err
+	}
+	credential, err := w.CreateCredential(user, *f.Data.WebAuthn, parsed)
+	if err != nil || len(credential.ID) == 0 || len(credential.ID) > 1024 {
+		return mfaVerification{}, nil
+	}
+	return mfaVerification{valid: true, credential: credential}, nil
+}
+
+func (s *mfaService) completeMFAOutcome(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
+	if f.Purpose == "login" || f.SessionID == nil {
+		return s.completeMFALocalSession(r, tx, f.UserID, f.SessionID == nil, codes)
+	}
+	if f.Purpose == "manage" || f.Purpose == "reauth" {
+		return s.completeMFARecentAuth(r, tx, f)
+	}
+	return s.completeMFAEnrollmentSession(r, tx, f, codes)
+}
+
+func (s *mfaService) completeMFALocalSession(r *http.Request, tx pgx.Tx, userID string, bootstrap bool, codes []string) (httpkit.Reply, error) {
+	local, err := isLocalLoginEnabled(r.Context(), s.access, tx)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if codes != nil && f.SessionID == nil {
-		reply.Body = map[string]any{"session": reply.Body, "recovery_codes": codes}
+	if !local {
+		return httpkit.Reply{}, httpkit.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
+	}
+	reply, err := s.sessions.newSession(r, tx, userID, sessionAuth{Method: "local", MFA: true})
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if codes != nil && bootstrap {
+		reply.Body = mfaBootstrapEnrolledResponse{Session: reply.Body, RecoveryCodes: codes}
 	}
 	return reply, nil
 }
 
-func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {
+func (s *mfaService) completeMFARecentAuth(r *http.Request, tx pgx.Tx, f mfaFlow) (httpkit.Reply, error) {
+	p, err := s.access.Authenticate(r, tx)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	purpose := f.Data.RecentPurpose
+	if purpose == "" {
+		purpose = "mfa_manage"
+	}
+	return s.sessions.grantRecent(r, tx, p, purpose, f.Data.RecentResource, true)
+}
+
+func (s *mfaService) completeMFAEnrollmentSession(r *http.Request, tx pgx.Tx, f mfaFlow, codes []string) (httpkit.Reply, error) {
+	// Enrollment raises authentication strength: rotate the session rather
+	// than upgrading a previously captured cookie in place.
+	var method string
+	if err := tx.QueryRow(r.Context(), "SELECT auth_method FROM olp.sessions WHERE id=$1", *f.SessionID).Scan(&method); err != nil {
+		return httpkit.Reply{}, err
+	}
+	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id=$1", *f.SessionID); err != nil {
+		return httpkit.Reply{}, err
+	}
+	reply, err := s.sessions.newSession(r, tx, f.UserID, sessionAuth{Method: method, MFA: true})
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	reply.Status = 200
+	reply.Body = mfaEnrolledResponse{Enrolled: true, RecoveryCodes: codes}
+	return reply, nil
+}
+
+func (s *mfaService) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential, counter int64) ([]string, error) {
 	var count int
 	if err := tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.mfa_factors WHERE user_id=$1", f.UserID).Scan(&count); err != nil {
 		return nil, err
@@ -268,24 +327,9 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 	if count >= 10 {
 		return nil, httpkit.Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
 	}
-	id := ids.New()
-	kind := "webauthn"
-	var credentialID []byte
-	if credential != nil {
-		credentialID = credential.ID
-		raw, _ := json.Marshal(credential)
-		if err := s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
-			return nil, err
-		}
-	} else {
-		if f.SecretID == nil {
-			return nil, httpkit.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
-		}
-		id = *f.SecretID
-		kind = "totp"
-		if _, err := tx.Exec(r.Context(), "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", id); err != nil {
-			return nil, err
-		}
+	id, kind, credentialID, err := s.storeMFAFactorSecret(r.Context(), tx, f, credential)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.mfa_factors(id,user_id,kind,name,credential_id,last_counter) VALUES($1,$2,$3,$4,$5,$6)", id, f.UserID, kind, f.Data.Name, credentialID, counter); err != nil {
 		return nil, err
@@ -308,4 +352,25 @@ func (s *Server) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credential *
 		return s.replaceRecoveryCodes(r.Context(), tx, f.UserID)
 	}
 	return nil, nil
+}
+
+func (s *mfaService) storeMFAFactorSecret(ctx context.Context, tx pgx.Tx, f mfaFlow, credential *webauthn.Credential) (string, string, []byte, error) {
+	if credential != nil {
+		id := ids.New()
+		raw, err := json.Marshal(credential)
+		if err != nil {
+			return "", "", nil, err
+		}
+		if err := s.access.Keys.Store(ctx, tx, s.access.Installation, id, secrets.MFAWebAuthn, raw, nil); err != nil {
+			return "", "", nil, err
+		}
+		return id, "webauthn", credential.ID, nil
+	}
+	if f.SecretID == nil {
+		return "", "", nil, httpkit.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
+	}
+	if _, err := tx.Exec(ctx, "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", *f.SecretID); err != nil {
+		return "", "", nil, err
+	}
+	return *f.SecretID, "totp", nil, nil
 }

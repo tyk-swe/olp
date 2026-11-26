@@ -11,7 +11,6 @@ import (
 	filter "github.com/scim2/filter-parser/v2"
 )
 
-// ParseFilter bounds input before invoking the RFC grammar parser.
 func ParseFilter(raw string) (filter.Expression, error) {
 	if !boundedExpression(raw) {
 		return nil, Fail(400, "invalidFilter", "The filter is too large or deeply nested.")
@@ -61,7 +60,7 @@ func boundedExpression(s string) bool {
 }
 
 func pathParts(p filter.AttributePath) []string {
-	parts := []string{}
+	parts := make([]string, 0, 3)
 	if p.URIPrefix != nil && !strings.EqualFold(*p.URIPrefix, UserSchema) && !strings.EqualFold(*p.URIPrefix, GroupSchema) {
 		parts = append(parts, Canonical(*p.URIPrefix))
 	}
@@ -81,16 +80,19 @@ func MultiValuedComplexAttribute(name string) bool {
 	}
 }
 
-func jsonPath(p filter.AttributePath) string {
+func jsonPath(p filter.AttributePath) (string, error) {
 	path := "$"
 	for _, part := range pathParts(p) {
-		b, _ := json.Marshal(part)
-		path += "." + string(b)
+		encoded, err := json.Marshal(part)
+		if err != nil {
+			return "", err
+		}
+		path += "." + string(encoded)
 		if MultiValuedComplexAttribute(part) {
 			path += "[*]"
 		}
 	}
-	return path
+	return path, nil
 }
 
 type SQLFilter struct {
@@ -104,8 +106,11 @@ func (s *SQLFilter) bind(v any) string {
 	return fmt.Sprintf("$%d", len(s.Args))
 }
 
-// Compile returns SQL with exclusively bound values and paths. base is a trusted
-// column expression supplied by the server, never a caller-selected SQL name.
+func (s *SQLFilter) nextAlias() string {
+	s.sequence++
+	return fmt.Sprintf("scim_value_%d", s.sequence)
+}
+
 func (s *SQLFilter) Compile(raw, base string) (string, error) {
 	if raw == "" {
 		return "TRUE", nil
@@ -123,57 +128,79 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 	}
 	switch x := e.(type) {
 	case *filter.LogicalExpression:
-		a, err := s.expression(x.Left, base, depth+1, scope)
-		if err != nil {
-			return "", err
-		}
-		b, err := s.expression(x.Right, base, depth+1, scope)
-		if err != nil {
-			return "", err
-		}
-		op := "AND"
-		if x.Operator == filter.OR {
-			op = "OR"
-		}
-		return "(" + a + " " + op + " " + b + ")", nil
+		return s.logicalExpression(x, base, depth, scope)
 	case *filter.NotExpression:
-		a, err := s.expression(x.Expression, base, depth+1, scope)
-		return "(NOT (" + a + "))", err
+		inner, err := s.expression(x.Expression, base, depth+1, scope)
+		return "(NOT (" + inner + "))", err
 	case *filter.ValuePath:
-		if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
-			return "", Fail(400, "invalidFilter", "The value path belongs to a different resource schema.")
-		}
-		s.sequence++
-		alias := fmt.Sprintf("scim_value_%d", s.sequence)
-		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
-		condition, err := s.expression(x.ValueFilter, alias+".value", depth+1, slices.Concat(scope, pathParts(x.AttributePath)))
-		return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", err
+		return s.valuePathExpression(x, base, depth, scope)
 	case *filter.AttributeExpression:
-		nullComparison := s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE)
-		if nullComparison && !s.definedAttribute(x.AttributePath, scope) {
-			return "FALSE", nil
-		}
-		if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
-			return "", Fail(400, "invalidFilter", "The attribute belongs to a different resource schema.")
-		}
-		s.sequence++
-		alias := fmt.Sprintf("scim_value_%d", s.sequence)
-		v := alias + ".value"
-		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
-		if nullComparison {
-			assigned := "EXISTS(SELECT 1 FROM " + source + " WHERE " + v + " NOT IN ('null'::jsonb,'\"\"'::jsonb,'[]'::jsonb,'{}'::jsonb))"
-			if x.Operator == filter.EQ {
-				return "NOT " + assigned, nil
-			}
-			return assigned, nil
-		}
-		condition, err := s.compare(x, v)
-		if err != nil {
-			return "", err
-		}
-		return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", nil
+		return s.attributeExpression(x, base, scope)
+	default:
+		return "", Fail(400, "invalidFilter", "Unsupported filter expression.")
 	}
-	return "", Fail(400, "invalidFilter", "Unsupported filter expression.")
+}
+
+func (s *SQLFilter) logicalExpression(x *filter.LogicalExpression, base string, depth int, scope []string) (string, error) {
+	left, err := s.expression(x.Left, base, depth+1, scope)
+	if err != nil {
+		return "", err
+	}
+	right, err := s.expression(x.Right, base, depth+1, scope)
+	if err != nil {
+		return "", err
+	}
+	op := "AND"
+	if x.Operator == filter.OR {
+		op = "OR"
+	}
+	return "(" + left + " " + op + " " + right + ")", nil
+}
+
+func (s *SQLFilter) valuePathExpression(x *filter.ValuePath, base string, depth int, scope []string) (string, error) {
+	if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
+		return "", Fail(400, "invalidFilter", "The value path belongs to a different resource schema.")
+	}
+	jp, err := jsonPath(x.AttributePath)
+	if err != nil {
+		return "", err
+	}
+	alias := s.nextAlias()
+	source := "jsonb_path_query(" + base + "," + s.bind(jp) + "::jsonpath) " + alias + "(value)"
+	condition, err := s.expression(x.ValueFilter, alias+".value", depth+1, slices.Concat(scope, pathParts(x.AttributePath)))
+	if err != nil {
+		return "", err
+	}
+	return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", nil
+}
+
+func (s *SQLFilter) attributeExpression(x *filter.AttributeExpression, base string, scope []string) (string, error) {
+	nullComparison := s.Schema != "" && x.CompareValue == nil && (x.Operator == filter.EQ || x.Operator == filter.NE)
+	if nullComparison && !s.definedAttribute(x.AttributePath, scope) {
+		return "FALSE", nil
+	}
+	if s.Schema != "" && !matchesCoreSchema(x.AttributePath, s.Schema) {
+		return "", Fail(400, "invalidFilter", "The attribute belongs to a different resource schema.")
+	}
+	jp, err := jsonPath(x.AttributePath)
+	if err != nil {
+		return "", err
+	}
+	alias := s.nextAlias()
+	v := alias + ".value"
+	source := "jsonb_path_query(" + base + "," + s.bind(jp) + "::jsonpath) " + alias + "(value)"
+	if nullComparison {
+		assigned := "EXISTS(SELECT 1 FROM " + source + " WHERE " + v + " NOT IN ('null'::jsonb,'\"\"'::jsonb,'[]'::jsonb,'{}'::jsonb))"
+		if x.Operator == filter.EQ {
+			return "NOT " + assigned, nil
+		}
+		return assigned, nil
+	}
+	condition, err := s.compare(x, v)
+	if err != nil {
+		return "", err
+	}
+	return "EXISTS(SELECT 1 FROM " + source + " WHERE " + condition + ")", nil
 }
 
 func matchesCoreSchema(path filter.AttributePath, schema string) bool {
@@ -213,74 +240,118 @@ func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) 
 	return false
 }
 
+func compareOperatorSQL(op filter.CompareOperator) string {
+	switch op {
+	case filter.EQ:
+		return "="
+	case filter.NE:
+		return "<>"
+	case filter.GT:
+		return ">"
+	case filter.GE:
+		return ">="
+	case filter.LT:
+		return "<"
+	case filter.LE:
+		return "<="
+	default:
+		return ""
+	}
+}
+
+func caseSensitiveAttribute(name string) bool {
+	return name == "id" || name == "externalId" || name == "$ref"
+}
+
 func (s *SQLFilter) compare(e *filter.AttributeExpression, v string) (string, error) {
 	if e.Operator == filter.PR {
 		return v + " NOT IN ('null'::jsonb,'\"\"'::jsonb,'[]'::jsonb,'{}'::jsonb)", nil
 	}
-	op := map[filter.CompareOperator]string{filter.EQ: "=", filter.NE: "<>", filter.GT: ">", filter.GE: ">=", filter.LT: "<", filter.LE: "<="}[e.Operator]
+	op := compareOperatorSQL(e.Operator)
 	switch value := e.CompareValue.(type) {
 	case string:
-		if strings.ContainsRune(value, 0) {
-			return "", Fail(400, "invalidFilter", "Filter strings cannot contain a null character.")
-		}
-		text := "(" + v + "#>>'{}')"
+		return s.compareString(e, v, value, op)
+	case bool:
+		return s.compareBool(v, value, op)
+	case json.Number:
+		return s.compareNumber(v, value, op)
+	case nil:
+		return compareNull(v, op)
+	default:
+		return "", Fail(400, "invalidFilter", "Unsupported comparison value.")
+	}
+}
+
+func (s *SQLFilter) compareString(e *filter.AttributeExpression, v, value, op string) (string, error) {
+	if strings.ContainsRune(value, 0) {
+		return "", Fail(400, "invalidFilter", "Filter strings cannot contain a null character.")
+	}
+	text := "(" + v + "#>>'{}')"
+	parts := pathParts(e.AttributePath)
+	last := parts[len(parts)-1]
+	if last == "created" || last == "lastModified" {
+		return s.compareTimestamp(v, text, value, op)
+	}
+	caseSensitive := caseSensitiveAttribute(last)
+	if op != "" {
+		expected := s.bind(value)
 		actual := text
-		expected := ""
-		parts := pathParts(e.AttributePath)
-		last := parts[len(parts)-1]
-		if last == "created" || last == "lastModified" {
-			expected = s.bind(value)
-			if _, err := time.Parse(time.RFC3339Nano, value); err != nil || op == "" {
-				return "", Fail(400, "invalidFilter", "Date comparisons require an RFC 3339 timestamp.")
-			}
-			return "CASE WHEN jsonb_typeof(" + v + ")='string' THEN " + actual + "::timestamptz " + op + " " + expected + "::timestamptz ELSE FALSE END", nil
-		}
-		if op != "" {
-			expected = s.bind(value)
-		}
-		if last != "id" && last != "externalId" && last != "$ref" {
+		if !caseSensitive {
 			actual = "lower(" + actual + ")"
 			expected = "lower(" + expected + "::text)"
 		}
-		if op != "" {
-			return "jsonb_typeof(" + v + ")='string' AND " + actual + op + expected, nil
-		}
-		pattern := regexp.QuoteMeta(value)
-		switch e.Operator {
-		case filter.SW:
-			pattern = "^" + pattern
-		case filter.EW:
-			pattern += "$"
-		case filter.CO:
-		default:
-			return "", Fail(400, "invalidFilter", "Unsupported comparison.")
-		}
-		operator := " ~* "
-		if last == "id" || last == "externalId" || last == "$ref" {
-			operator = " ~ "
-		}
-		return "jsonb_typeof(" + v + ")='string' AND " + text + operator + s.bind(pattern), nil
-	case bool:
-		if op != "=" && op != "<>" {
-			return "", Fail(400, "invalidFilter", "Booleans support eq and ne.")
-		}
-		return v + op + s.bind(fmt.Sprint(value)) + "::jsonb", nil
-	case json.Number:
-		if op == "" {
-			return "", Fail(400, "invalidFilter", "Numbers require an ordering or equality comparison.")
-		}
-		return "CASE WHEN jsonb_typeof(" + v + ")='number' THEN (" + v + "#>>'{}')::numeric " + op + " " + s.bind(value.String()) + "::numeric ELSE FALSE END", nil
-	case nil:
-		if op != "=" && op != "<>" {
-			return "", Fail(400, "invalidFilter", "Null supports eq and ne.")
-		}
-		return v + op + "'null'::jsonb", nil
+		return "jsonb_typeof(" + v + ")='string' AND " + actual + op + expected, nil
 	}
-	return "", Fail(400, "invalidFilter", "Unsupported comparison value.")
+	return s.compareStringPattern(e.Operator, v, text, value, caseSensitive)
 }
 
-// Sort honors primary values for multi-valued complex attributes, then uses the
-// first value. The caller adds the resource ID as a stable pagination tie-break.
+func (s *SQLFilter) compareTimestamp(v, actual, value, op string) (string, error) {
+	expected := s.bind(value)
+	if _, err := time.Parse(time.RFC3339Nano, value); err != nil || op == "" {
+		return "", Fail(400, "invalidFilter", "Date comparisons require an RFC 3339 timestamp.")
+	}
+	return "CASE WHEN jsonb_typeof(" + v + ")='string' THEN " + actual + "::timestamptz " + op + " " + expected + "::timestamptz ELSE FALSE END", nil
+}
+
+func (s *SQLFilter) compareStringPattern(op filter.CompareOperator, v, text, value string, caseSensitive bool) (string, error) {
+	pattern := regexp.QuoteMeta(value)
+	switch op {
+	case filter.SW:
+		pattern = "^" + pattern
+	case filter.EW:
+		pattern += "$"
+	case filter.CO:
+	default:
+		return "", Fail(400, "invalidFilter", "Unsupported comparison.")
+	}
+	operator := " ~* "
+	if caseSensitive {
+		operator = " ~ "
+	}
+	return "jsonb_typeof(" + v + ")='string' AND " + text + operator + s.bind(pattern), nil
+}
+
+func (s *SQLFilter) compareBool(v string, value bool, op string) (string, error) {
+	if op != "=" && op != "<>" {
+		return "", Fail(400, "invalidFilter", "Booleans support eq and ne.")
+	}
+	return v + op + s.bind(fmt.Sprint(value)) + "::jsonb", nil
+}
+
+func (s *SQLFilter) compareNumber(v string, value json.Number, op string) (string, error) {
+	if op == "" {
+		return "", Fail(400, "invalidFilter", "Numbers require an ordering or equality comparison.")
+	}
+	return "CASE WHEN jsonb_typeof(" + v + ")='number' THEN (" + v + "#>>'{}')::numeric " + op + " " + s.bind(value.String()) + "::numeric ELSE FALSE END", nil
+}
+
+func compareNull(v, op string) (string, error) {
+	if op != "=" && op != "<>" {
+		return "", Fail(400, "invalidFilter", "Null supports eq and ne.")
+	}
+	return v + op + "'null'::jsonb", nil
+}
+
 func (s *SQLFilter) Sort(raw, base string) (string, error) {
 	parts, err := SortPath(raw, s.Schema)
 	if err != nil {
@@ -293,7 +364,10 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 	path, primary := "$", "$"
 	multi := false
 	for _, part := range parts {
-		encoded, _ := json.Marshal(part)
+		encoded, err := json.Marshal(part)
+		if err != nil {
+			return "", err
+		}
 		step := "." + string(encoded)
 		path += step
 		primary += step

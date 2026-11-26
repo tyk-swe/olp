@@ -73,7 +73,7 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.WithoutCancel(ctx))
 	var fingerprint []byte
 	var active *int
 	if err = tx.QueryRow(ctx, "SELECT auth_fingerprint,active_key_version FROM olp.installation WHERE singleton FOR UPDATE").Scan(&fingerprint, &active); err != nil {
@@ -264,13 +264,13 @@ func ClearCookie(name string) *http.Cookie {
 	c.MaxAge = -1
 	return c
 }
-func (s *Server) Begin(r *http.Request) (pgx.Tx, error) {
+func (s *Server) begin(r *http.Request) (pgx.Tx, error) {
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, err
 	}
 	if _, err = tx.Exec(r.Context(), "SELECT id FROM olp.installation WHERE singleton FOR UPDATE"); err != nil {
-		tx.Rollback(r.Context())
+		tx.Rollback(context.WithoutCancel(r.Context()))
 		return nil, err
 	}
 	return tx, nil

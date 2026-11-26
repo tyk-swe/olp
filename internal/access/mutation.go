@@ -157,3 +157,19 @@ func Preflight[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, a
 	}
 	return current, replayed, tx.Commit(r.Context())
 }
+
+func Serialize[T any](s *Server, r *http.Request, step func(pgx.Tx) (T, bool, error)) (T, error) {
+	var none T
+	tx, err := s.begin(r)
+	if err != nil {
+		return none, err
+	}
+	defer tx.Rollback(context.WithoutCancel(r.Context()))
+	result, commit, err := step(tx)
+	if commit {
+		if commitErr := tx.Commit(r.Context()); commitErr != nil {
+			return none, commitErr
+		}
+	}
+	return result, err
+}

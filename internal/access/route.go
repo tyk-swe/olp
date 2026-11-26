@@ -187,7 +187,7 @@ func (s *Server) admitRoute(r *http.Request, req Requirement) (*http.Request, au
 	return r, p, req.Admits(p)
 }
 
-// Reauthorize resolves the caller again inside tx, after Begin has taken the
+// Reauthorize resolves the caller again inside tx, after begin has taken the
 // installation lock, and checks the route requirement again, so a mutation
 // never commits under authority revoked since the request was admitted.
 func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error) {
@@ -203,13 +203,13 @@ func (s *Server) Reauthorize(r *http.Request, tx pgx.Tx) (authz.Principal, error
 }
 
 func (s *Server) beginMutation(r *http.Request) (pgx.Tx, authz.Principal, error) {
-	tx, err := s.Begin(r)
+	tx, err := s.begin(r)
 	if err != nil {
 		return nil, authz.Principal{}, err
 	}
 	principal, err := s.Reauthorize(r, tx)
 	if err != nil {
-		tx.Rollback(r.Context())
+		tx.Rollback(context.WithoutCancel(r.Context()))
 		return nil, authz.Principal{}, err
 	}
 	return tx, principal, nil

@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/crewjam/saml"
@@ -42,6 +41,7 @@ type SAMLDefinition struct {
 	EmailMappings   []roleMapping `json:"email_role_mappings"`
 	GroupMappings   []roleMapping `json:"group_role_mappings"`
 }
+
 type samlConfiguration struct {
 	SAMLDefinition
 	ID                string `json:"id"`
@@ -49,6 +49,11 @@ type samlConfiguration struct {
 	EntityID          string `json:"idp_entity_id"`
 	ServiceProviderID string `json:"service_provider_id"`
 	Certificate       string `json:"signing_certificate"`
+}
+
+type samlImportResponse struct {
+	MetadataXML string `json:"metadata_xml"`
+	IDPEntityID string `json:"idp_entity_id"`
 }
 
 func ValidateSAMLDefinition(d SAMLDefinition) error {
@@ -72,13 +77,69 @@ func ReadSAMLDefinition(ctx context.Context, q database.Queryer) (SAMLDefinition
 
 func loadSAML(ctx context.Context, q database.Queryer) (samlConfiguration, error) {
 	var c samlConfiguration
-	err := q.QueryRow(ctx, "SELECT document||jsonb_build_object('id',id,'etag',etag) FROM olp.saml_configuration WHERE singleton").Scan(&c)
-	return c, err
+	var id, etag string
+	err := q.QueryRow(ctx, "SELECT document,id::text,etag::text FROM olp.saml_configuration WHERE singleton").Scan(&c, &id, &etag)
+	if err != nil {
+		return samlConfiguration{}, err
+	}
+	c.ID = id
+	c.ETag = etag
+	return c, nil
 }
 
-func (s *Server) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	c, e := loadSAML(r.Context(), s.access.Pool)
-	return httpkit.Detail(c, c.ETag), e
+func (s *samlService) register(mux *http.ServeMux) {
+	s.access.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
+	s.access.Public(mux, "POST /api/v1/saml/acs", s.samlACS, access.MaxBody(2<<20), access.AnyOrigin())
+	s.access.Public(mux, "GET /api/v1/saml/complete", s.completeSAML, access.CrossSiteNavigation())
+	s.access.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
+	s.access.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, access.MaxBody(2<<20))
+	s.access.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
+	s.access.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
+	s.access.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
+	s.access.Route(mux, "POST /api/v1/profile/saml/link", s.beginSAMLLink)
+	s.access.Route(mux, "POST /api/v1/profile/saml/reauthenticate", s.beginSAMLReauthentication)
+	s.access.Route(mux, "DELETE /api/v1/profile/saml-identities/{identity_id}", s.unlinkSAML)
+}
+
+func (s *samlService) samlConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	c, err := loadSAML(r.Context(), s.access.Pool)
+	return httpkit.Detail(c, c.ETag), err
+}
+
+func validateSAMLMetadataTrust(m samlidentity.Metadata, enabled bool, now time.Time) error {
+	if enabled && !m.Entity.ValidUntil.IsZero() && !m.Entity.ValidUntil.After(now) {
+		return httpkit.Invalid("metadata_xml", "The imported identity metadata has expired.")
+	}
+	if enabled && !slices.ContainsFunc(m.Certificates, func(cert *x509.Certificate) bool {
+		return !now.Before(cert.NotBefore) && !now.After(cert.NotAfter)
+	}) {
+		return httpkit.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
+	}
+	if access.CheckIdentityURL(m.RedirectURL) != nil {
+		return httpkit.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
+	}
+	return nil
+}
+
+func validateSAMLAttributes(c samlConfiguration) error {
+	attrs := []struct {
+		field    string
+		value    string
+		required bool
+	}{
+		{"email_attribute", c.EmailAttribute, true},
+		{"groups_attribute", c.GroupsAttribute, false},
+		{"name_attribute", c.NameAttribute, false},
+	}
+	for _, attr := range attrs {
+		if attr.value == "" && !attr.required {
+			continue
+		}
+		if httpkit.ValidText(attr.field, attr.value, 256) != nil {
+			return httpkit.Invalid(attr.field, "Use a bounded SAML attribute name.")
+		}
+	}
+	return nil
 }
 
 func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
@@ -86,46 +147,23 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 	if err != nil {
 		return m, httpkit.Invalid("metadata_xml", "Import one SAML 2.0 IdP descriptor with signing certificates and an HTTP-Redirect sign-in endpoint.")
 	}
-	if c.Enabled && !m.Entity.ValidUntil.IsZero() && !m.Entity.ValidUntil.After(time.Now()) {
-		return m, httpkit.Invalid("metadata_xml", "The imported identity metadata has expired.")
+	if err := validateSAMLMetadataTrust(m, c.Enabled, time.Now()); err != nil {
+		return m, err
 	}
-	if c.Enabled && !slices.ContainsFunc(m.Certificates, func(cert *x509.Certificate) bool {
-		now := time.Now()
-		return !now.Before(cert.NotBefore) && !now.After(cert.NotAfter)
-	}) {
-		return m, httpkit.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
-	}
-	if access.CheckIdentityURL(m.RedirectURL) != nil {
-		return m, httpkit.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
-	}
-	for field, value := range map[string]string{"email_attribute": c.EmailAttribute, "groups_attribute": c.GroupsAttribute, "name_attribute": c.NameAttribute} {
-		if value == "" && field != "email_attribute" {
-			continue
-		}
-		if httpkit.ValidText(field, value, 256) != nil {
-			return m, httpkit.Invalid(field, "Use a bounded SAML attribute name.")
-		}
+	if err := validateSAMLAttributes(c); err != nil {
+		return m, err
 	}
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
 		return m, httpkit.Invalid("default_role", "Choose a valid role.")
 	}
-	for field, list := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
-		if len(list) > 500 {
-			return m, httpkit.Invalid(field, "Use at most 500 mappings.")
-		}
-		for i, v := range list {
-			if !authz.ValidRole(v.Role) || httpkit.ValidText(field, v.ClaimValue, 254) != nil || slices.ContainsFunc(list[:i], func(other roleMapping) bool {
-				return other.ClaimValue == v.ClaimValue || field == "email_role_mappings" && strings.EqualFold(other.ClaimValue, v.ClaimValue)
-			}) {
-				return m, httpkit.Invalid(field, "Use unique values and valid roles.")
-			}
-		}
+	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "email_role_mappings", "group_role_mappings", "Use unique values and valid roles."); err != nil {
+		return m, err
 	}
 	return m, nil
 }
 
-func samlMappedRole(c samlConfiguration, email string, groups []string) string {
-	return mappedRole(oidcConfiguration{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, email, groups)
+func samlMappedRole(c samlConfiguration, address string, groups []string) string {
+	return resolveMappedRole(roleMappingPolicy{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, address, groups)
 }
 
 func newSAMLSigningKey() (samlSigningKey, error) {
@@ -147,7 +185,7 @@ func newSAMLSigningKey() (samlSigningKey, error) {
 	return samlSigningKey{Private: priv, Certificate: der}, err
 }
 
-func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
+func (s *samlService) samlProvider(r *http.Request, q database.Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
 	m, err := validateSAML(c)
 	if err != nil {
 		return nil, m, err
@@ -174,13 +212,29 @@ func (s *Server) samlProvider(r *http.Request, q database.Queryer, c samlConfigu
 	if err != nil {
 		return nil, m, err
 	}
-	metadataURL, _ := url.Parse(s.access.Origin + "/api/v1/saml/metadata")
-	acs, _ := url.Parse(s.access.Origin + "/api/v1/saml/acs")
-	sp := &saml.ServiceProvider{EntityID: s.access.Origin + "/api/v1/saml/metadata", Key: rsaKey, Certificate: cert, MetadataURL: *metadataURL, AcsURL: *acs, IDPMetadata: m.Entity, SignatureMethod: dsig.RSASHA256SignatureMethod, AuthnNameIDFormat: saml.PersistentNameIDFormat, HTTPClient: s.access.IdentityClient()}
+	metadataURL, err := url.Parse(s.access.Origin + "/api/v1/saml/metadata")
+	if err != nil {
+		return nil, m, err
+	}
+	acs, err := url.Parse(s.access.Origin + "/api/v1/saml/acs")
+	if err != nil {
+		return nil, m, err
+	}
+	sp := &saml.ServiceProvider{
+		EntityID:          s.access.Origin + "/api/v1/saml/metadata",
+		Key:               rsaKey,
+		Certificate:       cert,
+		MetadataURL:       *metadataURL,
+		AcsURL:            *acs,
+		IDPMetadata:       m.Entity,
+		SignatureMethod:   dsig.RSASHA256SignatureMethod,
+		AuthnNameIDFormat: saml.PersistentNameIDFormat,
+		HTTPClient:        s.access.IdentityClient(),
+	}
 	return sp, m, nil
 }
 
-func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		SAMLDefinition
 		Rotate bool `json:"rotate_signing_key"`
@@ -203,7 +257,7 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 		} else if r.Header.Get("If-Match") != "" {
 			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "No SAML configuration exists.")
 		}
-		c, err := s.StoreSAMLDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
+		c, err := s.storeDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -212,6 +266,49 @@ func (s *Server) putSAMLConfiguration(r *http.Request, _ authz.Principal) (httpk
 }
 
 func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
+	return s.saml.storeDefinition(ctx, tx, p, d, rotate)
+}
+
+func (s *samlService) rotateSAMLSigningKey(ctx context.Context, tx pgx.Tx, configID string) (string, error) {
+	key, err := newSAMLSigningKey()
+	if err != nil {
+		return "", err
+	}
+	defer clear(key.Private)
+	raw, err := json.Marshal(key)
+	if err != nil {
+		return "", err
+	}
+	defer clear(raw)
+	if err := s.access.Keys.Store(ctx, tx, s.access.Installation, configID, secrets.SAMLKey, raw, nil); err != nil {
+		return "", err
+	}
+	return encodeSAMLCertificate(key.Certificate), nil
+}
+
+func (s *samlService) invalidateSAMLAfterConfigChange(ctx context.Context, tx pgx.Tx, old, next samlConfiguration) error {
+	// Role evidence comes from the IdP's signed attributes, which a new SP
+	// signing key leaves unchanged.
+	if old.EntityID != next.EntityID || old.EmailAttribute != next.EmailAttribute || old.GroupsAttribute != next.GroupsAttribute {
+		if _, err := tx.Exec(ctx, "UPDATE olp.saml_identities SET role_claims=NULL"); err != nil {
+			return err
+		}
+	}
+	if err := EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
+		return err
+	}
+	if !next.Enabled {
+		if _, err := tx.Exec(ctx, "DELETE FROM olp.sessions WHERE auth_method='saml'"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *samlService) storeDefinition(ctx context.Context, tx pgx.Tx, p authz.Principal, d SAMLDefinition, rotate bool) (samlConfiguration, error) {
 	c := samlConfiguration{SAMLDefinition: d, ServiceProviderID: s.access.Origin + "/api/v1/saml/metadata"}
 	if err := p.Authorize(authz.Access); err != nil {
 		return c, err
@@ -232,50 +329,26 @@ func (s *Server) StoreSAMLDefinition(ctx context.Context, tx pgx.Tx, p authz.Pri
 	c.ETag = ids.New()
 	c.Certificate = old.Certificate
 	if old.ID == "" || rotate {
-		key, e := newSAMLSigningKey()
-		if e != nil {
-			return c, e
+		cert, err := s.rotateSAMLSigningKey(ctx, tx, c.ID)
+		if err != nil {
+			return c, err
 		}
-		raw, e := json.Marshal(key)
-		if e != nil {
-			return c, e
-		}
-		defer clear(raw)
-		defer clear(key.Private)
-		if e = s.access.Keys.Store(ctx, tx, s.access.Installation, c.ID, secrets.SAMLKey, raw, nil); e != nil {
-			return c, e
-		}
-		c.Certificate = encodeSAMLCertificate(key.Certificate)
+		c.Certificate = cert
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return c, err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.saml_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, c.ID, raw, c.ETag, p.UserID()); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.saml_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()", c.ID, raw, c.ETag, p.UserID()); err != nil {
 		return c, err
 	}
-	// Role evidence comes from the IdP's signed attributes, which a new SP
-	// signing key leaves unchanged.
-	if old.EntityID != c.EntityID || old.EmailAttribute != c.EmailAttribute || old.GroupsAttribute != c.GroupsAttribute {
-		if _, err = tx.Exec(ctx, "UPDATE olp.saml_identities SET role_claims=NULL"); err != nil {
-			return c, err
-		}
-	}
-	if err = EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {
+	if err := s.invalidateSAMLAfterConfigChange(ctx, tx, old, c); err != nil {
 		return c, err
-	}
-	if _, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
-		return c, err
-	}
-	if !c.Enabled {
-		if _, err = tx.Exec(ctx, "DELETE FROM olp.sessions WHERE auth_method='saml'"); err != nil {
-			return c, err
-		}
 	}
 	return c, nil
 }
 
-func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *samlService) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input struct {
 		URL string `json:"url"`
 	}
@@ -285,7 +358,7 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	if err := access.CheckIdentityURL(input.URL); err != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Use a safe identity metadata URL.")
 	}
-	req, err := http.NewRequestWithContext(r.Context(), "GET", input.URL, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, input.URL, nil)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -295,17 +368,17 @@ func (s *Server) importSAMLMetadata(r *http.Request, _ authz.Principal) (httpkit
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, samlidentity.MaxXML+1))
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint did not return a valid document.")
 	}
 	m, err := samlidentity.ParseMetadata(b)
 	if err != nil || access.CheckIdentityURL(m.RedirectURL) != nil {
 		return httpkit.Reply{}, httpkit.Invalid("url", "Invalid or unsupported SAML identity metadata.")
 	}
-	return httpkit.OK(map[string]any{"metadata_xml": string(b), "idp_entity_id": m.Entity.EntityID}), nil
+	return httpkit.OK(samlImportResponse{MetadataXML: string(b), IDPEntityID: m.Entity.EntityID}), nil
 }
 
-func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
+func (s *samlService) samlMetadata(w http.ResponseWriter, r *http.Request, _ authz.Principal) error {
 	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil {
 		return err

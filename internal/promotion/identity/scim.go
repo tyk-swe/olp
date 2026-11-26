@@ -167,22 +167,23 @@ func SCIMApplier(d Desired, deps Deps) promotion.Applier {
 	}
 }
 
-func extension(g group, directory promotion.Directory) (map[string]any, error) {
-	projects, err := promotion.TryMap(g.Projects, func(p grant) (any, error) {
+func extension(g group, directory promotion.Directory) (signin.SCIMGroupExtension, error) {
+	projects, err := promotion.TryMap(g.Projects, func(p grant) (signin.SCIMGroupProjectRef, error) {
 		id, ok := directory.ID(p.Project)
 		if !ok {
-			return nil, httpkit.Invalid("scim_group_mappings", missingProject)
+			return signin.SCIMGroupProjectRef{}, httpkit.Invalid("scim_group_mappings", missingProject)
 		}
-		return map[string]any{"value": id, "role": string(p.Role)}, nil
+		return signin.SCIMGroupProjectRef{Value: id, Role: string(p.Role)}, nil
 	})
 	if err != nil {
-		return nil, err
+		return signin.SCIMGroupExtension{}, err
 	}
 	role, ok := promotion.Present(g.Role)
 	if !ok {
-		return map[string]any{"accessScope": string(g.AccessScope), "projects": projects}, nil
+		return signin.SCIMGroupExtension{AccessScope: string(g.AccessScope), Projects: projects}, nil
 	}
-	return map[string]any{"accessScope": string(g.AccessScope), "role": string(role), "projects": projects}, nil
+	roleValue := string(role)
+	return signin.SCIMGroupExtension{Role: &roleValue, AccessScope: string(g.AccessScope), Projects: projects}, nil
 }
 
 func sameGroup(a, b group) bool {

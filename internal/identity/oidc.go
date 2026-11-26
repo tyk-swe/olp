@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -22,11 +24,6 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
 )
-
-type roleMapping struct {
-	ClaimValue string `json:"claim_value"`
-	Role       string `json:"role"`
-}
 
 // Persist only the verified inputs needed to assess future sign-in eligibility.
 // These facts are private to authorization and are excluded from API responses.
@@ -57,80 +54,159 @@ type oidcConfiguration struct {
 	UpdatedByEmail   string        `json:"updated_by_email"`
 }
 
-func loadOIDC(ctx context.Context, q database.Queryer) (oidcConfiguration, error) {
-	var c oidcConfiguration
-	var data []byte
-	err := q.QueryRow(ctx, "SELECT c.document||jsonb_build_object('id',c.id,'etag',c.etag,'updated_by_email',u.email,'has_client_secret',EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1)) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton", secrets.OIDCClientSecret).Scan(&data)
-	if err != nil {
-		return c, err
-	}
-	err = json.Unmarshal(data, &c)
-	return c, err
+type oidcDiscoveryMetadata struct {
+	oidc.ProviderConfig
+	AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 }
 
-func (s *Server) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func loadOIDC(ctx context.Context, q database.Queryer) (oidcConfiguration, error) {
+	var data []byte
+	var id, etag, updatedByEmail string
+	var hasClientSecret bool
+	err := q.QueryRow(
+		ctx,
+		"SELECT c.document,c.id::text,c.etag::text,u.email,EXISTS(SELECT 1 FROM olp.secrets s WHERE s.id=c.id AND s.purpose=$1) FROM olp.oidc_configuration c JOIN olp.users u ON u.id=c.updated_by WHERE singleton",
+		secrets.OIDCClientSecret,
+	).Scan(&data, &id, &etag, &updatedByEmail, &hasClientSecret)
+	if err != nil {
+		return oidcConfiguration{}, err
+	}
+	var c oidcConfiguration
+	if err := json.Unmarshal(data, &c); err != nil {
+		return oidcConfiguration{}, err
+	}
+	c.ID = id
+	c.ETag = etag
+	c.UpdatedByEmail = updatedByEmail
+	c.HasClientSecret = hasClientSecret
+	return c, nil
+}
+
+func (s *oidcService) register(mux *http.ServeMux) {
+	s.access.Public(mux, "GET /api/v1/oidc/login", s.beginOIDCLogin)
+	s.access.Public(mux, "POST /api/v1/oidc/login", s.beginOIDCLogin)
+	s.access.Public(mux, "GET /api/v1/oidc/callback", s.oidcCallback, access.CrossSiteNavigation())
+	routes := map[string]access.Handler{
+		"GET /api/v1/oidc/configuration":               s.oidcConfiguration,
+		"PUT /api/v1/oidc/configuration":               s.putOIDCConfiguration,
+		"POST /api/v1/oidc/link":                       s.beginOIDCLink,
+		"POST /api/v1/oidc/reauthenticate":             s.beginOIDCReauthentication,
+		"GET /api/v1/oidc/identities":                  s.oidcIdentities,
+		"DELETE /api/v1/oidc/identities/{identity_id}": s.unlinkOIDCIdentity,
+	}
+	for pattern, fn := range routes {
+		s.access.Route(mux, pattern, fn)
+	}
+}
+
+func (s *oidcService) oidcConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	c, err := loadOIDC(r.Context(), s.access.Pool)
 	c.DiscoveryBinding = ""
 	return httpkit.Detail(c, c.ETag), err
 }
 
-func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
-	if err := access.CheckIdentityURL(c.DiscoveryURL); err != nil {
-		return nil, nil, httpkit.Invalid("discovery_url", err.Error())
+func (s *oidcService) fetchOIDCMetadata(ctx context.Context, discoveryURL string) (oidcDiscoveryMetadata, error) {
+	if err := access.CheckIdentityURL(discoveryURL); err != nil {
+		return oidcDiscoveryMetadata{}, httpkit.Invalid("discovery_url", err.Error())
 	}
-	request, err := http.NewRequestWithContext(ctx, "GET", c.DiscoveryURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
 	if err != nil {
-		return nil, nil, err
+		return oidcDiscoveryMetadata{}, err
 	}
 	response, err := s.access.IdentityClient().Do(request)
 	if err != nil {
-		return nil, nil, httpkit.Fail(422, "oidc_discovery_failed", "The OIDC discovery endpoint is unavailable or outside the identity egress policy.")
+		return oidcDiscoveryMetadata{}, httpkit.Fail(422, "oidc_discovery_failed", "The OIDC discovery endpoint is unavailable or outside the identity egress policy.")
 	}
 	defer response.Body.Close()
-	var metadata struct {
-		oidc.ProviderConfig
-		AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
+	var metadata oidcDiscoveryMetadata
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&metadata) != nil {
+		return oidcDiscoveryMetadata{}, httpkit.Invalid("discovery_url", "Invalid OIDC discovery document.")
 	}
-	if response.StatusCode != 200 || json.NewDecoder(response.Body).Decode(&metadata) != nil {
-		return nil, nil, httpkit.Invalid("discovery_url", "Invalid OIDC discovery document.")
-	}
-	if metadata.IssuerURL != c.Issuer {
-		return nil, nil, httpkit.Invalid("issuer", "The issuer must exactly match discovery.")
-	}
+	return metadata, nil
+}
+
+func validateOIDCEndpoints(ctx context.Context, metadata oidcDiscoveryMetadata) error {
 	for _, endpoint := range []string{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL} {
 		if access.CheckIdentityURL(endpoint) != nil {
-			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
-		u, _ := url.Parse(endpoint) // Syntax was checked by oidcURL.
-		if _, err := access.IdentityAddresses(ctx, u.Hostname()); err != nil {
-			return nil, nil, httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
+		if _, err := access.IdentityAddresses(ctx, parsed.Hostname()); err != nil {
+			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+		}
+	}
+	return nil
+}
+
+func selectOIDCAuthStyle(authMethods []string) (oauth2.AuthStyle, error) {
+	switch {
+	case authMethods == nil || slices.Contains(authMethods, "client_secret_basic"):
+		// OIDC discovery defaults to client_secret_basic when omitted.
+		return oauth2.AuthStyleInHeader, nil
+	case slices.Contains(authMethods, "client_secret_post"):
+		return oauth2.AuthStyleInParams, nil
+	default:
+		return 0, httpkit.Invalid("discovery_url", "The token endpoint must support client_secret_basic or client_secret_post.")
+	}
+}
+
+// Bind validated destinations and the selected authentication method using a
+// canonical JSON array [issuer, auth, token, jwks, authStyle] SHA-256 digest.
+func oidcDiscoveryBinding(issuerURL, authURL, tokenURL, jwksURL string, authStyle oauth2.AuthStyle) (string, error) {
+	fields := [4]string{issuerURL, authURL, tokenURL, jwksURL}
+	buf := make([]byte, 0, 256)
+	buf = append(buf, '[')
+	for _, field := range fields {
+		encoded, err := json.Marshal(field)
+		if err != nil {
+			return "", err
+		}
+		buf = append(buf, encoded...)
+		buf = append(buf, ',')
+	}
+	buf = strconv.AppendInt(buf, int64(authStyle), 10)
+	buf = append(buf, ']')
+	digest := sha256.Sum256(buf)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func (s *oidcService) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provider, *oauth2.Config, string, error) {
+	metadata, err := s.fetchOIDCMetadata(ctx, c.DiscoveryURL)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if metadata.IssuerURL != c.Issuer {
+		return nil, nil, "", httpkit.Invalid("issuer", "The issuer must exactly match discovery.")
+	}
+	if err := validateOIDCEndpoints(ctx, metadata); err != nil {
+		return nil, nil, "", err
+	}
+	authStyle, err := selectOIDCAuthStyle(metadata.AuthMethods)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	binding, err := oidcDiscoveryBinding(metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL, authStyle)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if c.ID != "" && c.DiscoveryBinding != binding {
+		return nil, nil, "", httpkit.Fail(422, "oidc_discovery_changed", "OIDC discovery changed or is not bound. An owner must review and save the configuration again.")
 	}
 	// Keep the verifier's refresh context independent of this request's
 	// cancellation; every fetch still uses the bounded identity HTTP client.
 	provider := metadata.NewProvider(oidc.ClientContext(context.Background(), s.access.IdentityClient()))
-	oauth := &oauth2.Config{ClientID: c.ClientID, Endpoint: provider.Endpoint(), RedirectURL: s.access.Origin + "/api/v1/oidc/callback", Scopes: c.Scopes}
-	switch {
-	case metadata.AuthMethods == nil || slices.Contains(metadata.AuthMethods, "client_secret_basic"):
-		// OIDC discovery defaults to client_secret_basic when omitted.
-		oauth.Endpoint.AuthStyle = oauth2.AuthStyleInHeader
-	case slices.Contains(metadata.AuthMethods, "client_secret_post"):
-		oauth.Endpoint.AuthStyle = oauth2.AuthStyleInParams
-	default:
-		return nil, nil, httpkit.Invalid("discovery_url", "The token endpoint must support client_secret_basic or client_secret_post.")
+	endpoint := provider.Endpoint()
+	endpoint.AuthStyle = authStyle
+	oauth := &oauth2.Config{
+		ClientID:    c.ClientID,
+		Endpoint:    endpoint,
+		RedirectURL: s.access.Origin + "/api/v1/oidc/callback",
+		Scopes:      c.Scopes,
 	}
-
-	// Bind validated destinations and the selected authentication method to the
-	// saved configuration. Remote rediscovery cannot silently authorize a new
-	// recipient of the client secret, even before a public login flow starts.
-	encoded, _ := json.Marshal([]any{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL, oauth.Endpoint.AuthStyle})
-	digest := sha256.Sum256(encoded)
-	binding := hex.EncodeToString(digest[:])
-	if c.ID != "" && c.DiscoveryBinding != binding {
-		return nil, nil, httpkit.Fail(422, "oidc_discovery_changed", "OIDC discovery changed or is not bound. An owner must review and save the configuration again.")
-	}
-	c.DiscoveryBinding = binding
-	return provider, oauth, nil
+	return provider, oauth, binding, nil
 }
 
 type oidcConfigInput struct {
@@ -147,69 +223,86 @@ type oidcConfigInput struct {
 	GroupMappings []roleMapping `json:"group_role_mappings"`
 }
 
-func normalizeOIDCConfigInput(input oidcConfigInput) (oidcConfiguration, error) {
-	c := oidcConfiguration{DiscoveryURL: input.DiscoveryURL, Issuer: input.Issuer, ClientID: input.ClientID, Enabled: true, Scopes: input.Scopes, EmailClaim: input.EmailClaim, GroupsClaim: input.GroupsClaim, DefaultRole: input.DefaultRole, EmailMappings: input.EmailMappings, GroupMappings: input.GroupMappings}
-	if input.Enabled != nil {
-		c.Enabled = *input.Enabled
+func normalizeOIDCScopes(raw []string) ([]string, error) {
+	scopes := raw
+	if len(scopes) == 0 {
+		scopes = []string{"openid", "email", "profile"}
 	}
-	if len(c.Scopes) == 0 {
-		c.Scopes = []string{"openid", "email", "profile"}
+	if !slices.Contains(scopes, "openid") || len(scopes) > 20 {
+		return nil, httpkit.Invalid("scopes", "Include openid and at most 20 scopes.")
 	}
-	if !slices.Contains(c.Scopes, "openid") || len(c.Scopes) > 20 {
-		return oidcConfiguration{}, httpkit.Invalid("scopes", "Include openid and at most 20 scopes.")
-	}
-	for _, scope := range c.Scopes {
+	for _, scope := range scopes {
 		if httpkit.ValidText("scopes", scope, 100) != nil || strings.ContainsAny(scope, " \t\r\n") {
-			return oidcConfiguration{}, httpkit.Invalid("scopes", "Use individual valid scope names.")
+			return nil, httpkit.Invalid("scopes", "Use individual valid scope names.")
 		}
 	}
-	if c.EmailClaim == "" {
-		c.EmailClaim = "email"
+	return scopes, nil
+}
+
+func nonNilRoleMappings(entries []roleMapping) []roleMapping {
+	if entries == nil {
+		return []roleMapping{}
 	}
-	if c.GroupsClaim == "" {
-		c.GroupsClaim = "groups"
+	return entries
+}
+
+func validateOIDCConfigFields(c oidcConfiguration, clientSecret *string) error {
+	textFields := []struct{ field, value string }{
+		{"client_id", c.ClientID},
+		{"email_claim", c.EmailClaim},
+		{"groups_claim", c.GroupsClaim},
 	}
-	if c.EmailMappings == nil {
-		c.EmailMappings = []roleMapping{}
-	}
-	if c.GroupMappings == nil {
-		c.GroupMappings = []roleMapping{}
-	}
-	for field, value := range map[string]string{"client_id": c.ClientID, "email_claim": c.EmailClaim, "groups_claim": c.GroupsClaim} {
-		if err := httpkit.ValidText(field, value, 255); err != nil {
-			return oidcConfiguration{}, err
+	for _, item := range textFields {
+		if err := httpkit.ValidText(item.field, item.value, 255); err != nil {
+			return err
 		}
 	}
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
-		return oidcConfiguration{}, httpkit.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
+		return httpkit.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
 	}
-	for field, mappings := range map[string][]roleMapping{"email_role_mappings": c.EmailMappings, "group_role_mappings": c.GroupMappings} {
-		if len(mappings) > 500 {
-			return oidcConfiguration{}, httpkit.Invalid("role_mappings", "Use at most 500 mappings.")
-		}
-		for i, m := range mappings {
-			duplicate := slices.ContainsFunc(mappings[:i], func(previous roleMapping) bool {
-				return previous.ClaimValue == m.ClaimValue ||
-					(field == "email_role_mappings" && strings.EqualFold(previous.ClaimValue, m.ClaimValue))
-			})
-			if !authz.ValidRole(m.Role) || httpkit.ValidText("claim_value", m.ClaimValue, 254) != nil || duplicate {
-				return oidcConfiguration{}, httpkit.Invalid("role_mappings", "Use unique claim values and valid roles.")
-			}
-		}
+	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "role_mappings", "role_mappings", "Use unique claim values and valid roles."); err != nil {
+		return err
 	}
-	if input.ClientSecret != nil && len(*input.ClientSecret) > 4096 {
-		return oidcConfiguration{}, httpkit.Invalid("client_secret", "Use at most 4096 bytes.")
+	if clientSecret != nil && len(*clientSecret) > 4096 {
+		return httpkit.Invalid("client_secret", "Use at most 4096 bytes.")
+	}
+	return nil
+}
+
+func normalizeOIDCConfigInput(input oidcConfigInput) (oidcConfiguration, error) {
+	scopes, err := normalizeOIDCScopes(input.Scopes)
+	if err != nil {
+		return oidcConfiguration{}, err
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	c := oidcConfiguration{
+		DiscoveryURL:  input.DiscoveryURL,
+		Issuer:        input.Issuer,
+		ClientID:      input.ClientID,
+		Enabled:       enabled,
+		Scopes:        scopes,
+		EmailClaim:    cmp.Or(input.EmailClaim, "email"),
+		GroupsClaim:   cmp.Or(input.GroupsClaim, "groups"),
+		DefaultRole:   input.DefaultRole,
+		EmailMappings: nonNilRoleMappings(input.EmailMappings),
+		GroupMappings: nonNilRoleMappings(input.GroupMappings),
+	}
+	if err := validateOIDCConfigFields(c, input.ClientSecret); err != nil {
+		return oidcConfiguration{}, err
 	}
 	return c, nil
 }
 
-func (s *Server) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, c *oidcConfiguration, old oidcConfiguration, secret string) error {
+func (s *oidcService) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, configID string, hadSecret bool, secret string) (bool, error) {
 	var previous []byte
 	var err error
-	if old.HasClientSecret {
-		previous, err = s.access.Keys.Read(ctx, tx, s.access.Installation, c.ID, secrets.OIDCClientSecret)
+	if hadSecret {
+		previous, err = s.access.Keys.Read(ctx, tx, s.access.Installation, configID, secrets.OIDCClientSecret)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 	if !hmac.Equal(previous, []byte(secret)) {
@@ -217,18 +310,18 @@ func (s *Server) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, c *oidcCon
 		// Clear that evidence in the same transaction so owner protection
 		// requires an independent path until OIDC succeeds again.
 		if _, err = tx.Exec(ctx, "UPDATE olp.oidc_identities SET role_claims=NULL WHERE role_claims IS NOT NULL"); err != nil {
-			return err
+			return false, err
 		}
 	}
-	c.HasClientSecret = secret != ""
-	if c.HasClientSecret {
-		return s.access.Keys.Store(ctx, tx, s.access.Installation, c.ID, secrets.OIDCClientSecret, []byte(secret), nil)
+	hasSecret := secret != ""
+	if hasSecret {
+		return true, s.access.Keys.Store(ctx, tx, s.access.Installation, configID, secrets.OIDCClientSecret, []byte(secret), nil)
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1", c.ID)
-	return err
+	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1", configID)
+	return false, err
 }
 
-func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *oidcService) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input oidcConfigInput
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -238,39 +331,44 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpk
 		return httpkit.Reply{}, err
 	}
 	if c.Enabled {
-		if _, _, err := s.discover(r.Context(), &c); err != nil {
+		_, _, binding, err := s.discover(r.Context(), c)
+		if err != nil {
 			return httpkit.Reply{}, err
 		}
+		c.DiscoveryBinding = binding
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		old, err := loadOIDC(r.Context(), tx)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return httpkit.Reply{}, access.Event{}, err
 		}
+		next := c
 		if err == nil {
 			if err = httpkit.Match(r, old.ETag); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
-			c.ID = old.ID
-			c.HasClientSecret = old.HasClientSecret
+			next.ID = old.ID
+			next.HasClientSecret = old.HasClientSecret
 		} else {
 			if r.Header.Get("If-Match") != "" {
 				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
 			}
-			c.ID = ids.New()
+			next.ID = ids.New()
 		}
-		c.ETag = ids.New()
-		c.UpdatedByEmail = p.Email
+		next.ETag = ids.New()
+		next.UpdatedByEmail = p.Email
 		if input.ClientSecret != nil {
-			if err = s.saveOIDCClientSecret(r.Context(), tx, &c, old, *input.ClientSecret); err != nil {
+			hasSecret, err := s.saveOIDCClientSecret(r.Context(), tx, next.ID, old.HasClientSecret, *input.ClientSecret)
+			if err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
+			next.HasClientSecret = hasSecret
 		}
-		data, err := json.Marshal(c)
+		data, err := json.Marshal(next)
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", c.ID, data, c.ETag, p.UserID()); err != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by", next.ID, data, next.ETag, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
@@ -279,7 +377,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ authz.Principal) (httpk
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		c.DiscoveryBinding = ""
-		return httpkit.Detail(c, c.ETag), access.Event{Action: "oidc.configuration.update", Resource: "oidc_configuration", ID: c.ID}, nil
+		next.DiscoveryBinding = ""
+		return httpkit.Detail(next, next.ETag), access.Event{Action: "oidc.configuration.update", Resource: "oidc_configuration", ID: next.ID}, nil
 	})
 }

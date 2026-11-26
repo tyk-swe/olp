@@ -1,4 +1,3 @@
-// Package scim implements bounded SCIM 2.0 protocol documents and queries.
 package scim
 
 import (
@@ -57,11 +56,11 @@ func Canonical(name string) string {
 }
 
 func Decode(r io.Reader) (Document, error) {
-	data, e := io.ReadAll(io.LimitReader(r, MaxBody+1))
-	if e != nil || len(data) > MaxBody {
+	data, err := io.ReadAll(io.LimitReader(r, MaxBody+1))
+	if err != nil || len(data) > MaxBody {
 		return nil, Fail(413, "tooLarge", "SCIM documents are limited to 128 KiB.")
 	}
-	if _, e = oif.ParseJSON(data, oif.Limits{MaxBytes: MaxBody, MaxDepth: 24, MaxNodes: 16384}); e != nil {
+	if _, err = oif.ParseJSON(data, oif.Limits{MaxBytes: MaxBody, MaxDepth: 24, MaxNodes: 16384}); err != nil {
 		return nil, Fail(400, "invalidSyntax", "Provide one unambiguous JSON object.")
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -70,40 +69,45 @@ func Decode(r io.Reader) (Document, error) {
 	if d.Decode(&raw) != nil || raw == nil {
 		return nil, Fail(400, "invalidSyntax", "Provide one JSON object.")
 	}
-	normalized, e := normalize(raw)
-	if e != nil {
-		return nil, e
+	normalized, err := normalizeObject(raw)
+	if err != nil {
+		return nil, err
 	}
-	return Document(normalized.(map[string]any)), nil
+	return Document(normalized), nil
+}
+
+func normalizeObject(v map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(v))
+	seen := make(map[string]bool, len(v))
+	for k, x := range v {
+		key := strings.ToLower(k)
+		if seen[key] {
+			return nil, Fail(400, "invalidSyntax", "Attribute names must be unambiguous ignoring case.")
+		}
+		seen[key] = true
+		n, err := normalize(x)
+		if err != nil {
+			return nil, err
+		}
+		out[Canonical(k)] = n
+	}
+	return out, nil
 }
 
 func normalize(value any) (any, error) {
 	switch v := value.(type) {
 	case map[string]any:
-		out := map[string]any{}
-		seen := map[string]bool{}
-		for k, x := range v {
-			key := strings.ToLower(k)
-			if seen[key] {
-				return nil, Fail(400, "invalidSyntax", "Attribute names must be unambiguous ignoring case.")
+		return normalizeObject(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, x := range v {
+			n, err := normalize(x)
+			if err != nil {
+				return nil, err
 			}
-			seen[key] = true
-			n, e := normalize(x)
-			if e != nil {
-				return nil, e
-			}
-			out[Canonical(k)] = n
+			out[i] = n
 		}
 		return out, nil
-	case []any:
-		for i, x := range v {
-			n, e := normalize(x)
-			if e != nil {
-				return nil, e
-			}
-			v[i] = n
-		}
-		return v, nil
 	default:
 		return value, nil
 	}
@@ -124,20 +128,29 @@ func Schema(d Document, required string) error {
 	return Invalid("The resource schema is missing.")
 }
 
-func Clone(d Document) Document { return Document(cloneValue(map[string]any(d)).(map[string]any)) }
+func Clone(d Document) Document {
+	if d == nil {
+		return nil
+	}
+	return Document(cloneObject(map[string]any(d)))
+}
+
+func cloneObject(x map[string]any) map[string]any {
+	out := make(map[string]any, len(x))
+	for k, v := range x {
+		out[k] = cloneValue(v)
+	}
+	return out
+}
 
 func cloneValue(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(x))
-		for k, v := range x {
-			out[k] = cloneValue(v)
-		}
-		return out
+		return cloneObject(x)
 	case []any:
 		out := make([]any, len(x))
-		for i, v := range x {
-			out[i] = cloneValue(v)
+		for i, item := range x {
+			out[i] = cloneValue(item)
 		}
 		return out
 	default:
