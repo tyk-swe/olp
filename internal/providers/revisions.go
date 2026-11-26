@@ -114,7 +114,7 @@ func (v *revisionRow) summary() revisionSummary {
 	return revisionSummary{ID: v.ID, ProviderID: v.ProviderID, Revision: v.Revision, Name: v.Name, ConnectorReady: true, ActivatedBy: v.ActivatedBy, ActivatedAt: v.ActivatedAt, ModelCount: models, EnabledModelCount: models, CapabilityCount: capabilities, CertifiedCapabilityCount: certified, HistoricalCredentialVersion: v.CredentialVersion}
 }
 
-func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -143,7 +143,7 @@ func (s *Server) revisions(r *http.Request, p authz.Principal) (httpkit.Reply, e
 	return httpkit.ListReplyBy(items, page, func(item revisionListItem) string { return item.ID }), nil
 }
 
-func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -158,7 +158,7 @@ func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, er
 	return httpkit.OK(revisionDetail{revisionSummary: v.summary(), Configuration: v.Configuration, SourceETag: v.SourceETag}), nil
 }
 
-func (s *Server) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revisionModels(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -188,7 +188,7 @@ func capabilityKey(model string, c routing.RevisionCapability) string {
 	return model + ":" + c.Operation + "/" + c.Surface + "/" + c.Mode
 }
 
-func (s *Server) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *revisionService) revisionDiff(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err

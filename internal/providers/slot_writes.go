@@ -96,7 +96,7 @@ func credentialVersionID(given *string) (*string, error) {
 	return &id, nil
 }
 
-func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	a := s.access
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
@@ -147,7 +147,7 @@ func (s *Server) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	})
 }
 
-func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
+func (s *slotService) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
 	if existing == nil && slotCount >= maxSlots {
 		return httpkit.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
@@ -173,7 +173,7 @@ func (s *Server) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, 
 	return err
 }
 
-func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
+func (s *slotService) slotCredential(ctx context.Context, tx pgx.Tx, current *record, slot slotInput, source credentialSource, existing *slotRow) (*string, error) {
 	switch {
 	case source != nil:
 		if !current.Connection.Document().CredentialRequired() {
@@ -182,7 +182,7 @@ func (s *Server) slotCredential(ctx context.Context, tx pgx.Tx, current *record,
 		if current.Connection.Document().Grant() {
 			return nil, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
-		stored, _, err := s.storeCredential(ctx, tx, current.ID, source)
+		stored, _, err := s.credentials.storeCredential(ctx, tx, current.ID, source)
 		return &stored, err
 	case slot.CredentialVersionID != nil:
 		var revoked, lapsed bool
@@ -213,7 +213,7 @@ func matchSlot(r *http.Request, current *record, slot *slotRow) error {
 	return httpkit.Match(r, slot.ETag)
 }
 
-func (s *Server) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -241,7 +241,7 @@ func (s *Server) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply, err
 	}{slot.reply(), providerID, slot.Default, slot.ETag}, slot.ETag), nil
 }
 
-func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -271,7 +271,7 @@ func (s *Server) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	})
 }
 
-func (s *Server) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
+func (s *slotService) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
 	var err error
 	if slot.Default {
 		return "", httpkit.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")

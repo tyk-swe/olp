@@ -124,7 +124,7 @@ func suggestionsFor(signed *catalog.Signed, cfg connection.Configuration, models
 	return out, nil
 }
 
-func (s *Server) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) catalogSuggestions(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if s.catalog == nil {
 		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
@@ -154,7 +154,7 @@ type acceptCatalogRequest struct {
 
 // The caller names the catalog it reviewed, so an upgrade between review and
 // acceptance cannot store facts nobody saw.
-func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input acceptCatalogRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
@@ -165,15 +165,15 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ authz.Principal) (h
 	if len(input.UpstreamModels) == 0 || len(input.UpstreamModels) > 2000 {
 		return httpkit.Reply{}, httpkit.Invalid("upstream_models", "Name 1–2000 models to accept catalog facts for.")
 	}
-	return s.mutation(r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.catalog_facts.accept", input, func(ctx context.Context, tx pgx.Tx, _ authz.Principal, current *record) (httpkit.Reply, error) {
 		if err := s.acceptCatalogFacts(ctx, tx, current, input); err != nil {
 			return httpkit.Reply{}, err
 		}
-		return s.detailReply(ctx, tx, current.ID)
+		return s.drafts.detailReply(ctx, tx, current.ID)
 	})
 }
 
-func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
+func (s *modelService) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *record, input acceptCatalogRequest) error {
 	if input.CatalogSHA256 != s.catalog.SHA256 {
 		return httpkit.Fail(409, "catalog_changed", "The reference catalog changed since these suggestions were reviewed; review them again.")
 	}
@@ -207,9 +207,10 @@ func (s *Server) acceptCatalogFacts(ctx context.Context, tx pgx.Tx, current *rec
 		}
 		next.Options.Models[name] = merged
 	}
-	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), next)
+	prepared, err := connection.Prepare(ctx, s.drafts.connectionPolicy(tx), next)
 	if err != nil {
 		return err
 	}
-	return s.StoreDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
+	_, err = s.drafts.storeDraftConfiguration(ctx, tx, current.ID, current.Name, prepared)
+	return err
 }

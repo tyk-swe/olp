@@ -19,7 +19,7 @@ import (
 
 // The project scope is decided first, so a provider outside it answers 404
 // before its precondition or credential is consulted.
-func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, *slotRow, error) {
+func (s *modelService) prepare(r *http.Request, p authz.Principal, id string) (*record, probe.Target, *slotRow, error) {
 	tx, err := s.access.Pool.Begin(r.Context())
 	if err != nil {
 		return nil, probe.Target{}, nil, err
@@ -29,7 +29,7 @@ func (s *Server) prepare(r *http.Request, p authz.Principal, id string) (*record
 	if err != nil {
 		return nil, probe.Target{}, nil, err
 	}
-	credential, slot, err := s.credentialSlotFor(r.Context(), tx, current)
+	credential, slot, err := s.credentials.credentialSlotFor(r.Context(), tx, current)
 	if err != nil {
 		return nil, probe.Target{}, nil, err
 	}
@@ -55,7 +55,7 @@ func readProbeProvider(r *http.Request, p authz.Principal, q database.Queryer, i
 	return current, httpkit.Match(r, current.ETag)
 }
 
-func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -83,7 +83,7 @@ func (s *Server) probe(r *http.Request, p authz.Principal) (httpkit.Reply, error
 
 // The upstream call ran without the installation lock, so authority and
 // project reach are decided again under it before anything is written.
-func (s *Server) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
+func (s *modelService) recordProbe(r *http.Request, action, id string, at time.Time, succeeded bool, detail string) error {
 	_, err := access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, _ *record) (httpkit.Reply, access.Event, error) {
 		if err := storeProbe(r.Context(), tx, id, at, succeeded, detail); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -107,7 +107,7 @@ type discoverRequest struct {
 	} `json:"models"`
 }
 
-func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) discover(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -158,12 +158,12 @@ func (s *Server) discover(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		if err := s.storeDiscoveredModels(r.Context(), tx, locked, models, upstream, at, listing); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		reply, err := s.detailReply(r.Context(), tx, id)
+		reply, err := s.drafts.detailReply(r.Context(), tx, id)
 		return reply, access.Event{Action: "provider.discover", Resource: "provider", ID: id}, err
 	})
 }
 
-func (s *Server) listUpstreamModels(ctx context.Context, cfg connection.Configuration, target probe.Target, slot *slotRow, at time.Time) ([]probe.DiscoveredModel, *routing.RevisionListing, error) {
+func (s *modelService) listUpstreamModels(ctx context.Context, cfg connection.Configuration, target probe.Target, slot *slotRow, at time.Time) ([]probe.DiscoveredModel, *routing.RevisionListing, error) {
 	if cfg.Kind != connectors.KindAnthropic {
 		listed, err := s.prober.ListModelFacts(ctx, target)
 		return listed, nil, err

@@ -18,18 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func (row slotRow) credentialFits(cfg connection.Configuration) error {
-	switch {
-	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
-		return nil
-	case !cfg.Grant():
-		return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
-	case row.CredentialPlugin == "":
-		return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
-	}
-	return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build or profile of the plugin enrolled. A grant serves only its enrolling build and profile; re-enroll the slot's grant through this provider's profile.")
-}
-
 // A revoked version or a lapsed grant observes no principal.
 func (row slotRow) observedPrincipal() string {
 	if row.CredentialRevoked || row.CredentialLapsed {
@@ -90,8 +78,8 @@ func (row slotRow) published(authMode connectors.AuthMode) routing.RevisionSlot 
 	return routing.RevisionSlot{Slot: slot, Default: row.Default, ObservedPrincipal: principal}
 }
 
-func (s *Server) activateProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.activate", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+func (s *draftService) activateProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.activate", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		activated, err := s.activateDraft(ctx, tx, p, current)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -100,8 +88,8 @@ func (s *Server) activateProvider(r *http.Request, _ authz.Principal) (httpkit.R
 	})
 }
 
-func (s *Server) disableProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.disable", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
+func (s *draftService) disableProvider(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.disable", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		disabled, err := s.disable(ctx, tx, p, current)
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -115,10 +103,10 @@ type activatedProvider struct {
 	Generation release.Published
 }
 
-func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
+func (s *draftService) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
 	// The plugin a draft pinned may since have become unusable, such as
 	// an unconfined plugin in a deployment that no longer enables them.
-	prepared, err := connection.Prepare(ctx, s.ConnectionPolicy(tx), current.Connection.Document())
+	prepared, err := connection.Prepare(ctx, s.connectionPolicy(tx), current.Connection.Document())
 	if err != nil {
 		return activatedProvider{}, err
 	}
@@ -126,7 +114,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 	if err := validateNetworkReference(ctx, tx, current.ID, configuration.Options.Network); err != nil {
 		return activatedProvider{}, err
 	}
-	if _, err := s.credentialFor(ctx, tx, current); err != nil {
+	if _, err := s.credentials.credentialFor(ctx, tx, current); err != nil {
 		return activatedProvider{}, err
 	}
 	models, err := enabledModels(ctx, tx, current.ID)
@@ -164,12 +152,22 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 		if err := slots[i].credentialFits(configuration); err != nil {
 			return activatedProvider{}, err
 		}
-		if slot.Enabled && configuration.CredentialRequired() && slots[i].validationFingerprint(configuration, models) != "" {
-			if slot.CredentialID == nil {
-				return activatedProvider{}, httpkit.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
+		if slot.Enabled && configuration.CredentialRequired() {
+			fingerprint, err := slots[i].validationFingerprint(configuration, models)
+			if err != nil {
+				return activatedProvider{}, err
 			}
-			if slots[i].validationTime(configuration, models) == nil {
-				return activatedProvider{}, httpkit.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
+			if fingerprint != "" {
+				if slot.CredentialID == nil {
+					return activatedProvider{}, httpkit.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
+				}
+				validatedAt, err := slots[i].validationTime(configuration, models)
+				if err != nil {
+					return activatedProvider{}, err
+				}
+				if validatedAt == nil {
+					return activatedProvider{}, httpkit.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
+				}
 			}
 		}
 		if slot.Default {
@@ -201,7 +199,7 @@ func (s *Server) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Principal
 	return activatedProvider{ETag: etag, Generation: generation}, nil
 }
 
-func (s *Server) disable(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
+func (s *draftService) disable(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
 	if current.State != stateActive {
 		return activatedProvider{}, httpkit.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}

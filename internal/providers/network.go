@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -10,13 +9,12 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
-	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 // A table of its own keeps API credential slots from selecting TLS keys.
-func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
+func (s *credentialService) storeNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
 		return "", httpkit.Invalid("credential", "Network credentials must fit within 64 KiB.")
 	}
@@ -33,7 +31,7 @@ func (s *Server) StoreNetworkCredential(ctx context.Context, tx pgx.Tx, provider
 	return id, nil
 }
 
-func (s *Server) networkCredentials(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
+func (s *credentialService) networkCredentials(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -60,7 +58,7 @@ type networkCredentialRequest struct {
 	Credential string `json:"credential"`
 }
 
-func (s *Server) createNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *credentialService) createNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	var input networkCredentialRequest
 	if err := httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
@@ -81,8 +79,8 @@ func (s *Server) createNetworkCredential(r *http.Request, _ authz.Principal) (ht
 	})
 }
 
-func (s *Server) revokeNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	return s.mutation(r, "provider.network_credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, principal authz.Principal, current *record) (httpkit.Reply, error) {
+func (s *credentialService) revokeNetworkCredential(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+	return providerMutation(s.access, r, "provider.network_credential.revoke", nil, func(ctx context.Context, tx pgx.Tx, principal authz.Principal, current *record) (httpkit.Reply, error) {
 		id, err := httpkit.IDParam(r, "credential_id")
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -95,33 +93,18 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ authz.Principal) (ht
 	})
 }
 
-func validateNetworkReference(ctx context.Context, q database.Queryer, providerID string, network *egress.ConnectionOptions) error {
-	if network == nil || network.CredentialID == "" {
-		return nil
-	}
-	var valid bool
-	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", network.CredentialID, providerID).Scan(&valid)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !valid {
-		return httpkit.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
-	}
-	return err
-}
-
 type networkSecrets struct{ server *access.Server }
 
 func (n networkSecrets) NetworkSecret(ctx context.Context, providerID, credentialID string) ([]byte, error) {
-	tx, err := n.server.Pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if err := validateNetworkReference(ctx, tx, providerID, &egress.ConnectionOptions{CredentialID: credentialID}); err != nil {
-		return nil, err
-	}
-	return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
+	return readTx(ctx, n.server.Pool, func(tx pgx.Tx) ([]byte, error) {
+		if err := validateNetworkReference(ctx, tx, providerID, &egress.ConnectionOptions{CredentialID: credentialID}); err != nil {
+			return nil, err
+		}
+		return n.server.Keys.Read(ctx, tx, n.server.Installation, credentialID, secrets.ProviderCredential)
+	})
 }
 
-func (s *Server) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
+func (s *credentialService) revokeNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, current *record, id string) (revokedCredential, error) {
 	var version int
 	if err := tx.QueryRow(ctx, "UPDATE olp.provider_network_credentials SET revoked_at=now() WHERE id=$1 AND provider_id=$2 AND revoked_at IS NULL RETURNING version", id, current.ID).Scan(&version); err != nil {
 		return revokedCredential{}, err
@@ -142,8 +125,8 @@ type createdNetworkCredential struct {
 	ETag string
 }
 
-func (s *Server) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
-	id, err := s.StoreNetworkCredential(ctx, tx, providerID, credential)
+func (s *credentialService) createNetworkCredentialVersion(ctx context.Context, tx pgx.Tx, providerID, credential string) (createdNetworkCredential, error) {
+	id, err := s.storeNetworkCredential(ctx, tx, providerID, credential)
 	if err != nil {
 		return createdNetworkCredential{}, err
 	}

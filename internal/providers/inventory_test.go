@@ -19,7 +19,7 @@ type listedVendor struct {
 
 func TestVendorListingPublishesEveryVendorWithItsAuthentication(t *testing.T) {
 	t.Parallel()
-	reply, err := (&Server{}).listVendors(httptest.NewRequest(http.MethodGet, "/api/v1/provider-vendors", nil), authz.Principal{})
+	reply, err := (&inventoryService{}).listVendors(httptest.NewRequest(http.MethodGet, "/api/v1/provider-vendors", nil), authz.Principal{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,8 +22,6 @@ const maxGrantInput = 8 << 10
 
 const stageGrantTimeout = 15 * time.Second
 
-const grantEnrollmentOnly = "A grant authenticates this provider: its credential versions come from grant enrollment, not a pasted credential."
-
 type grantStart struct {
 	SlotID string `json:"slot_id"`
 }
@@ -90,7 +88,7 @@ func enrollmentIDs(r *http.Request) (string, string, error) {
 	return providerID, enrollmentID, err
 }
 
-func (s *Server) startGrantEnrollment(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *enrollmentService) startGrantEnrollment(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	providerID, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -165,7 +163,7 @@ func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
 	return slotRow{}, httpkit.Invalid("slot_id", "Unknown credential slot for this connection.")
 }
 
-func (s *Server) continueGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *enrollmentService) continueGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -199,7 +197,7 @@ func (s *Server) continueGrantEnrollment(r *http.Request, _ authz.Principal) (ht
 	return httpkit.Reply{Status: 201, ETag: completed.ETag, Body: completed}, nil
 }
 
-func (s *Server) exchange(r *http.Request, current *record, enrollment grants.Enrollment, input string) (enrollmentCompletion, error) {
+func (s *enrollmentService) exchange(r *http.Request, current *record, enrollment grants.Enrollment, input string) (enrollmentCompletion, error) {
 	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
 		return enrollmentCompletion{}, err
@@ -211,7 +209,7 @@ func (s *Server) exchange(r *http.Request, current *record, enrollment grants.En
 	return s.stage(r, current, enrollment, grant)
 }
 
-func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
+func (s *enrollmentService) stage(r *http.Request, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), stageGrantTimeout)
 	defer cancel()
 	return access.Run(s.access, r.WithContext(ctx), func(tx pgx.Tx, principal authz.Principal) (enrollmentCompletion, access.Event, error) {
@@ -220,7 +218,7 @@ func (s *Server) stage(r *http.Request, current *record, enrollment grants.Enrol
 	})
 }
 
-func (s *Server) stageGrant(ctx context.Context, tx pgx.Tx, r *http.Request, principal authz.Principal, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
+func (s *enrollmentService) stageGrant(ctx context.Context, tx pgx.Tx, r *http.Request, principal authz.Principal, current *record, enrollment grants.Enrollment, grant abi.Grant) (enrollmentCompletion, error) {
 	locked, err := lockProvider(ctx, tx, current.ID)
 	if err != nil {
 		return enrollmentCompletion{}, err
@@ -285,7 +283,7 @@ func completion(providerID, etag string, credential grants.Credential) enrollmen
 	return enrollmentCompletion{ProviderID: providerID, ETag: etag, CredentialID: credential.ID, CredentialVersion: credential.Version, Principal: credential.Principal}
 }
 
-func (s *Server) pollGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *enrollmentService) pollGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -338,7 +336,7 @@ func (s *Server) pollGrantEnrollment(r *http.Request, _ authz.Principal) (httpki
 	return httpkit.OK(grantStatus(current, settled)), nil
 }
 
-func (s *Server) poll(r *http.Request, current *record, enrollment grants.Enrollment) (enrollmentCompletion, error) {
+func (s *enrollmentService) poll(r *http.Request, current *record, enrollment grants.Enrollment) (enrollmentCompletion, error) {
 	client, err := s.prober.Client(r.Context(), current.target(nil))
 	if err != nil {
 		return enrollmentCompletion{}, err
@@ -361,14 +359,14 @@ func grantStatus(current *record, standing grants.Standing) enrollmentStatus {
 	return enrollmentStatus{Status: standing.Status}
 }
 
-func (s *Server) failedEnrollment(r *http.Request, actor authz.Actor, providerID string, failure error) error {
+func (s *enrollmentService) failedEnrollment(r *http.Request, actor authz.Actor, providerID string, failure error) error {
 	if audited := s.auditFailedEnrollment(r, actor, providerID); audited != nil {
 		return audited
 	}
 	return failure
 }
 
-func (s *Server) auditFailedEnrollment(r *http.Request, actor authz.Actor, providerID string) error {
+func (s *enrollmentService) auditFailedEnrollment(r *http.Request, actor authz.Actor, providerID string) error {
 	ctx := context.WithoutCancel(r.Context())
 	tx, err := s.access.Pool.Begin(ctx)
 	if err != nil {
@@ -381,7 +379,7 @@ func (s *Server) auditFailedEnrollment(r *http.Request, actor authz.Actor, provi
 	return tx.Commit(ctx)
 }
 
-func (s *Server) cancelGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
+func (s *enrollmentService) cancelGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	providerID, enrollmentID, err := enrollmentIDs(r)
 	if err != nil {
 		return httpkit.Reply{}, err

@@ -170,7 +170,7 @@ func errListingUnsupported() error {
 	return httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
 }
 
-func (s *Server) publishedListingTarget(ctx context.Context, current *record) (probe.Target, *revisionRow, listingScope, error) {
+func (s *modelService) publishedListingTarget(ctx context.Context, current *record) (probe.Target, *revisionRow, listingScope, error) {
 	if current.State != stateActive || current.ActiveRevisionID == nil {
 		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "no_active_revision", "Activate a revision before comparing its published inventory with the upstream listing.")
 	}
@@ -204,7 +204,7 @@ func (s *Server) publishedListingTarget(ctx context.Context, current *record) (p
 	if version != *slot.CredentialVersion {
 		return probe.Target{}, nil, listingScope{}, httpkit.Fail(422, "credential_mismatch", "The published credential version no longer matches the stored credential.")
 	}
-	credential, err := s.readCredential(ctx, s.access.Pool, *slot.CredentialID)
+	credential, err := s.credentials.readCredential(ctx, s.access.Pool, *slot.CredentialID)
 	if err != nil {
 		return probe.Target{}, nil, listingScope{}, err
 	}
@@ -217,7 +217,7 @@ func (s *Server) publishedListingTarget(ctx context.Context, current *record) (p
 	return probe.Target{ProviderID: current.ID, Connection: connection.Stored(cfg), Credential: credential}, revision, scope, nil
 }
 
-func (s *Server) publishedRoutesByModel(ctx context.Context, providerID string, p authz.Principal) (map[string][]listingRoute, error) {
+func (s *modelService) publishedRoutesByModel(ctx context.Context, providerID string, p authz.Principal) (map[string][]listingRoute, error) {
 	rows, err := s.access.Pool.Query(ctx, `SELECT r.id::text,r.slug,r.project_id::text,t->>'provider_model'
 		FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
 		CROSS JOIN LATERAL jsonb_array_elements(v.targets) t
@@ -232,7 +232,7 @@ func (s *Server) publishedRoutesByModel(ctx context.Context, providerID string, 
 	return visibleListingRoutes(p, found), nil
 }
 
-func (s *Server) compareListing(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *modelService) compareListing(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -265,7 +265,7 @@ func (s *Server) compareListing(r *http.Request, p authz.Principal) (httpkit.Rep
 	}), nil
 }
 
-func (s *Server) compareWithListing(ctx context.Context, p authz.Principal, target probe.Target, published []routing.RevisionModel, scope listingScope) (listingOutcome, error) {
+func (s *modelService) compareWithListing(ctx context.Context, p authz.Principal, target probe.Target, published []routing.RevisionModel, scope listingScope) (listingOutcome, error) {
 	listing, err := s.prober.ListCompleteModelFacts(ctx, target)
 	if err != nil {
 		return incompleteListing(probe.Classify(err).Detail), nil

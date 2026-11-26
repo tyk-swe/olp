@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
@@ -18,79 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
-
-type slotRow struct {
-	ID                string
-	ETag              string
-	Default           bool
-	Position          int
-	Name              string
-	Enabled           bool
-	Priority          int
-	Weight            int64
-	CredentialID      *string
-	CredentialVersion *int
-	CredentialRevoked bool
-	// CredentialPlugin is the digest of the plugin build whose grant
-	// enrollment created the credential version, or "" for a pasted one.
-	CredentialPlugin    string
-	CredentialProfile   string
-	CredentialLapsed    bool
-	GrantGeneration     int64
-	CredentialPrincipal string
-	// CredentialFacts are what the credential version reported serving as at
-	// enrollment, beyond its principal.
-	CredentialFacts      map[string]string
-	Restrictions         SlotRestrictions
-	Limits               connection.Limits
-	ValidatedAt          *time.Time
-	ValidatedFingerprint *string
-}
-
-type SlotRestrictions struct {
-	AllowedAPIKeys []string `json:"allowed_api_keys"`
-	AllowedModels  []string `json:"allowed_models"`
-	AllowedRoutes  []string `json:"allowed_routes"`
-}
-
-func findSlot(slots []slotRow, id string) *slotRow {
-	index := slices.IndexFunc(slots, func(row slotRow) bool { return row.ID == id })
-	if index < 0 {
-		return nil
-	}
-	return &slots[index]
-}
-
-func loadSlots(ctx context.Context, q database.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),coalesce(c.profile_id,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint,s.etag::text FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var slots []slotRow
-	for rows.Next() {
-		var row slotRow
-		var facts, restrictions, limits []byte
-		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialProfile, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint, &row.ETag); err != nil {
-			return nil, err
-		}
-		row.CredentialRevoked = revoked != nil && *revoked
-		if err = json.Unmarshal(facts, &row.CredentialFacts); err == nil {
-			err = json.Unmarshal(restrictions, &row.Restrictions)
-		}
-		if err == nil {
-			err = json.Unmarshal(limits, &row.Limits)
-		}
-		if err != nil {
-			return nil, err
-		}
-		slots = append(slots, row)
-	}
-	return slots, rows.Err()
-}
-
-const maxSlots = 64
 
 type slotInput struct {
 	ID                    string   `json:"id"`
@@ -152,7 +78,7 @@ func (row slotRow) reply() slotReply {
 	}
 }
 
-func (s *Server) slotList(ctx context.Context, q database.Queryer, current *record) (httpkit.Reply, error) {
+func (s *slotService) slotList(ctx context.Context, q database.Queryer, current *record) (httpkit.Reply, error) {
 	slots, err := loadSlots(ctx, q, current.ID)
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -191,19 +117,23 @@ func (s *Server) slotList(ctx context.Context, q database.Queryer, current *reco
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	live, connection := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
+	live, connectionUsage := s.quotas(ctx, current.ID, slots, activeCredentials, generations)
 	groups := s.sharedGroupUsage(ctx, current.ProjectID, activeQuotas)
 	items := make([]slotReply, len(slots))
 	health := make(map[string]slotHealth, len(slots))
 	for i, row := range slots {
 		items[i] = row.reply()
 		quota := live[row.ID]
+		validatedAt, err := row.validationTime(current.Connection.Document(), models)
+		if err != nil {
+			return httpkit.Reply{}, err
+		}
 		health[row.ID] = slotHealth{
 			Revoked: row.CredentialRevoked, Lapsed: row.CredentialLapsed, ActiveCredentialVersionID: activeCredentials[row.ID],
-			CoolingDown: quota.coolingDown, ValidatedAt: row.validationTime(current.Connection.Document(), models), Usage: quota.usage,
+			CoolingDown: quota.coolingDown, ValidatedAt: validatedAt, Usage: quota.usage,
 		}
 	}
-	return httpkit.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connection, SharedGroupUsage: groups}, current.SlotsETag), nil
+	return httpkit.Detail(slotList{Items: items, Health: health, ETag: current.SlotsETag, ConnectionUsage: connectionUsage, SharedGroupUsage: groups}, current.SlotsETag), nil
 }
 
 type slotList struct {
@@ -219,19 +149,19 @@ type sharedGroupUsage struct {
 	TokensPerMinute  int64 `json:"tokens_per_minute"`
 }
 
-func (s *Server) sharedGroupUsage(ctx context.Context, projectID *string, quotas []routing.SharedTokenQuota) map[string]*sharedGroupUsage {
+func (s *slotService) sharedGroupUsage(ctx context.Context, projectID *string, quotas []routing.SharedTokenQuota) map[string]*sharedGroupUsage {
 	groups := map[string]*sharedGroupUsage{}
 	if s.quota == nil || projectID == nil || len(quotas) == 0 {
 		return groups
 	}
-	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
+	quotaCtx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
 	for _, quota := range quotas {
 		if _, seen := groups[quota.Group]; seen {
 			continue
 		}
 		lookup := limits.SharedQuotaLookup(routing.SharedTokenQuotaGroupID(*projectID, quota.Group))
-		usage, err := s.quota.Usage(ctx, lookup)
+		usage, err := s.quota.Usage(quotaCtx, lookup)
 		if err != nil {
 			s.quotaUnavailable(err)
 			return groups
@@ -276,20 +206,20 @@ type slotQuota struct {
 
 // A counter that cannot be read stays nil, so the console shows it as unknown
 // instead of an idle zero or a failed request.
-func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64) (map[string]slotQuota, *quotaUsage) {
+func (s *slotService) quotas(ctx context.Context, providerID string, slots []slotRow, published map[string]*string, generations map[string]int64) (map[string]slotQuota, *quotaUsage) {
 	if s.quota == nil {
 		return nil, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, quotaTimeout)
+	quotaCtx, cancel := context.WithTimeout(ctx, quotaTimeout)
 	defer cancel()
-	connection, err := s.quota.Usage(ctx, limits.ConnectionLookup(providerID))
+	connectionUsage, err := s.quota.Usage(quotaCtx, limits.ConnectionLookup(providerID))
 	if err != nil {
 		s.quotaUnavailable(err)
 		return nil, nil
 	}
 	live := make(map[string]slotQuota, len(slots))
 	for _, row := range slots {
-		usage, err := s.quota.Usage(ctx, limits.SlotLookup(row.ID))
+		usage, err := s.quota.Usage(quotaCtx, limits.SlotLookup(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
@@ -301,21 +231,21 @@ func (s *Server) quotas(ctx context.Context, providerID string, slots []slotRow,
 		if id := published[row.ID]; id != nil {
 			generation = generations[*id]
 		}
-		cooling, err := s.quota.Cooling(ctx, fleet.CredentialScope(providerID, published[row.ID], generation), fleet.SlotScope(row.ID))
+		cooling, err := s.quota.Cooling(quotaCtx, fleet.CredentialScope(providerID, published[row.ID], generation), fleet.SlotScope(row.ID))
 		if err != nil {
 			s.quotaUnavailable(err)
 			break
 		}
 		live[row.ID] = slotQuota{usage: usageOf(usage), coolingDown: &cooling}
 	}
-	return live, usageOf(connection)
+	return live, usageOf(connectionUsage)
 }
 
-func (s *Server) quotaUnavailable(err error) {
+func (s *slotService) quotaUnavailable(err error) {
 	s.log.Warn("shared provider quota state is unavailable", "error", err)
 }
 
-func (s *Server) slots(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+func (s *slotService) slots(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err

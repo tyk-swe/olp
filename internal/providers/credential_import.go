@@ -34,13 +34,13 @@ type credentialImportSlot struct {
 	Principal    string
 }
 
-func (s *Server) importCredentials(adapter codemode.Adapter) access.Handler {
+func (s *enrollmentService) importCredentials(adapter codemode.Adapter) access.Handler {
 	return func(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 		return s.importCredentialsAs(r, p, adapter)
 	}
 }
 
-func (s *Server) importCredentialsAs(r *http.Request, p authz.Principal, adapter codemode.Adapter) (httpkit.Reply, error) {
+func (s *enrollmentService) importCredentialsAs(r *http.Request, p authz.Principal, adapter codemode.Adapter) (httpkit.Reply, error) {
 	id, err := httpkit.IDParam(r, "provider_id")
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -95,7 +95,7 @@ func (s *Server) importCredentialsAs(r *http.Request, p authz.Principal, adapter
 	return s.stageCredentialImport(r, current, slot, verified, adapter)
 }
 
-func (s *Server) credentialImportSlot(r *http.Request, providerID, slotID string) (credentialImportSlot, error) {
+func (s *enrollmentService) credentialImportSlot(r *http.Request, providerID, slotID string) (credentialImportSlot, error) {
 	identifier, parseErr := uuid.Parse(slotID)
 	if slotID != "" && parseErr != nil {
 		return credentialImportSlot{}, httpkit.Invalid("slot_id", "Use a credential slot identifier.")
@@ -110,7 +110,7 @@ func (s *Server) credentialImportSlot(r *http.Request, providerID, slotID string
 	return slot, err
 }
 
-func (s *Server) stageCredentialImport(request *http.Request, current *record, slot credentialImportSlot, grant abi.Grant, adapter codemode.Adapter) (httpkit.Reply, error) {
+func (s *enrollmentService) stageCredentialImport(request *http.Request, current *record, slot credentialImportSlot, grant abi.Grant, adapter codemode.Adapter) (httpkit.Reply, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), stageGrantTimeout)
 	defer cancel()
 	r := request.WithContext(ctx)
