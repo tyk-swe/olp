@@ -4,6 +4,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const lib = path.join(root, 'src/lib');
 const routes = path.join(root, 'src/routes');
 const features = path.join(lib, 'features');
+const testSupport = path.join(root, 'tests/unit/support');
 
 /**
  * @param {string} directory
@@ -38,6 +39,8 @@ const isTest = (file) => {
  */
 const resolve = (from, specifier) => {
   if (/^[#$]lib\//.test(specifier)) return path.join(lib, specifier.slice(5));
+  if (specifier.startsWith('#test/'))
+    return path.join(testSupport, specifier.slice(6));
   if (specifier.startsWith('.'))
     return path.resolve(path.dirname(from), specifier);
   return null;

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import js from '@eslint/js';
 import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
@@ -6,9 +5,20 @@ import tseslint from 'typescript-eslint';
 import featureBoundary from './eslint/feature-boundary.mjs';
 
 const tsFiles = ['**/*.{ts,tsx}'];
+const scriptFiles = [
+  'eslint.config.mjs',
+  'eslint/**/*.mjs',
+  'scripts/**/*.mjs',
+  'prettier.config.js'
+];
 const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 const sourceFiles = ['src/**/*.{ts,svelte}'];
-const testFiles = ['src/**/*.test.ts', 'src/**/test/**'];
+const testFiles = [
+  'src/**/*.test.ts',
+  'src/**/test/**',
+  'tests/unit/**/*.test.ts',
+  'tests/unit/support/**'
+];
 const sharedLayers = [
   '.',
   'management',
@@ -39,17 +49,11 @@ const apiModules = [
   'src/lib/features/usage/reconciliation.ts',
   'src/lib/features/usage/usage.ts'
 ];
-const legacy = JSON.parse(
-  readFileSync(new URL('./eslint-legacy.json', import.meta.url), 'utf8')
-);
 const mutationHeaderLiteral = {
   selector: 'Literal[value=/^(Idempotency-Key|If-Match)$/]',
   message:
     'Build mutation headers with ifMatch, mutationHeaders or createHeaders from #lib/management/http.js.'
 };
-// `<script lang="ts">` blocks are held to the same recommended rules as the
-// .ts modules; without this, unused imports and locals in components are
-// invisible to the linter.
 const typeScriptRecommendedRules = tseslint.configs.recommended.reduce(
   (rules, config) => ({ ...rules, ...config.rules }),
   {}
@@ -66,6 +70,14 @@ export default [
     ]
   },
   ...svelte.configs['flat/recommended'],
+  {
+    ...js.configs.recommended,
+    files: scriptFiles,
+    languageOptions: {
+      sourceType: 'module',
+      globals: globals.node
+    }
+  },
   {
     ...js.configs.recommended,
     files: tsFiles
@@ -106,8 +118,6 @@ export default [
     rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
   },
   {
-    // Feature api modules (and shared transport) own every apiClient call;
-    // browser code reaches the inference gateway only through gatewayFetch.
     files: sourceFiles,
     ignores: [...apiModules, ...testFiles],
     rules: {
@@ -127,7 +137,6 @@ export default [
   },
   {
     files: ['src/**/*.svelte'],
-    ignores: legacy.componentOverMaxLines,
     rules: {
       'max-lines': [
         'error',
@@ -142,7 +151,7 @@ export default [
   },
   {
     files: ['src/**/*.svelte'],
-    ignores: [...legacy.componentCatchesErrors, ...testFiles],
+    ignores: testFiles,
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -157,6 +166,7 @@ export default [
   },
   {
     files: testFiles,
+    ignores: ['tests/unit/support/eventually.ts'],
     rules: {
       'no-restricted-properties': [
         'error',
@@ -164,7 +174,13 @@ export default [
           object: 'vi',
           property: 'waitFor',
           message:
-            'Use eventually from tests/unit/support/eventually.ts. vi.waitFor polls every 50ms, which dominates the console unit budget.'
+            'Use eventually from #test/eventually.js. vi.waitFor polls every 50ms, which dominates the console unit budget.'
+        },
+        {
+          object: 'vi',
+          property: 'waitUntil',
+          message:
+            'Use eventually from #test/eventually.js. vi.waitUntil polls every 50ms, which dominates the console unit budget.'
         }
       ]
     }
