@@ -160,7 +160,7 @@ func Preflight[T any](s *Server, r *http.Request, input any, lock func(pgx.Tx, a
 
 func Serialize[T any](s *Server, r *http.Request, step func(pgx.Tx) (T, bool, error)) (T, error) {
 	var none T
-	tx, err := s.Begin(r)
+	tx, err := s.begin(r)
 	if err != nil {
 		return none, err
 	}
