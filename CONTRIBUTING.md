@@ -42,7 +42,7 @@ generator, run `make api` explicitly.
 
 Required CI includes `check-go`, `check-console`, `test-unit-go`,
 `test-unit-console`, `test-integration`, `test-e2e-api`, `test-e2e-browser`,
-`contracts`, `helm`, `dependencies`, and `build`,
+`contracts`, `helm`, `workflows`, `dependencies`, and `build`,
 each gated on the paths a change touches. Helm, dependency and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
 `management/management.json` is the checked-in source of truth. Update it
@@ -111,8 +111,9 @@ The end-to-end tier holds one journey per flow, so most service and browser
 behavior has no journey of its own. Validate it by running the affected
 functionality directly and record the command and output.
 
-Documentation changes also run `node scripts/check-docs.mjs`. The same scoped
-link, anchor and handbook-index contract runs through `make test-unit-console`.
+Documentation changes are validated by `make check-docs` (running
+`node scripts/check-docs.mjs`), and the same scoped link, anchor and
+handbook-index contract runs inside `make test-unit-console`.
 
 Use conventional commit subjects and name agent-created branches `tyk-{name}`.
 Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,
@@ -151,10 +152,11 @@ metadata, Docker/Compose tags, OpenAPI `info.version` and release tags must agre
 version into the binary. Build Linux amd64 and arm64 images natively; static
 console assets ship separately in the nonroot distroless image.
 
-Platform digests form one candidate index. Packaged browser, SDK and recovery
-qualification consumes that exact index; promotion tags and attests it without
-rebuilding. A manual workflow dispatch qualifies without publishing. A `v0.*`
-tag push can publish `:<version>` and `:<major>.<minor>` only after all gates pass.
+Platform digests form one candidate index. Packaged image mode, service,
+compose and vulnerability qualification (`scripts/qualify-image.sh`) consumes
+that exact index, and promotion tags and attests it without rebuilding. A manual
+workflow dispatch qualifies without publishing. A `v0.*` tag push can publish
+`:<version>` and `:<major>.<minor>` only after all gates pass.
 
 Provider/protocol/media reviews must cover native conformance, refused or lossy
 semantics, body/time/admission limits, pricing and missing usage, cancellation,

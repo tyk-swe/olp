@@ -197,8 +197,9 @@ Dispatch it before making any reliability claim for a release, and scope the cla
 green run summary names. A release with no green live run makes no
 such claim. The workflow is also reusable through `workflow_call`.
 When the repository variable `OLP_LIVE_QUALIFICATION` is set to
-`required`, the release workflow calls it with inherited secrets and
-promotion needs it, so a red or missing live run blocks the release.
+`required`, the release workflow calls it and forwards the live-lane secrets
+explicitly, and promotion needs it, so a red or missing live run blocks the
+release.
 When the variable is unset, that release job is skipped, claims remain
 fixture-scoped, and the `check-docs` guard in
 `scripts/check-docs.mjs` enforces that scope. The guard rejects the
