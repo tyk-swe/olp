@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, normalize, relative, sep } from 'node:path';
+import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
+const repoRoot = resolve(import.meta.dirname, '..');
 const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'README.md', 'SECURITY.md'];
-const docDirectories = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'docs/use/providers'];
 
 export const liveProvenClaimPatterns = [
   /\blive-proven only\b/i,
@@ -17,13 +17,26 @@ export function findLiveProvenClaims(text) {
     .map((pattern) => visible.match(pattern)[0]);
 }
 
-export function listScopedDocs(listDirectory = (directory) => readdirSync(directory)) {
-  const handbook = docDirectories.flatMap((directory) =>
-    listDirectory(directory)
-      .filter((entry) => entry.endsWith('.md'))
-      .map((entry) => join(directory, entry))
-  );
-  return [...rootDocs, ...handbook].sort();
+function defaultListMarkdown(directory) {
+  const entries = readdirSync(join(repoRoot, directory), { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const child = join(directory, entry.name);
+    if (entry.isDirectory()) return defaultListMarkdown(child);
+    return entry.isFile() && entry.name.endsWith('.md') ? [child] : [];
+  });
+}
+
+export function listScopedDocs(listDirectory) {
+  if (listDirectory) {
+    const legacyDirs = ['docs', 'docs/develop', 'docs/operate', 'docs/use', 'docs/use/providers'];
+    const handbook = legacyDirs.flatMap((directory) =>
+      listDirectory(directory)
+        .filter((entry) => entry.endsWith('.md'))
+        .map((entry) => join(directory, entry))
+    );
+    return [...rootDocs, ...handbook].sort();
+  }
+  return [...rootDocs, ...defaultListMarkdown('docs')].sort();
 }
 
 function withoutEmphasisMarkers(text) {
@@ -151,7 +164,8 @@ export function checkDocs(files, read, exists) {
       continue;
     }
     anchorsByFile.set(file, collectAnchors(markdown));
-    if (markdown.includes('—')) errors.push(`${file}: contains an em dash`);
+    const visible = withoutInlineCode(withoutFencedCode(markdown));
+    if (visible.includes('—')) errors.push(`${file}: contains an em dash`);
     for (const claim of findLiveProvenClaims(markdown)) {
       errors.push(`${file}: claims live-proven status (${claim})`);
     }
@@ -198,8 +212,11 @@ if (import.meta.main) {
   const files = listScopedDocs();
   const count = checkDocs(
     files,
-    (file) => (existsSync(file) ? readFileSync(file, 'utf8') : undefined),
-    (file) => existsSync(file)
+    (file) => {
+      const fullPath = join(repoRoot, file);
+      return existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
+    },
+    (file) => existsSync(join(repoRoot, file))
   );
   console.log(`Documentation check: ${count} files`);
 }

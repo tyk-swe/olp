@@ -1,0 +1,20 @@
+name: Set up qualification sandbox
+description: Install bubblewrap, AppArmor userns profile, and pinned coding clients for qualification lanes.
+runs:
+  using: composite
+  steps:
+    - name: Install client sandbox
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install --no-install-recommends -y apparmor bubblewrap
+        if ! bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true; then
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile olp-qualification-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' > "$RUNNER_TEMP/olp-qualification-bwrap"
+          sudo apparmor_parser -r "$RUNNER_TEMP/olp-qualification-bwrap"
+        fi
+        bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true
+    - name: Install pinned coding clients
+      shell: bash
+      run: |
+        scripts/qualification-clients.sh "$RUNNER_TEMP/qualification-clients"
+        printf '%s\n' "$RUNNER_TEMP/qualification-clients" >> "$GITHUB_PATH"

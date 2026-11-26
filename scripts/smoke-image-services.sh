@@ -11,13 +11,16 @@ case "$expected_arch:$host_arch" in amd64:x86_64|arm64:aarch64|arm64:arm64) ;; *
 project="olp-image-$$-$RANDOM"
 export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0
 compose=(docker compose -p "$project" -f deploy/compose.dev.yaml)
+postgres_image=$(awk '/^[[:space:]]*image:[[:space:]]*postgres:/ { print $2; exit }' deploy/compose.dev.yaml)
+[[ -n $postgres_image ]] || { echo 'could not read pinned postgres image from deploy/compose.dev.yaml' >&2; exit 1; }
 containers=()
 scratch=$(mktemp -d)
 chmod 755 "$scratch"
+# shellcheck source=scripts/secrets.sh
 source scripts/secrets.sh "$scratch/secrets"
 chmod 755 "$scratch/secrets"
 cleanup() {
-  status=$?
+  local status=$?
   trap - EXIT INT TERM
   for container in "${containers[@]}"; do
     if (( status != 0 )); then docker logs "$container" >&2 || true; fi
@@ -30,12 +33,11 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-"${compose[@]}" up -d --wait --wait-timeout 90
-version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+"${compose[@]}" up -d --wait --wait-timeout 90 postgres valkey
+version=$(jq -er .version package.json)
 [[ $(docker run --rm "$image" --version) == "olp $version" ]]
 [[ $(docker image inspect --format '{{.Config.User}}' "$image") == '65532:65532' ]]
-# Use the already pulled PostgreSQL image only to assign disposable volume ownership.
-docker run --rm --user 0 -v "$scratch/secrets:/secrets" postgres:18 sh -c 'chown 65532:65532 /secrets/* && chmod 0440 /secrets/*'
+docker run --rm --user 0 -v "$scratch/secrets:/secrets" "$postgres_image" sh -c 'chown 65532:65532 /secrets/* && chmod 0440 /secrets/*'
 secret_args=(-v "$scratch/secrets:/secrets:ro"
   -e OLP_AUTH_HMAC_KEY_FILE=/secrets/auth.key
   -e OLP_MASTER_KEY_FILE=/secrets/master.json
@@ -50,8 +52,8 @@ for mode in all gateway control worker; do
     -p 127.0.0.1::8080 -p 127.0.0.1::9090 \
     -e OLP_DATABASE_URL='postgres://olp:olp-local@postgres/olp?sslmode=disable' \
     "${secret_args[@]}" -e OLP_VALKEY_URL='redis://:olp-local@valkey/0' "$image" "$mode" >/dev/null
-  public=$(docker port "$container" 8080/tcp)
-  private=$(docker port "$container" 9090/tcp)
+  public=$(docker port "$container" 8080/tcp | head -n 1)
+  private=$(docker port "$container" 9090/tcp | head -n 1)
   live=false
   for _ in {1..150}; do
     if curl --fail --silent "http://$private/health/live" >/dev/null; then live=true; break; fi
@@ -61,8 +63,9 @@ for mode in all gateway control worker; do
   [[ $live == true ]] || { echo "$mode did not become live" >&2; exit 1; }
   expected=200
   if [[ $mode == all || $mode == gateway ]]; then expected=503; fi
+  status=000
   for _ in {1..100}; do
-    status=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$private/health/ready")
+    status=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$private/health/ready" || echo 000)
     [[ $status == "$expected" ]] && break
     sleep 0.1
   done
@@ -77,11 +80,11 @@ for mode in all gateway control worker; do
     curl --fail --silent "http://$public/login" | grep -q 'svelte-root'
   fi
   if [[ $mode != worker ]]; then
-    [[ $(curl --silent --output /dev/null --write-out '%{http_code}' "http://$public/health/ready") == 404 ]]
+    public_ready=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$public/health/ready" || echo 000)
+    [[ $public_ready == 404 ]]
   else
     if curl --silent --max-time 1 "http://$public/" >/dev/null; then echo 'worker exposed a public listener' >&2; exit 1; fi
   fi
-  # An observed startup snapshot, not a capacity or latency guarantee.
   docker stats --no-stream --format '{{json .}}' "$container"
   docker stop --time 40 "$container" >/dev/null
   [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]]

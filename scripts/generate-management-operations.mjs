@@ -1,9 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
-// A transport-neutral registry shared by the CLI, management MCP and SDK.
-// Only operations explicitly admitting management tokens are included.
+const repoRoot = resolve(import.meta.dirname, '..');
+
 export function operationsFrom(document) {
-  const resolve = (value) => {
+  const resolveRef = (value) => {
     if (!value?.$ref) return value;
     const prefix = '#/components/';
     if (!value.$ref.startsWith(prefix)) throw new Error('External contract reference');
@@ -12,15 +13,13 @@ export function operationsFrom(document) {
     if (!resolved) throw new Error(`Missing reference ${value.$ref}`);
     return resolved;
   };
-  // Standard ETag metadata is always safe when supplied. The contract selects
-  // additional allowed mutation facts; no other response headers are exposed.
   const safeResponseHeaders = new Map([
     ['etag', 'etag'],
     ['olp-previous-parent-etag', 'previous_parent_etag'],
     ['olp-parent-etag', 'parent_etag']
   ]);
   const parameterType = (parameter) => {
-    const schema = resolve(parameter.schema);
+    const schema = resolveRef(parameter.schema);
     const type = schema?.type;
     const supported = parameter.in === 'query'
       ? ['string', 'integer', 'boolean'].includes(type) && (parameter.style ?? 'form') === 'form'
@@ -30,7 +29,7 @@ export function operationsFrom(document) {
           && ['if-match', 'idempotency-key'].includes(parameter.name.toLowerCase())
           && (type === 'string' || (Array.isArray(type) && type.length === 2 && type.includes('string') && type.includes('null')))
           && (parameter.style ?? 'simple') === 'simple';
-    if (!supported || parameter.content || parameter.allowReserved || parameter.explode === true && parameter.in !== 'query') {
+    if (!supported || parameter.content || parameter.allowReserved || (parameter.explode === true && parameter.in !== 'query')) {
       throw new Error(`Unsupported management parameter ${parameter.in} ${parameter.name}`);
     }
     return Array.isArray(type) ? 'string' : type;
@@ -48,7 +47,7 @@ export function operationsFrom(document) {
         const name = value.$ref.slice(prefix.length);
         if (!(name in definitions)) {
           definitions[name] = null;
-          definitions[name] = visit(resolve(value));
+          definitions[name] = visit(resolveRef(value));
         }
         return { ...value, $ref: `#/$defs/${name}` };
       }
@@ -72,7 +71,7 @@ export function operationsFrom(document) {
       const name = operation.operationId;
       if (!name || names.has(name)) throw new Error(`Duplicate or missing operationId at ${path}`);
       names.add(name);
-      const parameters = [...(item.parameters ?? []), ...(operation.parameters ?? [])].map(resolve);
+      const parameters = [...(item.parameters ?? []), ...(operation.parameters ?? [])].map(resolveRef);
       const properties = {};
       const required = [];
       for (const location of ['path', 'query']) {
@@ -93,20 +92,20 @@ export function operationsFrom(document) {
         properties[argument] = { type: 'string', minLength: 1, description: parameter.description ?? header };
         if (parameter.required) required.push(argument);
       }
-      const body = resolve(operation.requestBody);
+      const body = resolveRef(operation.requestBody);
       if (body) {
         const schema = body.content?.['application/json']?.schema;
-        if (!schema) continue; // JSON clients do not expose multipart or raw uploads.
+        if (!schema) continue;
         properties.body = schema;
         if (body.required) required.push('body');
       }
       const successResponses = Object.entries(operation.responses ?? {})
         .filter(([status]) => /^2\d\d$/.test(status))
-        .map(([, response]) => resolve(response));
+        .map(([, response]) => resolveRef(response));
       if (successResponses.some((response) => {
         const types = Object.keys(response.content ?? {});
         return types.length && !types.some((type) => type === 'application/json' || type.endsWith('+json'));
-      })) continue; // Download, SSE and XML bodies require their native transports.
+      })) continue;
       operations.push({
         name,
         group: operation.tags?.[0] ?? 'management',
@@ -118,8 +117,8 @@ export function operationsFrom(document) {
         parameters: parameters.map((p) => ({ name: p.name, in: p.in, required: !!p.required, type: parameterType(p) })),
         response_headers: Object.fromEntries([['ETag', 'etag'], ...successResponses.flatMap((response) =>
           Object.keys(response.headers ?? {})
-            .filter((name) => safeResponseHeaders.has(name.toLowerCase()))
-            .map((name) => [name, safeResponseHeaders.get(name.toLowerCase())])
+            .filter((headerName) => safeResponseHeaders.has(headerName.toLowerCase()))
+            .map((headerName) => [headerName, safeResponseHeaders.get(headerName.toLowerCase())])
         )]),
         body_required: !!body?.required,
         input_schema: bundle({ type: 'object', properties, additionalProperties: false, ...(required.length ? { required } : {}) })
@@ -129,7 +128,10 @@ export function operationsFrom(document) {
   return operations.sort((a, b) => a.name.localeCompare(b.name, 'en'));
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const document = JSON.parse(readFileSync('management/management.json', 'utf8'));
-  writeFileSync(process.argv[2] ?? 'management/operations.gen.json', JSON.stringify(operationsFrom(document), null, 2) + '\n');
+if (import.meta.main) {
+  const document = JSON.parse(readFileSync(join(repoRoot, 'management/management.json'), 'utf8'));
+  writeFileSync(
+    process.argv[2] ?? join(repoRoot, 'management/operations.gen.json'),
+    JSON.stringify(operationsFrom(document), null, 2) + '\n'
+  );
 }

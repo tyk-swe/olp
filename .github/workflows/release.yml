@@ -33,19 +33,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
-      - name: Install fixture sandbox
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install --no-install-recommends -y apparmor bubblewrap
-          if ! bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true; then
-            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile olp-qualification-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' > "$RUNNER_TEMP/olp-qualification-bwrap"
-            sudo apparmor_parser -r "$RUNNER_TEMP/olp-qualification-bwrap"
-          fi
-          bwrap --unshare-net --unshare-pid --ro-bind / / /usr/bin/true
-      - name: Install pinned coding clients
-        run: |
-          scripts/qualification-clients.sh "$RUNNER_TEMP/qualification-clients"
-          printf '%s\n' "$RUNNER_TEMP/qualification-clients" >> "$GITHUB_PATH"
+      - uses: $/.github/actions/qualification-sandbox
       - run: make qualify-code
   qualify-code-live:
     if: vars.OLP_LIVE_QUALIFICATION == 'required'
@@ -234,9 +222,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: $/.github/actions/setup
-        with:
-          go-cache: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -244,7 +229,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - env:
-          OLP_CONSOLE_E2E_IMAGE: ghcr.io/${{ github.repository }}@${{ needs.candidate.outputs.digest }}
+          OLP_CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ needs.candidate.outputs.digest }}
           OLP_IMAGE_PLATFORM: ${{ matrix.platform }}
         run: ./scripts/qualify-image.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -254,7 +239,6 @@ jobs:
           path: |
             ${{ runner.temp }}/olp-candidate-scan/*.json
             ${{ runner.temp }}/olp-candidate-scan/native-inventory
-            console/test-results
           if-no-files-found: warn
   promote:
     if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v0.') && needs.candidate.result == 'success' && needs.packaged.result == 'success' && needs.qualify-code.result == 'success' && (needs.qualify-code-live.result == 'success' || needs.qualify-code-live.result == 'skipped') }}

@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${OLP_RESTORE_DATABASE_URL:?set OLP_RESTORE_DATABASE_URL to an empty destination database}"
 : "${OLP_RESTORE_VALKEY_ISOLATED:?use a separate Valkey service and set OLP_RESTORE_VALKEY_ISOLATED=true}"
-[[ $OLP_RESTORE_VALKEY_ISOLATED == true ]] || exit 2
+[[ $OLP_RESTORE_VALKEY_ISOLATED == true ]] || { echo 'OLP_RESTORE_VALKEY_ISOLATED must equal true.' >&2; exit 2; }
 python3 - <<'PYURL'
 import os, sys, urllib.parse
 url = urllib.parse.urlsplit(os.environ['OLP_RESTORE_DATABASE_URL'])
@@ -20,12 +20,12 @@ jq -e --arg checksum "$checksum" '
   .accounting_drained == true and (.installation | type == "string") and
   (.migration_history | type == "array" and length > 0) and
   .migrations == (.migration_history | length)' "$manifest" >/dev/null
-while IFS=$'\t' read -r version checksum; do
-  [[ $version =~ ^[0-9]{4}_[a-z0-9_]+\.sql$ && $checksum =~ ^[0-9a-f]{64}$ ]] || exit 1
+while IFS=$'\t' read -r version migration_checksum; do
+  [[ $version =~ ^[0-9]{4}_[a-z0-9_]+\.sql$ && $migration_checksum =~ ^[0-9a-f]{64}$ ]] || exit 1
   file="$repo_dir/internal/platform/database/migrations/$version"
   [[ -f $file ]] || { echo 'Backup migration is not supported by this checkout.' >&2; exit 1; }
   actual_checksum=$(sha256sum < "$file")
-  [[ ${actual_checksum%% *} == "$checksum" ]] || { echo 'Backup migration checksum differs from this checkout.' >&2; exit 1; }
+  [[ ${actual_checksum%% *} == "$migration_checksum" ]] || { echo 'Backup migration checksum differs from this checkout.' >&2; exit 1; }
 done < <(jq -r '.migration_history[] | [.version, .checksum] | @tsv' "$manifest")
 
 umask 077
@@ -33,8 +33,13 @@ scratch=$(mktemp -d)
 staging="olp_restore_verify_$(openssl rand -hex 12)"
 created=false
 cleanup() {
-  if [[ $created == true ]]; then dropdb --maintenance-db="$OLP_RESTORE_DATABASE_URL" --if-exists --force "$staging"; fi
+  local status=$?
+  trap - EXIT INT TERM
+  if [[ $created == true ]]; then
+    dropdb --maintenance-db="$OLP_RESTORE_DATABASE_URL" --if-exists --force "$staging" || true
+  fi
   rm -rf -- "$scratch"
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -50,8 +55,6 @@ DO $$ BEGIN
 END $$;
 SQL
 psql "$OLP_RESTORE_DATABASE_URL" -Xq -v ON_ERROR_STOP=1 --single-transaction -f "$scratch/empty.sql" >/dev/null
-# Validate the complete dump and mounted keys before mutating the destination.
-# CREATEDB is required for this isolated scratch database, which is always removed.
 createdb --maintenance-db="$OLP_RESTORE_DATABASE_URL" --template=template0 "$staging"
 created=true
 staging_url=$(OLP_STAGING_NAME="$staging" python3 - <<'PY'
@@ -71,7 +74,6 @@ maintenance=("${OLP_MAINTENANCE_BIN:-$repo_dir/.local/bin/olp}")
 "${maintenance[@]}" migrate >/dev/null
 "${maintenance[@]}" doctor >/dev/null
 pg_dump "$staging_url" --schema=olp --no-owner --no-privileges --file="$scratch/restore.sql"
-# Recheck emptiness under the same lock as migrate, and restore atomically.
 psql "$OLP_RESTORE_DATABASE_URL" -Xq -v ON_ERROR_STOP=1 --single-transaction \
   -f "$scratch/empty.sql" -f "$scratch/restore.sql" >/dev/null
 printf 'Restored and verified the installation, keys, migration history and runtime identity.\n'

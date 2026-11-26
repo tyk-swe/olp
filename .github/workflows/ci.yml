@@ -28,6 +28,7 @@ jobs:
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
       scripts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.scripts == 'true' }}
+      security_docs: ${{ github.event_name != 'pull_request' || steps.filter.outputs.security_docs == 'true' }}
       restore_runbook: ${{ steps.filter.outputs.restore_runbook }}
       workflows: ${{ github.event_name != 'pull_request' || steps.filter.outputs.workflows == 'true' }}
     steps:
@@ -52,9 +53,7 @@ jobs:
             go:
               - 'Makefile'
               - 'scripts/check-lint.sh'
-              - 'scripts/check-exemptions.sh'
               - '.golangci.yml'
-              - '.golangci-legacy.json'
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
@@ -73,7 +72,6 @@ jobs:
               - '.nvmrc'
               - 'management/**'
               - 'console/**'
-              - 'scripts/check-exemptions.sh'
               - 'pnpm-workspace.yaml'
               - 'pnpm-lock.yaml'
               - 'package.json'
@@ -95,18 +93,21 @@ jobs:
               - 'scripts/api.sh'
               - 'scripts/generate-*.mjs'
               - 'scripts/check-contracts.sh'
-              - 'console/scripts/generate-requirements.mjs'
-              - 'console/src/lib/management/**'
+              - 'scripts/check-release-version.mjs'
+              - 'deploy/helm/Chart.yaml'
+              - 'deploy/Dockerfile'
+              - 'deploy/compose.yaml'
+              - 'docs/operate/deployment.md'
+              - 'docs/use/plugins.md'
               - 'package.json'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
-              - '!**/*.md'
             helm:
               - 'deploy/helm/**'
               - 'deploy/monitoring/**'
               - 'scripts/check-helm.sh'
-              - 'scripts/check-helm-egress.sh'
               - 'docs/operate/deployment.md'
+              - 'cmd/**/*.go'
               - 'internal/**/*.go'
               - '.github/workflows/ci.yml'
             deps:
@@ -119,6 +120,7 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'scripts/check-dependencies.sh'
               - 'deploy/Dockerfile'
+              - '.nvmrc'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
             scripts:
@@ -126,6 +128,8 @@ jobs:
               - 'docs/**'
               - '**/*.md'
               - '.github/workflows/ci.yml'
+            security_docs:
+              - 'docs/develop/security.md'
             restore_runbook:
               - 'docs/operate/operations.md'
             workflows:
@@ -139,7 +143,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: $/.github/actions/setup
         with:
           node-modules: false
@@ -153,7 +156,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -163,7 +165,7 @@ jobs:
       - run: make check-console
   test-unit-go:
     needs: changes
-    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.security_docs == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -183,7 +185,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-unit-console:
     needs: changes
@@ -224,7 +225,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-e2e-api:
     needs: changes
@@ -248,7 +248,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   test-e2e-browser:
     needs: changes
@@ -286,7 +285,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            ~/.cache/golangci-lint
           key: ${{ steps.setup.outputs.go-cache-key }}
   contracts:
     needs: changes
@@ -315,7 +313,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
-      - run: ./scripts/check-helm.sh
+      - run: make check-helm
   workflows:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
@@ -342,7 +340,7 @@ jobs:
       - uses: $/.github/actions/setup
         with:
           go-cache: false
-      - run: ./scripts/check-dependencies.sh
+      - run: make check-dependencies
   build:
     needs: changes
     if: needs.changes.outputs.code == 'true'

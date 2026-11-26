@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${OLP_DATABASE_URL:?set OLP_DATABASE_URL}"
 : "${OLP_BACKUP_TRAFFIC_QUIESCED:?stop new inference, drain accounting, and set OLP_BACKUP_TRAFFIC_QUIESCED=true}"
-[[ $OLP_BACKUP_TRAFFIC_QUIESCED == true ]] || exit 2
+[[ $OLP_BACKUP_TRAFFIC_QUIESCED == true ]] || { echo 'OLP_BACKUP_TRAFFIC_QUIESCED must equal true.' >&2; exit 2; }
 deadline=${OLP_BACKUP_TIMEOUT_SECONDS:-600}
 [[ $deadline =~ ^[1-9][0-9]*$ ]] || { echo 'Backup timeout must be a positive number of seconds.' >&2; exit 2; }
 umask 077
@@ -12,11 +12,14 @@ partial=$(mktemp -d "$output/.olp-backup-XXXXXX")
 backup="$partial/olp-$(date -u +%Y%m%dT%H%M%SZ).dump"
 snapshot_pid=
 cleanup() {
+  local status=$?
+  trap - EXIT INT TERM
   if [[ -n $snapshot_pid ]]; then
     kill "$snapshot_pid" 2>/dev/null || true
     wait "$snapshot_pid" 2>/dev/null || true
   fi
   rm -rf -- "$partial"
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -30,7 +33,7 @@ printf '%s\n' \
   'BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE;' \
   "SELECT pg_export_snapshot(), current_setting('server_version'), (SELECT count(*) FROM olp.migrations), (SELECT COALESCE(max(sequence), 0) FROM olp.runtime_releases), (SELECT id FROM olp.installation WHERE singleton);" \
   "SELECT COALESCE((SELECT pending_events = 0 AND lag_events = 0 AND checked_at >= clock_timestamp() - interval '30 seconds' FROM olp.request_metadata_consumer_health WHERE singleton), false);" \
-  "SELECT json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version) FROM olp.migrations;" \
+  "SELECT COALESCE(json_agg(json_build_object('version', version, 'checksum', encode(checksum, 'hex')) ORDER BY version), '[]'::json) FROM olp.migrations;" \
   >&"$write_fd"
 IFS='|' read -r -t "$deadline" -u "$read_fd" snapshot server migrations generation installation
 IFS= read -r -t "$deadline" -u "$read_fd" drained
