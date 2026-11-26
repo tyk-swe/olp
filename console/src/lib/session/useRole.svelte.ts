@@ -23,7 +23,7 @@ export type RoleAccess = {
  * once at component initialization.
  */
 export function useRole(): RoleAccess {
-  let snapshot = $state(authLifecycle.snapshot());
+  let snapshot = $state.raw(authLifecycle.snapshot());
 
   $effect(() =>
     authLifecycle.subscribe((next) => {
