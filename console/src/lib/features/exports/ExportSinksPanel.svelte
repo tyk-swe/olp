@@ -28,7 +28,6 @@
     parseSinkCredential,
     type SinkDelivery
   } from './sinkSettings';
-  import {} from './presentation';
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
