@@ -30,7 +30,6 @@ const apiModules = [
   'src/lib/features/providers/providerProfiles.ts',
   'src/lib/features/providers/providers.ts',
   'src/lib/features/providers/revisions.ts',
-  'src/lib/features/resources/retrieval.ts',
   'src/lib/shell/branding/branding.ts',
   'src/lib/features/usage/discounts.ts',
   'src/lib/features/usage/pricing.ts',

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import type { ActiveRoute } from '#lib/features/routes/index.js';
   import type { NativeEndpoint } from './nativeLifecycle';
 
@@ -43,6 +44,13 @@
     upload: boolean;
     files: File[];
   } = $props();
+
+  const hasIdField = $derived(endpoint.pattern.includes('{id}'));
+
+  function submitLabel(action: string) {
+    if (action === 'content') return 'Fetch file content';
+    return `${action.slice(0, 1).toUpperCase()}${action.slice(1)} resource`;
+  }
 </script>
 
 <code class="endpoint">{endpoint.method} {endpoint.pattern}</code>
@@ -61,29 +69,37 @@
         </option>{/each}
     </select>
   </label>
-  {#if routesError}<p class="inline-problem" role="alert">
+  {#if routesError}
+    <Callout tone="danger">
       {routesError}
-    </p>
-    <button class="text-button" type="button" onclick={onReloadRoutes}>
-      Reload routes
-    </button>{/if}
+      {#snippet actions()}<button
+          class="button button-secondary"
+          type="button"
+          onclick={onReloadRoutes}
+        >
+          Reload routes
+        </button>{/snippet}
+    </Callout>
+  {/if}
 {/if}
-<div class="resource-fields">
-  {#each endpoint.ancestors as kind, index (index)}<label>
-      {kind.replaceAll('_', ' ')} parent ID<input
-        bind:value={parents[index]}
-        placeholder={`${kind}_…`}
-        required
-      />
-    </label>{/each}
-  {#if endpoint.pattern.includes('{id}')}<label>
-      {endpoint.kind.replaceAll('_', ' ')} ID<input
-        bind:value={id}
-        placeholder={`${endpoint.kind}_…`}
-        required
-      />
-    </label>{/if}
-</div>
+{#if endpoint.ancestors.length || hasIdField}
+  <div class="resource-fields">
+    {#each endpoint.ancestors as kind, index (index)}<label>
+        {kind.replaceAll('_', ' ')} parent ID<input
+          bind:value={parents[index]}
+          placeholder={`${kind}_…`}
+          required
+        />
+      </label>{/each}
+    {#if hasIdField}<label>
+        {endpoint.kind.replaceAll('_', ' ')} ID<input
+          bind:value={id}
+          placeholder={`${endpoint.kind}_…`}
+          required
+        />
+      </label>{/if}
+  </div>
+{/if}
 <label>
   Query parameters (JSON string values)<textarea
     bind:value={query}
@@ -143,12 +159,15 @@
     (requiresRoute && !route) ||
     (multipart && !files.length)}
 >
-  {endpoint.action === 'content'
-    ? 'Fetch file content'
-    : `${endpoint.action[0]?.toUpperCase()}${endpoint.action.slice(1)} resource`}
+  {submitLabel(endpoint.action)}
 </button>
 
 <style>
+  .resource-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+  }
   label {
     display: grid;
     gap: 0.4rem;

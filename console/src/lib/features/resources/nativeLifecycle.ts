@@ -1,4 +1,4 @@
-import { getProviderResourceContracts } from './api';
+import { isJsonObject } from '#lib/editing/json.js';
 import { gatewayFetch } from '#lib/management/gateway.js';
 import { createHeaders } from '#lib/management/http.js';
 import {
@@ -6,7 +6,15 @@ import {
   parseNativeJSON,
   stringifyNativeJSON
 } from '#lib/nativeJson.js';
-import { agentSubmissionFingerprint, ResourceRequestError } from './lifecycle';
+import { getProviderResourceContracts } from './api';
+import {
+  agentSubmissionFingerprint,
+  isGatewayResourceId,
+  readBoundedResponseBytes,
+  resourceByteLimit,
+  resourceKindPattern,
+  ResourceRequestError
+} from './lifecycle';
 
 export type NativeEndpoint = {
   operation: string;
@@ -37,7 +45,7 @@ export type NativeResourceResult = {
   download?: Blob;
 };
 
-export const nativeResourceByteLimit = 4 * 1024 * 1024;
+export const nativeResourceByteLimit = resourceByteLimit;
 
 const roots: Record<string, string> = {
   'fine_tuning/openai': '/v1/fine_tuning/jobs',
@@ -59,42 +67,28 @@ const actionMethods: Record<string, NativeEndpoint['method']> = {
   cancel: 'POST',
   content: 'GET'
 };
-const kindPattern = /^[a-z][a-z0-9_]{0,63}$/;
+const segmentPattern = /^(?:[A-Za-z0-9_-]+|\{(?:id|parent[01])\})$/;
 
 function validEndpoint(endpoint: NativeEndpoint): boolean {
   const root = roots[`${endpoint.operation}/${endpoint.surface}`];
   if (
     !root ||
-    typeof endpoint.action !== 'string' ||
-    !['GET', 'POST', 'PATCH', 'DELETE'].includes(endpoint.method) ||
     actionMethods[endpoint.action] !== endpoint.method ||
-    typeof endpoint.kind !== 'string' ||
-    !kindPattern.test(endpoint.kind) ||
-    !Array.isArray(endpoint.ancestors) ||
-    typeof endpoint.metered !== 'boolean' ||
+    !resourceKindPattern.test(endpoint.kind) ||
     endpoint.ancestors.length > 2 ||
-    !endpoint.ancestors.every(
-      (kind) => typeof kind === 'string' && kindPattern.test(kind)
-    ) ||
-    typeof endpoint.pattern !== 'string' ||
+    !endpoint.ancestors.every((kind) => resourceKindPattern.test(kind)) ||
     !(endpoint.pattern === root || endpoint.pattern.startsWith(`${root}/`))
   )
     return false;
   const segments = endpoint.pattern.split('/').slice(1);
-  if (
-    !segments.every((segment) =>
-      /^(?:[A-Za-z0-9_-]+|\{(?:id|parent[01])\})$/.test(segment)
-    )
-  )
-    return false;
+  if (!segments.every((segment) => segmentPattern.test(segment))) return false;
   const placeholders = segments.filter((segment) => segment.startsWith('{'));
-  const expected = endpoint.ancestors.map((_, index) => `{parent${index}}`);
-  if (
-    ['get', 'update', 'patch', 'delete', 'cancel', 'content'].includes(
-      endpoint.action
-    )
-  )
-    expected.push('{id}');
+  const expected = [
+    ...endpoint.ancestors.map((_, index) => `{parent${index}}`),
+    ...(endpoint.action !== 'create' && endpoint.action !== 'list'
+      ? ['{id}']
+      : [])
+  ];
   return (
     placeholders.length === expected.length &&
     expected.every(
@@ -103,29 +97,51 @@ function validEndpoint(endpoint: NativeEndpoint): boolean {
   );
 }
 
-/** The server registry owns which lifecycle methods appear. Older servers
- * without endpoint metadata expose no guessed or synthesized native actions. */
+function parseNativeEndpoint(value: unknown): NativeEndpoint | null {
+  if (!isJsonObject(value)) return null;
+  const { operation, surface, kind, action, method, pattern, metered } = value;
+  const ancestors = value.ancestors ?? [];
+  if (
+    typeof operation !== 'string' ||
+    typeof surface !== 'string' ||
+    typeof kind !== 'string' ||
+    typeof action !== 'string' ||
+    typeof pattern !== 'string' ||
+    typeof metered !== 'boolean' ||
+    !Array.isArray(ancestors) ||
+    !ancestors.every((item): item is string => typeof item === 'string')
+  )
+    return null;
+  const expectedMethod = Object.hasOwn(actionMethods, action)
+    ? actionMethods[action]
+    : undefined;
+  if (!expectedMethod || method !== expectedMethod) return null;
+  const endpoint: NativeEndpoint = {
+    operation,
+    surface,
+    kind,
+    action,
+    method: expectedMethod,
+    pattern,
+    ancestors,
+    metered
+  };
+  return validEndpoint(endpoint) ? endpoint : null;
+}
+
 export async function listNativeEndpoints(
   signal?: AbortSignal
 ): Promise<NativeEndpoint[]> {
   const contracts = await getProviderResourceContracts(signal);
-  const endpoints = (contracts as unknown as { endpoints?: unknown }).endpoints;
-  if (!Array.isArray(endpoints)) return [];
-  return endpoints
-    .filter((value): value is NativeEndpoint => {
-      if (!value || typeof value !== 'object') return false;
-      const candidate = {
-        ...value,
-        ancestors: value.ancestors ?? []
-      } as NativeEndpoint;
-      return validEndpoint(candidate);
-    })
-    .map((value) => ({ ...value, ancestors: value.ancestors ?? [] }));
+  if (!Array.isArray(contracts.endpoints)) return [];
+  return contracts.endpoints
+    .map(parseNativeEndpoint)
+    .filter((entry): entry is NativeEndpoint => entry !== null);
 }
 
 function gatewayId(kind: string, value: string): string {
   const id = value.trim();
-  if (!kindPattern.test(kind) || !new RegExp(`^${kind}_[a-f0-9]{32}$`).test(id))
+  if (!isGatewayResourceId(kind, id))
     throw new Error(`Enter a gateway ${kind.replaceAll('_', ' ')} ID.`);
   return id;
 }
@@ -137,39 +153,43 @@ export function nativeResourcePath(
 ): string {
   if (!validEndpoint(endpoint))
     throw new Error('Choose a registered lifecycle endpoint.');
-  let path = endpoint.pattern;
-  endpoint.ancestors.forEach((kind, index) => {
-    path = path.replace(
-      `{parent${index}}`,
-      encodeURIComponent(gatewayId(kind, parents[index] ?? ''))
-    );
-  });
-  if (path.includes('{id}'))
-    path = path.replace(
-      '{id}',
-      encodeURIComponent(gatewayId(endpoint.kind, id))
-    );
-  return path;
+  const withParents = endpoint.ancestors.reduce(
+    (current, kind, index) =>
+      current.replace(
+        `{parent${index}}`,
+        encodeURIComponent(gatewayId(kind, parents[index] ?? ''))
+      ),
+    endpoint.pattern
+  );
+  return withParents.includes('{id}')
+    ? withParents.replace(
+        '{id}',
+        encodeURIComponent(gatewayId(endpoint.kind, id))
+      )
+    : withParents;
 }
 
 function queryParameters(raw: string): URLSearchParams {
   const value = parseNativeJSON(raw.trim() || '{}');
   if (!nativeObject(value))
     throw new Error('Query parameters must be a JSON object of string values.');
-  const params = new URLSearchParams();
-  for (const name of Object.keys(value).sort()) {
-    if (!name || /[\r\n]/.test(name) || name.includes('\0'))
-      throw new Error('Enter a valid query parameter name.');
-    const item = value[name];
-    const values = Array.isArray(item) ? item : [item];
-    for (const part of values) {
-      if (typeof part !== 'string')
-        throw new Error(
-          'Query parameter values must be strings or arrays of strings.'
-        );
-      params.append(name, part);
-    }
-  }
+  const entries: [string, string][] = Object.keys(value)
+    .sort()
+    .flatMap((name) => {
+      if (!name || /[\r\n]/.test(name) || name.includes('\0'))
+        throw new Error('Enter a valid query parameter name.');
+      const item = value[name];
+      return (Array.isArray(item) ? item : [item]).map(
+        (part): [string, string] => {
+          if (typeof part !== 'string')
+            throw new Error(
+              'Query parameter values must be strings or arrays of strings.'
+            );
+          return [name, part];
+        }
+      );
+    });
+  const params = new URLSearchParams(entries);
   if (params.toString().length > 16384)
     throw new Error('Query parameters are too large.');
   return params;
@@ -186,7 +206,9 @@ function requestBody(
   if (!nativeObject(value))
     throw new Error('The resource body must be a JSON object.');
   const raw = stringifyNativeJSON(value);
-  if (new TextEncoder().encode(raw).byteLength > nativeResourceByteLimit)
+  const encoder = new TextEncoder();
+  const rawBytes = encoder.encode(raw).byteLength;
+  if (rawBytes > nativeResourceByteLimit)
     throw new Error('The resource body is too large.');
   if (!request.multipart) {
     if (endpoint.operation === 'skill' && endpoint.action === 'create')
@@ -202,7 +224,7 @@ function requestBody(
     throw new Error('Choose 1–64 files to upload.');
   if (
     endpoint.kind === 'container_file' &&
-    (request.files.length !== 1 || Object.keys(value).length)
+    (request.files.length !== 1 || Object.keys(value).length > 0)
   )
     throw new Error(
       'A container upload requires one file and an empty JSON body.'
@@ -217,8 +239,8 @@ function requestBody(
       name.includes('\0')
     )
       throw new Error('Choose files with bounded, valid filenames.');
-    return size + file.size + new TextEncoder().encode(name).byteLength + 512;
-  }, new TextEncoder().encode(raw).byteLength);
+    return size + file.size + encoder.encode(name).byteLength + 512;
+  }, rawBytes);
   if (total > nativeResourceByteLimit)
     throw new Error('Uploads are limited to 4 MiB in this console.');
   const form = new FormData();
@@ -229,12 +251,9 @@ function requestBody(
       );
     form.append(name, field);
   }
+  const fieldName = endpoint.kind === 'container_file' ? 'file' : 'files[]';
   for (const file of request.files)
-    form.append(
-      endpoint.kind === 'container_file' ? 'file' : 'files[]',
-      file,
-      file.webkitRelativePath || file.name
-    );
+    form.append(fieldName, file, file.webkitRelativePath || file.name);
   return form;
 }
 
@@ -255,28 +274,29 @@ function requestParts(request: NativeResourceRequest) {
   };
 }
 
-/** Bind one mutation identity to exact content, parents, route and query. JSON
- * key order and multipart boundary changes do not create a new submission. */
 export async function nativeResourceFingerprint(
   request: NativeResourceRequest
 ): Promise<string> {
   const { path, body } = requestParts(request);
-  const files = [];
-  if (body instanceof FormData)
-    for (const file of request.files) {
-      const digest = await crypto.subtle.digest(
-        'SHA-256',
-        await file.arrayBuffer()
-      );
-      files.push([
-        file.webkitRelativePath || file.name,
-        file.type,
-        file.size,
-        Array.from(new Uint8Array(digest), (byte) =>
-          byte.toString(16).padStart(2, '0')
-        ).join('')
-      ]);
-    }
+  const files =
+    body instanceof FormData
+      ? await Promise.all(
+          request.files.map(async (file) => {
+            const digest = await crypto.subtle.digest(
+              'SHA-256',
+              await file.arrayBuffer()
+            );
+            return [
+              file.webkitRelativePath || file.name,
+              file.type,
+              file.size,
+              Array.from(new Uint8Array(digest), (byte) =>
+                byte.toString(16).padStart(2, '0')
+              ).join('')
+            ] as const;
+          })
+        )
+      : [];
   return JSON.stringify([
     request.endpoint.method,
     path,
@@ -288,59 +308,28 @@ export async function nativeResourceFingerprint(
   ]);
 }
 
-async function readBoundedResource(response: Response): Promise<Uint8Array> {
-  const reader = response.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += chunk.value.byteLength;
-      if (bytes > nativeResourceByteLimit) {
-        await reader.cancel();
-        throw new Error(
-          'The resource response exceeds the 4 MiB console limit.'
-        );
-      }
-      chunks.push(chunk.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const content = new Uint8Array(bytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    content.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return content;
-}
-
-/** No retries, management cookies or persistence. File content is returned as
- * a bounded Blob for browser download rather than converted to base64/text. */
 export async function runNativeResourceRequest(
   request: NativeResourceRequest
 ): Promise<NativeResourceResult> {
   const { path, body } = requestParts(request);
+  if (request.endpoint.method !== 'GET' && !request.submissionKey)
+    throw new Error('A mutation identity is required.');
+  const route = request.route.trim();
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${request.apiKey.trim()}`
+    Authorization: `Bearer ${request.apiKey.trim()}`,
+    ...(route ? { 'X-OLP-Route': route } : {}),
+    ...(request.endpoint.method !== 'GET' && request.submissionKey
+      ? createHeaders(request.submissionKey)
+      : {}),
+    ...(typeof body === 'string' ? { 'Content-Type': 'application/json' } : {})
   };
-  if (request.route.trim()) headers['X-OLP-Route'] = request.route.trim();
-  if (request.endpoint.method !== 'GET') {
-    if (!request.submissionKey)
-      throw new Error('A mutation identity is required.');
-    Object.assign(headers, createHeaders(request.submissionKey));
-  }
-  if (typeof body === 'string') headers['Content-Type'] = 'application/json';
   const response = await gatewayFetch(path, {
     method: request.endpoint.method,
     headers,
     body,
     signal: request.signal
   });
-  const bytes = await readBoundedResource(response);
+  const bytes = await readBoundedResponseBytes(response);
   const resourceId = response.headers.get('X-OLP-Resource-ID');
   if (!response.ok)
     throw new ResourceRequestError(
@@ -351,9 +340,7 @@ export async function runNativeResourceRequest(
     return {
       text: '',
       resourceId,
-      download: new Blob([bytes as BlobPart], {
-        type: 'application/octet-stream'
-      })
+      download: new Blob([bytes], { type: 'application/octet-stream' })
     };
   return { text: new TextDecoder().decode(bytes), resourceId };
 }

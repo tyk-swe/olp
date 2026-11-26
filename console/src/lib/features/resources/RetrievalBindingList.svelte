@@ -1,8 +1,8 @@
 <script lang="ts">
+  import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import { errorMessage } from '#lib/management/http.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import type { RetrievalBinding } from './retrieval.js';
+  import type { RetrievalBinding } from './api';
 
   const {
     bindings,
@@ -15,17 +15,15 @@
   } = $props();
 </script>
 
-{#if bindings.isPending}<p role="status">Loading retrieval bindings…</p>
-{:else if bindings.isError}<p class="inline-problem" role="alert">
-    {errorMessage(bindings.error)}
-  </p>
-  <button class="text-button" type="button" onclick={() => bindings.refetch()}>
-    Retry
-  </button>
-{:else if !bindings.data?.length}<p>
-    No cloud retrieval bindings are configured.
-  </p>
-{:else}<ScrollTable label="Cloud retrieval bindings">
+<QueryView
+  query={bindings}
+  loading="Loading retrieval bindings…"
+  emptyWhen={!bindings.data?.length}
+>
+  {#snippet empty()}
+    <p>No cloud retrieval bindings are configured.</p>
+  {/snippet}
+  <ScrollTable label="Cloud retrieval bindings">
     <table class="data-table">
       <caption class="sr-only">Cloud retrieval bindings</caption>
       <thead>
@@ -56,7 +54,8 @@
           </tr>{/each}
       </tbody>
     </table>
-  </ScrollTable>{/if}
+  </ScrollTable>
+</QueryView>
 
 <style>
   td small {

@@ -48,6 +48,11 @@ describe('native resource lifecycle requests', () => {
       data: {
         endpoints: [
           { ...endpoint, ancestors: undefined },
+          null,
+          'not-an-endpoint',
+          { ...endpoint, method: 'PUT' },
+          { ...endpoint, ancestors: [123] },
+          { ...endpoint, metered: 'yes' },
           { ...endpoint, pattern: 'https://foreign.test/v1/fine_tuning/jobs' },
           { ...endpoint, pattern: '/v1/fine_tuning/jobs/../models' },
           { ...endpoint, kind: undefined },

@@ -1,19 +1,15 @@
 <script lang="ts">
-  import Callout from '#lib/components/Callout.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
+  import { useAction } from '#lib/editing/action.svelte.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { useAction } from '#lib/editing/action.svelte.js';
-  import {
-    nativeObject,
-    parseNativeJSON,
-    stringifyNativeJSON
-  } from '#lib/nativeJson.js';
   import {
     requestRetainedReconciliation,
     submitRetainedEvidence,
     type ProviderResource
   } from './api';
+  import { draftRetainedEvidence, parseRetainedEvidence } from './lifecycle';
 
   let {
     resource,
@@ -24,101 +20,67 @@
   const canEvidence = $derived(access.can('settings.update'));
   let hint = $state('');
   let evidence = $state('');
-  let problem = $state('');
-  let notice = $state('');
   const controlAction = useAction();
   const busy = $derived(controlAction.busy);
+
   usePrincipalLifetime(() => {
     evidence = '';
     hint = '';
-    problem = '';
-    notice = '';
   });
 
   function draftEvidence() {
-    const quantity =
-      resource.kind === 'fine_tuning_job' ||
-      resource.kind === 'vertex_tuning_job'
-        ? { training_tokens: 0 }
-        : resource.kind === 'context_cache'
-          ? { cache_token_seconds: '0' }
-          : resource.kind === 'container'
-            ? { container_sessions: { '1g': 0 } }
-            : resource.kind === 'eval_run'
-              ? {
-                  input_tokens: 0,
-                  output_tokens: 0,
-                  cached_input_tokens: 0,
-                  invocation_count: 0
-                }
-              : { storage_byte_seconds: '0' };
-    evidence = JSON.stringify(
-      {
-        idempotency_key: crypto.randomUUID(),
-        evidence_digest: '',
-        start: resource.created_at,
-        end: new Date().toISOString(),
-        model:
-          resource.retained_settlement?.models?.[0] ?? resource.upstream_model,
-        ...quantity,
-        terminal: false
-      },
-      null,
-      2
-    );
-    problem = '';
-    notice = '';
+    evidence = draftRetainedEvidence(resource);
+    controlAction.reset();
   }
 
   async function reconcile() {
     if (busy || !canReconcile) return;
     const selectedId = resource.id;
-    problem = '';
-    notice = '';
     await controlAction.run(
       () => requestRetainedReconciliation(selectedId, hint),
-      (_, current) => {
-        if (!current() || resource.id !== selectedId) return;
-        notice =
-          'Reconciliation scheduled. Refresh to inspect settlement progress.';
+      () => {
+        if (resource.id !== selectedId) return;
+        notify(
+          'Reconciliation scheduled. Refresh to inspect settlement progress.'
+        );
         changed();
       },
       {
         key: 'reconcile',
         failure: (error) =>
-          errorMessage(error, 'Reconciliation could not be scheduled.')
+          resource.id === selectedId
+            ? errorMessage(error, 'Reconciliation could not be scheduled.')
+            : ''
       }
     );
-    if (resource.id === selectedId) problem = controlAction.error;
   }
 
   async function submitEvidence(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !canEvidence) return;
+    const parsed = parseRetainedEvidence(evidence);
+    if (!parsed.ok) {
+      controlAction.error = parsed.message;
+      return;
+    }
     const selectedId = resource.id;
-    problem = '';
-    notice = '';
     await controlAction.run(
-      () => {
-        const value = parseNativeJSON(evidence);
-        if (!nativeObject(value))
-          throw new Error('Enter one usage evidence object.');
-        // Keep int64 quantities exact through the management transport.
-        const serialized = stringifyNativeJSON(value);
-        return submitRetainedEvidence(selectedId, serialized);
-      },
-      (result, current) => {
-        if (!current() || resource.id !== selectedId) return;
-        notice = `Usage evidence recorded. Settlement ${result.settlement_status ?? 'pending'}.`;
+      () => submitRetainedEvidence(selectedId, parsed.value),
+      (result) => {
+        if (resource.id !== selectedId) return;
+        notify(
+          `Usage evidence recorded. Settlement ${result.settlement_status ?? 'pending'}.`
+        );
         changed();
       },
       {
         key: 'evidence',
         failure: (error) =>
-          errorMessage(error, 'Usage evidence could not be recorded.')
+          resource.id === selectedId
+            ? errorMessage(error, 'Usage evidence could not be recorded.')
+            : ''
       }
     );
-    if (resource.id === selectedId) problem = controlAction.error;
   }
 </script>
 
@@ -188,8 +150,9 @@
       </button>
     </form>
   {/if}
-  {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
-  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
+  {#if controlAction.error}<p class="inline-problem" role="alert">
+      {controlAction.error}
+    </p>{/if}
 </section>
 
 <style>

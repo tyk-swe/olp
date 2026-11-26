@@ -1,27 +1,28 @@
 <script lang="ts">
-  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import PageHeader from '#lib/components/PageHeader.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
-  import {
-    listProviderResources,
-    type ProviderResourceFilters
-  } from '#lib/features/resources/api.js';
-  import { resourceKeys } from '#lib/features/resources/resourceKeys.js';
-  import { errorMessage } from '#lib/management/http.js';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import PageHeader from '#lib/components/PageHeader.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { formatDate } from '#lib/format.js';
   import {
     cursorPaginationProps,
-    emptyCursorHistory
+    emptyCursorHistory,
+    resetCursor
   } from '#lib/listing/pagination.js';
-  import { formatDate } from '#lib/format.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import AgentResources from './AgentResources.svelte';
-  import RetrievalBindings from './RetrievalBindings.svelte';
   import NativeResources from './NativeResources.svelte';
   import RetainedResourceControls from './RetainedResourceControls.svelte';
-  let selectedId = $state<string | null>(null);
+  import RetrievalBindings from './RetrievalBindings.svelte';
+  import { listProviderResources, type ProviderResourceFilters } from './api';
+  import { resourceKeys } from './resourceKeys';
 
-  const kinds: ProviderResourceFilters['kind'][] = [
+  type ResourceKind = NonNullable<ProviderResourceFilters['kind']>;
+
+  const kinds: readonly ResourceKind[] = [
     'file',
     'batch',
     'response',
@@ -56,7 +57,8 @@
     'context_cache'
   ];
 
-  let kind = $state('');
+  let selectedId = $state<string | null>(null);
+  let kind = $state<ResourceKind | ''>('');
   let route = $state('');
   let resourceState = $state('');
   let apiKeyId = $state('');
@@ -78,14 +80,13 @@
     event.preventDefault();
     applied = {
       limit: 50,
-      kind: (kind || undefined) as ProviderResourceFilters['kind'],
+      kind: kind || undefined,
       route: route.trim() || undefined,
       state: resourceState.trim() || undefined,
       api_key_id: apiKeyId.trim() || undefined,
       provider_id: providerId.trim() || undefined
     };
-    paging.cursor = undefined;
-    paging.history = [];
+    resetCursor(paging);
   }
 
   function clear() {
@@ -95,8 +96,7 @@
     apiKeyId = '';
     providerId = '';
     applied = { limit: 50 };
-    paging.cursor = undefined;
-    paging.history = [];
+    resetCursor(paging);
   }
 </script>
 
@@ -170,23 +170,17 @@
     </button>
   </div>
 </form>
-{#if resources.isPending}<div class="loading-state" role="status">
-    Loading provider resources…
-  </div>
-{:else if resources.isError}<div class="inline-problem" role="alert">
-    {errorMessage(resources.error, 'Provider resources are unavailable.')}
-    <button
-      class="text-button"
-      type="button"
-      onclick={() => resources.refetch()}
-    >
-      Retry
-    </button>
-  </div>
-{:else if resources.data?.items.length === 0}<section class="card empty-state">
-    <p>No provider resources match these filters.</p>
-  </section>
-{:else}
+<QueryView
+  query={resources}
+  loading="Loading provider resources…"
+  failure={errorMessage(resources.error, 'Provider resources are unavailable.')}
+  emptyWhen={resources.data?.items.length === 0}
+>
+  {#snippet empty()}
+    <EmptyState title="No provider resources found">
+      No provider resources match these filters.
+    </EmptyState>
+  {/snippet}
   <ScrollTable label="Provider resource results">
     <table class="data-table">
       <caption class="sr-only">Provider resource mappings</caption><thead>
@@ -249,7 +243,7 @@
     )}
     label="Provider resource pages"
   />
-{/if}
+</QueryView>
 
 <style>
   .filters {

@@ -1,30 +1,40 @@
 <script lang="ts">
-  import NativeResourceFields from './NativeResourceFields.svelte';
-  import Callout from '#lib/components/Callout.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '#lib/management/http.js';
-  import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
-  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
-  import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
-  import { ResourceRequestError } from './lifecycle';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '#lib/editing/mutationIntent.svelte.js';
+  import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
+  import { errorMessage } from '#lib/management/http.js';
+  import NativeResourceFields from './NativeResourceFields.svelte';
+  import {
+    ResourceRequestError,
+    extractResourceJsonId,
+    isGatewayResourceId
+  } from './lifecycle';
   import {
     listNativeEndpoints,
     nativeResourceFingerprint,
     runNativeResourceRequest,
     type NativeEndpoint,
-    type NativeResourceRequest
+    type NativeResourceRequest,
+    type NativeResourceResult
   } from './nativeLifecycle';
+  import { resourceKeys } from './resourceKeys';
 
   const contracts = createQuery(() => ({
-    queryKey: ['provider-resource-contracts'],
+    queryKey: resourceKeys.contracts(),
     queryFn: ({ signal }) => listNativeEndpoints(signal)
   }));
   const routes = createQuery(() => ({
     queryKey: routeKeys.all(),
     queryFn: ({ signal }) => listRoutes(signal)
   }));
+  const action = useAction();
+  const intent = useMutationIntent();
   let operation = $state('');
   let endpointKey = $state('');
   let apiKey = $state('');
@@ -37,43 +47,30 @@
   let files = $state<File[]>([]);
   let filePickerKey = $state(0);
   let result = $state('');
-  let problem = $state('');
-  let notice = $state('');
-  const runAction = useAction();
-  const busy = $derived(runAction.busy);
-  const apiKeyMissing = $derived(!apiKey.trim());
   let downloadUrl = $state('');
   let downloadName = $state('');
   let downloadBytes = $state(0);
   let controller: AbortController | undefined;
-  let pendingFingerprint = '';
-  let pendingKey = '';
-  let pendingApiKey = '';
-  let epoch = 0;
+
+  const apiKeyMissing = $derived(!apiKey.trim());
 
   function clearDownload() {
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-    downloadUrl = '';
-    downloadName = '';
+    downloadUrl = downloadName = '';
     downloadBytes = 0;
   }
-  const captureOwner = usePrincipalLifetime(() => {
-    epoch += 1;
+
+  usePrincipalLifetime(() => {
     controller?.abort();
+    controller = undefined;
     clearDownload();
-    apiKey = '';
-    route = '';
-    id = '';
+    apiKey = route = id = result = '';
     parents = ['', ''];
-    body = '{}';
-    query = '{}';
+    body = query = '{}';
     files = [];
     filePickerKey += 1;
-    result = '';
-    problem = '';
-    notice = '';
-    pendingFingerprint = pendingKey = pendingApiKey = '';
   });
+
   const operations = $derived([
     ...new Set((contracts.data ?? []).map((item) => item.operation))
   ]);
@@ -107,9 +104,8 @@
     endpoint?.action === 'create' && endpoint.ancestors.length === 0
   );
 
-  function key(item: NativeEndpoint) {
-    return `${item.method} ${item.pattern}`;
-  }
+  const key = (item: NativeEndpoint) => `${item.method} ${item.pattern}`;
+
   $effect(() => {
     if (!operations.includes(operation)) operation = operations[0] ?? '';
     if (!available.some((item) => key(item) === endpointKey))
@@ -119,30 +115,27 @@
     if (route && !eligibleRoutes.some((item) => item.slug === route))
       route = '';
   });
+
   function selectEndpoint() {
     files = [];
     filePickerKey += 1;
     upload = false;
-    body = '{}';
-    query = '{}';
+    body = query = '{}';
     result = '';
-    notice = '';
-    problem = '';
+    action.error = '';
     clearDownload();
   }
-  function captureId(
-    value: string | null | undefined,
-    selected: NativeEndpoint
-  ) {
-    if (value && new RegExp(`^${selected.kind}_[a-f0-9]{32}$`).test(value))
-      id = value;
+
+  function captureId(value: string | null | undefined, kind: string) {
+    if (value && isGatewayResourceId(kind, value)) id = value;
   }
+
   async function run(event: SubmitEvent) {
     event.preventDefault();
-    if (busy || !endpoint) return;
+    if (action.busy || !endpoint) return;
     const selected = endpoint;
-    const version = epoch;
-    const isCurrent = captureOwner();
+    const owner = new AbortController();
+    controller = owner;
     const request: NativeResourceRequest = {
       endpoint: selected,
       apiKey,
@@ -152,69 +145,56 @@
       body,
       query,
       multipart,
-      files: [...files]
+      files: [...files],
+      signal: owner.signal
     };
-    controller = new AbortController();
-    request.signal = controller.signal;
-    problem = notice = result = '';
+    result = '';
     clearDownload();
-    await runAction.run(
-      async () => {
-        if (selected.method !== 'GET') {
-          const fingerprint = await nativeResourceFingerprint(request);
-          if (version !== epoch || request.signal?.aborted) return;
-          if (
-            fingerprint !== pendingFingerprint ||
-            request.apiKey !== pendingApiKey
-          ) {
-            pendingFingerprint = fingerprint;
-            pendingApiKey = request.apiKey;
-            pendingKey = crypto.randomUUID();
-          }
-          request.submissionKey = pendingKey;
-        }
-        return runNativeResourceRequest(request);
-      },
-      (response, current) => {
-        if (!response || !current() || version !== epoch) return;
-        captureId(response.resourceId, selected);
-        if (response.download) {
-          downloadUrl = URL.createObjectURL(response.download);
-          downloadName = `${request.id.trim()}.bin`;
-          downloadBytes = response.download.size;
-          notice = 'File content is ready to download.';
-        } else {
-          result = response.text;
-          notice = response.text
-            ? 'Resource operation completed.'
-            : 'Resource operation completed without a response body.';
-          if (response.text) {
-            const parsed = captureResult(() => parseNativeJSON(response.text));
-            if (parsed.ok && nativeObject(parsed.value)) {
-              if (typeof parsed.value.id === 'string')
-                captureId(parsed.value.id, selected);
-              if (typeof parsed.value.name === 'string')
-                captureId(parsed.value.name, selected);
-            }
-          }
-        }
-        if (selected.method !== 'GET')
-          pendingFingerprint = pendingKey = pendingApiKey = '';
-      },
-      {
-        key: 'run',
-        failure: (cause) => {
-          if (version !== epoch || request.signal?.aborted) return problem;
-          if (cause instanceof ResourceRequestError)
-            captureId(cause.resourceId, selected);
-          return errorMessage(
-            cause,
-            'The resource operation could not be completed.'
-          );
-        }
+    const accept = (response: NativeResourceResult) => {
+      captureId(response.resourceId, selected.kind);
+      if (response.download) {
+        downloadUrl = URL.createObjectURL(response.download);
+        downloadName = `${request.id.trim()}.bin`;
+        downloadBytes = response.download.size;
+        notify('File content is ready to download.');
+        return;
       }
+      result = response.text;
+      notify(
+        response.text
+          ? 'Resource operation completed.'
+          : 'Resource operation completed without a response body.'
+      );
+      const bodyId = extractResourceJsonId(response.text, selected.kind);
+      if (bodyId) id = bodyId;
+    };
+    const feedback = {
+      key: 'run',
+      failure: (cause: unknown) => {
+        if (owner.signal.aborted) return '';
+        if (cause instanceof ResourceRequestError)
+          captureId(cause.resourceId, selected.kind);
+        return errorMessage(
+          cause,
+          'The resource operation could not be completed.'
+        );
+      }
+    };
+    await action.run(
+      async () => {
+        if (selected.method === 'GET') return runNativeResourceRequest(request);
+        const fingerprint = await nativeResourceFingerprint(request);
+        owner.signal.throwIfAborted();
+        return intent.submit(
+          [fingerprint, request.apiKey.trim()],
+          (_input, submissionKey) =>
+            runNativeResourceRequest({ ...request, submissionKey })
+        );
+      },
+      accept,
+      feedback
     );
-    if (version === epoch && isCurrent()) problem = runAction.error;
+    if (controller === owner) controller = undefined;
   }
 </script>
 
@@ -226,25 +206,20 @@
       The key, request content and results stay in this page until you leave.
     </p>
   </div>
-  {#if contracts.isPending}<p role="status">
-      Loading supported resource actions…
-    </p>
-  {:else if contracts.isError}<p class="inline-problem" role="alert">
-      {errorMessage(contracts.error, 'Resource contracts could not be loaded.')}
-    </p>
-    <button
-      class="text-button"
-      type="button"
-      onclick={() => contracts.refetch()}
-    >
-      Retry
-    </button>
-  {:else if !contracts.data?.length}<p>
-      The server has not published selectable resource lifecycle actions.
-    </p>
-  {:else}
+  <QueryView
+    query={contracts}
+    loading="Loading supported resource actions…"
+    failure={errorMessage(
+      contracts.error,
+      'Resource contracts could not be loaded.'
+    )}
+    emptyWhen={!contracts.data?.length}
+  >
+    {#snippet empty()}
+      <p>The server has not published selectable resource lifecycle actions.</p>
+    {/snippet}
     <form onsubmit={run}>
-      <fieldset disabled={busy}>
+      <fieldset disabled={action.busy}>
         <div class="resource-fields">
           <label>
             Resource family<select
@@ -298,7 +273,7 @@
           />
         {/if}
       </fieldset>
-      {#if busy}<div class="resource-actions">
+      {#if action.busy}<div class="resource-actions">
           <p role="status">Waiting for the resource operation…</p>
           <button
             class="button button-secondary"
@@ -309,9 +284,10 @@
           </button>
         </div>{/if}
     </form>
-  {/if}
-  {#if notice}<Callout tone="success">{notice}</Callout>{/if}
-  {#if problem}<p class="inline-problem" role="alert">{problem}</p>{/if}
+  </QueryView>
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
+    </p>{/if}
   {#if downloadUrl}<a
       class="button button-secondary"
       href={downloadUrl}
@@ -354,8 +330,6 @@
   }
   pre {
     font-family: var(--font-mono, monospace);
-  }
-  pre {
     max-height: 28rem;
     overflow: auto;
     white-space: pre-wrap;
