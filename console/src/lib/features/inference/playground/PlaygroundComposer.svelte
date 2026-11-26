@@ -2,7 +2,7 @@
   import { RoutingPreferencesForm } from '#lib/features/routes/index.js';
   import SegmentedRadioGroup from '#lib/components/SegmentedRadioGroup.svelte';
   import PlaygroundDryRun from './PlaygroundDryRun.svelte';
-  import { publicNativeOperations } from './nativeOperation.js';
+  import { publicNativeOperations } from './nativeOperation';
   import { playgroundTemplates } from './templates';
   import { errorMessage } from '#lib/management/http.js';
   import type { PlaygroundState } from './playgroundState.svelte';
@@ -257,7 +257,7 @@
         <input
           type="checkbox"
           checked={playground.streamEnabled}
-          disabled={!playground.streamSelectable || playground.streaming}
+          disabled={playground.streaming}
           onchange={(event) =>
             playground.toggleStream(event.currentTarget.checked)}
         />

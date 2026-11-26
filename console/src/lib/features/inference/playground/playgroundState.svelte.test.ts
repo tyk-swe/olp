@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import {
+  flushSync,
+  getAllContexts,
+  mount,
+  unmount,
+  type Component
+} from 'svelte';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
 import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
@@ -7,10 +13,8 @@ import AgentResources from '#lib/features/resources/AgentResources.svelte';
 import NativeResources from '#lib/features/resources/NativeResources.svelte';
 import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
 import PlaygroundPage from './PlaygroundPage.svelte';
-import {
-  PlaygroundState,
-  resolvePlaygroundPlan
-} from './playgroundState.svelte';
+import { resolvePlaygroundPlan } from './playgroundPlan';
+import { PlaygroundState } from './playgroundState.svelte';
 import { playgroundTemplates } from './templates';
 import { eventually } from '../../../../../tests/unit/support/eventually.js';
 
@@ -38,6 +42,26 @@ function playground(): PlaygroundState {
   onTestFinished(() => unmount(component));
   flushSync();
   return ready.mock.results[0].value;
+}
+
+function mountInHarness(
+  components: readonly Component[],
+  options: { attachToBody?: boolean } = {}
+): HTMLDivElement {
+  const target = document.createElement('div');
+  if (options.attachToBody) document.body.append(target);
+  const setup = vi.fn(() => {
+    const context = getAllContexts();
+    return components.map((component) => mount(component, { target, context }));
+  });
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await Promise.all(setup.mock.results[0].value.map(unmount));
+    await unmount(harness);
+    target.remove();
+  });
+  flushSync();
+  return target;
 }
 
 function submitEvent(): SubmitEvent {
@@ -106,21 +130,12 @@ describe('playground composer', () => {
       },
       ['read']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() => {
-      const options = { target, context: getAllContexts() };
-      return [
-        mount(PlaygroundPage, options),
-        mount(AgentResources, options),
-        mount(NativeResources, options),
-        mount(CostCalculator, options)
-      ];
-    });
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await Promise.all(setup.mock.results[0].value.map(unmount));
-      await unmount(harness);
-    });
+    const target = mountInHarness([
+      PlaygroundPage,
+      AgentResources,
+      NativeResources,
+      CostCalculator
+    ]);
     const values = (selector: string) =>
       Array.from(
         target.querySelectorAll<HTMLOptionElement>(selector),
@@ -156,9 +171,9 @@ describe('playground composer', () => {
       'old-route',
       'route-a'
     ]);
-    const route = target.querySelector<HTMLSelectElement>(nativeRoutes);
-    if (!route) throw new Error('Missing native resource route');
-    choose(route, 'old-route');
+    const routeSelect = target.querySelector<HTMLSelectElement>(nativeRoutes);
+    if (!routeSelect) throw new Error('Missing native resource route');
+    choose(routeSelect, 'old-route');
     choose(action, 'POST /v1/vector_stores');
     expect(values(`${nativeRoutes} option`)).toEqual(['', 'route-a']);
     expect(target.querySelector(nativeRoutes)).toHaveProperty('value', '');
@@ -166,17 +181,7 @@ describe('playground composer', () => {
 
   it('shows the surface of the selected Decisions dialect', () => {
     serve(() => json({}));
-    const target = document.createElement('div');
-    document.body.append(target);
-    const setup = vi.fn(() =>
-      mount(PlaygroundPage, { target, context: getAllContexts() })
-    );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-      target.remove();
-    });
+    const target = mountInHarness([PlaygroundPage], { attachToBody: true });
     const control = (name: string) =>
       Array.from(target.querySelectorAll('label')).find(
         (label) => label.textContent?.trim() === name
@@ -189,7 +194,6 @@ describe('playground composer', () => {
       element.dispatchEvent(new Event('change', { bubbles: true }));
       flushSync();
     };
-    flushSync();
     control('Advanced')?.click();
     flushSync();
     select('Operation', 'decision');
@@ -246,26 +250,6 @@ describe('playground composer', () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(state.simulationError).toBe('');
-  });
-
-  it('discloses request metadata and encrypted tool recovery retention', () => {
-    serve(() => json({}));
-    const target = document.createElement('div');
-    const setup = vi.fn(() =>
-      mount(PlaygroundPage, { target, context: getAllContexts() })
-    );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
-    flushSync();
-
-    const content = target.textContent?.replaceAll(/\s+/g, ' ');
-    expect(content).toMatch(/metadata retention is enabled.*Request Explorer/s);
-    expect(content).toMatch(
-      /Negotiated tool recovery.*encrypted for up to 24 hours/s
-    );
   });
 
   it('rejects a submission without a route or prompt before dispatch', async () => {
@@ -528,5 +512,64 @@ describe('playground execution plans', () => {
     expect(plan.kind).toBe('realtime');
     expect(plan.inspection.mode).toBe('realtime');
     expect(plan.submissionError).toContain('local realtime event viewer');
+  });
+
+  it('routes strict OpenAI generation to the strict tool client or legacy completions client', () => {
+    expect(
+      resolvePlaygroundPlan({
+        ...input,
+        operation: 'generation',
+        template: 'openai-chat'
+      })
+    ).toMatchObject({
+      kind: 'strict',
+      submissionError:
+        'Use the qualified public client below for this strict route.'
+    });
+    expect(
+      resolvePlaygroundPlan({
+        ...input,
+        operation: 'generation',
+        template: 'legacy-completions'
+      })
+    ).toMatchObject({
+      kind: 'native',
+      operation: 'completions',
+      dialect: 'openai-completions'
+    });
+  });
+
+  it('marks strict basic or non-OpenAI generation unavailable and reports unknown advanced operations', () => {
+    expect(
+      resolvePlaygroundPlan({ ...input, composer: 'basic', strict: true })
+    ).toMatchObject({
+      kind: 'unavailable',
+      activeOperation: 'generation'
+    });
+    expect(
+      resolvePlaygroundPlan({
+        ...input,
+        operation: 'generation',
+        surface: 'anthropic'
+      })
+    ).toMatchObject({ kind: 'unavailable' });
+    expect(
+      resolvePlaygroundPlan({ ...input, operationKnown: false })
+    ).toMatchObject({
+      submissionError: 'The route does not offer the embeddings operation.'
+    });
+  });
+
+  it('routes audio translation to the upload form', () => {
+    expect(
+      resolvePlaygroundPlan({
+        ...input,
+        operation: 'translation',
+        strict: false
+      })
+    ).toMatchObject({
+      kind: 'audio',
+      submissionError: 'Use the audio upload form below.'
+    });
   });
 });

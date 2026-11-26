@@ -1,15 +1,25 @@
 import { gatewayFetch } from '#lib/management/gateway.js';
-import { validRouteSlug } from '#lib/routeIdentity.js';
 import {
   nativeObject,
-  parseNativeJSON,
   replaceNative,
   stringifyNativeJSON,
   type NativeObject,
   type NativeValue
 } from '#lib/nativeJson.js';
+import {
+  fail,
+  MAX_PUBLIC_REQUEST_BYTES,
+  MAX_PUBLIC_RESPONSE_BYTES,
+  parseNativeValue,
+  publicGatewayHeaders,
+  unwrapOutcome,
+  utf8ByteLength,
+  validateApiKey,
+  validatePublicRoute,
+  type Outcome
+} from './publicGateway';
 
-export const nativeOperationDialects = {
+const nativeOperationDialects = {
   completions: ['openai-completions'],
   decision: ['openai-decisions', 'systemone', 'gemini-decisions'],
   embeddings: [
@@ -49,8 +59,6 @@ export const nativeOperationDialects = {
   ]
 } as const;
 
-/** Operations that serve publicly on strict and transformed routes: they need
- * the public native client rather than the negotiated composer. */
 export const publicNativeOperations: ReadonlySet<string> = new Set([
   'decision',
   'ocr',
@@ -58,8 +66,8 @@ export const publicNativeOperations: ReadonlySet<string> = new Set([
 ]);
 
 export type NativeOperation = keyof typeof nativeOperationDialects;
-const maxResultBytes = 8 * 1024 * 1024;
-const bodyModelDialects = new Set([
+
+const bodyModelDialects: ReadonlySet<string> = new Set([
   'openai-completions',
   'openai-decisions',
   'gemini-decisions',
@@ -86,16 +94,16 @@ const publicPaths: Readonly<Record<string, string | undefined>> = {
   'perplexity-search': '/v1/search'
 };
 
-// Search dialects carry the route in a header or the native path, never a
-// body model field.
 const routeCarriedDialects: ReadonlySet<string> = new Set(
   nativeOperationDialects.search
 );
 
+function isNativeOperation(value: string): value is NativeOperation {
+  return Object.hasOwn(nativeOperationDialects, value);
+}
+
 export function nativeDialects(operation: string): readonly string[] {
-  return Object.hasOwn(nativeOperationDialects, operation)
-    ? nativeOperationDialects[operation as NativeOperation]
-    : [];
+  return isNativeOperation(operation) ? nativeOperationDialects[operation] : [];
 }
 
 export type NativeOperationResult = {
@@ -104,31 +112,71 @@ export type NativeOperationResult = {
   raw: string;
 };
 
-/** The UI advertises only code-registered dialects. Route identity in a
- * model-bearing native body is bound from the chosen public slug. URL-bound
- * bodies such as TEI remain source-exact. */
 export function nativeOperationRequest(
   source: string,
   route: string,
   dialect: string
-): NativeObject {
-  const parsed = parseNativeJSON(source);
-  if (!nativeObject(parsed))
-    throw new Error('The native operation request must be a JSON object.');
-  const model = parsed.model;
+): Outcome<NativeObject> {
+  const parsed = parseNativeValue(
+    source,
+    'The native operation request must be valid JSON.'
+  );
+  if (!parsed.ok) return parsed;
+  if (!nativeObject(parsed.value))
+    return fail('The native operation request must be a JSON object.');
+  const model = parsed.value.model;
   if (model !== undefined && routeCarriedDialects.has(dialect))
-    throw new Error(
+    return fail(
       'Search requests carry no model field; the route goes in X-OLP-Route or the native path.'
     );
   if (model !== undefined && model !== '' && model !== route)
-    throw new Error('The native request names another route.');
-  if (model === '' && bodyModelDialects.has(dialect))
-    return replaceNative(parsed, ['model'], route) as NativeObject;
+    return fail('The native request names another route.');
+  if (model === '' && bodyModelDialects.has(dialect)) {
+    const bound = replaceNative(parsed.value, ['model'], route);
+    return nativeObject(bound)
+      ? { ok: true, value: bound }
+      : fail('The native operation request must be a JSON object.');
+  }
   if (model === '')
-    throw new Error(
+    return fail(
       'This URL-bound native dialect does not use a body model; remove the empty field.'
     );
-  return parsed;
+  return { ok: true, value: parsed.value };
+}
+
+function prepareNativeOperation(
+  operation: NativeOperation,
+  dialect: string,
+  route: string,
+  key: string,
+  source: string
+): Outcome<{ request: NativeObject; body: string; headers: Headers }> {
+  if (!nativeDialects(operation).includes(dialect))
+    return fail('Choose a registered native dialect for this operation.');
+  const validRoute = validatePublicRoute(route);
+  if (!validRoute.ok) return validRoute;
+  const validKey = validateApiKey(key);
+  if (!validKey.ok) return validKey;
+  const request = nativeOperationRequest(source, validRoute.value, dialect);
+  if (!request.ok) return request;
+  if (operation === 'completions' && request.value.stream === true)
+    return fail(
+      'This public JSON form supports unary completions. Use the SDK for streaming.'
+    );
+  const body = stringifyNativeJSON(request.value);
+  if (utf8ByteLength(body) > MAX_PUBLIC_REQUEST_BYTES)
+    return fail('The native operation request exceeds the public body limit.');
+  const headers = publicGatewayHeaders(validKey.value, {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(operation === 'embeddings'
+      ? { 'X-OLP-Client-Contract': 'raw-vector-storage/1' }
+      : {}),
+    ...(dialect === 'perplexity-search'
+      ? { 'X-OLP-Route': validRoute.value }
+      : {})
+  });
+  return { ok: true, value: { request: request.value, body, headers } };
 }
 
 export async function runNativeOperation(
@@ -139,38 +187,16 @@ export async function runNativeOperation(
   source: string,
   signal?: AbortSignal
 ): Promise<NativeOperationResult> {
-  if (!nativeDialects(operation).includes(dialect))
-    throw new Error('Choose a registered native dialect for this operation.');
-  if (!validRouteSlug(route))
-    throw new Error('Choose an active published route slug.');
-  if (!key.startsWith('olp_') || key.length > 512)
-    throw new Error('Enter an inference API key for this route.');
-  const request = nativeOperationRequest(source, route, dialect);
-  if (operation === 'completions' && request.stream === true)
-    throw new Error(
-      'This public JSON form supports unary completions. Use the SDK for streaming.'
-    );
-  const body = stringifyNativeJSON(request);
-  if (new TextEncoder().encode(body).byteLength > 1 << 20)
-    throw new Error(
-      'The native operation request exceeds the public body limit.'
-    );
-  const headers = new Headers({
-    Authorization: `Bearer ${key}`,
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    'Cache-Control': 'no-store'
-  });
-  if (operation === 'embeddings')
-    headers.set('X-OLP-Client-Contract', 'raw-vector-storage/1');
-  if (dialect === 'perplexity-search') headers.set('X-OLP-Route', route);
+  const prepared = unwrapOutcome(
+    prepareNativeOperation(operation, dialect, route, key, source)
+  );
   const response = await gatewayFetch(
     publicPaths[dialect] ??
       `/native/${dialect}/models/${encodeURIComponent(route)}`,
     {
       method: 'POST',
-      headers,
-      body,
+      headers: prepared.headers,
+      body: prepared.body,
       signal
     }
   );
@@ -179,13 +205,14 @@ export async function runNativeOperation(
       `The public operation was not admitted (${response.status}). Check the route, key and native dialect.`
     );
   const raw = await response.text();
-  if (new TextEncoder().encode(raw).byteLength > maxResultBytes)
+  if (utf8ByteLength(raw) > MAX_PUBLIC_RESPONSE_BYTES)
     throw new Error('The native operation result exceeds the browser limit.');
-  let document: NativeValue;
-  try {
-    document = parseNativeJSON(raw, maxResultBytes);
-  } catch {
+  const parsed = parseNativeValue(
+    raw,
+    'The provider returned an invalid native JSON result.',
+    MAX_PUBLIC_RESPONSE_BYTES
+  );
+  if (!parsed.ok)
     throw new Error('The provider returned an invalid native JSON result.');
-  }
-  return { request, response: document, raw };
+  return { request: prepared.request, response: parsed.value, raw };
 }

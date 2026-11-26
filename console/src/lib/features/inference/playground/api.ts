@@ -1,7 +1,8 @@
-import { requestNative } from '#lib/management/transport.js';
-import type { components } from '#lib/management/schema.js';
-import { apiClient } from '#lib/session/client.js';
+import { parseJsonObject } from '#lib/editing/json.js';
 import { unwrap } from '#lib/management/http.js';
+import type { components } from '#lib/management/schema.js';
+import { requestNative } from '#lib/management/transport.js';
+import { apiClient } from '#lib/session/client.js';
 
 export type PlaygroundRequest = Omit<
   components['schemas']['PlaygroundRequest'],
@@ -9,7 +10,9 @@ export type PlaygroundRequest = Omit<
 > & {
   surface?: 'openai' | 'anthropic' | 'gemini';
 };
-export type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
+
+type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
+
 const maxPlaygroundResponseBytes = 32 * 1024 * 1024;
 
 export type PlaygroundOperation =
@@ -39,7 +42,7 @@ export type PlaygroundStreamProblem = {
   status?: number;
 };
 
-export type PlaygroundStreamHandlers = {
+type PlaygroundStreamHandlers = {
   frame: (data: string) => void;
   done: (meta: PlaygroundStreamDone) => void;
   error: (problem: PlaygroundStreamProblem) => void;
@@ -62,26 +65,40 @@ export async function runPlayground(
   );
 }
 
-function dispatchEvent(block: string, handlers: PlaygroundStreamHandlers) {
-  let event = '';
-  const data: string[] = [];
-  for (const line of block.split('\n')) {
-    if (line.startsWith('event:')) event = line.slice(6).trim();
-    else if (line.startsWith('data:')) data.push(line.slice(5).trim());
-  }
-  if (!event || data.length === 0) return;
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(data.join('\n'));
-  } catch {
-    return;
-  }
+function parseStreamProblem(
+  payload: Record<string, unknown>
+): PlaygroundStreamProblem {
+  return {
+    ...(typeof payload.code === 'string' ? { code: payload.code } : {}),
+    ...(typeof payload.message === 'string'
+      ? { message: payload.message }
+      : {}),
+    ...(typeof payload.status === 'number' ? { status: payload.status } : {})
+  };
+}
+
+function dispatchEvent(
+  block: string,
+  handlers: PlaygroundStreamHandlers
+): void {
+  const lines = block.split('\n');
+  const event =
+    lines
+      .filter((line) => line.startsWith('event:'))
+      .map((line) => line.slice(6).trim())
+      .at(-1) ?? '';
+  const dataLines = lines
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim());
+  if (!event || dataLines.length === 0) return;
+  const payload = parseJsonObject(dataLines.join('\n'));
+  if (!payload) return;
   if (event === 'frame' && typeof payload.data === 'string') {
     handlers.frame(payload.data);
   } else if (event === 'done') {
     handlers.done(payload as PlaygroundStreamDone);
   } else if (event === 'error') {
-    handlers.error(payload as PlaygroundStreamProblem);
+    handlers.error(parseStreamProblem(payload));
   }
 }
 

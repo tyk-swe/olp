@@ -2,6 +2,12 @@
   import type { PlaygroundState } from './playgroundState.svelte';
 
   let { playground }: { playground: PlaygroundState } = $props();
+
+  function handleSeedKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    if (!playground.simulation.isPending) void playground.explain();
+  }
 </script>
 
 <details class="dry-run">
@@ -36,7 +42,8 @@
   {/if}
   <div class="route-grid">
     <div class="form-field">
-      <label for="playground-simulate-key">Evaluate as API key</label><select
+      <label for="playground-simulate-key">Evaluate as API key</label>
+      <select
         id="playground-simulate-key"
         bind:value={playground.simulateKeyId}
         aria-describedby="simulate-key-help"
@@ -45,25 +52,23 @@
         {#each playground.apiKeys.data ?? [] as key (key.id)}
           {#if !key.revoked_at}<option value={key.id}>{key.name}</option>{/if}
         {/each}
-      </select><small id="simulate-key-help">
+      </select>
+      <small id="simulate-key-help">
         Applies that key's route allowlist and scopes to the explanation.
       </small>
     </div>
     <div class="form-field">
-      <label for="playground-simulate-seed">Seed</label><input
+      <label for="playground-simulate-seed">Seed</label>
+      <input
         id="playground-simulate-seed"
         bind:value={playground.simulateSeed}
         autocomplete="off"
         maxlength="256"
         placeholder="Any stable value"
         aria-describedby="simulate-seed-help"
-        onkeydown={(event) => {
-          // Enter would implicitly submit the composer and start a real run.
-          if (event.key !== 'Enter' || event.isComposing) return;
-          event.preventDefault();
-          if (!playground.simulation.isPending) void playground.explain();
-        }}
-      /><small id="simulate-seed-help">
+        onkeydown={handleSeedKeydown}
+      />
+      <small id="simulate-seed-help">
         Fixes weighted tie-breaks so the order is reproducible.
       </small>
     </div>

@@ -1,24 +1,17 @@
 <script lang="ts">
-  import { captureResult } from '#lib/editing/result.js';
-  import { parseRealtimeTrace, type RealtimeEventRow } from './realtimeTrace';
+  import Callout from '#lib/components/Callout.svelte';
+  import {
+    parseRealtimeTrace,
+    type RealtimeTraceResult
+  } from './realtimeTrace';
 
   let source = $state(
     '[\n  {"type":"input_audio_buffer.speech_started","audio_start_ms":120},\n  {"type":"input_audio_buffer.speech_stopped","audio_end_ms":840},\n  {"type":"response.created"},\n  {"type":"response.done"}\n]'
   );
-  let rows = $state<RealtimeEventRow[]>([]);
-  let error = $state('');
+  let trace = $state<RealtimeTraceResult | null>(null);
 
   function inspect() {
-    error = '';
-    const result = captureResult(() => parseRealtimeTrace(source));
-    if (result.ok) rows = result.value;
-    else {
-      rows = [];
-      error =
-        result.error instanceof Error
-          ? result.error.message
-          : 'Invalid event trace.';
-    }
+    trace = parseRealtimeTrace(source);
   }
 </script>
 
@@ -43,10 +36,11 @@
   <button class="button button-secondary" type="button" onclick={inspect}>
     Inspect event order locally
   </button>
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
-  {#if rows.length}
+  {#if trace && !trace.ok}
+    <Callout tone="danger">{trace.error}</Callout>
+  {:else if trace && trace.value.length}
     <ol aria-label="Realtime event sequence">
-      {#each rows as row (row.position)}
+      {#each trace.value as row (row.position)}
         <li>
           <strong>{row.position + 1}. {row.phase}</strong>
           <span>Role: {row.role}</span>

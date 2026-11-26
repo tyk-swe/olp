@@ -6,31 +6,58 @@ import {
   vectorRows
 } from './operationPresentation';
 
+function expectedVector(
+  overrides: Partial<{
+    position: number;
+    inputIndex: string;
+    layout: string;
+    dtype: string;
+    logicalShape: string;
+    storageShape: string;
+  }>
+) {
+  return {
+    position: 0,
+    inputIndex: 'Not reported',
+    layout: 'Dense array',
+    dtype: 'Not declared',
+    logicalShape: 'Unknown',
+    storageShape: 'Unknown',
+    ...overrides
+  };
+}
+
 describe('embedding result presentation', () => {
   it.each([
     {
       name: 'dense values',
       response: { data: [{ index: 3, embedding: [0.1, 0.2] }] },
       request: { output_dtype: 'float', dimensions: 2 },
-      row: {
+      row: expectedVector({
         inputIndex: '3',
-        layout: 'Dense array',
         dtype: 'float',
         logicalShape: '2',
         storageShape: '2 stored values'
-      }
+      })
+    },
+    {
+      name: 'empty dense vector',
+      response: { data: [{ embedding: [] }] },
+      request: undefined,
+      row: expectedVector({
+        logicalShape: '0',
+        storageShape: '0 stored values'
+      })
     },
     {
       name: 'sparse coordinates',
       response: { predictions: [{ values: [{ index: 4, value: 0.5 }] }] },
       request: { dimensions: 12 },
-      row: {
-        inputIndex: 'Not reported',
+      row: expectedVector({
         layout: 'Sparse coordinates',
-        dtype: 'Not declared',
         logicalShape: '12',
         storageShape: '1 index/value pairs'
-      }
+      })
     },
     {
       name: 'token vectors',
@@ -43,56 +70,86 @@ describe('embedding result presentation', () => {
         ]
       },
       request: {},
-      row: {
-        inputIndex: 'Not reported',
+      row: expectedVector({
         layout: 'Multivector',
-        dtype: 'Not declared',
         logicalShape: '2 × 2',
         storageShape: '2 token vectors · 4 stored values'
-      }
+      })
     },
     {
       name: 'packed bytes',
       response: { data: [{ embedding: [1, 2] }] },
       request: { output_dtype: 'ubinary' },
-      row: {
-        inputIndex: 'Not reported',
+      row: expectedVector({
         layout: 'Packed binary',
         dtype: 'ubinary',
         logicalShape: '16',
         storageShape: '2 stored bytes'
-      }
+      })
     },
     {
       name: 'encoded float storage',
       response: ['AQIDBA=='],
       request: { output_dtype: 'float' },
-      row: {
-        inputIndex: 'Not reported',
+      row: expectedVector({
         layout: 'Base64 storage',
         dtype: 'float',
         logicalShape: '1',
         storageShape: '4 stored bytes'
-      }
+      })
     },
     {
       name: 'invalid encoded storage',
       response: ['not base64'],
       request: { output_dtype: 'float' },
-      row: {
-        inputIndex: 'Not reported',
+      row: expectedVector({
         layout: 'Base64 storage',
         dtype: 'float',
-        logicalShape: 'Unknown',
         storageShape: 'Opaque encoded value'
-      }
+      })
     }
   ])(
     'describes $name without changing the native result',
     ({ response, request, row }) => {
-      expect(vectorRows(response, request)).toEqual([{ position: 0, ...row }]);
+      expect(vectorRows(response, request)).toEqual([row]);
     }
   );
+
+  it('describes each typed embedding separately and uses the requested dimension', () => {
+    const response = {
+      embeddings: {
+        float: [[0.1, 0.2]],
+        ubinary: [[255]],
+        base64: ['AQI=']
+      }
+    };
+
+    expect(vectorRows(response, { output_dimension: 7 })).toEqual([
+      expectedVector({
+        position: 0,
+        inputIndex: '0',
+        dtype: 'float',
+        logicalShape: '7',
+        storageShape: '2 stored values'
+      }),
+      expectedVector({
+        position: 1,
+        inputIndex: '0',
+        layout: 'Packed binary',
+        dtype: 'ubinary',
+        logicalShape: '7',
+        storageShape: '1 stored byte'
+      }),
+      expectedVector({
+        position: 2,
+        inputIndex: '0',
+        layout: 'Base64 storage',
+        dtype: 'base64',
+        logicalShape: '7',
+        storageShape: '2 stored bytes'
+      })
+    ]);
+  });
 
   it('does not report an empty dense vector as sparse coordinates', () => {
     expect(vectorRows({ data: [{ embedding: [] }] })).toEqual([
@@ -107,43 +164,6 @@ describe('embedding result presentation', () => {
     ]);
   });
 
-  it('describes each typed embedding separately and uses the requested dimension', () => {
-    const response = {
-      embeddings: {
-        float: [[0.1, 0.2]],
-        ubinary: [[255]],
-        base64: ['AQI=']
-      }
-    };
-
-    expect(vectorRows(response, { output_dimension: 7 })).toEqual([
-      {
-        position: 0,
-        inputIndex: '0',
-        layout: 'Dense array',
-        dtype: 'float',
-        logicalShape: '7',
-        storageShape: '2 stored values'
-      },
-      {
-        position: 1,
-        inputIndex: '0',
-        layout: 'Packed binary',
-        dtype: 'ubinary',
-        logicalShape: '7',
-        storageShape: '1 stored byte'
-      },
-      {
-        position: 2,
-        inputIndex: '0',
-        layout: 'Base64 storage',
-        dtype: 'base64',
-        logicalShape: '7',
-        storageShape: '2 stored bytes'
-      }
-    ]);
-  });
-
   it('bounds the number of rows shown for large responses', () => {
     const response = Array.from({ length: 140 }, (_, index) => ({
       index,
@@ -153,6 +173,12 @@ describe('embedding result presentation', () => {
     const rows = vectorRows(response);
     expect(rows).toHaveLength(128);
     expect(rows.at(-1)?.inputIndex).toBe('127');
+
+    const typedRows = vectorRows({
+      embeddings: { float: Array.from({ length: 140 }, (_, index) => [index]) }
+    });
+    expect(typedRows).toHaveLength(128);
+    expect(typedRows.at(-1)?.inputIndex).toBe('127');
   });
 });
 

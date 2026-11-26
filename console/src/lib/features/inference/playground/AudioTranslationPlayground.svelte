@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { useAction } from '#lib/editing/action.svelte.js';
-  const runAction = useAction();
-  import { errorMessage } from '#lib/management/http.js';
-  import { onDestroy } from 'svelte';
+  import PublicKeyField from './PublicKeyField.svelte';
   import {
     translateAudio,
     translationFormats,
     type TranslationFormat
   } from './audioTranslation';
+  import { usePublicClientAction } from './usePublicClientAction.svelte';
 
   let { route }: { route: string } = $props();
   let key = $state('');
@@ -16,38 +14,28 @@
   let temperature = $state('');
   let format = $state<TranslationFormat>('json');
   let result = $state<string | null>(null);
-  let abort: AbortController | null = null;
+  const client = usePublicClientAction('Audio translation failed.', () => {
+    key = '';
+  });
 
   async function run(event: SubmitEvent) {
     event.preventDefault();
     const file = files?.[0];
-    if (runAction.busy || !file) return;
+    if (client.busy || !file) return;
     result = null;
-    abort = new AbortController();
-    const controller = abort;
-    await runAction.run(
-      () =>
-        translateAudio(
-          route,
-          key,
-          file,
-          prompt,
-          temperature,
-          format,
-          controller.signal
-        ),
-      (value, current) => {
-        if (!current()) return;
+    await client.run(
+      (signal) =>
+        translateAudio(route, key, file, prompt, temperature, format, signal),
+      (value) => {
         result = value;
-      },
-      { failure: (reason) => errorMessage(reason, 'Audio translation failed.') }
+      }
     );
-    if (abort === controller) abort = null;
   }
-  onDestroy(() => {
-    abort?.abort();
-    key = '';
-  });
+
+  function clear() {
+    client.reset();
+    result = null;
+  }
 </script>
 
 <form class="card audio-translation" onsubmit={run}>
@@ -57,17 +45,11 @@
     The original file is uploaded to the selected route. Empty optional controls
     use the provider's defaults.
   </p>
-  <div class="form-field">
-    <label for="translation-key">Inference API key</label>
-    <input
-      id="translation-key"
-      type="password"
-      bind:value={key}
-      autocomplete="off"
-      spellcheck="false"
-    />
-    <small>Held only in this tab and sent to the same-origin public API.</small>
-  </div>
+  <PublicKeyField
+    id="translation-key"
+    help="Held only in this tab and sent to the same-origin public API."
+    bind:value={key}
+  />
   <div class="form-field">
     <label for="translation-file">Audio file</label>
     <input
@@ -102,29 +84,27 @@
     <button
       class="button button-primary"
       type="submit"
-      disabled={runAction.busy || !key || !route || !files?.[0]}
+      disabled={client.busy || !key || !route || !files?.[0]}
     >
-      {runAction.busy ? 'Translating…' : 'Run billable translation'}
+      {client.busy ? 'Translating…' : 'Run billable translation'}
     </button>
-    {#if runAction.busy}<button
+    {#if client.busy}<button
         class="button button-secondary"
         type="button"
-        onclick={() => abort?.abort()}
+        onclick={client.cancel}
       >
         Cancel delivery
       </button>{/if}
     {#if result !== null}<button
         class="button button-secondary"
         type="button"
-        onclick={() => {
-          result = null;
-        }}
+        onclick={clear}
       >
         Clear result
       </button>{/if}
   </div>
-  {#if runAction.error}<p role="alert" class="inline-problem">
-      {runAction.error}
+  {#if client.error}<p role="alert" class="inline-problem">
+      {client.error}
     </p>{/if}
   {#if result !== null}<pre
       aria-label="Native audio translation result">{result}</pre>{/if}

@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   parseMaxOutputTokens,
   parseResponseSchema,
+  parseRoutingPreferences,
   parseTemperature,
   parseTools
 } from './validation';
 
 describe('playground tool input', () => {
   it('omits blank input and keeps only the supported fields from valid tools', () => {
-    expect(parseTools('  ')).toBeUndefined();
+    expect(parseTools('  ')).toEqual({ ok: true, value: undefined });
     expect(
       parseTools(
         JSON.stringify([
@@ -24,17 +25,20 @@ describe('playground tool input', () => {
           { name: 'time', input_schema: { type: 'object' } }
         ])
       )
-    ).toEqual([
-      {
-        name: 'weather',
-        description: 'Look up conditions',
-        input_schema: {
-          type: 'object',
-          properties: { city: { type: 'string' } }
-        }
-      },
-      { name: 'time', input_schema: { type: 'object' } }
-    ]);
+    ).toEqual({
+      ok: true,
+      value: [
+        {
+          name: 'weather',
+          description: 'Look up conditions',
+          input_schema: {
+            type: 'object',
+            properties: { city: { type: 'string' } }
+          }
+        },
+        { name: 'time', input_schema: { type: 'object' } }
+      ]
+    });
   });
 
   it.each([
@@ -45,13 +49,18 @@ describe('playground tool input', () => {
     '[{"name":"tool"}]',
     '[{"name":"tool","description":3,"input_schema":{}}]'
   ])('rejects an invalid tools value %s', (value) => {
-    expect(() => parseTools(value)).toThrow(
-      'Tools must be an array of name, description, and input_schema objects.'
-    );
+    expect(parseTools(value)).toEqual({
+      ok: false,
+      error:
+        'Tools must be an array of name, description, and input_schema objects.'
+    });
   });
 
   it('explains malformed JSON', () => {
-    expect(() => parseTools('[invalid')).toThrow('Enter valid JSON.');
+    expect(parseTools('[invalid')).toEqual({
+      ok: false,
+      error: 'Enter valid JSON.'
+    });
   });
 });
 
@@ -62,26 +71,33 @@ describe('playground structured responses', () => {
       properties: { answer: { type: 'string' } }
     };
 
-    expect(parseResponseSchema('  ')).toBeUndefined();
+    expect(parseResponseSchema('  ')).toEqual({ ok: true, value: undefined });
     expect(parseResponseSchema(JSON.stringify(schema))).toEqual({
-      type: 'json_schema',
-      name: 'playground_response',
-      strict: true,
-      schema
+      ok: true,
+      value: {
+        type: 'json_schema',
+        name: 'playground_response',
+        strict: true,
+        schema
+      }
     });
   });
 
   it.each(['null', '[]', 'true', '42', '"object"'])(
     'rejects a schema that is not an object: %s',
     (value) => {
-      expect(() => parseResponseSchema(value)).toThrow(
-        'The response schema must be a JSON object.'
-      );
+      expect(parseResponseSchema(value)).toEqual({
+        ok: false,
+        error: 'The response schema must be a JSON object.'
+      });
     }
   );
 
   it('explains malformed schema JSON', () => {
-    expect(() => parseResponseSchema('{invalid')).toThrow('Enter valid JSON.');
+    expect(parseResponseSchema('{invalid')).toEqual({
+      ok: false,
+      error: 'Enter valid JSON.'
+    });
   });
 });
 
@@ -91,15 +107,16 @@ describe('playground generation limits', () => {
     [' 1.25 ', 1.25],
     ['2', 2]
   ])('accepts a temperature of %s', (value, expected) => {
-    expect(parseTemperature(value)).toBe(expected);
+    expect(parseTemperature(value)).toEqual({ ok: true, value: expected });
   });
 
   it.each(['-0.01', '2.01', 'NaN', 'Infinity'])(
     'rejects an invalid temperature %s',
     (value) => {
-      expect(() => parseTemperature(value)).toThrow(
-        'Temperature must be from 0 through 2.'
-      );
+      expect(parseTemperature(value)).toEqual({
+        ok: false,
+        error: 'Temperature must be from 0 through 2.'
+      });
     }
   );
 
@@ -109,20 +126,40 @@ describe('playground generation limits', () => {
     ['1000001', 1000001],
     ['1048576', 1048576]
   ])('accepts an output token limit of %s', (value, expected) => {
-    expect(parseMaxOutputTokens(value)).toBe(expected);
+    expect(parseMaxOutputTokens(value)).toEqual({ ok: true, value: expected });
   });
 
   it.each(['0', '-1', '1.5', '1048577', 'Infinity', 'invalid'])(
     'rejects an invalid output token limit %s',
     (value) => {
-      expect(() => parseMaxOutputTokens(value)).toThrow(
-        'Maximum output tokens must be from 1 through 1048576.'
-      );
+      expect(parseMaxOutputTokens(value)).toEqual({
+        ok: false,
+        error: 'Maximum output tokens must be from 1 through 1048576.'
+      });
     }
   );
 
   it('omits blank optional limits', () => {
-    expect(parseTemperature('  ')).toBeUndefined();
-    expect(parseMaxOutputTokens('  ')).toBeUndefined();
+    expect(parseTemperature('  ')).toEqual({ ok: true, value: undefined });
+    expect(parseMaxOutputTokens('  ')).toEqual({ ok: true, value: undefined });
   });
+});
+
+describe('playground routing preferences', () => {
+  it('accepts a JSON object', () => {
+    expect(parseRoutingPreferences('{"ignore":["provider-a"]}')).toEqual({
+      ok: true,
+      value: { ignore: ['provider-a'] }
+    });
+  });
+
+  it.each(['{invalid', '[]', 'null', '"text"'])(
+    'rejects non-object routing preferences %s',
+    (value) => {
+      expect(parseRoutingPreferences(value)).toEqual({
+        ok: false,
+        error: 'Routing preferences must be a JSON object.'
+      });
+    }
+  );
 });

@@ -1,14 +1,13 @@
 <script lang="ts">
-  import { useAction } from '#lib/editing/action.svelte.js';
-  const runAction = useAction();
-  import { onDestroy } from 'svelte';
   import OperationResult from './OperationResult.svelte';
+  import PublicKeyField from './PublicKeyField.svelte';
   import {
     nativeDialects,
     runNativeOperation,
     type NativeOperation,
     type NativeOperationResult
   } from './nativeOperation';
+  import { usePublicClientAction } from './usePublicClientAction.svelte';
 
   let {
     route,
@@ -26,62 +25,30 @@
     if (!options.includes(dialect)) dialect = options[0] ?? '';
   });
   let key = $state('');
-  let busy = $state(false);
-  let error = $state('');
   let result = $state<NativeOperationResult | null>(null);
-  let abort: AbortController | null = null;
-  let epoch = 0;
+  const client = usePublicClientAction(
+    'The public native operation could not be completed.',
+    () => {
+      key = '';
+    }
+  );
 
   async function run() {
-    if (busy) return;
-    epoch += 1;
-    const owner = epoch;
-    error = '';
+    if (client.busy) return;
     result = null;
-    busy = true;
-    abort = new AbortController();
-    const controller = abort;
-    await runAction.run(
-      () =>
-        runNativeOperation(
-          operation,
-          dialect,
-          route,
-          key,
-          requestText,
-          controller.signal
-        ),
-      (value, current) => {
-        if (owner === epoch && current()) result = value;
-      },
-      {
-        failure: (reason) =>
-          reason instanceof Error
-            ? reason.message
-            : 'The public native operation could not be completed.'
+    await client.run(
+      (signal) =>
+        runNativeOperation(operation, dialect, route, key, requestText, signal),
+      (value) => {
+        result = value;
       }
     );
-    if (owner === epoch) {
-      error = runAction.error;
-      busy = false;
-      if (abort === controller) abort = null;
-    }
   }
 
   function clear() {
-    epoch += 1;
-    abort?.abort();
-    abort = null;
-    busy = false;
-    error = '';
+    client.reset();
     result = null;
   }
-
-  onDestroy(() => {
-    epoch += 1;
-    abort?.abort();
-    key = '';
-  });
 </script>
 
 <section class="card native-client" aria-labelledby="native-client-heading">
@@ -103,21 +70,11 @@
           </option>{/each}
       </select>
     </div>
-    <div class="form-field">
-      <label for="native-operation-key">Inference API key</label>
-      <input
-        id="native-operation-key"
-        type="password"
-        bind:value={key}
-        autocomplete="off"
-        spellcheck="false"
-        aria-describedby="native-operation-key-help"
-      />
-      <small id="native-operation-key-help">
-        Held only in this tab and sent to the same-origin public API. The key
-        must allow this route and inference operation.
-      </small>
-    </div>
+    <PublicKeyField
+      id="native-operation-key"
+      help="Held only in this tab and sent to the same-origin public API. The key must allow this route and inference operation."
+      bind:value={key}
+    />
   </div>
   {#if operation === 'embeddings'}
     <p class="scope-note">
@@ -131,14 +88,14 @@
       type="button"
       class="button button-primary"
       onclick={run}
-      disabled={busy || !key || !route || !dialect}
+      disabled={client.busy || !key || !route || !dialect}
     >
-      {busy ? 'Running public operation…' : 'Run billable operation'}
+      {client.busy ? 'Running public operation…' : 'Run billable operation'}
     </button>
-    {#if busy}<button
+    {#if client.busy}<button
         type="button"
         class="button button-secondary"
-        onclick={() => abort?.abort()}
+        onclick={client.cancel}
       >
         Cancel delivery
       </button>{/if}
@@ -150,7 +107,9 @@
         Clear result
       </button>{/if}
   </div>
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if client.error}<p class="inline-problem" role="alert">
+      {client.error}
+    </p>{/if}
   {#if result}
     <OperationResult
       {operation}
