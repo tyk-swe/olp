@@ -73,7 +73,7 @@ func diffRawFields(doc map[string]json.RawMessage, known ...string) map[string]j
 }
 
 func mergeRawFields(base, extra map[string]json.RawMessage) map[string]json.RawMessage {
-	merged := make(map[string]json.RawMessage, len(base)+len(extra))
+	merged := map[string]json.RawMessage{}
 	maps.Copy(merged, base)
 	for name, value := range extra {
 		if _, exists := merged[name]; !exists {
@@ -95,7 +95,7 @@ func encodeRequestJSON[T any](payload T, extra map[string]json.RawMessage) ([]by
 	if err != nil {
 		return nil, invalidMedia("The media request could not be encoded.")
 	}
-	merged := make(map[string]json.RawMessage, len(fields)+len(extra))
+	merged := map[string]json.RawMessage{}
 	maps.Copy(merged, fields)
 	for name, value := range extra {
 		if _, exists := merged[name]; exists {
