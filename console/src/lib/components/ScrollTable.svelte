@@ -52,6 +52,7 @@
 <style>
   .scroll-table {
     position: relative;
+    min-width: 0;
   }
 
   .scroll-table::before,

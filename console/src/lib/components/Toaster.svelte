@@ -8,10 +8,10 @@
     <div
       class="toast {toast.tone}"
       role="group"
-      onpointerenter={() => toasts.pause(toast.id)}
-      onpointerleave={() => toasts.resume(toast.id)}
-      onfocusin={() => toasts.pause(toast.id)}
-      onfocusout={() => toasts.resume(toast.id)}
+      onpointerenter={() => toasts.hold(toast.id, 'pointer')}
+      onpointerleave={() => toasts.release(toast.id, 'pointer')}
+      onfocusin={() => toasts.hold(toast.id, 'focus')}
+      onfocusout={() => toasts.release(toast.id, 'focus')}
     >
       <p>{toast.message}</p>
       <button

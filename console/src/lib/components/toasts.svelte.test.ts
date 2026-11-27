@@ -32,6 +32,26 @@ it('renders toast tones and pauses auto-dismiss on pointer hover', () => {
   expect(toasts.items).toHaveLength(0);
 });
 
+it('keeps a focused toast open after the pointer leaves it', () => {
+  vi.useFakeTimers();
+  const { target } = mountWithState(Toaster);
+
+  notify('Key rotated');
+  flushSync();
+  const toast = target.querySelector<HTMLElement>('.toast');
+  toast?.dispatchEvent(new Event('focusin', { bubbles: true }));
+  toast?.dispatchEvent(new Event('pointerenter', { bubbles: true }));
+  toast?.dispatchEvent(new Event('pointerleave', { bubbles: true }));
+  vi.advanceTimersByTime(10_000);
+  flushSync();
+  expect(toasts.items).toHaveLength(1);
+
+  toast?.dispatchEvent(new Event('focusout', { bubbles: true }));
+  vi.advanceTimersByTime(5000);
+  flushSync();
+  expect(toasts.items).toHaveLength(0);
+});
+
 it('dismisses a toast when its close button is clicked', () => {
   const { target } = mountWithState(Toaster);
 

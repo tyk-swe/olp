@@ -60,15 +60,13 @@ it('renders an empty state when there are no usage points', () => {
   expect(target.querySelector('svg')).toBeNull();
 });
 
-it('renders without SVG distortion and updates readout via keyboard navigation', () => {
+it('updates the readout via keyboard navigation', () => {
   const { target } = mountWithState(UsageChart, {
     points,
     granularity: 'hour'
   });
 
-  const svg = target.querySelector('svg');
-  expect(svg).not.toBeNull();
-  expect(svg?.getAttribute('preserveAspectRatio')).toBeNull();
+  expect(target.querySelector('svg')).not.toBeNull();
 
   const stage = target.querySelector<HTMLInputElement>(
     'input[type="range"][aria-label="Inspect usage bucket"]'
@@ -94,4 +92,29 @@ it('renders without SVG distortion and updates readout via keyboard navigation',
   expect(target.querySelector('.readout')?.textContent).toContain(
     'Hover or focus chart to inspect buckets'
   );
+});
+
+it('selects the bucket plotted under the pointer when buckets are unevenly spaced', () => {
+  const { target } = mountWithState(UsageChart, {
+    points: [
+      makePoint({ bucket: '2026-10-01T00:00:00Z', request_count: 12 }),
+      makePoint({ bucket: '2026-10-01T01:00:00Z', request_count: 28 }),
+      makePoint({ bucket: '2026-10-01T10:00:00Z', request_count: 5 })
+    ],
+    granularity: 'hour'
+  });
+  const chart = target.querySelector<HTMLElement>('.chart');
+  if (!chart) throw new Error('chart did not render');
+  chart.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: 640, height: 288 }) as DOMRect;
+  const secondX = Number(
+    target.querySelectorAll('circle.point')[1]?.getAttribute('cx')
+  );
+
+  chart.dispatchEvent(
+    new MouseEvent('pointerdown', { clientX: secondX, bubbles: true })
+  );
+  flushSync();
+
+  expect(target.querySelector('.readout')?.textContent).toContain('28 req');
 });

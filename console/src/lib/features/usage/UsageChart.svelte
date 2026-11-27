@@ -74,9 +74,7 @@
 
   function handlePointer(event: PointerEvent) {
     if (!chart.coordinates.length) return;
-    const rect = (
-      event.currentTarget as HTMLInputElement
-    ).getBoundingClientRect();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     if (rect.width <= 0) return;
     const targetX = ((event.clientX - rect.left) / rect.width) * bounds.width;
     activeIndex = nearestCoordinateIndex(chart.coordinates, targetX);
@@ -127,7 +125,14 @@
         <span class="muted">Hover or focus chart to inspect buckets</span>
       {/if}
     </div>
-    <div bind:this={chartContainer} class="chart">
+    <!-- svelte-ignore a11y_no_static_element_interactions (The range input inside the chart owns keyboard bucket selection.) -->
+    <div
+      bind:this={chartContainer}
+      class="chart"
+      onpointerdown={handlePointer}
+      onpointermove={handlePointer}
+      onpointerleave={() => (activeIndex = null)}
+    >
       <input
         class="chart-scrubber"
         type="range"
@@ -139,8 +144,6 @@
           ? `${bucketLabel(activePoint.bucket)}, ${formatCompact(activePoint.request_count)} requests`
           : 'No bucket selected'}
         oninput={(event) => (activeIndex = Number(event.currentTarget.value))}
-        onpointermove={handlePointer}
-        onpointerleave={() => (activeIndex = null)}
         onblur={() => (activeIndex = null)}
         onkeydown={handleKey}
       />
@@ -278,6 +281,7 @@
     height: 18rem;
     margin-top: 0.35rem;
     border-radius: var(--radius-control);
+    cursor: crosshair;
   }
   .chart:has(:focus-visible) {
     outline: 2px solid var(--focus);
@@ -291,7 +295,7 @@
     height: 100%;
     margin: 0;
     opacity: 0;
-    cursor: crosshair;
+    pointer-events: none;
   }
   svg {
     width: 100%;
