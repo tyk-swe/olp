@@ -116,6 +116,7 @@ func TestTransformedRerankPreservesDocumentIdentity(t *testing.T) {
 		{"omitted document", `{"index":0,"relevance_score":0.5}`, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
 				for id, provider := range snapshot.Providers {
@@ -158,6 +159,7 @@ func TestTransformedEmbeddingsRejectIncompleteVectors(t *testing.T) {
 		{"null coordinate", `{"embeddings":[{"values":[0.5,null]},{"values":[0.25,0.5]}]}`, http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 				strictEmbeddings(snapshot)
@@ -196,6 +198,7 @@ func TestEmbeddingsRejectInvalidResultIndices(t *testing.T) {
 		{"duplicate", `{"index":0,"embedding":[0.5,0]},{"index":0,"embedding":[0.25,0.5]}`, http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 				strictEmbeddings(snapshot)
@@ -247,6 +250,7 @@ func TestEmbeddingsCountTokenIDInputs(t *testing.T) {
 		{"one tokenized input", `[1024,2048]`, `{"index":0,"embedding":[0.5,0]}`, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 				strictEmbeddings(snapshot)
@@ -314,6 +318,7 @@ func TestBedrockStreamClassifiesRequestEndings(t *testing.T) {
 		{"overall timeout", ClassTimeout, "failure", "gateway_timeout", 300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
 				for id, provider := range snapshot.Providers {
@@ -431,6 +436,7 @@ func TestModerationRejectsIncompleteDecisions(t *testing.T) {
 		{"empty categories", batch, `{"flagged":false,"categories":{},"category_scores":{}},` + valid, http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
 				for id, provider := range snapshot.Providers {
@@ -484,6 +490,7 @@ func TestBraveSearchRejectsNonObjectResponses(t *testing.T) {
 		{"null web", `{"type":"search","web":null}`, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.republish(func(snapshot *routing.Snapshot, _, _ routing.Provider) {
 				for id, provider := range snapshot.Providers {

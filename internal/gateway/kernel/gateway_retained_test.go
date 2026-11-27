@@ -52,6 +52,7 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 		{"client write failure at deadline", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -478,6 +479,7 @@ func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
 		{"stored byte count", `{"adapter":"mistral","provider_file":{"bytes":-1}}`, `{"id":"file-native","bytes":10}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t, Config{})
 			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, tc.providerBody)
