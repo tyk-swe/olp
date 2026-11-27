@@ -16,14 +16,6 @@ import (
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
-func requireRetrievalStatus(t *testing.T, res apiResult, want int) apiResult {
-	t.Helper()
-	if res.status != want {
-		t.Fatalf("HTTP %d, want %d: %s", res.status, want, res.body)
-	}
-	return res
-}
-
 func decodeRetrievalBinding(t *testing.T, body []byte) retrieval.Binding {
 	t.Helper()
 	var binding retrieval.Binding
@@ -71,19 +63,19 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	managerID := uuid.NewString()
 	outsiderID := uuid.NewString()
 
-	execLatencyFixture(t, pool, `INSERT INTO olp.providers (id,name,kind,state,configuration,etag,slots_etag,created_by,project_id)
+	mustExec(t, pool, `INSERT INTO olp.providers (id,name,kind,state,configuration,etag,slots_etag,created_by,project_id)
 		VALUES ($1::uuid,'bedrock-kb','bedrock','active','{}',$1::uuid,$1::uuid,$2,$3)`, bedrockProvider, f.ownerID, f.projectID)
 	targetsJSON := fmt.Sprintf(`[{"id":%q,"provider_id":%q,"provider_model":%q}]`, targetID, bedrockProvider, kbResource)
-	execLatencyFixture(t, pool, `INSERT INTO olp.route_drafts (id,slug,state,operations,overall_timeout_ms,max_attempts,targets,etag,created_by,project_id,fidelity)
+	mustExec(t, pool, `INSERT INTO olp.route_drafts (id,slug,state,operations,overall_timeout_ms,max_attempts,targets,etag,created_by,project_id,fidelity)
 		VALUES ($1::uuid,$2,'draft','["retrieval"]'::jsonb,5000,1,$3::jsonb,$1::uuid,$4,$5,'{"mode":"strict"}'::jsonb)`,
 		uuid.NewString(), routeSlug, targetsJSON, f.ownerID, f.projectID)
-	execLatencyFixture(t, pool, `INSERT INTO olp.projects (id,name,etag,created_by) VALUES ($1::uuid,'other-project',$1::uuid,$2)`, otherProject, f.ownerID)
-	execLatencyFixture(t, pool, `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
+	mustExec(t, pool, `INSERT INTO olp.projects (id,name,etag,created_by) VALUES ($1::uuid,'other-project',$1::uuid,$2)`, otherProject, f.ownerID)
+	mustExec(t, pool, `INSERT INTO olp.api_keys (id,lookup_id,digest,name,created_by,policy,etag,project_id)
 		VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Other key',$2,'{}',$1::uuid,$3)`, otherKey, f.ownerID, otherProject)
 	for _, user := range []struct{ id, project string }{{managerID, f.projectID}, {outsiderID, otherProject}} {
-		execLatencyFixture(t, pool, `INSERT INTO olp.users (id,email,display_name,role,access_scope,etag)
+		mustExec(t, pool, `INSERT INTO olp.users (id,email,display_name,role,access_scope,etag)
 			VALUES ($1::uuid,$1::text||'@example.test','Manager','operator','assigned',$1::uuid)`, user.id)
-		execLatencyFixture(t, pool, `INSERT INTO olp.project_members (project_id,user_id,role,added_by) VALUES ($1,$2,'manager',$3)`,
+		mustExec(t, pool, `INSERT INTO olp.project_members (project_id,user_id,role,added_by) VALUES ($1,$2,'manager',$3)`,
 			user.project, user.id, f.ownerID)
 	}
 
@@ -113,14 +105,14 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 		return string(raw)
 	}
 
-	requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", payload("bad-key", f.projectID, true, []string{otherKey}, retrieval.Fields{})), http.StatusUnprocessableEntity)
-	requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", payload("bad-fields", f.projectID, true, []string{f.keyID}, retrieval.Fields{Text: "content"})), http.StatusUnprocessableEntity)
-	requireRetrievalStatus(t, outsider("POST", "/api/v1/retrieval-bindings", "", payload("outsider", f.projectID, true, []string{f.keyID}, retrieval.Fields{})), http.StatusNotFound)
+	expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", payload("bad-key", f.projectID, true, []string{otherKey}, retrieval.Fields{})), http.StatusUnprocessableEntity)
+	expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", payload("bad-fields", f.projectID, true, []string{f.keyID}, retrieval.Fields{Text: "content"})), http.StatusUnprocessableEntity)
+	expectStatus(t, "", outsider.call(t, "POST", "/api/v1/retrieval-bindings", "", payload("outsider", f.projectID, true, []string{f.keyID}, retrieval.Fields{})), http.StatusNotFound)
 
 	const createKey = "retrieval-create-1"
 	seqBeforeCreate := authoritySeq()
 	createBody := payload("Primary KB", f.projectID, false, []string{f.keyID, f.keyID}, retrieval.Fields{Metadata: map[string]string{"tenant": "tenant_id"}})
-	created := requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
+	created := expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
 	binding := decodeRetrievalBinding(t, created.body)
 	if created.location != "/api/v1/retrieval-bindings/"+binding.ID || binding.ProviderID != bedrockProvider || binding.Revision != 1 || len(binding.KeyGrants) != 1 || binding.KeyGrants[0] != f.keyID {
 		t.Fatalf("unexpected created binding: loc=%q binding=%+v", created.location, binding)
@@ -129,37 +121,37 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 		t.Fatalf("authority sequence did not advance on create")
 	}
 
-	replayed := requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
+	replayed := expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
 	if replayed.etag != created.etag || decodeRetrievalBinding(t, replayed.body).ID != binding.ID {
 		t.Fatalf("idempotent replay diverged: %+v vs %+v", replayed, created)
 	}
-	requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", payload("Different KB", f.projectID, false, []string{f.keyID}, retrieval.Fields{}), createKey), http.StatusConflict)
-	requireRetrievalStatus(t, manager("POST", "/api/v1/retrieval-bindings", "", createBody), http.StatusConflict)
+	expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", payload("Different KB", f.projectID, false, []string{f.keyID}, retrieval.Fields{}), createKey), http.StatusConflict)
+	expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", createBody), http.StatusConflict)
 
-	listed := requireRetrievalStatus(t, manager("GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
+	listed := expectStatus(t, "", manager.call(t, "GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
 	if !slices.ContainsFunc(decodeRetrievalPage(t, listed.body), func(b retrieval.Binding) bool { return b.ID == binding.ID }) {
 		t.Fatalf("manager list omitted binding %s: %s", binding.ID, listed.body)
 	}
-	outsiderList := requireRetrievalStatus(t, outsider("GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
+	outsiderList := expectStatus(t, "", outsider.call(t, "GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
 	if slices.ContainsFunc(decodeRetrievalPage(t, outsiderList.body), func(b retrieval.Binding) bool { return b.ID == binding.ID }) {
 		t.Fatalf("outsider list exposed foreign binding: %s", outsiderList.body)
 	}
 	path := "/api/v1/retrieval-bindings/" + binding.ID
-	got := requireRetrievalStatus(t, manager("GET", path, "", ""), http.StatusOK)
+	got := expectStatus(t, "", manager.call(t, "GET", path, "", ""), http.StatusOK)
 	if got.etag != created.etag {
 		t.Fatalf("GET ETag %q != created %q", got.etag, created.etag)
 	}
-	requireRetrievalStatus(t, outsider("GET", path, "", ""), http.StatusNotFound)
+	expectStatus(t, "", outsider.call(t, "GET", path, "", ""), http.StatusNotFound)
 
 	updateBody := payload("Primary KB v2", f.projectID, true, []string{f.keyID}, retrieval.Fields{Metadata: map[string]string{"tenant": "tenant_id"}})
-	requireRetrievalStatus(t, manager("PUT", path, "", updateBody), http.StatusPreconditionRequired)
-	requireRetrievalStatus(t, manager("PUT", path, `"`+uuid.NewString()+`"`, updateBody), http.StatusPreconditionFailed)
-	requireRetrievalStatus(t, manager("PUT", path, created.etag, payload("Moved", otherProject, true, nil, retrieval.Fields{})), http.StatusUnprocessableEntity)
-	requireRetrievalStatus(t, outsider("PUT", path, created.etag, updateBody), http.StatusNotFound)
+	expectStatus(t, "", manager.call(t, "PUT", path, "", updateBody), http.StatusPreconditionRequired)
+	expectStatus(t, "", manager.call(t, "PUT", path, `"`+uuid.NewString()+`"`, updateBody), http.StatusPreconditionFailed)
+	expectStatus(t, "", manager.call(t, "PUT", path, created.etag, payload("Moved", otherProject, true, nil, retrieval.Fields{})), http.StatusUnprocessableEntity)
+	expectStatus(t, "", outsider.call(t, "PUT", path, created.etag, updateBody), http.StatusNotFound)
 
 	const updateKey = "retrieval-update-1"
 	seqBeforeUpdate := authoritySeq()
-	updated := requireRetrievalStatus(t, manager("PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
+	updated := expectStatus(t, "", manager.call(t, "PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
 	bindingV2 := decodeRetrievalBinding(t, updated.body)
 	if bindingV2.Revision != 2 || !bindingV2.Enabled || bindingV2.Name != "Primary KB v2" || updated.etag == created.etag {
 		t.Fatalf("unexpected updated binding: etag=%q binding=%+v", updated.etag, bindingV2)
@@ -167,33 +159,33 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	if authoritySeq() <= seqBeforeUpdate {
 		t.Fatalf("authority sequence did not advance on update")
 	}
-	replayedUpdate := requireRetrievalStatus(t, manager("PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
+	replayedUpdate := expectStatus(t, "", manager.call(t, "PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
 	if replayedUpdate.etag != updated.etag || decodeRetrievalBinding(t, replayedUpdate.body).RevisionID != bindingV2.RevisionID {
 		t.Fatalf("idempotent update replay diverged")
 	}
 
-	rev1 := requireRetrievalStatus(t, manager("GET", path+"/revisions/"+binding.RevisionID, "", ""), http.StatusOK)
-	rev2 := requireRetrievalStatus(t, manager("GET", path+"/revisions/"+bindingV2.RevisionID, "", ""), http.StatusOK)
+	rev1 := expectStatus(t, "", manager.call(t, "GET", path+"/revisions/"+binding.RevisionID, "", ""), http.StatusOK)
+	rev2 := expectStatus(t, "", manager.call(t, "GET", path+"/revisions/"+bindingV2.RevisionID, "", ""), http.StatusOK)
 	if n, definition := decodeRetrievalRevision(t, rev1.body); n != 1 || definition.Name != "Primary KB" {
 		t.Fatalf("unexpected first revision: revision=%d definition=%+v", n, definition)
 	}
 	if n, definition := decodeRetrievalRevision(t, rev2.body); n != 2 || definition.Name != "Primary KB v2" {
 		t.Fatalf("unexpected second revision: revision=%d definition=%+v", n, definition)
 	}
-	requireRetrievalStatus(t, outsider("GET", path+"/revisions/"+binding.RevisionID, "", ""), http.StatusNotFound)
+	expectStatus(t, "", outsider.call(t, "GET", path+"/revisions/"+binding.RevisionID, "", ""), http.StatusNotFound)
 
 	seqBeforeRetire := authoritySeq()
-	requireRetrievalStatus(t, manager("DELETE", path, created.etag, ""), http.StatusPreconditionFailed)
-	requireRetrievalStatus(t, manager("DELETE", path, updated.etag, ""), http.StatusNoContent)
+	expectStatus(t, "", manager.call(t, "DELETE", path, created.etag, ""), http.StatusPreconditionFailed)
+	expectStatus(t, "", manager.call(t, "DELETE", path, updated.etag, ""), http.StatusNoContent)
 	if authoritySeq() <= seqBeforeRetire {
 		t.Fatalf("authority sequence did not advance on retire")
 	}
-	afterRetireList := requireRetrievalStatus(t, manager("GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
+	afterRetireList := expectStatus(t, "", manager.call(t, "GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)
 	if slices.ContainsFunc(decodeRetrievalPage(t, afterRetireList.body), func(b retrieval.Binding) bool { return b.ID == binding.ID }) {
 		t.Fatalf("retired binding still returned in list: %s", afterRetireList.body)
 	}
-	retiredDetail := requireRetrievalStatus(t, manager("GET", path, "", ""), http.StatusOK)
-	requireRetrievalStatus(t, manager("PUT", path, retiredDetail.etag, updateBody), http.StatusConflict)
+	retiredDetail := expectStatus(t, "", manager.call(t, "GET", path, "", ""), http.StatusOK)
+	expectStatus(t, "", manager.call(t, "PUT", path, retiredDetail.etag, updateBody), http.StatusConflict)
 
 	var auditCount int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE resource_type='retrieval_binding' AND resource_id=$1 AND action IN ('retrieval_binding.create','retrieval_binding.update','retrieval_binding.retire')`, binding.ID).Scan(&auditCount); err != nil || auditCount != 3 {

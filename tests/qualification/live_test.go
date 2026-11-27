@@ -63,15 +63,7 @@ func newLiveReportWriter(t *testing.T) *reportWriter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path == "" {
-		return &reportWriter{out: os.Stdout}
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = file.Close() })
-	return &reportWriter{out: file}
+	return openReportWriter(t, path)
 }
 
 func (s *service) liveList(c *harness.Caller, path string) ([]map[string]any, error) {
@@ -100,19 +92,6 @@ func (s *service) liveCreate(c *harness.Caller, path string, body any, headers m
 		}
 	}
 	return out, nil
-}
-
-func pollLive(window, interval time.Duration, ready func() bool) bool {
-	deadline := time.Now().Add(window)
-	for {
-		if ready() {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(interval)
-	}
 }
 
 func allowanceWindows(account map[string]any) []any {
@@ -248,7 +227,7 @@ func (s *service) liveChecks(owner, consumer *harness.Caller, project, slug, pri
 	status := s.liveInference(consumer, slug, l)
 	inference := runCheck{Name: "inference", Result: "fail", Detail: fmt.Sprintf("journey returned status %d", status)}
 	if status == http.StatusOK {
-		settled := pollLive(15*time.Second, time.Second, func() bool {
+		settled := pollUntil(15*time.Second, time.Second, func() bool {
 			return slices.ContainsFunc(s.liveAttempts(owner, project), func(attempt map[string]any) bool {
 				return slices.Contains(accountIDs, fmt.Sprint(attempt["account_id"])) && attempt["upstream_status"] == float64(http.StatusOK)
 			})
@@ -280,7 +259,7 @@ func (s *service) liveAllowanceCheck(owner *harness.Caller, project, primary str
 		account, ok := s.liveAccount(owner, project, primary)
 		return ok && len(allowanceWindows(account)) > 0
 	}
-	if pollLive(20*time.Second, time.Second, observed) {
+	if pollUntil(20*time.Second, time.Second, observed) {
 		return runCheck{Name: "allowance", Result: "pass", Detail: "allowance windows observed after inference"}
 	}
 	return runCheck{Name: "allowance", Result: "no_signal", Detail: "no passive allowance observed; active reads are not qualified"}
@@ -376,9 +355,8 @@ func TestCodeModeLiveQualificationLanes(t *testing.T) {
 	keyID := key["id"].(string)
 
 	for _, spec := range specs {
-		lane := spec
-		complete(runLiveLane(t, lane, func() []runCheck {
-			return s.liveJourney(owner, consumer, project, ownerID, keyID, lane)
+		complete(runLiveLane(t, spec, func() []runCheck {
+			return s.liveJourney(owner, consumer, project, ownerID, keyID, spec)
 		}))
 	}
 }

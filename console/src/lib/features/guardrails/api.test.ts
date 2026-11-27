@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   activatePolicy,
@@ -7,8 +7,6 @@ import {
   savePolicy,
   type Policy
 } from './api';
-
-afterEach(() => vi.unstubAllGlobals());
 
 const policy: Policy = {
   id: 'policy-id',

@@ -1,13 +1,17 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { useQueryClient } from '@tanstack/svelte-query';
+import { describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { ApiProblem } from '#lib/management/http.js';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import {
+  findButton,
+  mountState,
+  mountWithState,
+  setFieldValue
+} from '#test/mount.js';
 import AccountEditor from './AccountEditor.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
 import { confirmAction } from '#lib/components/confirm.js';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('#lib/components/confirm.js', () => ({ confirmAction: vi.fn() }));
 
@@ -31,17 +35,10 @@ function renderSubmission(overrides: Partial<Options> = {}) {
     onCancel,
     ...overrides
   };
-  const ready = vi.fn(
-    (state: ReturnType<typeof useResourceSubmission<Input>>) => state
-  );
-  const component = mount(StateHarness, {
-    target: document.createElement('div'),
-    props: { setup: () => ready(useResourceSubmission(options)) }
-  });
-  onTestFinished(() => unmount(component));
-  flushSync();
+  const mounted = mountState(() => useResourceSubmission(options));
   return {
-    state: ready.mock.results[0].value,
+    state: mounted.value,
+    unmount: mounted.unmount,
     persist,
     onDraftChange,
     onSaved,
@@ -52,8 +49,6 @@ function renderSubmission(overrides: Partial<Options> = {}) {
 function submit(): SubmitEvent {
   return new SubmitEvent('submit', { cancelable: true });
 }
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe('resource submissions', () => {
   it('shows failed account provider lookups and allows cancelling without enabling save', async () => {
@@ -75,33 +70,24 @@ describe('resource submissions', () => {
       vi.fn(() => true)
     );
     const onCancel = vi.fn();
-    const target = document.createElement('div');
-    const setup = vi.fn(() => {
-      useQueryClient().setDefaultOptions({ queries: { retry: false } });
-      return mount(AccountEditor, {
-        target,
-        context: getAllContexts(),
-        props: {
-          projectId: 'project',
-          allowed: true,
-          onDraftChange: vi.fn(),
-          onSaved: vi.fn(async () => undefined),
-          onCancel
-        }
-      });
-    });
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
-    flushSync();
+    const { target } = mountWithState(
+      AccountEditor,
+      {
+        projectId: 'project',
+        allowed: true,
+        onDraftChange: vi.fn(),
+        onSaved: vi.fn(async () => undefined),
+        onCancel
+      },
+      {
+        configureClient: (client) =>
+          client.setDefaultOptions({ queries: { retry: false } })
+      }
+    );
     const provider = target.querySelector<HTMLSelectElement>('#code-provider');
     await eventually(() => expect(provider?.options.length).toBe(2));
     if (!provider) throw new Error('Provider selection is missing');
-    provider.value = 'provider';
-    provider.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
+    setFieldValue(provider, 'provider', 'change');
     expect(
       target.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled
     ).toBe(true);
@@ -113,9 +99,7 @@ describe('resource submissions', () => {
     expect(
       target.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled
     ).toBe(true);
-    const cancel = [...target.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Cancel'
-    );
+    const cancel = findButton(target, 'Cancel');
     expect(cancel?.disabled).toBe(false);
     cancel?.click();
     expect(onCancel).toHaveBeenCalledOnce();
@@ -241,31 +225,11 @@ describe('resource submissions', () => {
 
   it('ignores a completed request after the editor is closed', async () => {
     const pending = Promise.withResolvers<void>();
-    const onSaved = vi.fn<Options['onSaved']>(async () => undefined);
-    const onDraftChange = vi.fn<Options['onDraftChange']>();
-    const ready = vi.fn(
-      (state: ReturnType<typeof useResourceSubmission<Input>>) => state
-    );
-    const component = mount(StateHarness, {
-      target: document.createElement('div'),
-      props: {
-        setup: () =>
-          ready(
-            useResourceSubmission({
-              allowed: () => true,
-              creating: () => true,
-              build: () => ({ name: 'Example' }),
-              persist: () => pending.promise,
-              onDraftChange,
-              onSaved,
-              onCancel: () => undefined
-            })
-          )
-      }
+    const { state, unmount, onSaved, onDraftChange } = renderSubmission({
+      persist: () => pending.promise
     });
-    flushSync();
-    const saving = ready.mock.results[0].value.save(submit());
-    await unmount(component);
+    const saving = state.save(submit());
+    await unmount();
     pending.resolve();
     await saving;
 

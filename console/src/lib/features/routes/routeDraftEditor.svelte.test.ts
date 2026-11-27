@@ -1,14 +1,14 @@
 import { templateFor } from '#lib/features/inference/playground/templates.js';
 import type { OperationDialect } from './inspectionDialects';
 import RoutePublishPanel from './RoutePublishPanel.svelte';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountState } from '#test/mount.js';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';
 import { RouteDraftEditorState } from './routeDraftEditor.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));
 
@@ -126,21 +126,12 @@ function serveEditor(dialects: OperationDialect[] = []) {
 }
 
 async function editor(): Promise<RouteDraftEditorState> {
-  const ready = vi.fn((state: RouteDraftEditorState) => state);
-  const component = mount(StateHarness, {
-    target: document.createElement('div'),
-    props: { setup: () => ready(new RouteDraftEditorState(() => draft.id)) }
-  });
-  onTestFinished(() => unmount(component));
-  flushSync();
-  const state = ready.mock.results[0].value;
+  const { value: state } = mountState(
+    () => new RouteDraftEditorState(() => draft.id)
+  );
   await eventually(() => expect(state.slug).toBe(draft.slug));
   return state;
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe('route draft editor', () => {
   it('hydrates a draft and maintains operation choices', async () => {

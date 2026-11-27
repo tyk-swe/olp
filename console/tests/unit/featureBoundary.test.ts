@@ -130,8 +130,8 @@ new RuleTester({ languageOptions: { parser: tseslint.parser } }).run(
       {
         filename: inLib('features/exports/api.ts'),
         options: ordered,
-        code: "import { a } from '#lib/session/test/transport.js'; import { b } from './test/fixture.js'; import { c } from './api.test.js'; import { d } from '../../../../tests/unit/support/eventually.js'; export { a, b, c, d };",
-        errors: [...test, ...test, ...test, ...test]
+        code: "import { a } from '#lib/session/test/transport.js'; import { b } from './test/fixture.js'; import { c } from './api.test.js'; import { d } from '../../../../tests/unit/support/eventually.js'; import { e } from '#test/eventually.js'; export { a, b, c, d, e };",
+        errors: [...test, ...test, ...test, ...test, ...test]
       },
       {
         filename: path.resolve('src/routes/exports/+page.ts'),

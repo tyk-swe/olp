@@ -1,9 +1,9 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, onTestFinished, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountWithState, setFieldValue } from '#test/mount.js';
 import SettingsPage from './SettingsPage.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const setting = {
   key: 'retention.usage_days',
@@ -12,8 +12,6 @@ const setting = {
   updated_at: '2026-01-01T00:00:00Z',
   updated_by: 'owner'
 };
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('rebases a draft edited during a save onto the returned etag', async () => {
   const pending = Promise.withResolvers<void>();
@@ -38,30 +36,16 @@ it('rebases a draft edited during a save onto the returned etag', async () => {
     },
     ['read', 'settings']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(SettingsPage, {
-      target,
-      props: { view: 'retention' as const },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    release.resolve();
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
+  onTestFinished(() => release.resolve());
+  const { target } = mountWithState(SettingsPage, {
+    view: 'retention' as const
   });
   const input = () => {
     const found = target.querySelector('input');
     if (!found) throw new Error('Missing setting input');
     return found;
   };
-  const edit = (value: string) => {
-    input().value = value;
-    input().dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-  };
+  const edit = (value: string) => setFieldValue(input(), value);
   const save = () => {
     const form = target.querySelector('form');
     if (!form) throw new Error('Missing setting form');
@@ -74,7 +58,6 @@ it('rebases a draft edited during a save onto the returned etag', async () => {
     [...target.querySelectorAll('button')].find((item) =>
       ['Save', 'Saving…'].includes(item.textContent?.trim() ?? '')
     );
-  flushSync();
   await eventually(() => expect(input().value).toBe('30'));
   edit('45');
   save();

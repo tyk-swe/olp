@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { ApiProblem } from '#lib/management/http.js';
 import * as api from './api';
@@ -36,8 +36,6 @@ const native: api.MCPExecutablePermission = {
   permitted: false,
   size_bytes: 4
 };
-afterEach(() => vi.unstubAllGlobals());
-
 describe('plugin HTTP contracts', () => {
   it('reads installed plugins, the reviewed index and executable inventories', async () => {
     const controller = new AbortController();

@@ -64,16 +64,7 @@ type reportWriter struct {
 
 func newReportWriter(t *testing.T) *reportWriter {
 	t.Helper()
-	path := os.Getenv("OLP_QUALIFY_REPORT")
-	if path == "" {
-		return &reportWriter{out: os.Stdout}
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = file.Close() })
-	return &reportWriter{out: file}
+	return openReportWriter(t, os.Getenv("OLP_QUALIFY_REPORT"))
 }
 
 func (w *reportWriter) emit(t *testing.T, record runRecord) {
@@ -205,11 +196,12 @@ func codexFixtureToken() (string, time.Time) {
 	return encode([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + encode(payload) + ".fixture", expires
 }
 
-func lanes() []lane {
+func lanes(t *testing.T) []lane {
+	t.Helper()
 	token, expires := codexFixtureToken()
 	identity, err := codexauth.TokenIdentity(token, time.Now())
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return []lane{
 		{
@@ -258,12 +250,13 @@ func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, netw
 		return "", "", err
 	}
 	configuration, err := json.Marshal(connection.Configuration{
-
-		Options: connection.Options{Network: network,
+		Options: connection.Options{
+			Network:           network,
 			CredentialHeaders: []string{},
 			Models:            map[string]json.RawMessage{},
 			ParameterDefaults: map[string]json.RawMessage{},
-		}, Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: spec.profile, ProfileRevision: digest, Endpoint: &address},
+		},
+		Identity: providerconfig.Identity[*string]{Kind: "plugin", AuthMode: "grant", ProfileID: spec.profile, ProfileRevision: digest, Endpoint: &address},
 	})
 	if err != nil {
 		return "", "", err
@@ -439,13 +432,11 @@ func waitForFixtureRoute(s *service, consumer *harness.Caller, slug, protocol st
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
+	if pollUntil(20*time.Second, 250*time.Millisecond, func() bool {
 		status, raw := s.Do(consumer, "POST", "/code/"+slug+"/"+path, body, nil)
-		if status == http.StatusOK && strings.Contains(string(raw), vendorAnswer) {
-			return nil
-		}
-		time.Sleep(250 * time.Millisecond)
+		return status == http.StatusOK && strings.Contains(string(raw), vendorAnswer)
+	}) {
+		return nil
 	}
 	return fmt.Errorf("published route did not become ready")
 }
@@ -484,9 +475,13 @@ func TestMissingClientReportsNoSignal(t *testing.T) {
 func TestClientVersionProbeCannotReadHarnessSecrets(t *testing.T) {
 	sentinel := "olp-qualification-sentinel-secret"
 	if os.Getenv("OLP_LIVE_SENTINEL_KEY") != sentinel {
-		harness := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestClientVersionProbeCannotReadHarnessSecrets$", "-test.count=1")
-		harness.Env = slices.Concat(os.Environ(), []string{"OLP_LIVE_SENTINEL_KEY=" + sentinel})
-		if output, err := harness.CombinedOutput(); err != nil {
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		command := exec.CommandContext(t.Context(), executable, "-test.run=^TestClientVersionProbeCannotReadHarnessSecrets$", "-test.count=1")
+		command.Env = slices.Concat(os.Environ(), []string{"OLP_LIVE_SENTINEL_KEY=" + sentinel})
+		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("%v\n%s", err, output)
 		}
 		return
@@ -503,7 +498,7 @@ func TestClientVersionProbeCannotReadHarnessSecrets(t *testing.T) {
 }
 
 func TestCodeModeQualificationLanes(t *testing.T) {
-	specs := lanes()
+	specs := lanes(t)
 	report := newLaneReport(newReportWriter(t), specs)
 	defer report.flush(t)
 
@@ -538,12 +533,11 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 		}, harness.Idempotent(), http.StatusCreated)
 		s.Want(owner, "POST", "/api/v1/code/routes/"+route["id"].(string)+"/publish", nil, harness.Idempotent(harness.ETag(route)), http.StatusOK)
 
-		lane := spec
-		record := runLane(t, lane, bridge, func(binary string) (string, bool, error) {
-			if err := waitForFixtureRoute(s, consumer, slug, lane.protocol); err != nil {
+		record := runLane(t, spec, bridge, func(binary string) (string, bool, error) {
+			if err := waitForFixtureRoute(s, consumer, slug, spec.protocol); err != nil {
 				return "", false, err
 			}
-			rawOutput, executed, err := runFixtureClient(t, lane.client.name, binary, bridge, slug, key["secret"].(string))
+			rawOutput, executed, err := runFixtureClient(t, spec.client.name, binary, bridge, slug, key["secret"].(string))
 			output := strings.ReplaceAll(rawOutput, key["secret"].(string), "[redacted]")
 			if err != nil {
 				return output, executed, err
@@ -555,10 +549,10 @@ func TestCodeModeQualificationLanes(t *testing.T) {
 		})
 		report.complete(t, record)
 		if record.Result != "pass" {
-			t.Errorf("lane %s: result %s (%s)", lane.client.name, record.Result, record.Detail)
+			t.Errorf("lane %s: result %s (%s)", spec.client.name, record.Result, record.Detail)
 		}
 		if record.Result == "pass" && !record.ClientExecuted {
-			t.Errorf("lane %s: passing fixture must execute the client", lane.client.name)
+			t.Errorf("lane %s: passing fixture must execute the client", spec.client.name)
 		}
 	}
 }

@@ -8,9 +8,11 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 )
 
+const chatGenerationFixture = `{"model":"team-model","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`
+
 func requestWithFormat(t *testing.T, format string, stream bool) *wire.Request {
 	t.Helper()
-	fields, _ := object([]byte(generationFixtures[wire.Chat]))
+	fields, _ := object([]byte(chatGenerationFixture))
 	if format != "" {
 		fields["response_format"] = json.RawMessage(format)
 	}
@@ -86,7 +88,7 @@ func TestAnthropicStructuredOutputTranslation(t *testing.T) {
 			t.Errorf("accepted %s", format)
 		}
 	}
-	fields, _ := object([]byte(generationFixtures[wire.Chat]))
+	fields, _ := object([]byte(chatGenerationFixture))
 	fields["seed"] = json.RawMessage("7")
 	r, err := Parse(wire.Chat, raw(fields), "")
 	if err != nil {

@@ -1,10 +1,11 @@
-// Generates src/lib/management/requirements.ts from the management contract: every
-// operation's security requirement, as the server enforces it, so the console
-// offers an action only when the server would admit it.
 import { readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+
+const consoleRoot = resolve(import.meta.dirname, '..');
+const repoRoot = resolve(consoleRoot, '..');
 
 const contract = JSON.parse(
-  await readFile('../management/management.json', 'utf8')
+  await readFile(join(repoRoot, 'management/management.json'), 'utf8')
 );
 const methods = ['get', 'put', 'post', 'delete', 'patch'];
 const routes = [];
@@ -20,8 +21,7 @@ for (const [path, item] of Object.entries(contract.paths)) {
       (security.length === 1 && 'bootstrapSetupToken' in security[0]);
     const alternatives = isPublic
       ? []
-      : // Consumer inference keys are not console management principals.
-        security
+      : security
           .filter((alternative) => !('apiKeyBearer' in alternative))
           .map((alternative) => {
             const kind = 'sessionCookie' in alternative ? 'user' : 'machine';
@@ -47,21 +47,19 @@ const body = routes
   )
   .join(',\n');
 await writeFile(
-  'src/lib/management/requirements.ts',
-  `// Generated from management/management.json by scripts/generate-requirements.mjs.
+  join(consoleRoot, 'src/lib/management/requirements.ts'),
+  `// Generated from management/management.json by console/scripts/generate-requirements.mjs.
 // Regenerate with \`make api\`; never edit this file.
 import type { components } from './schema';
 
 export type ManagementOperation = components['schemas']['ManagementOperation'];
 
-/** One way to satisfy a route: every operation, and installation reach when set. */
 export type Alternative = {
   readonly kind: 'user' | 'machine';
   readonly operations: readonly ManagementOperation[];
   readonly installation: boolean;
 };
 
-/** A route's security requirement; alternatives are ORed. */
 export type Requirement = {
   readonly public: boolean;
   readonly alternatives: readonly Alternative[];

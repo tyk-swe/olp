@@ -8,6 +8,17 @@ reports=$(cd "$reports" && pwd)
 scanner=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 args=(--rm -v /var/run/docker.sock:/var/run/docker.sock
   --mount "type=bind,src=$reports,dst=/reports")
+container=
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM
+  [[ -z $container ]] || docker rm -f "$container" >/dev/null 2>&1 || true
+  exit "$exit_code"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 status=0
 docker run "${args[@]}" "$scanner" image --scanners vuln --format json \
   --cache-dir /reports/cache --output /reports/runtime-vulnerabilities.json \
@@ -22,6 +33,7 @@ container=$(docker create "$image")
 mkdir -p "$reports/native-inventory"
 docker cp "$container:/usr/share/doc/openllmproxy/." "$reports/native-inventory"
 docker rm "$container" >/dev/null
+container=
 test -s "$reports/native-inventory/TIKTOKEN-LICENSE"
 test -s "$reports/native-inventory/native-link.txt"
 count=0

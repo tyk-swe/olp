@@ -3,13 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 toolchain=$(sed -n 's/^toolchain go//p' go.mod)
 grep -q "^FROM golang:$toolchain-trixie@sha256:" deploy/Dockerfile || { echo "deploy/Dockerfile must build with the go.mod toolchain go$toolchain." >&2; exit 1; }
+node_major=$(tr -d '[:space:]' < .nvmrc)
+grep -q "^FROM node:${node_major}\..*-alpine@sha256:" deploy/Dockerfile || { echo "deploy/Dockerfile must build with the .nvmrc Node.js $node_major release." >&2; exit 1; }
 package_manager=$(node -p "require('./package.json').packageManager")
 grep -qxF "RUN npm install --global $package_manager" deploy/Dockerfile || { echo "deploy/Dockerfile must install the package.json $package_manager." >&2; exit 1; }
 # GO-2026-6909 records no fixed version, yet saml v0.5.2 fixed both defects.
 # Pin the reviewed record, so a revised advisory gets reviewed again.
 # TODO: drop once https://go.dev/cl/861981 publishes the fixed version.
 reviewed_advisories='{"GO-2026-6909":"2026-11-05T22:55:15Z"}'
-# Tools are pinned independently of runtime dependencies.
 reachable=$(go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -format json ./... | jq -rs --argjson reviewed "$reviewed_advisories" '
   [.[].osv | select(. != null and $reviewed[.id] == .modified) | .id] as $accepted
   | [.[].finding | select(. != null and .trace[0].function != null and (.osv | IN($accepted[]) | not))

@@ -37,7 +37,6 @@ const challenge: Schemas['MFAChallenge'] = {
 };
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.resetAllMocks();
 });
 

@@ -1,34 +1,21 @@
-import { afterEach, assert, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { assert, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import {
+  clickButton as clickTargetButton,
+  findButton as findTargetButton,
+  mountWithState
+} from '#test/mount.js';
 import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
 import ProjectRouteGroupsPanel from './ProjectRouteGroupsPanel.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 const projectId = '00000000-0000-4000-8000-000000000010';
 
 function mountPanel(
   Panel: typeof ProjectRouteGroupsPanel | typeof ProjectLimitTemplatesPanel
 ) {
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(Panel, {
-      target,
-      props: { projectId },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-  });
-  return target;
+  return mountWithState(Panel, { projectId }, { attach: true }).target;
 }
 
 it('keeps a conflicting edit until reload and saves with the refreshed etag', async () => {
@@ -66,15 +53,8 @@ it('keeps a conflicting edit until reload and saves with the refreshed etag', as
     assert.instanceOf(field, HTMLTextAreaElement);
     return field;
   };
-  const findButton = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent.trim() === label
-    );
-  const clickButton = (label: string) => {
-    const button = findButton(label);
-    assert.instanceOf(button, HTMLButtonElement);
-    flushSync(() => button.click());
-  };
+  const findButton = (label: string) => findTargetButton(target, label);
+  const clickButton = (label: string) => clickTargetButton(target, label);
   const saveLabel = 'Save route groups';
   const alert = () => target.querySelector('[role="alert"]');
   const waitForSuccessfulSave = () =>
@@ -134,11 +114,11 @@ it('saves edits to the remaining limit template with the loaded etag', async () 
     return json(policy);
   });
   const target = mountPanel(ProjectLimitTemplatesPanel);
-  const remove = await vi.waitUntil(() =>
-    [...target.querySelectorAll('button')].find(
-      (button) => button.textContent.trim() === 'Remove template'
-    )
-  );
+  const remove = await eventually(() => {
+    const found = findTargetButton(target, 'Remove template');
+    expect(found).toBeDefined();
+    return found!;
+  });
   remove.click();
   flushSync();
 

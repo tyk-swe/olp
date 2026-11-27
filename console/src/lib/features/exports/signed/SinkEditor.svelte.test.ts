@@ -1,14 +1,12 @@
 import SinksPage from './SinksPage.svelte';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
 import SinkEditor from './SinkEditor.svelte';
 import type { Sink } from './api';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('preserves the signing credential when editing other fields and supports explicit removal', async () => {
   const writes = vi.fn<(body: unknown, etag: string | null) => void>();
@@ -33,24 +31,13 @@ it('preserves the signing credential when editing other fields and supports expl
     },
     ['read', 'settings']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(SinkEditor, {
-      target,
-      props: { current, projects: [], saved },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
+  const { target } = mountWithState(SinkEditor, {
+    current,
+    projects: [],
+    saved
   });
-  flushSync();
   const name = target.querySelectorAll('input')[0];
-  name.value = 'Renamed facts';
-  name.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  setFieldValue(name, 'Renamed facts');
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -116,19 +103,8 @@ it.each(['refresh', 'conflict'])(
       },
       ['read', 'settings']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() =>
-      mount(SinksPage, { target, context: getAllContexts() })
-    );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
-    const button = (name: string) =>
-      [...target.querySelectorAll('button')].find(
-        (item) => item.textContent?.trim() === name
-      );
+    const { target } = mountWithState(SinksPage);
+    const button = (name: string) => findButton(target, name);
     await eventually(() => expect(button('Edit')).toBeDefined());
     button('Edit')?.click();
     flushSync();
@@ -194,19 +170,8 @@ function mountSinks(operations: ManagementOperation[]) {
       ),
     operations
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(SinksPage, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (name: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === name
-    );
+  const { target } = mountWithState(SinksPage);
+  const button = (name: string) => findButton(target, name);
   return { target, button };
 }
 

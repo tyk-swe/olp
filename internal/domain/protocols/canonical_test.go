@@ -149,12 +149,6 @@ func TestGeminiSchemaTypesBecomeJSONSchemaTypes(t *testing.T) {
 	})
 }
 
-// A name written through an escape is lowered like any other, and the
-// escapes that are left in the schema are kept as they were written.
-
-// Each of Gemini's type names is lowered when it is the only one the schema
-// has to give it away.
-
 func TestMessagesToolsAndReasoningEncodeAsResponses(t *testing.T) {
 	const body = `{"model":"route","max_tokens":64,"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}],"tool_choice":{"type":"tool","name":"read_file","disable_parallel_tool_use":true},"thinking":{"type":"adaptive"},"output_config":{"effort":"high"},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-read","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":"package main"}]}]}`
 	request, err := Parse(wire.Anthropic, []byte(body), "")

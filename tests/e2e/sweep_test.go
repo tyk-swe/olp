@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -181,11 +180,7 @@ func TestManagementIsolationSweep(t *testing.T) {
 	fixture := s.seedCanary(owner, newVendor(t).URL)
 	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "isolated"}, harness.Idempotent(), http.StatusCreated)
 
-	member := s.Invite(owner, "isolated-operator@example.com", authz.RoleOperator)
-	profile := s.Want(member, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
-	userID := profile["id"].(string)
-	s.Want(owner, "PATCH", "/api/v1/users/"+userID, map[string]any{"access_scope": "assigned"}, harness.ETag(profile), http.StatusOK)
-	s.Want(owner, "PUT", "/api/v1/projects/"+project["id"].(string)+"/members/"+userID, map[string]any{"role": "manager"}, harness.ETag(project), http.StatusOK)
+	member, userID := s.assignProjectMember(owner, "isolated-operator@example.com", authz.RoleOperator, project["id"].(string), "manager")
 
 	scopes := make([]string, 0, len(authz.TokenScopes()))
 	for _, operation := range authz.TokenScopes() {
@@ -197,7 +192,7 @@ func TestManagementIsolationSweep(t *testing.T) {
 	}, harness.Idempotent(), http.StatusCreated)
 
 	callers := []*harness.Caller{
-		s.Login("isolated-operator@example.com"),
+		member,
 		{Name: "project token", Token: token["secret"].(string)},
 	}
 	for _, pattern := range secureReads(t) {
@@ -217,70 +212,63 @@ func TestManagementIsolationSweep(t *testing.T) {
 	}
 
 	t.Run("project_policy_promotion_preserves_local_state_and_rolls_back", func(t *testing.T) {
-		other := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "batch-policy"}, harness.Idempotent(), http.StatusCreated)
+		sub := s.withT(t)
+		other := sub.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "batch-policy"}, harness.Idempotent(), http.StatusCreated)
 		projectID, otherID := project["id"].(string), other["id"].(string)
 		path := "/api/v1/projects/" + projectID
-		templates := s.Want(owner, "GET", path+"/limit-templates", nil, nil, http.StatusOK)
-		s.Want(owner, "PUT", path+"/limit-templates", map[string]any{
+		templates := sub.Want(owner, "GET", path+"/limit-templates", nil, nil, http.StatusOK)
+		sub.Want(owner, "PUT", path+"/limit-templates", map[string]any{
 			"templates": map[string]any{"retained": map[string]any{"requests_per_minute": 5}},
 		}, harness.ETag(templates), http.StatusOK)
-		s.Want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		sub.Want(owner, "POST", "/api/v1/api-keys", map[string]any{
 			"name": "template-member", "scopes": []string{"inference"}, "project_id": projectID, "limit_template": "retained",
 		}, harness.Idempotent(), http.StatusCreated)
 		for index, id := range []string{projectID, otherID} {
 			policyPath := "/api/v1/projects/" + id + "/end-user-policy"
-			current := s.Want(owner, "GET", policyPath, nil, nil, http.StatusOK)
-			s.Want(owner, "PUT", policyPath, map[string]any{"policy": map[string]any{
+			current := sub.Want(owner, "GET", policyPath, nil, nil, http.StatusOK)
+			sub.Want(owner, "PUT", policyPath, map[string]any{"policy": map[string]any{
 				"defaults":  map[string]any{"requests_per_minute": 11 - index},
 				"overrides": map[string]any{strings.Repeat("a", 64): map[string]any{"requests_per_minute": 3}},
 				"blocked":   []string{strings.Repeat("b", 64)},
 			}}, harness.ETag(current), http.StatusOK)
 		}
-		live := s.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		live := sub.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
 		document := map[string]any{"api_version": "openllmproxy.dev/config/v2", "projects": []map[string]any{
 			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
 			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 11}},
 		}}
-		s.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, harness.Idempotent(), http.StatusOK)
-		liveAfter := s.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
-		promoted := s.Want(owner, "GET", "/api/v1/projects/"+otherID+"/end-user-policy", nil, nil, http.StatusOK)
-		livePolicy, err := json.Marshal(live["policy"])
-		if err != nil {
-			t.Fatal(err)
-		}
-		promotedPolicy, err := json.Marshal(promoted["policy"])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(livePolicy) != string(promotedPolicy) {
+		sub.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, harness.Idempotent(), http.StatusOK)
+		liveAfter := sub.Want(owner, "GET", path+"/end-user-policy", nil, nil, http.StatusOK)
+		promoted := sub.Want(owner, "GET", "/api/v1/projects/"+otherID+"/end-user-policy", nil, nil, http.StatusOK)
+		livePolicy := sameJSON(t, live["policy"])
+		promotedPolicy := sameJSON(t, promoted["policy"])
+		if livePolicy != promotedPolicy {
 			t.Fatalf("promoted policy = %s, live policy = %s", promotedPolicy, livePolicy)
 		}
 		invalid := map[string]any{"api_version": "openllmproxy.dev/config/v2", "projects": []map[string]any{
 			{"name": other["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}},
 			{"name": project["name"], "end_user_defaults": map[string]any{"requests_per_minute": 17}, "limit_templates": map[string]any{}},
 		}}
-		problem := s.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, harness.Idempotent(), http.StatusConflict)
+		problem := sub.Want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": invalid}, harness.Idempotent(), http.StatusConflict)
 		if problem["type"] != "https://openllmproxy.dev/problems/template_in_use" {
 			t.Fatalf("promotion did not reach the referenced-template check: %v", problem)
 		}
 		for index, id := range []string{projectID, otherID} {
-			current := s.Want(owner, "GET", "/api/v1/projects/"+id+"/end-user-policy", nil, nil, http.StatusOK)
-			currentPolicy, err := json.Marshal(current["policy"])
-			if err != nil {
-				t.Fatal(err)
-			}
+			current := sub.Want(owner, "GET", "/api/v1/projects/"+id+"/end-user-policy", nil, nil, http.StatusOK)
+			currentPolicy := sameJSON(t, current["policy"])
 			before := []map[string]any{liveAfter, promoted}[index]
-			if string(currentPolicy) != string(livePolicy) || current["etag"] != before["etag"] {
+			if currentPolicy != livePolicy || current["etag"] != before["etag"] {
 				t.Fatalf("failed promotion changed project %s policy or version: %v", id, current)
 			}
 		}
 	})
 
 	t.Run("queued_mutation_rechecks_project_membership", func(t *testing.T) {
+		sub := s.withT(t)
 		projectID := project["id"].(string)
 		path := "/api/v1/projects/" + projectID + "/end-user-policy"
-		current := s.Want(callers[0], "GET", path, nil, nil, http.StatusOK)
-		gate, err := s.Pool.Begin(t.Context())
+		current := sub.Want(callers[0], "GET", path, nil, nil, http.StatusOK)
+		gate, err := sub.Pool.Begin(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -292,15 +280,16 @@ func TestManagementIsolationSweep(t *testing.T) {
 		type response struct {
 			status int
 			raw    []byte
+			err    error
 		}
 		result := make(chan response, 1)
 		go func() {
-			status, raw := s.Do(callers[0], "PUT", path, map[string]any{"policy": nil}, harness.ETag(current))
-			result <- response{status, raw}
+			status, raw, err := sub.TryDo(callers[0], "PUT", path, map[string]any{"policy": nil}, harness.ETag(current))
+			result <- response{status, raw, err}
 		}()
-		s.Eventually("the policy mutation waiting for the concurrent membership change", 5*time.Second, func() (bool, string) {
+		sub.Eventually("the policy mutation waiting for the concurrent membership change", 5*time.Second, func() (bool, string) {
 			var blocked bool
-			err := s.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))", gatePID).Scan(&blocked)
+			err := sub.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))", gatePID).Scan(&blocked)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,22 +303,17 @@ func TestManagementIsolationSweep(t *testing.T) {
 		}
 		select {
 		case reply := <-result:
+			if reply.err != nil {
+				t.Fatal(reply.err)
+			}
 			if reply.status != http.StatusNotFound {
 				t.Fatalf("queued mutation retained revoked project authority: %s", describe(reply.status, reply.raw))
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("queued mutation did not finish after the membership change")
 		}
-		after := s.Want(owner, "GET", path, nil, nil, http.StatusOK)
-		beforeJSON, err := json.Marshal(current)
-		if err != nil {
-			t.Fatal(err)
-		}
-		afterJSON, err := json.Marshal(after)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(beforeJSON) != string(afterJSON) {
+		after := sub.Want(owner, "GET", path, nil, nil, http.StatusOK)
+		if beforeJSON, afterJSON := sameJSON(t, current), sameJSON(t, after); beforeJSON != afterJSON {
 			t.Fatalf("denied mutation changed the project policy: before %s, after %s", beforeJSON, afterJSON)
 		}
 	})

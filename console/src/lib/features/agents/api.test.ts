@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { ApiProblem } from '#lib/management/http.js';
 import * as api from './api';
@@ -37,8 +37,6 @@ const server: api.MCPServer = {
   per_key_max_concurrency: 8,
   catalog: { protocol_version: '2025-11-25', digest: 'digest-a', tools: [] }
 };
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe('publication HTTP contracts', () => {
   it.each(['toolsets', 'agents', 'prompts'] as const)(

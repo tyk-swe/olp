@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// AWS's prompt-caching example reports the cache write beside inputTokens.
-
 func TestBedrockCacheUsageValidation(t *testing.T) {
 	for _, tc := range []struct{ name, usage string }{
 		{"unknown TTL", `{"inputTokens":100,"outputTokens":2,"cacheWriteInputTokens":30,"cacheDetails":[{"ttl":"10m","inputTokens":5}]}`},

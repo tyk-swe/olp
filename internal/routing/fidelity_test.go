@@ -3,6 +3,8 @@ package routing
 import (
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -26,14 +28,19 @@ func fidelitySnapshot(t *testing.T) Snapshot {
 
 func TestStrictSnapshotRequiresCompiledProfiles(t *testing.T) {
 	snapshot := fidelitySnapshot(t)
-	for slug, route := range snapshot.Routes {
+	slugs := slices.Sorted(maps.Keys(snapshot.Routes))
+	if len(slugs) == 0 {
+		t.Fatal("routing fixture has no routes")
+	}
+	for _, slug := range slugs {
+		candidate := snapshot.Clone()
+		route := candidate.Routes[slug]
 		route.Fidelity = RouteFidelity{Mode: FidelityStrict}
-		snapshot.Routes[slug] = route
-		err := snapshot.Compile()
+		candidate.Routes[slug] = route
+		err := candidate.Compile()
 		var incompatible *oif.Incompatibility
 		if !errors.As(err, &incompatible) || incompatible.Code != "target_capability" || incompatible.Requirement != "explicit_profile" {
-			t.Fatal("strict snapshot installed without explicit compiled profiles", err)
+			t.Fatalf("strict snapshot for route %q installed without explicit compiled profiles: %v", slug, err)
 		}
-		break
 	}
 }

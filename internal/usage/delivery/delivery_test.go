@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/usage/completeness"
@@ -122,18 +123,39 @@ func TestCheckpointLossCoalescesConcurrentLosses(t *testing.T) {
 }
 
 func TestCheckpointLossCoalescesFailedCheckpoints(t *testing.T) {
-	const losses = 16
-	fake := &fakeLossCheckpoint{err: errors.New("checkpoint unavailable"), delay: 20 * time.Millisecond}
-	d := newTestDelivery(fake)
+	synctest.Test(t, func(t *testing.T) {
+		const losses = 16
+		fake := &fakeLossCheckpoint{
+			started: make(chan struct{}),
+			release: make(chan struct{}),
+			err:     errors.New("checkpoint unavailable"),
+			delay:   20 * time.Millisecond,
+		}
+		d := newTestDelivery(fake)
 
-	start := time.Now()
-	rejectConcurrently(d, losses)
-	elapsed := time.Since(start)
+		start := time.Now()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			rejectConcurrently(d, losses)
+		}()
+		<-fake.started
+		synctest.Wait()
+		if got := d.Snapshot().Dropped; got != losses {
+			t.Fatalf("got %d dropped losses counted, want %d", got, losses)
+		}
+		close(fake.release)
+		<-done
+		elapsed := time.Since(start)
 
-	if got := fake.calls.Load(); got > 3 {
-		t.Fatalf("got %d failed loss checkpoints for %d concurrent losses, want a coalesced few", got, losses)
-	}
-	if elapsed >= losses*20*time.Millisecond {
-		t.Fatalf("got %d concurrent failed losses taking %s, want far less than one checkpoint wait each", losses, elapsed)
-	}
+		if got := fake.maximum.Load(); got != 1 {
+			t.Fatalf("got %d concurrent failed loss checkpoints, want 1", got)
+		}
+		if got := fake.calls.Load(); got > 3 {
+			t.Fatalf("got %d failed loss checkpoints for %d concurrent losses, want a coalesced few", got, losses)
+		}
+		if elapsed >= losses*20*time.Millisecond {
+			t.Fatalf("got %d concurrent failed losses taking %s, want far less than one checkpoint wait each", losses, elapsed)
+		}
+	})
 }

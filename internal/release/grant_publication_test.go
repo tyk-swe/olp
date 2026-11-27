@@ -29,15 +29,6 @@ func publishGrantCandidate(t *testing.T, m *Manager, candidate *releaseCandidate
 	return installed
 }
 
-// No database fallback is configured: publishing the pin alone cannot
-// satisfy this read or expose its generation to pre-dispatch gating.
-
-// The candidate's coherent read preceded a rotation poll. Preparing a
-// release can be slow; its older seed must not undo that live progress.
-
-// The next poll prepares the still-desired release against the new base
-// and the primary's current generation instead of keeping retired secrets.
-
 func TestReleasePublicationNotifiesOnlyAdvancedGrantGenerations(t *testing.T) {
 	m := credentialManager(t, time.Now())
 	notified := make(chan string, 3)

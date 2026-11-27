@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/platform/concurrency"
 	"github.com/tyk-swe/olp/internal/platform/panics"
@@ -83,7 +84,11 @@ func TestListenerLogsHandlerPanicsAsStructuredErrors(t *testing.T) {
 	}
 	listener := listeners[0]
 	go listener.server.Serve(listener.socket)
-	t.Cleanup(func() { _ = listener.server.Shutdown(t.Context()) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = listener.server.Shutdown(ctx)
+	})
 	if response, err := http.Get("http://" + listener.socket.Addr().String()); err == nil {
 		response.Body.Close()
 		t.Fatalf("a panicking handler answered %d", response.StatusCode)

@@ -17,7 +17,21 @@ export function serve(
     },
     csrf_token: 'fixture-csrf'
   });
-  vi.stubGlobal('fetch', handler);
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+    handler(
+      input instanceof Request
+        ? input
+        : new Request(
+            new URL(
+              String(input),
+              typeof window !== 'undefined'
+                ? window.location.origin
+                : 'http://localhost'
+            ),
+            init
+          )
+    )
+  );
 }
 
 export function json<T>(body: T, status = 200) {

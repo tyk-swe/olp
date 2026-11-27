@@ -2,30 +2,12 @@ import { useAction, useMutation } from './action.svelte';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import type { AuthenticatedSession } from '#lib/session/state.js';
 import { expect, it, vi } from 'vitest';
-import { mount, unmount } from 'svelte';
-import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (cause: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-function harness(setup: () => void) {
-  return mount(StateHarness, { target: document.body, props: { setup } });
-}
+import { mountState } from '#test/mount.js';
 
 it('replays an unanswered submission with its request ID but never reuses it after a completed send', async () => {
-  let mutation!: ReturnType<typeof useMutation>;
-  const component = harness(() => {
-    mutation = useMutation();
-  });
+  const { value: mutation } = mountState(() => useMutation(), { attach: true });
   const requestIds: string[] = [];
-  const lost = deferred<number>();
+  const lost = Promise.withResolvers<number>();
   const replay = mutation.submit('write', (_input, requestId) => {
     requestIds.push(requestId);
     return lost.promise;
@@ -33,7 +15,7 @@ it('replays an unanswered submission with its request ID but never reuses it aft
   lost.reject(new TypeError('network lost'));
   expect(await replay).toBe(false);
 
-  const recovered = deferred<number>();
+  const recovered = Promise.withResolvers<number>();
   const retried = mutation.submit('write', (_input, requestId) => {
     requestIds.push(requestId);
     return recovered.promise;
@@ -42,7 +24,7 @@ it('replays an unanswered submission with its request ID but never reuses it aft
   expect(await retried).toBe(true);
   expect(requestIds[0]).toBe(requestIds[1]);
 
-  const settled = deferred<number>();
+  const settled = Promise.withResolvers<number>();
   const next = mutation.submit(
     'write',
     (_input, requestId) => {
@@ -56,7 +38,7 @@ it('replays an unanswered submission with its request ID but never reuses it aft
   settled.resolve(2);
   expect(await next).toBe(false);
 
-  const fresh = deferred<number>();
+  const fresh = Promise.withResolvers<number>();
   const again = mutation.submit('write', (_input, requestId) => {
     requestIds.push(requestId);
     return fresh.promise;
@@ -65,11 +47,9 @@ it('replays an unanswered submission with its request ID but never reuses it aft
   expect(await again).toBe(true);
   expect(requestIds[3]).not.toBe(requestIds[2]);
   expect(requestIds[3]).not.toBe(requestIds[0]);
-  await unmount(component);
 });
 
 it('retires a pending send with the old principal so its late resolution neither accepts nor clears the new principal’s write', async () => {
-  let action!: ReturnType<typeof useAction>;
   const retire: { current?: () => void } = {};
   vi.spyOn(authLifecycle, 'onPrincipalChange').mockImplementation(
     (listener) => {
@@ -77,10 +57,8 @@ it('retires a pending send with the old principal so its late resolution neither
       return () => {};
     }
   );
-  const component = harness(() => {
-    action = useAction();
-  });
-  const stale = deferred<string>();
+  const { value: action } = mountState(() => useAction(), { attach: true });
+  const stale = Promise.withResolvers<string>();
   const staleAccept = vi.fn();
   const staleRun = action.run(() => stale.promise, staleAccept);
   expect(action.busy).toBe(true);
@@ -88,7 +66,7 @@ it('retires a pending send with the old principal so its late resolution neither
   retire.current?.();
   expect(action.busy).toBe(false);
 
-  const fresh = deferred<string>();
+  const fresh = Promise.withResolvers<string>();
   const freshAccept = vi.fn();
   const freshRun = action.run(() => fresh.promise, freshAccept);
   expect(action.busy).toBe(true);
@@ -102,14 +80,13 @@ it('retires a pending send with the old principal so its late resolution neither
   expect(await freshRun).toBe(true);
   expect(freshAccept).toHaveBeenCalledOnce();
   expect(action.busy).toBe(false);
-  await unmount(component);
 });
 
 it('keeps an authentication-scoped action busy through its own transition and stops accepting after unmount', async () => {
-  let action!: ReturnType<typeof useAction>;
-  const component = harness(() => {
-    action = useAction(undefined, 'authentication');
+  const mounted = mountState(() => useAction(undefined, 'authentication'), {
+    attach: true
   });
+  const action = mounted.value;
   const session: AuthenticatedSession = {
     user: {
       id: 'owner',
@@ -121,7 +98,7 @@ it('keeps an authentication-scoped action busy through its own transition and st
     },
     csrf_token: 'token'
   };
-  const first = deferred<string>();
+  const first = Promise.withResolvers<string>();
   const accept = vi.fn();
   const firstRun = action.run(() => first.promise, accept);
   expect(action.busy).toBe(true);
@@ -134,10 +111,10 @@ it('keeps an authentication-scoped action busy through its own transition and st
   expect(accept).toHaveBeenCalledOnce();
   expect(action.busy).toBe(false);
 
-  const second = deferred<string>();
+  const second = Promise.withResolvers<string>();
   const secondAccept = vi.fn();
   const secondRun = action.run(() => second.promise, secondAccept);
-  await unmount(component);
+  await mounted.unmount();
   second.resolve('too late');
   expect(await secondRun).toBe(false);
   expect(secondAccept).not.toHaveBeenCalled();

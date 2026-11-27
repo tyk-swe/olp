@@ -5,7 +5,7 @@ import { clearCsrfToken, getCsrfToken } from './csrf';
 import { AuthenticationLifecycle } from './lifecycle';
 import { SESSION_FRESHNESS_MS } from './sessionFreshness';
 import type { AuthenticatedSession } from './state';
-import { eventually } from '../../../tests/unit/support/eventually.js';
+import { eventually } from '#test/eventually.js';
 
 const alice: AuthenticatedSession = {
   user: {

@@ -237,9 +237,6 @@ func TestLatencyStrategyOrdersProvidersByMeasuredLatency(t *testing.T) {
 	}
 }
 
-// plan answers each decision's outcome by credential slot, or by provider
-// for a target with no slot to try: its attempt, or its reason.
-
 func TestPublishedRoutingOwnsConfigurationAndReturnedValues(t *testing.T) {
 	snapshot, slug, ids := planningFixture()
 	provider := snapshot.Providers[ids[0]]

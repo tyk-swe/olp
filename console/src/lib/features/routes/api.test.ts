@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   createRouteDraft,
@@ -9,8 +9,6 @@ import {
   type CreateRouteDraftInput,
   type RouteDraftValidation
 } from './api';
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe('route management API', () => {
   it('loads a draft page using its cursor and exposes the next page', async () => {

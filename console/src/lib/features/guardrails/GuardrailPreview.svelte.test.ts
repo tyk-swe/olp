@@ -1,10 +1,10 @@
-import { expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountWithState } from '#test/mount.js';
 import GuardrailPreview from './GuardrailPreview.svelte';
 import type { PreviewEntry } from './api';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const notice =
   'This preview shows only guardrails you can view. Full-policy compatibility is not shown.';
@@ -179,19 +179,9 @@ async function mountPreview(
     },
     ['read']
   );
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(GuardrailPreview, { target, context: getAllContexts() })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-    vi.unstubAllGlobals();
+  const { target } = mountWithState(GuardrailPreview, undefined, {
+    attach: true
   });
-  flushSync();
   const result = () => {
     const region = target.querySelector('[aria-label="Preview result"]');
     if (!region) throw new Error('Missing preview result');

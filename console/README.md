@@ -23,6 +23,8 @@ Run from the repository root after setup:
 | Command                    | Purpose                                                       |
 | -------------------------- | ------------------------------------------------------------- |
 | `make check-console`       | Generate types and check formatting, Svelte types, and ESLint |
+| `make test-unit-console`   | Run Vitest `unit` and `svelte` projects plus script tests     |
+| `make test-e2e-browser`    | Run Playwright browser journeys against a built console       |
 | `pnpm --dir console build` | Static assets                                                 |
 
 Management requests use the generated `openapi-fetch` client. Update
@@ -35,10 +37,10 @@ repository-wide commands.
 - `apiClient` lives in `#lib/session/client.ts`, which gives the management
   transport its session authentication, and is imported only by feature api
   modules (plus the session and branding api modules and tests). A slice with
-  one API module uses `api.ts`; a slice with several uses an `api/` folder with
-  one file per domain (`api/<domain>.ts`). Api modules hold the API-call
-  functions and the schema-derived types they return; pure helpers stay in the
-  slice's domain modules.
+  one API module uses `api.ts`; larger slices split their API modules by domain
+  and register those modules in `eslint.config.mjs`. Api modules hold the
+  API-call functions and the schema-derived types they return; pure helpers
+  stay in the slice's domain modules.
 - Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
   `ensureOk(fetched)` from `#lib/management/http.js`.
 - Every query key comes from the slice's `*Keys.ts` module.
@@ -117,7 +119,7 @@ first five, in `import` and `export` statements, dynamic imports and inline
 - A feature imports another feature only through that feature's `index.ts`.
   Add the export there instead of importing one of its files.
 - Nothing under `src/lib` imports from `src/routes`.
-- Only a test file imports a `*.test.ts` file, a `test/` folder or
+- Only a test file imports a `*.test.ts` file, a `test/` folder, `#test/*`, or
   `console/tests/`. Test files are exempt from these rules, so code that
   production needs moves out of them.
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into
@@ -125,13 +127,6 @@ first five, in `import` and `export` statements, dynamic imports and inline
 - The `Idempotency-Key` and `If-Match` header names appear only in
   `src/lib/management/`.
 - A `.svelte` file has no `try` block. See "Writes" below.
-
-Components that broke the size rule or the `try` rule before those rules
-existed are listed in `eslint-legacy.json`, and the other six rules have no
-exemptions. The lists only shrink: `scripts/check-exemptions.sh` fails
-`make check-console` when a list has an entry the default branch does not. Fix
-a new violation instead of listing it, and remove a file from its list in the
-change that fixes it.
 
 ### Shared layers
 
@@ -224,5 +219,6 @@ Keep text readable on hover, preserve its wording and avoid gradients behind cop
 
 ## Testing
 
-See the [testing guide](../tests/README.md) for the console unit project
-and focused runs.
+See the [testing guide](../tests/README.md) for the console `unit` and `svelte`
+Vitest projects, Playwright browser journeys, and focused runs. Shared Vitest
+helpers in `tests/unit/support/` are imported through the `#test/*` alias.

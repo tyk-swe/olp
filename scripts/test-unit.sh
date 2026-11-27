@@ -4,15 +4,29 @@ cd "$(dirname "$0")/.."
 source scripts/lib/test.sh
 
 console_tests() {
-  pnpm --dir console test --project unit --project svelte &&
-    node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs scripts/dev.test.mjs
+  local script_tests=()
+  shopt -s nullglob
+  script_tests=(scripts/*.test.mjs)
+  shopt -u nullglob
+  pnpm --dir console test --project unit --project svelte "$@" &&
+    node --test "${script_tests[@]}"
 }
 
 case ${1:-} in
-  go) go_suite 'unit go' 30 -vet=off -timeout=60s ./... ;;
-  console) timed_suite 'unit console' 30 console_tests ;;
+  go)
+    shift
+    if [[ $# -eq 0 ]]; then
+      go_suite 'unit go' 30 -vet=off -timeout=60s ./...
+    else
+      go_suite 'unit go' 30 -vet=off -timeout=60s "$@"
+    fi
+    ;;
+  console)
+    shift
+    timed_suite 'unit console' 30 console_tests "$@"
+    ;;
   *)
-    printf 'usage: %s go|console\n' "$0" >&2
+    printf 'usage: %s go|console [runner arguments]\n' "$0" >&2
     exit 2
     ;;
 esac

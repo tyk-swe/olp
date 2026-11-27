@@ -1,8 +1,9 @@
+import type { Page } from '@playwright/test';
 import { expect, owner, test } from './journey';
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-async function signIn(page: import('@playwright/test').Page) {
+async function signIn(page: Page) {
   await page.getByLabel('Email').fill(owner.email);
   await page.getByLabel('Password', { exact: true }).fill(owner.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -31,8 +32,12 @@ test('a bookmark opens the destination overview behind its own login', async ({
     page.getByRole('heading', { name: 'API keys', exact: true })
   ).toBeVisible();
 
-  const { port } = new URL(page.url());
-  const destination = new URL(`http://localhost:${port}`);
+  const current = new URL(page.url());
+  const alternateHost =
+    current.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1';
+  const destination = new URL(
+    `${current.protocol}//${alternateHost}${current.port ? `:${current.port}` : ''}`
+  );
   const sidebar = page.getByRole('complementary');
   await sidebar.getByLabel(/Choose installation/).click();
   await sidebar.getByLabel('Bookmark name').fill('Destination');
@@ -56,26 +61,45 @@ test('installation branding restyles the sign-in page for signed-out visitors', 
 }) => {
   await page.goto('/settings/general');
   await signIn(page);
-  await page.getByLabel('Installation name').fill('Harbor Proxy');
-  await page.getByLabel('Brand color hex').fill('#0f766e');
-  await page.getByRole('button', { name: 'Save identity' }).click();
-  await expect(page.getByText('Installation branding saved.')).toBeVisible();
-  await page.mouse.move(0, 0);
-  await expect(page.getByRole('button', { name: 'Save identity' })).toHaveCSS(
-    'background-color',
-    'rgb(15, 118, 110)'
-  );
+  const nameInput = page.getByLabel('Installation name');
+  const colorInput = page.getByLabel('Brand color hex');
+  const saveButton = page.getByRole('button', { name: 'Save identity' });
+  await expect(nameInput).toBeEnabled();
+  const originalName = await nameInput.inputValue();
+  const originalColor = await colorInput.inputValue();
 
-  const visitor = await browser.newPage({
-    storageState: { cookies: [], origins: [] }
-  });
-  await visitor.goto('/login');
-  await expect(
-    visitor.getByText('Sign in to manage Harbor Proxy.')
-  ).toBeVisible();
-  await expect(visitor).toHaveTitle(/· Harbor Proxy$/);
-  await expect(
-    visitor.getByRole('button', { name: 'Sign in', exact: true })
-  ).toHaveCSS('background-color', 'rgb(15, 118, 110)');
-  await visitor.close();
+  try {
+    await nameInput.fill('Harbor Proxy');
+    await colorInput.fill('#0f766e');
+    await saveButton.click();
+    await expect(page.getByText('Installation branding saved.')).toBeVisible();
+    await page.mouse.move(0, 0);
+    await expect(saveButton).toHaveCSS('background-color', 'rgb(15, 118, 110)');
+
+    const visitor = await browser.newPage({
+      storageState: { cookies: [], origins: [] }
+    });
+    try {
+      await visitor.goto('/login');
+      await expect(
+        visitor.getByText('Sign in to manage Harbor Proxy.')
+      ).toBeVisible();
+      await expect(visitor).toHaveTitle(/· Harbor Proxy$/);
+      await expect(
+        visitor.getByRole('button', { name: 'Sign in', exact: true })
+      ).toHaveCSS('background-color', 'rgb(15, 118, 110)');
+    } finally {
+      await visitor.close();
+    }
+  } finally {
+    await nameInput.fill(originalName);
+    await colorInput.fill(originalColor);
+    const restored = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/v1/branding') &&
+        response.request().method() === 'PUT'
+    );
+    await saveButton.click();
+    await restored;
+  }
 });

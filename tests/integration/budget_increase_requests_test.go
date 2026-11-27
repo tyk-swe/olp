@@ -31,10 +31,10 @@ type budgetRequestBody struct {
 type budgetRequestFixture struct {
 	pool                                                           *pgxpool.Pool
 	ownerID, requesterOneID, requesterTwoID, managerID, outsiderID string
-	owner, requesterOne, requesterTwo, manager, outsider           notificationCaller
+	owner, requesterOne, requesterTwo, manager, outsider           *managementClient
 }
 
-func budgetRequestCaller(t *testing.T, pool *pgxpool.Pool, userID string) notificationCaller {
+func budgetRequestCaller(t *testing.T, pool *pgxpool.Pool, userID string) *managementClient {
 	t.Helper()
 	return managementHTTPAs(t, pool, userID, func(mux *http.ServeMux, server *access.Server) {
 		budgets.NewAPI(server).Register(mux)
@@ -95,14 +95,6 @@ func addBudgetRequestMember(t *testing.T, pool *pgxpool.Pool, project, user, rol
 	}
 }
 
-func expectBudgetRequestStatus(t *testing.T, step string, got apiResult, status int) apiResult {
-	t.Helper()
-	if got.status != status {
-		t.Fatalf("%s: HTTP %d, want %d: %s", step, got.status, status, got.body)
-	}
-	return got
-}
-
 func decodeBudgetRequest(t *testing.T, result apiResult) budgetRequestBody {
 	t.Helper()
 	var body budgetRequestBody
@@ -122,10 +114,10 @@ func budgetRequestProblem(t *testing.T, result apiResult, code string) {
 	}
 }
 
-func createBudgetRequest(t *testing.T, call notificationCaller, project, amount string) budgetRequestBody {
+func createBudgetRequest(t *testing.T, client *managementClient, project, amount string) budgetRequestBody {
 	t.Helper()
 	body := fmt.Sprintf(`{"project_id":%q,"window":"day","amount":%q,"reason":"launch traffic"}`, project, amount)
-	created := expectBudgetRequestStatus(t, "create request", call("POST", "/api/v1/budget-increase-requests", "", body), http.StatusCreated)
+	created := expectStatus(t, "create request", client.call(t, "POST", "/api/v1/budget-increase-requests", "", body), http.StatusCreated)
 	return decodeBudgetRequest(t, created)
 }
 
@@ -186,11 +178,29 @@ func expectEnforcedBudgetIncreases(t *testing.T, pool *pgxpool.Pool, project str
 	}
 }
 
-func runBudgetRequestPair(first, second func() apiResult) (apiResult, apiResult) {
-	results := make(chan apiResult, 2)
-	go func() { results <- first() }()
-	go func() { results <- second() }()
-	return <-results, <-results
+func runBudgetRequestPair(t *testing.T, first, second func() (apiResult, error)) (apiResult, apiResult) {
+	t.Helper()
+	type outcome struct {
+		result apiResult
+		err    error
+	}
+	results := make(chan outcome, 2)
+	go func() {
+		res, err := first()
+		results <- outcome{res, err}
+	}()
+	go func() {
+		res, err := second()
+		results <- outcome{res, err}
+	}()
+	one, two := <-results, <-results
+	if one.err != nil {
+		t.Fatal(one.err)
+	}
+	if two.err != nil {
+		t.Fatal(two.err)
+	}
+	return one.result, two.result
 }
 
 func TestBudgetIncreaseRequests(t *testing.T) {
@@ -219,7 +229,7 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 	owner, requesterOne, requesterTwo, manager, outsider := f.owner, f.requesterOne, f.requesterTwo, f.manager, f.outsider
 
 	own := createBudgetRequest(t, owner, project, "5")
-	selfApproval := expectBudgetRequestStatus(t, "self approval", owner("POST", budgetRequestPath(own.ID, "approve"), "", ""), http.StatusForbidden)
+	selfApproval := expectStatus(t, "self approval", owner.call(t, "POST", budgetRequestPath(own.ID, "approve"), "", ""), http.StatusForbidden)
 	budgetRequestProblem(t, selfApproval, "budget_increase_request_self_approval")
 
 	twenty := createBudgetRequest(t, requesterOne, project, "20")
@@ -230,21 +240,25 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 	if count := activeBudgetIncreases(t, pool, project); count != 0 {
 		t.Fatalf("pending requests granted %d increases", count)
 	}
-	expectBudgetRequestStatus(t, "cross-project request", outsider("POST", "/api/v1/budget-increase-requests", "", fmt.Sprintf(`{"project_id":%q,"window":"day","amount":"5","reason":"launch traffic"}`, project)), http.StatusNotFound)
-	expectBudgetRequestStatus(t, "cross-project approval", outsider("POST", budgetRequestPath(twenty.ID, "approve"), "", ""), http.StatusNotFound)
-	expectBudgetRequestStatus(t, "viewer approval", requesterOne("POST", budgetRequestPath(thirty.ID, "approve"), "", ""), http.StatusForbidden)
+	expectStatus(t, "cross-project request", outsider.call(t, "POST", "/api/v1/budget-increase-requests", "", fmt.Sprintf(`{"project_id":%q,"window":"day","amount":"5","reason":"launch traffic"}`, project)), http.StatusNotFound)
+	expectStatus(t, "cross-project approval", outsider.call(t, "POST", budgetRequestPath(twenty.ID, "approve"), "", ""), http.StatusNotFound)
+	expectStatus(t, "viewer approval", requesterOne.call(t, "POST", budgetRequestPath(thirty.ID, "approve"), "", ""), http.StatusForbidden)
 	if count := activeBudgetIncreases(t, pool, project); count != 0 {
 		t.Fatalf("rejected approvals granted %d increases", count)
 	}
 
 	const approvalKey = "approve-twenty"
-	first, second := runBudgetRequestPair(
-		func() apiResult { return owner("POST", budgetRequestPath(twenty.ID, "approve"), "", "", approvalKey) },
-		func() apiResult { return manager("POST", budgetRequestPath(thirty.ID, "approve"), "", "") },
+	first, second := runBudgetRequestPair(t,
+		func() (apiResult, error) {
+			return owner.tryCall(t.Context(), "POST", budgetRequestPath(twenty.ID, "approve"), "", "", approvalKey)
+		},
+		func() (apiResult, error) {
+			return manager.tryCall(t.Context(), "POST", budgetRequestPath(thirty.ID, "approve"), "", "")
+		},
 	)
 	approved := map[string]budgetRequestBody{}
 	for _, result := range []apiResult{first, second} {
-		body := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "concurrent approval", result, http.StatusOK))
+		body := decodeBudgetRequest(t, expectStatus(t, "concurrent approval", result, http.StatusOK))
 		if body.Status != "approved" || body.IncreaseID == nil {
 			t.Fatalf("concurrent approval = %+v", body)
 		}
@@ -259,10 +273,10 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 	expectEnforcedBudgetIncreases(t, pool, project, 50)
 
 	for _, replay := range []apiResult{
-		owner("POST", budgetRequestPath(twenty.ID, "approve"), "", "", approvalKey),
-		manager("POST", budgetRequestPath(twenty.ID, "approve"), "", ""),
+		owner.call(t, "POST", budgetRequestPath(twenty.ID, "approve"), "", "", approvalKey),
+		manager.call(t, "POST", budgetRequestPath(twenty.ID, "approve"), "", ""),
 	} {
-		body := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "approval replay", replay, http.StatusOK))
+		body := decodeBudgetRequest(t, expectStatus(t, "approval replay", replay, http.StatusOK))
 		if body.IncreaseID == nil || *body.IncreaseID != *approved[twenty.ID].IncreaseID {
 			t.Fatalf("approval replay = %+v, want increase %v", body, approved[twenty.ID].IncreaseID)
 		}
@@ -272,11 +286,11 @@ func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {
 	}
 
 	declined := createBudgetRequest(t, requesterOne, project, "10")
-	decline := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "decline", manager("POST", budgetRequestPath(declined.ID, "decline"), "", ""), http.StatusOK))
+	decline := decodeBudgetRequest(t, expectStatus(t, "decline", manager.call(t, "POST", budgetRequestPath(declined.ID, "decline"), "", ""), http.StatusOK))
 	if decline.Status != "declined" || decline.IncreaseID != nil {
 		t.Fatalf("declined request = %+v", decline)
 	}
-	decided := expectBudgetRequestStatus(t, "approve declined", manager("POST", budgetRequestPath(declined.ID, "approve"), "", ""), http.StatusConflict)
+	decided := expectStatus(t, "approve declined", manager.call(t, "POST", budgetRequestPath(declined.ID, "approve"), "", ""), http.StatusConflict)
 	budgetRequestProblem(t, decided, "budget_increase_request_decided")
 	if count := activeBudgetIncreases(t, pool, project); count != 2 {
 		t.Fatalf("decline flow changed the grants, active = %d", count)
@@ -301,9 +315,9 @@ func testBudgetRequestStale(t *testing.T, f budgetRequestFixture) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.projects SET budget_policy='{"daily_cost_limit":"110"}' WHERE id=$1`, project); err != nil {
 		t.Fatal(err)
 	}
-	stale := expectBudgetRequestStatus(t, "stale cap approval", manager("POST", budgetRequestPath(staleCap.ID, "approve"), "", ""), http.StatusConflict)
+	stale := expectStatus(t, "stale cap approval", manager.call(t, "POST", budgetRequestPath(staleCap.ID, "approve"), "", ""), http.StatusConflict)
 	budgetRequestProblem(t, stale, "budget_increase_request_stale")
-	stillPending := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "read stale cap request", manager("GET", budgetRequestPath(staleCap.ID, ""), "", ""), http.StatusOK))
+	stillPending := decodeBudgetRequest(t, expectStatus(t, "read stale cap request", manager.call(t, "GET", budgetRequestPath(staleCap.ID, ""), "", ""), http.StatusOK))
 	if stillPending.Status != "pending" {
 		t.Fatalf("stale cap request status = %q, want pending", stillPending.Status)
 	}
@@ -312,11 +326,11 @@ func testBudgetRequestStale(t *testing.T, f budgetRequestFixture) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.budget_increase_requests SET window_id=window_id-1,window_ends_at=now()-interval '1 minute' WHERE id=$1`, staleWindow.ID); err != nil {
 		t.Fatal(err)
 	}
-	expired := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "read expired request", manager("GET", budgetRequestPath(staleWindow.ID, ""), "", ""), http.StatusOK))
+	expired := decodeBudgetRequest(t, expectStatus(t, "read expired request", manager.call(t, "GET", budgetRequestPath(staleWindow.ID, ""), "", ""), http.StatusOK))
 	if expired.Status != "expired" {
 		t.Fatalf("rolled window request status = %q, want expired", expired.Status)
 	}
-	stale = expectBudgetRequestStatus(t, "stale window approval", manager("POST", budgetRequestPath(staleWindow.ID, "approve"), "", ""), http.StatusConflict)
+	stale = expectStatus(t, "stale window approval", manager.call(t, "POST", budgetRequestPath(staleWindow.ID, "approve"), "", ""), http.StatusConflict)
 	budgetRequestProblem(t, stale, "budget_increase_request_stale")
 	if count := activeBudgetIncreases(t, pool, project); count != 0 {
 		t.Fatalf("stale approvals granted %d increases", count)
@@ -326,17 +340,17 @@ func testBudgetRequestStale(t *testing.T, f budgetRequestFixture) {
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.projects SET budget_policy='{"daily_cost_limit":"110.00"}' WHERE id=$1`, project); err != nil {
 		t.Fatal(err)
 	}
-	approved := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "same cap approval", manager("POST", budgetRequestPath(sameCap.ID, "approve"), "", ""), http.StatusOK))
+	approved := decodeBudgetRequest(t, expectStatus(t, "same cap approval", manager.call(t, "POST", budgetRequestPath(sameCap.ID, "approve"), "", ""), http.StatusOK))
 	if approved.Status != "approved" || approved.IncreaseID == nil || !activeBudgetIncreaseSumIs(t, pool, project, "10") {
 		t.Fatalf("same cap approval = %+v", approved)
 	}
 }
 
-func seedBudgetRequestDirectGrants(t *testing.T, call notificationCaller, project string, grants int) {
+func seedBudgetRequestDirectGrants(t *testing.T, client *managementClient, project string, grants int) {
 	t.Helper()
 	for range grants {
 		body := fmt.Sprintf(`{"target":{"kind":"project","id":%q},"window":"day","amount":"1","reason":"seed grant"}`, project)
-		expectBudgetRequestStatus(t, "seed direct grant", call("POST", "/api/v1/budget-increases", "", body), http.StatusCreated)
+		expectStatus(t, "seed direct grant", client.call(t, "POST", "/api/v1/budget-increases", "", body), http.StatusCreated)
 	}
 }
 
@@ -368,9 +382,13 @@ func testBudgetRequestLimitSplit(t *testing.T, f budgetRequestFixture) {
 	seedBudgetRequestDirectGrants(t, owner, approvalsProject, 7)
 	first := createBudgetRequest(t, requesterOne, approvalsProject, "20")
 	second := createBudgetRequest(t, requesterTwo, approvalsProject, "30")
-	one, two := runBudgetRequestPair(
-		func() apiResult { return owner("POST", budgetRequestPath(first.ID, "approve"), "", "") },
-		func() apiResult { return manager("POST", budgetRequestPath(second.ID, "approve"), "", "") },
+	one, two := runBudgetRequestPair(t,
+		func() (apiResult, error) {
+			return owner.tryCall(t.Context(), "POST", budgetRequestPath(first.ID, "approve"), "", "")
+		},
+		func() (apiResult, error) {
+			return manager.tryCall(t.Context(), "POST", budgetRequestPath(second.ID, "approve"), "", "")
+		},
 	)
 	budgetRequestLimitSplit(t, one, two)
 	if count := activeBudgetIncreases(t, pool, approvalsProject); count != 8 {
@@ -378,7 +396,7 @@ func testBudgetRequestLimitSplit(t *testing.T, f budgetRequestFixture) {
 	}
 	pending := 0
 	for _, id := range []string{first.ID, second.ID} {
-		body := decodeBudgetRequest(t, expectBudgetRequestStatus(t, "read split request", owner("GET", budgetRequestPath(id, ""), "", ""), http.StatusOK))
+		body := decodeBudgetRequest(t, expectStatus(t, "read split request", owner.call(t, "GET", budgetRequestPath(id, ""), "", ""), http.StatusOK))
 		if body.Status == "pending" {
 			pending++
 		}
@@ -391,9 +409,13 @@ func testBudgetRequestLimitSplit(t *testing.T, f budgetRequestFixture) {
 	seedBudgetRequestDirectGrants(t, owner, directProject, 7)
 	request := createBudgetRequest(t, requesterOne, directProject, "20")
 	directBody := fmt.Sprintf(`{"target":{"kind":"project","id":%q},"window":"day","amount":"5","reason":"urgent grant"}`, directProject)
-	one, two = runBudgetRequestPair(
-		func() apiResult { return owner("POST", "/api/v1/budget-increases", "", directBody) },
-		func() apiResult { return manager("POST", budgetRequestPath(request.ID, "approve"), "", "") },
+	one, two = runBudgetRequestPair(t,
+		func() (apiResult, error) {
+			return owner.tryCall(t.Context(), "POST", "/api/v1/budget-increases", "", directBody)
+		},
+		func() (apiResult, error) {
+			return manager.tryCall(t.Context(), "POST", budgetRequestPath(request.ID, "approve"), "", "")
+		},
 	)
 	budgetRequestLimitSplit(t, one, two)
 	if count := activeBudgetIncreases(t, pool, directProject); count != 8 {

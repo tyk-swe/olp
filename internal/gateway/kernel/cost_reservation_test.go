@@ -187,16 +187,6 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 	}
 }
 
-// Fallback dispatch still spends against the ingress policy.
-
-// The same request is priced the moment a budget applies, so the empty answers
-// above are the guard's and not an execution nothing could price.
-
-// A generation priced the same way has an output nobody can price.
-
-// A strict route sends a target what the caller sent, which needs a compiled
-// interaction for the target; this route has none.
-
 func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 	price := rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{
 		InputPerMillion: costText("2"), OutputPerMillion: costText("8"), CachedInputPerMillion: costText("0.5"),

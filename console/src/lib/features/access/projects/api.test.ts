@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   createProject,
@@ -109,8 +109,6 @@ const policies = [
       })
   }
 ];
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe('project API', () => {
   it.each([

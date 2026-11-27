@@ -122,5 +122,3 @@ func decodeFixture(path string) (*Catalog, error) {
 	}
 	return Decode(raw)
 }
-
-// Counters read the estimation section alone; it is the validated one.

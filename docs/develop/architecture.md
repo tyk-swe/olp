@@ -292,11 +292,6 @@ package instead.
 - A management write returns `access.Mutate`, `access.Remove` or
   `access.Transact`.
 
-Code that broke a rule before it existed is listed in `.golangci-legacy.json`.
-Never add an entry there. The gate fails on a violation that is not listed and
-on a listed entry that no longer violates, so remove an entry in the change
-that fixes it.
-
 ## Adding a management endpoint
 
 Copy `internal/guardrails/credential/api.go`. It is the reference for every

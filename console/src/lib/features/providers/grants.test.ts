@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
@@ -9,12 +10,6 @@ import {
   type GrantEnrollmentCompletion,
   type GrantEnrollmentStatus
 } from './grants';
-
-vi.mock('#lib/session/authMiddleware.js', () => ({
-  createAuthMiddleware: () => ({
-    onRequest: ({ request }: { request: Request }) => request
-  })
-}));
 
 const provider = {
   id: '10000000-0000-4000-8000-000000000001',
@@ -35,14 +30,6 @@ const completion: GrantEnrollmentCompletion = {
   principal: 'verified-fixture-principal'
 };
 
-function respond(handler: (request: Request) => Response | Promise<Response>) {
-  const transport = vi.fn(handler);
-  vi.stubGlobal('fetch', transport);
-  return transport;
-}
-
-afterEach(() => vi.unstubAllGlobals());
-
 describe('provider grant API', () => {
   it.each([
     ['codex-subscription', 'codex-import'],
@@ -52,14 +39,11 @@ describe('provider grant API', () => {
     'imports %s through its authorized endpoint',
     async (profile, path) => {
       const credentials = '{"fixture":"not-a-real-secret"}';
-      respond(async (request) => {
-        expect(new URL(request.url).pathname).toBe(
-          `/api/v1/providers/${provider.id}/${path}`
-        );
-        expect(request.method).toBe('POST');
+      serve(async (request) => {
+        route(request, 'POST', `/api/v1/providers/${provider.id}/${path}`);
         expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
         expect(await request.json()).toEqual({ credentials });
-        return Response.json(completion, { status: 201 });
+        return json(completion, 201);
       });
       expect(
         await importSubscriptionCredentials(provider, credentials, profile)
@@ -70,15 +54,16 @@ describe('provider grant API', () => {
   it.each([undefined, enrollment.slot_id])(
     'starts enrollment for slot %s',
     async (slotId) => {
-      respond(async (request) => {
-        expect(new URL(request.url).pathname).toBe(
+      serve(async (request) => {
+        route(
+          request,
+          'POST',
           `/api/v1/providers/${provider.id}/grant-enrollments`
         );
-        expect(request.method).toBe('POST');
         expect(request.headers.get('If-Match')).toBe(`"${provider.etag}"`);
         if (slotId) expect(await request.json()).toEqual({ slot_id: slotId });
         else expect(await request.text()).toBe('');
-        return Response.json(enrollment, { status: 201 });
+        return json(enrollment, 201);
       });
       expect(await startGrantEnrollment(provider, slotId)).toEqual(enrollment);
     }
@@ -86,13 +71,14 @@ describe('provider grant API', () => {
 
   it('continues the selected enrollment with the exact pasted input', async () => {
     const input = 'https://fixture.example/callback?code=fixture&state=bound';
-    respond(async (request) => {
-      expect(new URL(request.url).pathname).toBe(
+    serve(async (request) => {
+      route(
+        request,
+        'POST',
         `/api/v1/providers/${provider.id}/grant-enrollments/${enrollment.id}/continue`
       );
-      expect(request.method).toBe('POST');
       expect(await request.json()).toEqual({ input });
-      return Response.json(completion);
+      return json(completion);
     });
     expect(await continueGrantEnrollment(enrollment, input)).toEqual(
       completion
@@ -101,44 +87,40 @@ describe('provider grant API', () => {
 
   it('polls the selected device enrollment and retains its completion', async () => {
     const status: GrantEnrollmentStatus = { status: 'completed', completion };
-    respond((request) => {
-      expect(new URL(request.url).pathname).toBe(
+    serve((request) => {
+      route(
+        request,
+        'POST',
         `/api/v1/providers/${provider.id}/grant-enrollments/${enrollment.id}/poll`
       );
-      expect(request.method).toBe('POST');
-      return Response.json(status);
+      return json(status);
     });
     expect(await pollGrantEnrollment(enrollment)).toEqual(status);
   });
 
   it('cancels the selected enrollment without expecting a response body', async () => {
-    const transport = respond((request) => {
-      expect(new URL(request.url).pathname).toBe(
+    const transport = vi.fn((request: Request) => {
+      route(
+        request,
+        'DELETE',
         `/api/v1/providers/${provider.id}/grant-enrollments/${enrollment.id}`
       );
-      expect(request.method).toBe('DELETE');
       return new Response(null, { status: 204 });
     });
+    serve(transport);
     await expect(cancelGrantEnrollment(enrollment)).resolves.toBeUndefined();
     expect(transport).toHaveBeenCalled();
   });
 
   it('reports cancellation refusal instead of claiming the enrollment was canceled', async () => {
-    respond(() =>
-      Response.json(
-        { title: 'Cancellation denied', status: 403 },
-        { status: 403 }
-      )
-    );
+    serve(() => json({ title: 'Cancellation denied', status: 403 }, 403));
     await expect(cancelGrantEnrollment(enrollment)).rejects.toMatchObject({
       problem: { status: 403, title: 'Cancellation denied' }
     });
   });
 
   it('surfaces import refusal without returning a partial credential', async () => {
-    respond(() =>
-      Response.json({ title: 'Import denied', status: 403 }, { status: 403 })
-    );
+    serve(() => json({ title: 'Import denied', status: 403 }, 403));
     await expect(
       importSubscriptionCredentials(provider, '{}', 'claude-subscription')
     ).rejects.toMatchObject({

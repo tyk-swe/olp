@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
+const repoRoot = resolve(import.meta.dirname, '..');
 const json = (text) => JSON.parse(text);
 
 export const versionCopies = [
@@ -27,6 +29,9 @@ export function checkReleaseVersion(read, tag) {
 }
 
 if (import.meta.main) {
-  const version = checkReleaseVersion((file) => readFileSync(file, 'utf8'), process.argv[2]);
+  const version = checkReleaseVersion(
+    (file) => readFileSync(join(repoRoot, file), 'utf8'),
+    process.argv[2]
+  );
   console.log(`Release version: ${version}`);
 }

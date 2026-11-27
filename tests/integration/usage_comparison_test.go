@@ -5,9 +5,7 @@ package integration_test
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -15,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
-	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/internal/usage/reports"
@@ -168,47 +165,22 @@ func seedComparisonBoundary(t *testing.T, fixture usageFixture, at time.Time, ro
 
 func usageComparisonClient(t *testing.T, f usageFixture, start, end time.Time) func(url.Values) contract.UsageComparisonResponse {
 	t.Helper()
-	ctx := t.Context()
-	keys, installation := notificationKeys(t, f.pool)
-	auth := secrets.NewAuthKey(make([]byte, 32), installation)
-	if err := access.PrepareInstallation(ctx, f.pool, installation, auth, keys); err != nil {
-		t.Fatal(err)
-	}
-	token := uuid.NewString()
-	if _, err := f.pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint)
-		VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), f.ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO olp.request_metadata_consumer_health(singleton,pending_events,lag_events,checked_at)
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health(singleton,pending_events,lag_events,checked_at)
 		VALUES(true,0,0,now()) ON CONFLICT(singleton) DO UPDATE SET pending_events=0,lag_events=0,checked_at=now()`); err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	api := reports.API{Access: access.New(access.Config{Pool: f.pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.NewTextHandler(t.Output(), nil))})}
-	api.Register(mux)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	client := managementHTTPAs(t, f.pool, f.ownerID, func(mux *http.ServeMux, server *access.Server) {
+		(&reports.API{Access: server}).Register(mux)
+	})
 	return func(extra url.Values) contract.UsageComparisonResponse {
 		t.Helper()
 		query := url.Values{"start": {start.Format(time.RFC3339)}, "end": {end.Format(time.RFC3339)}, "project_id": {f.projectID}}
 		for key, values := range extra {
 			query[key] = values
 		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/usage/comparison?"+query.Encode(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-		response, err := server.Client().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("usage comparison: HTTP %d", response.StatusCode)
-		}
+		res := expectStatus(t, "usage comparison", client.call(t, http.MethodGet, "/api/v1/usage/comparison?"+query.Encode(), "", ""), http.StatusOK)
 		var report contract.UsageComparisonResponse
-		if err := json.NewDecoder(response.Body).Decode(&report); err != nil {
+		if err := json.Unmarshal(res.body, &report); err != nil {
 			t.Fatal(err)
 		}
 		return report

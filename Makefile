@@ -1,7 +1,7 @@
 SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
-VERSION = $(shell node -p "require('./package.json').version")
+VERSION := $(shell node -p "require('./package.json').version")
 LDFLAGS = -X main.Version=$(VERSION)
 
 AIR_VERSION := v1.67.4
@@ -11,7 +11,7 @@ GOFMT_PATHS = \
 	tests/e2e tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity tests/harness tests/integration tests/qualification
 
 .PHONY: \
-	help setup dev dev-stop dev-reset check check-go check-console check-contracts lint fmt-check vet \
+	help setup dev dev-stop dev-reset check check-go check-console check-contracts check-docs check-helm check-dependencies lint fmt-check vet \
 	test test-unit test-unit-go test-unit-console test-integration test-e2e test-e2e-api test-e2e-browser \
 	qualify-code qualify-code-live \
 	api build build-go catalog catalog-sign fmt
@@ -57,10 +57,27 @@ check-console: ## Prepare console types and check formatting, types, and lint
 	pnpm --dir console api:generate
 	pnpm --dir console format:check
 	pnpm --dir console check
-	./scripts/check-exemptions.sh
 
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh
+
+check-docs: ## Check documentation links, anchors, handbook index, and style rules
+	node scripts/check-docs.mjs
+
+check-helm: ## Validate Helm chart profiles, schema, and monitoring metrics
+	./scripts/check-helm.sh
+
+check-dependencies: ## Check toolchain alignment, Go vulnerabilities, licenses, and pnpm audit
+	./scripts/check-dependencies.sh
+
+fmt-check: ## Check Go formatting without modifying files
+	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
+
+vet: ## Run go vet across all Go packages and build tags
+	go vet -tags integration,e2e,qualification,qualificationlive ./...
+
+lint: ## Run golangci-lint and Go architecture boundary checks
+	./scripts/check-lint.sh
 
 ##@ Tests
 test: ## Run every tier, cheapest first
@@ -95,15 +112,6 @@ qualify-code: ## Run the code mode fixture qualification lanes in disposable con
 
 qualify-code-live: ## Run the code mode live qualification lanes against real vendor accounts
 	./scripts/qualification-live.sh
-
-fmt-check:
-	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
-
-vet:
-	go vet -tags integration,e2e ./...
-
-lint:
-	./scripts/check-lint.sh
 
 ##@ Services and maintenance
 dev-stop: ## Stop development containers and preserve data

@@ -1,40 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-legacy=.golangci-legacy.json
-tools=$(mktemp -d)
-trap 'rm -rf "$tools"' EXIT
-report=$tools/report.json
-GOBIN=$tools go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-status=0
-"$tools/golangci-lint" run --show-stats=false --output.json.path "$report" \
-  --output.text.path /dev/null ./... 2>"$tools/log" || status=$?
-if ((status > 1)) || ! jq -e '.Issues | type == "array" or . == null' "$report" >/dev/null; then
-  cat "$tools/log" >&2
-  echo "check-lint: golangci-lint failed to run" >&2
-  exit 1
+
+golangci_version=v2.15.0
+lint_bin=".local/bin/golangci-lint-$golangci_version"
+if [[ ! -x $lint_bin ]]; then
+  mkdir -p .local/bin
+  find .local/bin -maxdepth 1 -name 'golangci-lint-*' -delete
+  tools=$(mktemp -d)
+  trap 'rm -rf -- "$tools"' EXIT
+  GOBIN=$tools go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$golangci_version"
+  mv -f "$tools/golangci-lint" "$lint_bin"
+  rm -rf -- "$tools"
+  trap - EXIT
 fi
-problems=$(jq -r --slurpfile legacy "$legacy" '
-  def entry:
-    if .FromLinter == "funlen" then
-      {list: "functionOverMaxLines", name: "\(.Pos.Filename) \(.SourceLines[0] | capture("^func (\\((\\w+ )?\\*?(?<receiver>\\w+)[^)]*\\) )?(?<name>\\w+)") | [.receiver // empty, .name] | join("."))"}
-    elif .FromLinter == "revive" and (.Text | startswith("file-length-limit")) then
-      {list: "fileOverMaxLines", name: .Pos.Filename}
-    else null end;
-  [.Issues[] | {issue: ., entry: entry}] as $found
-  | ($found | map(select(.entry as $entry
-        | $entry == null or (($legacy[0][$entry.list] // []) | index($entry.name) | not))
-      | "\(.issue.Pos.Filename):\(.issue.Pos.Line): \(.issue.Text) (\(.issue.FromLinter))"))
-  + ($legacy[0] | to_entries | map(.key as $list | .value[] as $name
-      | select($found | any(.entry == {list: $list, name: $name}) | not)
-      | "\($list): \($name) no longer violates, remove it from '"$legacy"'"))
-  | unique | .[]' "$report")
-if [[ -n $problems ]]; then
-  echo "$problems" >&2
-  echo "check-lint: fix the code, never add an entry to $legacy" >&2
-  exit 1
-fi
-./scripts/check-exemptions.sh
+
+"$lint_bin" run --show-stats=false ./...
 
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
@@ -62,39 +43,40 @@ declare -A gateway_imports=(
   [surface/geminilive]="duplexrelay fault ingress kernel quota"
   [kernel]="anthropicbeta codeforward delegation events fault generationrefs guardstream health ingress managedbatch models publishedprompt quota realtimeresponses traceingest"
 )
-while read -r package imports; do
+gateway_list=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/gateway/...)
+while IFS=' ' read -r package imports; do
   [[ $package == "$gateway" ]] && continue
   name=${package#"$gateway/"}
   if [[ ! -v gateway_imports[$name] ]]; then
     echo "check-lint: declare which gateway packages $package may import in scripts/check-lint.sh" >&2
     exit 1
   fi
-  for imported in $imports; do
+  read -r -a imported_list <<<"$imports"
+  for imported in "${imported_list[@]}"; do
     [[ $imported == "$gateway/"* ]] || continue
     if [[ " ${gateway_imports[$name]} " != *" ${imported#"$gateway/"} "* ]]; then
       echo "check-lint: $package must not import $imported" >&2
       exit 1
     fi
   done
-done < <(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/gateway/...)
+done <<<"$gateway_list"
 
-module_edges() {
-  go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/... | awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="$1" '
-    function module(path, rest) {
-      if (index(path, root) != 1) return ""
-      rest = substr(path, length(root) + 1)
-      sub(/\/.*/, "", rest)
-      return rest
+internal_list=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/...)
+edges=$(awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="domain catalog" '
+  function module(path, rest) {
+    if (index(path, root) != 1) return ""
+    rest = substr(path, length(root) + 1)
+    sub(/\/.*/, "", rest)
+    return rest
+  }
+  {
+    from = module($1)
+    for (i = 2; i <= NF; i++) {
+      to = module($i)
+      if (to != "" && to != from && from " " to != allowed) print from, to
     }
-    {
-      from = module($1)
-      for (i = 2; i <= NF; i++) {
-        to = module($i)
-        if (to != "" && to != from && from " " to != allowed) print from, to
-      }
-    }' | sort -u
-}
-if ! loop=$(module_edges "domain catalog" | tsort 2>&1 >/dev/null); then
+  }' <<<"$internal_list" | sort -u)
+if ! loop=$(tsort <<<"$edges" 2>&1 >/dev/null); then
   echo "$loop" >&2
   echo "check-lint: modules under internal/ import each other in a cycle. Move the shared piece into internal/domain or inject it from cmd/olp" >&2
   exit 1

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -205,62 +204,50 @@ func blockSpoolRemoval(t *testing.T, spool *Spool, name string) string {
 }
 
 func TestSpoolCleanupGivesUpAndStopsOnClose(t *testing.T) {
-	removeStuck := func(spool *Spool) string {
-		t.Helper()
-		artifact, err := stage(t, spool, strings.NewReader("1234567890"), 10)
-		if err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		removeStuck := func(spool *Spool) string {
+			t.Helper()
+			artifact, err := stage(t, spool, strings.NewReader("1234567890"), 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := blockSpoolRemoval(t, spool, string(artifact.Handle))
+			if err := spool.Remove(artifact.Handle); !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("Remove returned %v for an artifact it could not remove", err)
+			}
+			return dir
+		}
+		retrying := newSpool(t)
+		stuck := removeStuck(retrying)
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if retrying.UsedBytes() != 0 {
+			t.Fatalf("got %d bytes still in use for a path that cannot be removed, want the reservation released once cleanup gives up", retrying.UsedBytes())
+		}
+		if _, err := os.Stat(filepath.Join(stuck, "kept")); err != nil {
+			t.Fatalf("the unremovable path went away, so the release did not come from giving up: %v", err)
+		}
+		if err := retrying.Close(); err != nil {
 			t.Fatal(err)
 		}
-		dir := blockSpoolRemoval(t, spool, string(artifact.Handle))
-		if err := spool.Remove(artifact.Handle); !errors.Is(err, ErrUnavailable) {
-			t.Fatalf("Remove returned %v for an artifact it could not remove", err)
-		}
-		return dir
-	}
-	retrying := newSpool(t)
-	stuck := removeStuck(retrying)
-	deadline := time.Now().Add(3 * time.Second)
-	for retrying.UsedBytes() != 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if retrying.UsedBytes() != 0 {
-		t.Fatalf("got %d bytes still in use for a path that cannot be removed, want the reservation released once cleanup gives up", retrying.UsedBytes())
-	}
-	if _, err := os.Stat(filepath.Join(stuck, "kept")); err != nil {
-		t.Fatalf("the unremovable path went away, so the release did not come from giving up: %v", err)
-	}
-	if err := retrying.Close(); err != nil {
-		t.Fatal(err)
-	}
 
-	before := runtime.NumGoroutine()
-	spool := newSpool(t)
-	settled := runtime.NumGoroutine()
-	for range 24 {
-		removeStuck(spool)
-	}
-	growth := 0
-	until := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(until) {
-		growth = max(growth, runtime.NumGoroutine()-settled)
-		time.Sleep(10 * time.Millisecond)
-	}
-	if growth > cleanupConcurrency+2 {
-		t.Fatalf("got %d extra goroutines for 24 cleanup jobs, want at most %d", growth, cleanupConcurrency+2)
-	}
-	if err := spool.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if spool.UsedBytes() != 0 {
-		t.Fatalf("got %d bytes still in use after closing, want every cleanup reservation released", spool.UsedBytes())
-	}
-	deadline = time.Now().Add(2 * time.Second)
-	for runtime.NumGoroutine() > before+4 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := runtime.NumGoroutine(); got > before+4 {
-		t.Fatalf("got %d goroutines after closing, want the cleanup workers stopped (started from %d)", got, before)
-	}
+		spool := newSpool(t)
+		const jobs = 24
+		for range jobs {
+			removeStuck(spool)
+		}
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		if got, want := spool.UsedBytes(), int64((jobs-cleanupConcurrency)*10); got != want {
+			t.Fatalf("got %d bytes still reserved after one cleanup wave, want %d for bounded concurrency %d", got, want, cleanupConcurrency)
+		}
+		if err := spool.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if spool.UsedBytes() != 0 {
+			t.Fatalf("got %d bytes still in use after closing, want every cleanup reservation released", spool.UsedBytes())
+		}
+	})
 }
 
 func TestSaturatedSpoolCleanupReturnsBeforeRetryingArtifacts(t *testing.T) {

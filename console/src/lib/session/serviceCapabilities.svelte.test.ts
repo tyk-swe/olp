@@ -1,24 +1,12 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountState } from '#test/mount.js';
 import { useServiceCapabilities } from './serviceCapabilities.svelte';
-import { eventually } from '../../../tests/unit/support/eventually.js';
 
 function capabilities() {
-  const ready = vi.fn(
-    (state: ReturnType<typeof useServiceCapabilities>) => state
-  );
-  const component = mount(StateHarness, {
-    target: document.createElement('div'),
-    props: { setup: () => ready(useServiceCapabilities()) }
-  });
-  onTestFinished(() => unmount(component));
-  flushSync();
-  return ready.mock.results[0].value;
+  return mountState(() => useServiceCapabilities()).value;
 }
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe('service capabilities', () => {
   it('keeps capabilities unavailable until the server responds', async () => {

@@ -730,7 +730,7 @@ translated to them with a late system message fails with `unsupported_parameter`
 instead of moving the message to the front.
 
 Keep these tables aligned with the
-[protocol suites](../../internal/domain/protocols/translation_test.go) when semantics
+[protocol suites](../../internal/domain/protocols/canonical_test.go) when semantics
 change.
 
 ### Anthropic providers

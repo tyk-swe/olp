@@ -4,5 +4,5 @@ package fixtures
 
 import "embed"
 
-//go:embed routing/attempt-order.json streams/*.sse tokens/*.json
+//go:embed routing/attempt-order.json streams/*.sse tokens/*.json vendors
 var Files embed.FS

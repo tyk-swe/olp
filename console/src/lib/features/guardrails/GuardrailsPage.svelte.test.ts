@@ -1,9 +1,14 @@
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, onTestFinished, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import {
+  clickButton,
+  findButton,
+  mountWithState,
+  setFieldValue
+} from '#test/mount.js';
 import GuardrailsPage from './GuardrailsPage.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const original = {
   id: 'original',
@@ -26,8 +31,6 @@ const other = {
   name: 'Other',
   etag: 'other-etag'
 };
-
-afterEach(() => vi.unstubAllGlobals());
 
 for (const editor of [
   {
@@ -111,40 +114,18 @@ for (const editor of [
         },
         ['configure']
       );
-      const target = document.createElement('div');
-      const setup = vi.fn(() =>
-        mount(GuardrailsPage, {
-          target,
-          props: { tab: editor.tab },
-          context: getAllContexts()
-        })
-      );
-      const harness = mount(StateHarness, {
-        target,
-        props: { setup }
-      });
-      onTestFinished(async () => {
-        release.resolve();
-        await unmount(setup.mock.results[0].value);
-        await unmount(harness);
-      });
+      onTestFinished(() => release.resolve());
+      const { target } = mountWithState(GuardrailsPage, { tab: editor.tab });
       const button = (name: string) => {
-        const found = [...target.querySelectorAll('button')].find(
-          (item) => item.textContent?.trim() === name
-        );
+        const found = findButton(target, name);
         if (!found) throw new Error(`Missing button ${name}`);
         return found;
       };
-      const click = (name: string) => {
-        button(name).click();
-        flushSync();
-      };
+      const click = (name: string) => clickButton(target, name);
       const rename = (value: string) => {
         const input = target.querySelector('input');
         if (!input) throw new Error('Missing name input');
-        input.value = value;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        flushSync();
+        setFieldValue(input, value);
       };
       const save = () => {
         const form = target.querySelector('form');
@@ -154,7 +135,6 @@ for (const editor of [
         );
         flushSync();
       };
-      flushSync();
       await eventually(() => expect(button('Original')).toBeDefined());
       click('Original');
       if (destination === 'new-from-new') click(editor.create);
@@ -284,26 +264,8 @@ it('replaces an attachment atomically and retains its displayed revision when pu
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(GuardrailsPage, {
-      target,
-      props: { tab: 'attachments' },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  function click(name: string) {
-    [...target.querySelectorAll('button')]
-      .find((item) => item.textContent?.trim() === name)
-      ?.click();
-    flushSync();
-  }
-  flushSync();
+  const { target } = mountWithState(GuardrailsPage, { tab: 'attachments' });
+  const click = (name: string) => clickButton(target, name);
   await eventually(() =>
     expect(target.textContent).toContain('Attached revision pinned')
   );
@@ -376,26 +338,8 @@ it.each(['loaded', 'pending'])(
       },
       ['read', 'configure']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() =>
-      mount(GuardrailsPage, {
-        target,
-        props: { tab: 'attachments' },
-        context: getAllContexts()
-      })
-    );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
-    function click(label: string) {
-      [...target.querySelectorAll('button')]
-        .find((item) => item.textContent?.trim() === label)
-        ?.click();
-      flushSync();
-    }
-    flushSync();
+    const { target } = mountWithState(GuardrailsPage, { tab: 'attachments' });
+    const click = (label: string) => clickButton(target, label);
     await eventually(() =>
       expect(target.textContent).toContain('Attached revision pinned')
     );
@@ -471,29 +415,12 @@ it.each(
       },
       ['read', 'configure']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() =>
-      mount(GuardrailsPage, {
-        target,
-        props: { tab },
-        context: getAllContexts()
-      })
+    onTestFinished(() =>
+      retirement.resolve(new Response(null, { status: 204 }))
     );
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      retirement.resolve(new Response(null, { status: 204 }));
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
-    const button = (label: string) =>
-      [...target.querySelectorAll('button')].find(
-        (item) => item.textContent?.trim() === label
-      );
-    const click = (label: string) => {
-      button(label)?.click();
-      flushSync();
-    };
-    flushSync();
+    const { target } = mountWithState(GuardrailsPage, { tab });
+    const button = (label: string) => findButton(target, label);
+    const click = (label: string) => clickButton(target, label);
     await eventually(() => expect(button('Original')).toBeDefined());
     const kind = tab === 'checks' ? 'check' : 'policy';
     click(`Retire ${kind}`);
@@ -571,27 +498,9 @@ it('retries a failed policy save and activation with the same idempotency key', 
     },
     ['read', 'configure']
   );
-  const target = document.createElement('div');
-  const setup = vi.fn(() =>
-    mount(GuardrailsPage, {
-      target,
-      props: { tab: 'policies' },
-      context: getAllContexts()
-    })
-  );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-  });
-  const button = (name: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === name
-    );
-  const click = (name: string) => {
-    button(name)?.click();
-    flushSync();
-  };
+  const { target } = mountWithState(GuardrailsPage, { tab: 'policies' });
+  const button = (name: string) => findButton(target, name);
+  const click = (name: string) => clickButton(target, name);
   const save = () => {
     target
       .querySelector('form')
@@ -600,7 +509,6 @@ it('retries a failed policy save and activation with the same idempotency key', 
       );
     flushSync();
   };
-  flushSync();
   await eventually(() => expect(button('Original')).toBeDefined());
   click('Original');
   save();

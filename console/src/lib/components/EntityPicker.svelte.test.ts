@@ -1,9 +1,9 @@
-import { expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
+import { expect, it, vi } from 'vitest';
+import { personOptions } from '#lib/features/identity/index.js';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../tests/unit/support/StateHarness.svelte';
-import PickerProbe from './test/PickerProbe.svelte';
-import { eventually } from '../../../tests/unit/support/eventually.js';
+import { eventually } from '#test/eventually.js';
+import { mountWithState, setFieldValue } from '#test/mount.js';
+import EntityPicker from './EntityPicker.svelte';
 
 const person = {
   id: '00000000-0000-4000-8000-000000000002',
@@ -26,21 +26,16 @@ function render(operations: Parameters<typeof serve>[1]) {
     operations
   );
   const picked = vi.fn<(value: string) => void>();
-  const target = document.createElement('div');
-  document.body.append(target);
-  const setup = vi.fn(() =>
-    mount(PickerProbe, {
-      target,
-      props: { picked },
-      context: getAllContexts()
-    })
+  const { target } = mountWithState(
+    EntityPicker,
+    {
+      id: 'probe',
+      source: personOptions,
+      emptyLabel: 'Anyone',
+      onchange: picked
+    },
+    { attach: true }
   );
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
-    target.remove();
-  });
   return { target, picked };
 }
 
@@ -53,9 +48,7 @@ it('lists people by name and hands back the chosen ID', async () => {
     return found;
   });
   if (!select) throw new Error('missing picker');
-  select.value = person.id;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
+  setFieldValue(select, person.id, 'change');
 
   expect(picked).toHaveBeenCalledExactlyOnceWith(person.id);
 });

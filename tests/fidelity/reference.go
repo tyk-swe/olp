@@ -157,7 +157,7 @@ func compare(want, got any, path string) error {
 		if !ok {
 			return mismatch("object type")
 		}
-		keys := make([]string, 0, len(w)+len(g))
+		keys := make([]string, 0, max(len(w), len(g)))
 		for k := range w {
 			keys = append(keys, k)
 		}
@@ -213,8 +213,14 @@ func CompareEvents(expected, observed []byte) error {
 	if err != nil {
 		return fmt.Errorf("invalid observed stream: %w", err)
 	}
-	w, _ := json.Marshal(want)
-	g, _ := json.Marshal(got)
+	w, err := json.Marshal(want)
+	if err != nil {
+		return fmt.Errorf("marshal reference stream: %w", err)
+	}
+	g, err := json.Marshal(got)
+	if err != nil {
+		return fmt.Errorf("marshal observed stream: %w", err)
+	}
 	return compareJSON(w, g)
 }
 

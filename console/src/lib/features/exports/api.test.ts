@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/svelte-query';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import {
   createCapturePolicy,
@@ -38,24 +38,19 @@ const dataset: FocusDataset = {
   commitment_totals: null
 };
 
-afterEach(() => vi.unstubAllGlobals());
-
 it('loads one bounded dataset page and preserves its continuation', async () => {
   const cursor = 'older-date';
   const fetch = vi.fn(async (request: Request) => {
+    route(request, 'GET', '/api/v1/observability/sinks/sink/focus-datasets');
     const url = new URL(request.url);
-    expect(url.pathname).toBe(
-      '/api/v1/observability/sinks/sink/focus-datasets'
-    );
     expect(url.searchParams.get('limit')).toBe('50');
-    expect(request.method).toBe('GET');
     expect(request.signal.aborted).toBe(false);
-    return Response.json({
+    return json({
       items: [dataset],
       next_cursor: url.searchParams.has('cursor') ? null : cursor
     });
   });
-  vi.stubGlobal('fetch', fetch);
+  serve(fetch);
   const first = await listExportSinkFocusDatasets('sink');
   expect(first).toEqual({ items: [dataset], nextCursor: cursor });
   expect(fetch).toHaveBeenCalledTimes(1);
@@ -68,15 +63,7 @@ it('loads one bounded dataset page and preserves its continuation', async () => 
 });
 
 it('surfaces failed dataset pages instead of returning an empty history', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      Response.json(
-        { title: 'Dataset unavailable', status: 500 },
-        { status: 500 }
-      )
-    )
-  );
+  serve(() => json({ title: 'Dataset unavailable', status: 500 }, 500));
   await expect(
     listExportSinkFocusDatasets('sink', 'older-date')
   ).rejects.toThrow('Dataset unavailable');

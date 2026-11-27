@@ -1,13 +1,11 @@
 import { createQuery } from '@tanstack/svelte-query';
 import { getAllContexts, mount, unmount } from 'svelte';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { expect, it, onTestFinished } from 'vitest';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountState } from '#test/mount.js';
 import { getRequest } from './api.js';
 import RequestTimeline from './RequestTimeline.svelte';
-import { eventually } from '../../../../../tests/unit/support/eventually.js';
-
-afterEach(() => vi.unstubAllGlobals());
 
 it.each([
   ['bypass', 'no_store', ' · Caller opted out (no-store)'],
@@ -29,8 +27,7 @@ it.each([
         }),
       ['read', 'usage']
     );
-    const target = document.createElement('div');
-    const setup = vi.fn(() => {
+    const { target, value: component } = mountState(({ target }) => {
       const detail = createQuery(() => ({
         queryKey: ['request', result, reason],
         queryFn: () => getRequest('request-id')
@@ -41,11 +38,7 @@ it.each([
         context: getAllContexts()
       });
     });
-    const harness = mount(StateHarness, { target, props: { setup } });
-    onTestFinished(async () => {
-      await unmount(setup.mock.results[0].value);
-      await unmount(harness);
-    });
+    onTestFinished(() => unmount(component));
     await eventually(() =>
       expect(target.querySelector('p.muted')?.textContent?.trim()).toBe(
         `Response cache: ${result}${suffix}`

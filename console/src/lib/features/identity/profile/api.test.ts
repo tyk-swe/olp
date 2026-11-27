@@ -1,27 +1,19 @@
 import { reauthenticateWithPassword } from './reauthentication';
 import { afterEach, expect, it, vi } from 'vitest';
 import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
+import { json, route, serve } from '#lib/session/test/transport.js';
 import { beginIdentityReauthentication } from './api';
 
-vi.mock('#lib/session/authMiddleware.js', () => ({
-  createAuthMiddleware: () => ({
-    onRequest: ({ request }: { request: Request }) => request
-  })
-}));
 vi.mock('#lib/session/mfaPrompt.svelte.js', () => ({
   confirmMFA: vi.fn()
 }));
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.resetAllMocks();
 });
 
 it('binds password verification to the agent delegation key', async () => {
-  vi.stubGlobal('fetch', async (request: Request) => {
-    expect(new URL(request.url).pathname).toBe(
-      '/api/v1/profile/reauthenticate'
-    );
-    expect(request.method).toBe('POST');
+  serve(async (request) => {
+    route(request, 'POST', '/api/v1/profile/reauthenticate');
     expect(await request.json()).toEqual({
       current_password: 'example-password',
       purpose: 'agent_delegation',
@@ -35,9 +27,7 @@ it('binds password verification to the agent delegation key', async () => {
 });
 
 it('does not treat a rejected password as fresh authentication', async () => {
-  vi.stubGlobal('fetch', async () =>
-    Response.json({ title: 'Invalid password', status: 401 }, { status: 401 })
-  );
+  serve(() => json({ title: 'Invalid password', status: 401 }, 401));
   await expect(
     reauthenticateWithPassword('wrong', 'agent_delegation', 'key')
   ).rejects.toMatchObject({ problem: { status: 401 } });
@@ -57,7 +47,7 @@ it('requires the offered second factor before password verification completes', 
     );
     throw new Error('Verification incomplete');
   });
-  vi.stubGlobal('fetch', async () => Response.json(challenge, { status: 202 }));
+  serve(() => json(challenge, 202));
   await expect(
     reauthenticateWithPassword('example-password', 'agent_delegation', 'key')
   ).rejects.toThrow('Verification incomplete');
@@ -69,22 +59,20 @@ it.each([
 ])(
   'continues agent delegation through the available linked identity',
   async ({ saml, endpoint }) => {
-    vi.stubGlobal('fetch', async (request: Request) => {
-      const path = new URL(request.url).pathname;
+    serve(async (request) => {
       if (request.method === 'GET') {
-        expect(path).toBe('/api/v1/profile/saml-identities');
-        return Response.json({
+        route(request, 'GET', '/api/v1/profile/saml-identities');
+        return json({
           reauthentication_available: saml,
           identities: []
         });
       }
-      expect(request.method).toBe('POST');
-      expect(path).toBe(endpoint);
+      route(request, 'POST', endpoint);
       expect(await request.json()).toEqual({
         purpose: 'agent_delegation',
         resource_id: 'key'
       });
-      return Response.json({
+      return json({
         authorization_url: 'https://identity.example.test/authorize'
       });
     });
@@ -95,12 +83,9 @@ it.each([
 );
 
 it('does not start identity verification when identity availability fails', async () => {
-  vi.stubGlobal('fetch', async (request: Request) => {
-    expect(request.method).toBe('GET');
-    return Response.json(
-      { title: 'Unavailable', status: 503 },
-      { status: 503 }
-    );
+  serve((request) => {
+    route(request, 'GET', '/api/v1/profile/saml-identities');
+    return json({ title: 'Unavailable', status: 503 }, 503);
   });
   await expect(
     beginIdentityReauthentication('agent_delegation', 'key')

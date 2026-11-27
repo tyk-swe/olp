@@ -13,7 +13,6 @@ const { guardUnsavedChanges } = await import('./unsavedChanges.js');
 
 afterEach(() => {
   guards.length = 0;
-  vi.unstubAllGlobals();
 });
 
 function navigate(from: string, to: string) {

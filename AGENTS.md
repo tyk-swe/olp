@@ -120,7 +120,7 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 ## Architecture rules
 
-Lint enforces the structure, so read the failure message and fix the code. `.golangci-legacy.json` and `console/eslint-legacy.json` list the code that broke a rule before it existed. Never add an entry to either list. They only shrink, which `scripts/check-exemptions.sh` checks against the default branch, and the Go lint gate also fails on a listed entry that no longer violates. The one way a list is created is the change that introduces its rule, which lists the code that already broke it. When you fix listed code, remove its entry in the same change
+Lint enforces the structure, so read the failure message and fix the code
 
 A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. A write that calls an upstream first runs `access.Preflight` before `access.Mutate`. A step whose result is a value and not a reply runs `access.Run`. The functions that open the management transaction and read the replay record are unexported, so never call `tx.Commit` in a handler. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
 

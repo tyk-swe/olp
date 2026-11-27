@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { describe, expect, it, vi } from 'vitest';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { eventually } from '#test/eventually.js';
+import { mountState } from '#test/mount.js';
 import type { GrantEnrollment, GrantEnrollmentCompletion } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
 
 const provider = { id: 'provider-id', etag: 'provider-version' };
 const enrollment: GrantEnrollment = {
@@ -37,26 +36,13 @@ const completion: GrantEnrollmentCompletion = {
 const basePath = `/api/v1/providers/${provider.id}/grant-enrollments`;
 const enrollmentPath = `${basePath}/${enrollment.id}`;
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 function grant() {
   const error = vi.fn();
   const completed = vi.fn();
-  const ready = vi.fn((state: GrantEnrollmentState) => state);
-  const component = mount(StateHarness, {
-    target: document.createElement('div'),
-    props: {
-      setup: () =>
-        ready(
-          new GrantEnrollmentState({ allowed: () => true, error, completed })
-        )
-    }
-  });
-  onTestFinished(() => unmount(component));
-  flushSync();
-  return { state: ready.mock.results[0].value, error, completed };
+  const { value: state } = mountState(
+    () => new GrantEnrollmentState({ allowed: () => true, error, completed })
+  );
+  return { state, error, completed };
 }
 
 describe('provider grant enrollment', () => {
@@ -214,12 +200,9 @@ describe('provider grant enrollment', () => {
   });
 
   it('discards and cancels an enrollment that arrives after a principal change', async () => {
-    const gate = new AbortController();
-    const release = new Promise<void>((resolve) =>
-      gate.signal.addEventListener('abort', () => resolve(), { once: true })
-    );
+    const release = Promise.withResolvers<void>();
     const start = vi.fn(async () => {
-      await release;
+      await release.promise;
       return json(enrollment);
     });
     const cancel = vi.fn(() => new Response(null, { status: 204 }));
@@ -246,7 +229,7 @@ describe('provider grant enrollment', () => {
       },
       csrf_token: 'fixture-csrf'
     });
-    gate.abort();
+    release.resolve();
     await pending;
 
     await eventually(() => expect(cancel).toHaveBeenCalledOnce());

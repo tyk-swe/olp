@@ -41,6 +41,7 @@ export default defineConfig({
     allowOnly: false,
     clearMocks: true,
     restoreMocks: true,
+    unstubGlobals: true,
     // Persist Vite transforms across runs; the suite re-transforms the same
     // dependency graph on every invocation without it.
     fsModuleCache: true,
@@ -55,7 +56,11 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts'],
-          exclude: ['src/**/*.svelte.test.ts']
+          exclude: [
+            'src/**/*.svelte.test.ts',
+            'tests/unit/**/*.svelte.test.ts'
+          ],
+          setupFiles: ['tests/unit/support/setup.ts']
         }
       },
       {
@@ -64,8 +69,14 @@ export default defineConfig({
         test: {
           name: 'svelte',
           environment: 'jsdom',
-          include: ['src/**/*.svelte.test.ts'],
-          setupFiles: ['tests/unit/support/dialog.ts']
+          include: [
+            'src/**/*.svelte.test.ts',
+            'tests/unit/**/*.svelte.test.ts'
+          ],
+          setupFiles: [
+            'tests/unit/support/setup.ts',
+            'tests/unit/support/dialog.ts'
+          ]
         }
       }
     ]

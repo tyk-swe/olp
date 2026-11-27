@@ -7,7 +7,8 @@ incident procedures belong in the [Operations runbook](operations.md).
 
 ## Prerequisites and secrets
 
-The example renders are checked for Kubernetes 1.33–1.35. Use a supported
+The chart schema and example renders are validated against Kubernetes 1.27+ via
+`scripts/check-helm.sh`. Use a supported
 cluster release, PostgreSQL 18, and durable Valkey 9.1. Pin an approved OCI
 image digest; do not deploy a mutable development tag. Create these Secrets
 before installing (names and keys are configurable through `config`):

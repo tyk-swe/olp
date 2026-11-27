@@ -3,11 +3,10 @@
 package integration_test
 
 import (
-	"encoding/base64"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -19,10 +18,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/messages"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
@@ -93,51 +95,11 @@ func fixtureTool(name, description, schema string) upstream.ListedTool {
 	return upstream.ListedTool{Name: name, Description: description, InputSchema: json.RawMessage(schema)}
 }
 
-func catalogManagement(t *testing.T, pool *pgxpool.Pool, ownerID string, policy *egress.Policy) func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
+func catalogManagement(t *testing.T, pool *pgxpool.Pool, ownerID string, policy *egress.Policy) *managementClient {
 	t.Helper()
-	ctx := t.Context()
-	keys, installation := notificationKeys(t, pool)
-	auth := secrets.NewAuthKey(make([]byte, 32), installation)
-	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
-		t.Fatal(err)
-	}
-	token := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,now()+interval '1 hour','test')`, uuid.NewString(), ownerID, auth.Digest(secrets.SessionDigest, token)); err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	registration.New(access.New(access.Config{Pool: pool, Installation: installation, Origin: "https://test.example", Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler)}), policy, registration.NewExecutables(nil, pool)).Register(mux)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	csrf := base64.RawURLEncoding.EncodeToString(auth.Digest(secrets.CSRFDigest, token))
-	return func(method, path, ifMatch, body string, idempotencyKey ...string) apiResult {
-		t.Helper()
-		r, err := http.NewRequestWithContext(ctx, method, server.URL+path, strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Origin", "https://test.example")
-		r.Header.Set("X-CSRF-Token", csrf)
-		if len(idempotencyKey) > 0 {
-			r.Header.Set("Idempotency-Key", idempotencyKey[0])
-		}
-		if ifMatch != "" {
-			r.Header.Set("If-Match", ifMatch)
-		}
-		r.AddCookie(&http.Cookie{Name: "__Host-olp_session", Value: token})
-		response, err := server.Client().Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		raw, err := io.ReadAll(response.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%s %s -> %d", method, path, response.StatusCode)
-		return apiResult{status: response.StatusCode, etag: response.Header.Get("ETag"), body: raw}
-	}
+	return managementHTTPAs(t, pool, ownerID, func(mux *http.ServeMux, server *access.Server) {
+		registration.New(server, policy, registration.NewExecutables(nil, pool)).Register(mux)
+	})
 }
 
 type savedRegistration struct {
@@ -221,16 +183,9 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		return current
 	}
 	before := state()
-	call := catalogManagement(t, pool, ownerID, policy)
+	client := catalogManagement(t, pool, ownerID, policy)
 	previewPath := "/api/v1/mcp-servers/" + saved.ID + "/catalog-preview"
 	approvePath := "/api/v1/mcp-servers/" + saved.ID + "/catalog-approval"
-	expect := func(step string, got apiResult, status int) apiResult {
-		t.Helper()
-		if got.status != status {
-			t.Fatalf("%s: HTTP %d, want %d: %s", step, got.status, status, got.body)
-		}
-		return got
-	}
 	problemType := func(step string, got apiResult) string {
 		t.Helper()
 		var problem struct {
@@ -242,7 +197,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		return problem.Type
 	}
 	currentBody := fmt.Sprintf(`{"protocol_version":%q,"digest":%q}`, certified.Protocol, certified.Digest)
-	unchanged := expect("approve unchanged catalog", call("POST", approvePath, fmt.Sprintf("%q", before.etag), currentBody, "approve-unchanged"), http.StatusConflict)
+	unchanged := expectStatus(t, "approve unchanged catalog", client.call(t, "POST", approvePath, fmt.Sprintf("%q", before.etag), currentBody, "approve-unchanged"), http.StatusConflict)
 	if kind := problemType("approve unchanged catalog", unchanged); !strings.HasSuffix(kind, "/mcp_catalog_current") {
 		t.Fatalf("unchanged approval problem = %s", kind)
 	}
@@ -254,7 +209,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		fixtureTool("search", "Search records", `{"type":"object","properties":{"q":{"type":"string"}}}`),
 		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
-	previewed := expect("preview", call("POST", previewPath, "", ""), http.StatusOK)
+	previewed := expectStatus(t, "preview", client.call(t, "POST", previewPath, "", ""), http.StatusOK)
 	var preview contract.MCPCatalogPreviewResponse
 	if err := json.Unmarshal(previewed.body, &preview); err != nil {
 		t.Fatal(err)
@@ -280,7 +235,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 		fixtureTool("search", "Search everything", `{"type":"object","properties":{"q":{"type":"string"}}}`),
 		fixtureTool("status", "Report status", `{"type":"object","properties":{}}`),
 	})
-	conflict := expect("approve changed catalog", call("POST", approvePath, previewed.etag, approvalBody, "approve-stale-catalog"), http.StatusConflict)
+	conflict := expectStatus(t, "approve changed catalog", client.call(t, "POST", approvePath, previewed.etag, approvalBody, "approve-stale-catalog"), http.StatusConflict)
 	if kind := problemType("approve changed catalog", conflict); !strings.HasSuffix(kind, "/mcp_catalog_changed") {
 		t.Fatalf("conflict problem = %s", kind)
 	}
@@ -295,17 +250,17 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE olp.mcp_servers SET etag=gen_random_uuid() WHERE id=$1`, saved.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect("approve stale etag", call("POST", approvePath, previewed.etag, approvalBody, "approve-stale-etag"), http.StatusPreconditionFailed)
+	expectStatus(t, "approve stale etag", client.call(t, "POST", approvePath, previewed.etag, approvalBody, "approve-stale-etag"), http.StatusPreconditionFailed)
 	if after := state(); after.revisionID != before.revisionID || after.digest != before.digest || after.revisions != before.revisions {
 		t.Fatalf("stale approval changed certification: before=%+v after=%+v", before, after)
 	}
-	reviewed := expect("preview again", call("POST", previewPath, "", ""), http.StatusOK)
+	reviewed := expectStatus(t, "preview again", client.call(t, "POST", previewPath, "", ""), http.StatusOK)
 	var fresh contract.MCPCatalogPreviewResponse
 	if err := json.Unmarshal(reviewed.body, &fresh); err != nil {
 		t.Fatal(err)
 	}
 	freshBody := fmt.Sprintf(`{"protocol_version":%q,"digest":%q}`, string(fresh.DiscoveredProtocolVersion), fresh.DiscoveredDigest)
-	approved := expect("approve reviewed catalog", call("POST", approvePath, reviewed.etag, freshBody, "approve-reviewed"), http.StatusOK)
+	approved := expectStatus(t, "approve reviewed catalog", client.call(t, "POST", approvePath, reviewed.etag, freshBody, "approve-reviewed"), http.StatusOK)
 	var server contract.MCPServerResponse
 	if err := json.Unmarshal(approved.body, &server); err != nil {
 		t.Fatal(err)
@@ -319,7 +274,7 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	if len(server.ToolPrices) != 1 || server.ToolPrices["lookup"] != "1.5" {
 		t.Fatalf("approved tool prices = %v", server.ToolPrices)
 	}
-	replayed := expect("replay approval", call("POST", approvePath, reviewed.etag, freshBody, "approve-reviewed"), http.StatusOK)
+	replayed := expectStatus(t, "replay approval", client.call(t, "POST", approvePath, reviewed.etag, freshBody, "approve-reviewed"), http.StatusOK)
 	if string(replayed.body) != string(approved.body) {
 		t.Fatalf("replay differed: %s", replayed.body)
 	}
@@ -331,5 +286,147 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	}
 	if fixture.badAuth.Load() != 0 {
 		t.Fatalf("fixture saw %d requests without the stored credential", fixture.badAuth.Load())
+	}
+}
+
+func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		pricing, price string
+		expected       int64
+	}{{"unpriced", "NULL", 1}, {"free", "0", 0}} {
+		t.Run(test.pricing, func(t *testing.T) {
+			t.Parallel()
+			pricing, price, expected := test.pricing, test.price, test.expected
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			ctx := t.Context()
+			pub, rev, server, srev, dispatch, call := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			sql := fmt.Sprintf(`
+ BEGIN;
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','audit','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','audit','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');
+ INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until,dispatched_at) VALUES('%[7]s','%[8]s','%[2]s','tool','{}',decode(repeat('00',32),'hex'),'%[7]s','USD',0,0,'outcome_unknown',now(),now());
+ INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES('%[7]s','%[8]s','key','cost',0,0,0,0);
+ INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,status,started_at,pricing_state,currency,unit_price) VALUES('%[9]s','%[7]s','%[8]s','%[2]s','%[1]s','%[4]s','%[5]s','%[6]s','t_'||repeat('0',32)||'_'||repeat('0',32),repeat('0',64),'outcome_unknown',now(),'%[10]s','USD',%[11]s);
+ COMMIT;`, pub, f.projectID, f.ownerID, rev, server, srev, dispatch, f.keyID, call, pricing, price)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			client := managementHTTPAs(t, pool, f.ownerID, func(mux *http.ServeMux, a *access.Server) {
+				accounting.NewManagement(a).Register(mux)
+			})
+			for range 2 {
+				expectStatus(t, "resolve", client.call(t, http.MethodPost, "/api/v1/mcp-tool-calls/"+call+"/resolve", "", `{"outcome":"settled","evidence_digest":"`+strings.Repeat("a", 64)+`","observed_cost":"0","observed_charge":"0"}`, "audit"), http.StatusOK)
+			}
+			var attempts, uncharged int64
+			if err := pool.QueryRow(ctx, `SELECT unpriced_attempts,uncharged_attempts FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='month'`, f.keyID).Scan(&attempts, &uncharged); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("two resolve requests returned HTTP 200; %s attempts=%d, uncharged=%d", pricing, attempts, uncharged)
+			if attempts != expected || uncharged != expected {
+				t.Fatalf("pricing=%s: unpriced=%d uncharged=%d, want %d", pricing, attempts, uncharged, expected)
+			}
+		})
+	}
+}
+
+type cancelOnBegin struct{ cancel context.CancelFunc }
+
+func (c cancelOnBegin) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (c cancelOnBegin) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err == nil && data.CommandTag.String() == "BEGIN" {
+		c.cancel()
+	}
+}
+
+func TestCanceledToolSettlementKeepsConnectionReusable(t *testing.T) {
+	t.Parallel()
+	db, _ := harness.EmptyDatabase(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	config := db.Config()
+	config.MinConns, config.MaxConns = 0, 1
+	config.ConnConfig.Tracer = cancelOnBegin{cancel: cancel}
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := pool.Ping(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	connections := pool.Stat().NewConnsCount()
+	if err := limitdebits.NewStore(pool).SettleTool(ctx, limitdebits.Result{}); !errors.Is(err, limitdebits.ErrConflict) || ctx.Err() == nil {
+		t.Fatalf("settlement = %v, context = %v", err, ctx.Err())
+	}
+	if err := pool.Ping(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := pool.Stat().NewConnsCount(); got != connections {
+		t.Fatalf("connections opened = %d, want %d", got, connections)
+	}
+}
+
+func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
+	t.Parallel()
+	for _, status := range []accounting.Status{accounting.StatusSucceeded, accounting.StatusUpstreamError, accounting.StatusGuardrailBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			pool, _ := harness.Database(t)
+			f := newUsageFixture(t, pool)
+			ctx := t.Context()
+			pub, rev, server, srev, dispatch, call := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			sql := fmt.Sprintf(`
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','late','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','late','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');
+ INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until) VALUES('%[7]s','%[8]s','%[2]s','tool','{}',decode(repeat('00',32),'hex'),'%[7]s','USD',1,1,'ready',now()+interval '1 hour');
+ INSERT INTO olp.execution_debit_owners(dispatch_id,owner_id,owner_kind,basis,bound,daily_window_id,weekly_window_id,monthly_window_id) VALUES('%[7]s','%[8]s','key','cost',1,0,0,0);`, pub, f.projectID, f.ownerID, rev, server, srev, dispatch, f.keyID)
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			price := "1"
+			reservation := &accounting.Reservation{DispatchID: dispatch, ClaimID: dispatch, AttemptID: call, APIKeyID: f.keyID, ProjectID: f.projectID, ToolsetID: pub, ToolsetRevisionID: rev, ToolAlias: "t_" + strings.Repeat("0", 32) + "_" + strings.Repeat("0", 32), InputDigest: strings.Repeat("0", 64), CallDigest: strings.Repeat("1", 64), UnitPrice: &price, Currency: "USD"}
+			evidence := accounting.AttemptEvidence{ServerID: server, ServerRevisionID: srev, StartedAt: time.Now().UTC(), Status: accounting.StatusDispatched}
+			ledger := accounting.NewDurableLedger(pool, nil, nil, nil)
+			if err := ledger.MarkDispatched(ctx, reservation, evidence); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := ledger.RecoverOrphanedDispatches(ctx, time.Now().Add(time.Minute), 1); err != nil || n != 1 {
+				t.Fatalf("recover = %d, %v", n, err)
+			}
+			unknown := evidence
+			unknown.Status = accounting.StatusOutcomeUnknown
+			unknown.ResultDigest = strings.Repeat("3", 64)
+			unknown.CompletedAt = time.Now().UTC()
+			if err := ledger.MarkUnknown(ctx, reservation, unknown); err != nil {
+				t.Fatal(err)
+			}
+			evidence.Status = status
+			evidence.IsError = status == accounting.StatusUpstreamError
+			evidence.CompletedAt = time.Now().UTC()
+			evidence.ResultDigest = strings.Repeat("2", 64)
+			for range 2 {
+				if err := ledger.Settle(ctx, reservation, evidence); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var callStatus, debitState, resultDigest string
+			var chargedOnce bool
+			var receipts int
+			if err := pool.QueryRow(ctx, `SELECT c.status,d.state,c.result_digest,d.observed_cost=1 AND d.observed_charge=1,(SELECT count(*) FROM olp.execution_debit_results WHERE dispatch_id=d.id) FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE c.id=$1`, call).Scan(&callStatus, &debitState, &resultDigest, &chargedOnce, &receipts); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("call=%s debit=%s charged_once=%t receipts=%d", callStatus, debitState, chargedOnce, receipts)
+			if callStatus != string(status) || debitState != "settled" || !chargedOnce || resultDigest != evidence.ResultDigest || receipts != 1 {
+				t.Fatalf("late settlement: call=%s debit=%s receipts=%d", callStatus, debitState, receipts)
+			}
+		})
 	}
 }

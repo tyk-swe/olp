@@ -1,9 +1,8 @@
-import { QueryClient } from '@tanstack/svelte-query';
-import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { json, serve } from '#lib/session/test/transport.js';
-import CodeDiagnosticsProbe from './test/CodeDiagnosticsProbe.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
+import { eventually } from '#test/eventually.js';
+import { findButton, mountWithState } from '#test/mount.js';
+import CodeDiagnostics from './CodeDiagnostics.svelte';
 
 function attempt(id: string) {
   return {
@@ -29,23 +28,15 @@ function decision(id: string) {
 }
 
 function render() {
-  const target = document.createElement('div');
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } }
-  });
-  const component = mount(CodeDiagnosticsProbe, {
-    target,
-    props: { client, projectId: 'project' }
-  });
-  onTestFinished(async () => {
-    await unmount(component);
-    client.clear();
-  });
-  flushSync();
-  return target;
+  return mountWithState(
+    CodeDiagnostics,
+    { projectId: 'project', kind: 'attempts', allowed: false },
+    {
+      configureClient: (client) =>
+        client.setDefaultOptions({ queries: { retry: false } })
+    }
+  ).target;
 }
-
-afterEach(() => vi.unstubAllGlobals());
 
 it('loads decisions only for attempts on the displayed page', async () => {
   const requested: string[] = [];
@@ -75,9 +66,7 @@ it('loads decisions only for attempts on the displayed page', async () => {
     );
   });
   expect(requested.toSorted()).toEqual(['first', 'second']);
-  const next = [...target.querySelectorAll('button')].find(
-    (button) => button.textContent?.trim() === 'Next'
-  );
+  const next = findButton(target, 'Next');
   expect(next).toBeDefined();
   next?.click();
   await eventually(() => expect(target.textContent).toContain('chosen-third'));

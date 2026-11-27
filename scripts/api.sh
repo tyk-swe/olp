@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 mkdir -p -- "${1:-$PWD}"
 output_root=$(cd -- "${1:-$PWD}" && pwd)
 mkdir -p -- "$output_root/internal/management/contract" "$output_root/management" "$output_root/guardrails" "$output_root/inference"
-node scripts/generate-go-contract.mjs "$output_root/internal/management/contract/types.gen.go"
+go tool oapi-codegen --config internal/management/oapi-codegen.yaml -o "$output_root/internal/management/contract/types.gen.go" management/management.json
 node scripts/generate-management-operations.mjs "$output_root/management/operations.gen.json"
 
 go tool oapi-codegen -generate types,client -package guardrails -o "$output_root/guardrails/client.gen.go" guardrails/guardrails.json

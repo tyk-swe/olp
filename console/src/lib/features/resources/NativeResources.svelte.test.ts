@@ -1,17 +1,14 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { useQueryClient } from '@tanstack/svelte-query';
+import { describe, expect, it } from 'vitest';
 import { toasts } from '#lib/components/toasts.svelte.js';
 import { json, serve } from '#lib/session/test/transport.js';
-import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
-import { eventually } from '../../../../tests/unit/support/eventually.js';
+import { eventually } from '#test/eventually.js';
+import {
+  findButton,
+  mountWithState,
+  setFieldValue as setValue
+} from '#test/mount.js';
 import NativeResources from './NativeResources.svelte';
 import { resourceKeys } from './resourceKeys';
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-  for (const item of toasts.items) toasts.dismiss(item.id);
-});
 
 const hex32 = (digit: string) => digit.repeat(32);
 
@@ -50,50 +47,20 @@ const trainingRoute = {
 function mountNative(
   handler: (request: Request) => Response | Promise<Response>
 ) {
-  serve(
-    (input: RequestInfo | URL, init?: RequestInit) => {
-      const request =
-        input instanceof Request
-          ? input
-          : new Request(new URL(String(input), 'http://localhost'), init);
-      return handler(request);
-    },
-    ['read']
-  );
+  serve(handler, ['read']);
 
-  const target = document.createElement('div');
-  const setup = vi.fn(() => {
-    useQueryClient().setQueryDefaults(resourceKeys.contracts(), {
-      retry: false
-    });
-    return mount(NativeResources, { target, context: getAllContexts() });
-  });
-  const harness = mount(StateHarness, { target, props: { setup } });
-  onTestFinished(async () => {
-    await unmount(setup.mock.results[0].value);
-    await unmount(harness);
+  const { target } = mountWithState(NativeResources, undefined, {
+    configureClient: (client) =>
+      client.setQueryDefaults(resourceKeys.contracts(), { retry: false })
   });
 
   const control = <T extends HTMLElement>(label: string) =>
     [...target.querySelectorAll('label')].find((item) =>
       item.textContent?.includes(label)
     )?.control as T | undefined;
-  const button = (label: string) =>
-    [...target.querySelectorAll('button')].find(
-      (item) => item.textContent?.trim() === label
-    );
+  const button = (label: string) => findButton(target, label);
 
   return { target, control, button };
-}
-
-function setValue(
-  element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
-  value: string,
-  event: 'input' | 'change' = 'input'
-) {
-  element.value = value;
-  element.dispatchEvent(new Event(event, { bubbles: true }));
-  flushSync();
 }
 
 function submitForm(target: HTMLElement) {

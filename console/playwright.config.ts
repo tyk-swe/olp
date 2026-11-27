@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { session } from './tests/e2e/journey';
+import { origin, session } from './tests/e2e/journey';
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -9,7 +9,7 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: process.env.OLP_E2E_ORIGIN,
+    baseURL: origin,
     contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure'
   },
@@ -18,6 +18,7 @@ export default defineConfig({
     {
       name: 'journeys',
       dependencies: ['setup'],
+      testIgnore: 'setup.ts',
       use: { storageState: session }
     }
   ]
