@@ -108,9 +108,12 @@ the current principal inside the management transaction. See
 ## Gateway keys
 
 An API key is stored only as a digest and resolved against the key authority
-each gateway reloads within five seconds of any key change. A gateway that
-cannot refresh its authority for a minute refuses all traffic rather than serve
-revoked keys, and realtime sessions reauthorize every five seconds.
+each gateway reloads within five seconds of any key change. When the authority
+is stale for more than a minute, new API-key-authenticated gateway requests
+fail closed with 503 `authority_unavailable` instead of serving keys that may
+have been revoked. Session and management authentication use other paths and
+are not affected by that outage. Realtime sessions reauthorize every five
+seconds.
 
 | Surface | Where the key is read |
 | --- | --- |
