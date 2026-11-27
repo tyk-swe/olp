@@ -38,11 +38,29 @@ type Service struct {
 }
 
 func New(deps Deps) *Service {
-	return &Service{store: deps.Store, transport: deps.Transport, credentials: deps.Credentials,
-		gaps: deps.Gaps, log: deps.Log, now: deps.Now}
+	log := deps.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &Service{
+		store: deps.Store, transport: deps.Transport, credentials: deps.Credentials,
+		gaps: deps.Gaps, log: log, now: now,
+	}
 }
 
-func (s *Service) RecordGap() { s.gaps.Add(1) }
+func (s *Service) Store() *Store { return s.store }
+
+func (s *Service) Now() time.Time { return s.now() }
+
+func (s *Service) RecordGap() {
+	if s.gaps != nil {
+		s.gaps.Add(1)
+	}
+}
 
 type Resolved struct {
 	transport.Target
@@ -60,8 +78,8 @@ type Caller struct {
 
 func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 	runtimeUnavailable := &Unavailable{Code: "media_job_runtime_unavailable"}
-	var raw []byte
-	if err := s.store.db.QueryRow(ctx, "SELECT snapshot FROM olp.runtime_releases WHERE id = $1", record.RuntimeGenerationID).Scan(&raw); err != nil {
+	raw, err := s.store.ReleaseSnapshot(ctx, record.RuntimeGenerationID)
+	if err != nil {
 		return Resolved{}, runtimeUnavailable
 	}
 	pin, err := routing.DecodeReleasePin(raw, routing.ReleasePinIdentity{ProviderID: record.ProviderID, ProviderRevisionID: record.ProviderRevisionID, RouteSlug: record.RouteSlug, Model: record.UpstreamModel, SlotID: record.SlotID, CredentialID: record.CredentialVersionID})
@@ -74,13 +92,16 @@ func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 	config := provider.Connector()
 	owned := provider.CredentialSource != "caller"
 	if owned && record.CredentialVersionID != nil {
+		if s.credentials == nil {
+			return Resolved{}, runtimeUnavailable
+		}
 		if eligibility := s.credentials.Eligibility(*record.CredentialVersionID); eligibility != routing.Eligible {
 			return Resolved{}, &Unavailable{Code: "media_job_credential_" + string(eligibility)}
 		}
 	}
 	var secret []byte
 	if owned && connectors.SecretRequired(config.AuthMode) {
-		if record.CredentialVersionID == nil {
+		if record.CredentialVersionID == nil || s.credentials == nil {
 			return Resolved{}, runtimeUnavailable
 		}
 		credential, credentialErr := binding.Credential(ctx)
@@ -91,6 +112,9 @@ func (s *Service) Target(ctx context.Context, record Record) (Resolved, error) {
 	}
 	var networkSecret []byte
 	if config.Network != nil && config.Network.CredentialID != "" {
+		if s.credentials == nil {
+			return Resolved{}, &Unavailable{Code: "media_job_network_credential_unavailable"}
+		}
 		networkSecret, err = binding.NetworkSecret(ctx)
 		if err != nil {
 			return Resolved{}, &Unavailable{Code: "media_job_network_credential_unavailable"}
@@ -263,6 +287,11 @@ func (s *Service) compensate(ctx context.Context, reserved Record, upstream stri
 	return true
 }
 
+func (s *Service) ReconcileClaimed(ctx context.Context, claimed Claimed) (Record, error) {
+	s.reconcile(ctx, claimed)
+	return s.store.Get(ctx, claimed.ID)
+}
+
 func (s *Service) Refresh(ctx context.Context, id string) (Record, error) {
 	record, err := s.store.Get(ctx, id)
 	if err != nil || !refreshable(record, s.now()) {
@@ -278,8 +307,7 @@ func (s *Service) Refresh(ctx context.Context, id string) (Record, error) {
 	if !ok {
 		return Record{}, busy("media job is being reconciled by another worker")
 	}
-	s.reconcile(ctx, claimed)
-	return s.store.Get(ctx, id)
+	return s.ReconcileClaimed(ctx, claimed)
 }
 
 func (s *Service) Delete(ctx context.Context, id string) (Record, error) {
@@ -301,8 +329,7 @@ func (s *Service) Delete(ctx context.Context, id string) (Record, error) {
 		return Record{}, busy("media job is being reconciled by another worker")
 	}
 	if claimed.Lifecycle != Active {
-		s.reconcile(ctx, claimed)
-		return s.store.Get(ctx, id)
+		return s.ReconcileClaimed(ctx, claimed)
 	}
 	deleting, err := s.store.BeginDeletion(ctx, id, claimed.Fence())
 	if errors.Is(err, errClaimLost) {
@@ -311,8 +338,7 @@ func (s *Service) Delete(ctx context.Context, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	s.reconcile(ctx, Claimed{Record: deleting, claim: claimed.claim})
-	return s.store.Get(ctx, id)
+	return s.ReconcileClaimed(ctx, Claimed{Record: deleting, claim: claimed.claim})
 }
 
 func (s *Service) Content(ctx context.Context, record Record, variant string) (*staging.Artifact, error) {

@@ -1,8 +1,8 @@
 package media
 
 import (
+	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 )
@@ -14,27 +14,43 @@ var imageAspectRatios = map[string]string{
 	"1792x1024": "16:9", "1024x1792": "9:16", "auto": "auto",
 }
 
+type xaiImageRequest struct {
+	Model       string  `json:"model"`
+	Prompt      string  `json:"prompt"`
+	Count       *int64  `json:"n,omitempty"`
+	Format      *string `json:"response_format,omitempty"`
+	User        *string `json:"user,omitempty"`
+	AspectRatio string  `json:"aspect_ratio,omitempty"`
+}
+
 func encodeXAIImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
 	switch {
 	case p.Quality != nil, p.Style != nil, p.Background != nil, p.Moderation != nil, p.OutputCompression != nil,
-		p.OutputFormat != nil, p.PartialImages != nil, p.Stream, len(r.Extra()) > 0:
+		p.OutputFormat != nil, p.PartialImages != nil, p.Stream, r.hasExtra():
 		return nil, invalidMedia("xAI image generation does not support the requested image parameters.")
 	case p.Count != nil && (*p.Count < 1 || *p.Count > 10):
 		return nil, invalidMedia("xAI generates 1 to 10 images per request.")
 	case p.Format != nil && *p.Format != "url" && *p.Format != "b64_json":
 		return nil, invalidMedia("xAI returns images as url or b64_json.")
 	}
-	fields := map[string]any{"model": model, "prompt": p.Prompt, "n": p.Count, "response_format": p.Format, "user": p.User}
+	var ratio string
 	if p.Size != nil {
-		ratio, ok := imageAspectRatios[*p.Size]
+		var ok bool
+		ratio, ok = imageAspectRatios[*p.Size]
 		if !ok {
 			return nil, invalidMedia("The size is not supported by xAI image generation.")
 		}
-		fields["aspect_ratio"] = ratio
 	}
-	body, failure := jsonDoc(fields, nil)
-	if failure != nil {
-		return nil, failure
+	body, err := json.Marshal(xaiImageRequest{
+		Model:       model,
+		Prompt:      p.Prompt,
+		Count:       p.Count,
+		Format:      p.Format,
+		User:        p.User,
+		AspectRatio: ratio,
+	})
+	if err != nil {
+		return nil, invalidMedia("The media request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "images/generations"}, Body: JSONBody(body),
 		Response: ImageReply{Decode: decodeXAIImages}, Ambiguous: true}, nil
@@ -43,7 +59,7 @@ func encodeXAIImage(r *Request, p ImageGeneration, _ connectors.Config, model st
 func decodeXAIImages(body []byte, stage StageImage) (*ImageResult, *Error) {
 	result, failure := DecodeImageResponse(body, stage)
 	if failure == nil && result.CreatedAt == 0 {
-		result.CreatedAt = time.Now().Unix()
+		result.CreatedAt = nowUnix()
 	}
 	return result, failure
 }

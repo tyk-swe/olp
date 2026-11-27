@@ -1,7 +1,6 @@
 package media
 
 import (
-	"bytes"
 	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
@@ -21,7 +20,7 @@ type VideoJobResult struct {
 	Size         *string
 	ErrorCode    *string
 	ErrorMessage *string
-	Extra        map[string]any
+	Extra        map[string]json.RawMessage
 }
 
 type VideoListResult struct {
@@ -35,94 +34,110 @@ type VideoDeleteResult struct {
 	ID      string
 	Deleted bool
 	Object  *string
-	Extra   map[string]any
+	Extra   map[string]json.RawMessage
+}
+
+type videoErrorWire struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type videoObjectWire struct {
+	ID          string          `json:"id"`
+	Object      string          `json:"object"`
+	Model       string          `json:"model"`
+	Status      string          `json:"status"`
+	Progress    *float32        `json:"progress,omitempty"`
+	CreatedAt   *int64          `json:"created_at,omitempty"`
+	CompletedAt *int64          `json:"completed_at,omitempty"`
+	ExpiresAt   *int64          `json:"expires_at,omitempty"`
+	Prompt      *string         `json:"prompt,omitempty"`
+	Seconds     *string         `json:"seconds,omitempty"`
+	Size        *string         `json:"size,omitempty"`
+	Error       *videoErrorWire `json:"error,omitempty"`
+}
+
+type videoListWire struct {
+	Object  string            `json:"object"`
+	Data    []json.RawMessage `json:"data"`
+	HasMore bool              `json:"has_more"`
+	FirstID *string           `json:"first_id,omitempty"`
+	LastID  *string           `json:"last_id,omitempty"`
+}
+
+type videoDeleteWire struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Deleted bool   `json:"deleted"`
 }
 
 func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
-	var encodedWire struct {
-		ID        string   `json:"id"`
-		Object    string   `json:"object"`
-		Model     string   `json:"model"`
-		Status    string   `json:"status"`
-		Progress  *float32 `json:"progress"`
-		CreatedAt *int64   `json:"created_at"`
-		Completed *int64   `json:"completed_at"`
-		Expires   *int64   `json:"expires_at"`
-		Prompt    *string  `json:"prompt"`
-		Seconds   *string  `json:"seconds"`
-		Size      *string  `json:"size"`
-		Error     *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
+	raw, err := parseRawObject(body)
+	if err != nil {
 		return nil, ProtocolError("The provider video response is not valid JSON.")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
+	var wireObj videoObjectWire
+	if firstErr(
+		decodeField(raw, "id", &wireObj.ID),
+		decodeField(raw, "object", &wireObj.Object),
+		decodeField(raw, "model", &wireObj.Model),
+		decodeField(raw, "status", &wireObj.Status),
+		decodeField(raw, "progress", &wireObj.Progress),
+		decodeField(raw, "created_at", &wireObj.CreatedAt),
+		decodeField(raw, "completed_at", &wireObj.CompletedAt),
+		decodeField(raw, "expires_at", &wireObj.ExpiresAt),
+		decodeField(raw, "prompt", &wireObj.Prompt),
+		decodeField(raw, "seconds", &wireObj.Seconds),
+		decodeField(raw, "size", &wireObj.Size),
+		decodeField(raw, "error", &wireObj.Error),
+	) != nil {
 		return nil, ProtocolError("The provider video response is not valid JSON.")
 	}
-	if encodedWire.Object != "video" {
+	if wireObj.Object != "video" {
 		return nil, ProtocolError("The provider returned an unexpected video object type.")
 	}
 	result := &VideoJobResult{
-		ID: encodedWire.ID, Status: encodedWire.Status, Progress: encodedWire.Progress,
-		CreatedAt: encodedWire.CreatedAt, CompletedAt: encodedWire.Completed, ExpiresAt: encodedWire.Expires,
-		Prompt: encodedWire.Prompt, Seconds: encodedWire.Seconds, Size: encodedWire.Size,
-		Extra: diffFields(doc, "id", "object", "model", "status", "progress", "created_at",
+		ID:          wireObj.ID,
+		Status:      wireObj.Status,
+		Progress:    wireObj.Progress,
+		CreatedAt:   wireObj.CreatedAt,
+		CompletedAt: wireObj.CompletedAt,
+		ExpiresAt:   wireObj.ExpiresAt,
+		Prompt:      wireObj.Prompt,
+		Seconds:     wireObj.Seconds,
+		Size:        wireObj.Size,
+		Extra: diffRawFields(raw, "id", "object", "model", "status", "progress", "created_at",
 			"completed_at", "expires_at", "prompt", "seconds", "size", "remixed_from_video_id", "error"),
 	}
-	if encodedWire.Error != nil {
-		result.ErrorCode = &encodedWire.Error.Code
-		result.ErrorMessage = &encodedWire.Error.Message
+	if wireObj.Error != nil {
+		result.ErrorCode = &wireObj.Error.Code
+		result.ErrorMessage = &wireObj.Error.Message
 	}
 	return result, nil
 }
 
 func EncodeVideoObject(result *VideoJobResult, localID, route string) ([]byte, *Error) {
-	doc := map[string]any{
-		"id":     localID,
-		"object": "video",
-		"model":  route,
-		"status": result.Status,
-	}
-	if result.Progress != nil {
-		doc["progress"] = *result.Progress
-	}
-	if result.CreatedAt != nil {
-		doc["created_at"] = *result.CreatedAt
-	}
-	if result.CompletedAt != nil {
-		doc["completed_at"] = *result.CompletedAt
-	}
-	if result.ExpiresAt != nil {
-		doc["expires_at"] = *result.ExpiresAt
-	}
-	if result.Prompt != nil {
-		doc["prompt"] = *result.Prompt
-	}
-	if result.Seconds != nil {
-		doc["seconds"] = *result.Seconds
-	}
-	if result.Size != nil {
-		doc["size"] = *result.Size
+	doc := videoObjectWire{
+		ID:          localID,
+		Object:      "video",
+		Model:       route,
+		Status:      result.Status,
+		Progress:    result.Progress,
+		CreatedAt:   result.CreatedAt,
+		CompletedAt: result.CompletedAt,
+		ExpiresAt:   result.ExpiresAt,
+		Prompt:      result.Prompt,
+		Seconds:     result.Seconds,
+		Size:        result.Size,
 	}
 	if result.ErrorMessage != nil {
 		code := "video_error"
 		if result.ErrorCode != nil {
 			code = *result.ErrorCode
 		}
-		doc["error"] = map[string]any{"code": code, "message": *result.ErrorMessage}
+		doc.Error = &videoErrorWire{Code: code, Message: *result.ErrorMessage}
 	}
-	for name, value := range result.Extra {
-		if _, exists := doc[name]; !exists {
-			doc[name] = value
-		}
-	}
-	body, err := json.Marshal(doc)
+	body, err := marshalWithExtra(doc, result.Extra)
 	if err != nil {
 		return nil, ProtocolError("The provider video metadata could not be encoded.")
 	}
@@ -138,10 +153,16 @@ func EncodeStrictVideoObject(source oif.Document, upstreamID, localID, route str
 	if !ok || !valid || actual != upstreamID {
 		return nil, ProtocolError("The native video identity changed.")
 	}
-	localJSON, _ := json.Marshal(localID)
+	localJSON, err := json.Marshal(localID)
+	if err != nil {
+		return nil, ProtocolError("The native video metadata could not be projected.")
+	}
 	changes := []oif.Change{{Pointer: "/id", Value: string(localJSON), Origin: oif.ResourceBinding, Reason: "owned local video job identity"}}
 	if route != "" {
-		routeJSON, _ := json.Marshal(route)
+		routeJSON, err := json.Marshal(route)
+		if err != nil {
+			return nil, ProtocolError("The native video metadata could not be projected.")
+		}
 		changes = append(changes, oif.Change{Pointer: "/model", Value: string(routeJSON), Origin: oif.IdentityBinding, Reason: "published route identity"})
 	}
 	client, err := oif.Apply(source, changes)
@@ -170,25 +191,21 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 }
 
 func EncodeVideoListResponse(result *VideoListResult) ([]byte, *Error) {
-	data := make([]any, len(result.Jobs))
+	data := make([]json.RawMessage, len(result.Jobs))
 	for i := range result.Jobs {
 		job := result.Jobs[i]
 		encoded, failure := EncodeVideoObject(&job, job.ID, job.Route)
 		if failure != nil {
 			return nil, failure
 		}
-		var item any
-		if err := json.Unmarshal(encoded, &item); err != nil {
-			return nil, ProtocolError("The provider video metadata could not be encoded.")
-		}
-		data[i] = item
+		data[i] = json.RawMessage(encoded)
 	}
-	doc := map[string]any{"object": "list", "data": data, "has_more": result.HasMore}
-	if result.FirstID != nil {
-		doc["first_id"] = *result.FirstID
-	}
-	if result.LastID != nil {
-		doc["last_id"] = *result.LastID
+	doc := videoListWire{
+		Object:  "list",
+		Data:    data,
+		HasMore: result.HasMore,
+		FirstID: result.FirstID,
+		LastID:  result.LastID,
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -198,23 +215,25 @@ func EncodeVideoListResponse(result *VideoListResult) ([]byte, *Error) {
 }
 
 func DecodeVideoDeleteResponse(body []byte) (*VideoDeleteResult, *Error) {
-	var encodedWire struct {
-		ID      string  `json:"id"`
-		Object  *string `json:"object"`
-		Deleted bool    `json:"deleted"`
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
+	raw, err := parseRawObject(body)
+	if err != nil {
 		return nil, ProtocolError("The provider video delete response is not valid JSON.")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
+	var id string
+	var object *string
+	var deleted bool
+	if firstErr(
+		decodeField(raw, "id", &id),
+		decodeField(raw, "object", &object),
+		decodeField(raw, "deleted", &deleted),
+	) != nil {
 		return nil, ProtocolError("The provider video delete response is not valid JSON.")
 	}
 	return &VideoDeleteResult{
-		ID: encodedWire.ID, Deleted: encodedWire.Deleted, Object: encodedWire.Object,
-		Extra: diffFields(doc, "id", "object", "deleted"),
+		ID:      id,
+		Deleted: deleted,
+		Object:  object,
+		Extra:   diffRawFields(raw, "id", "object", "deleted"),
 	}, nil
 }
 
@@ -223,13 +242,12 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 	if result.Object != nil && *result.Object != "" {
 		object = *result.Object
 	}
-	doc := map[string]any{"id": localID, "object": object, "deleted": result.Deleted}
-	for name, value := range result.Extra {
-		if _, exists := doc[name]; !exists {
-			doc[name] = value
-		}
+	doc := videoDeleteWire{
+		ID:      localID,
+		Object:  object,
+		Deleted: result.Deleted,
 	}
-	body, err := json.Marshal(doc)
+	body, err := marshalWithExtra(doc, result.Extra)
 	if err != nil {
 		return nil, ProtocolError("The provider video deletion receipt could not be encoded.")
 	}

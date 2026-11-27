@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -24,15 +23,22 @@ func protocol(detail string) *Failure {
 }
 
 func decodeFailure(err *media.Error) *Failure {
-	if err.Status >= 400 && err.Status < 500 {
-		class := upstream.ClientError
-		if err.Code == string(upstream.ContentFilter) {
-			class = upstream.ContentFilter
-		}
-		return &Failure{Class: class, Status: err.Status,
-			Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
+	if err.Status < 400 || err.Status >= 500 {
+		return protocol(err.Message)
 	}
-	return protocol(err.Message)
+	return &Failure{
+		Class:    clientFailureClass(err.Code),
+		Status:   err.Status,
+		Upstream: &wire.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message},
+		Detail:   err.Message,
+	}
+}
+
+func clientFailureClass(code string) upstream.Class {
+	if code == string(upstream.ContentFilter) {
+		return upstream.ContentFilter
+	}
+	return upstream.ClientError
 }
 
 func stageFailure(err error) *Failure {
@@ -218,7 +224,7 @@ func (t *Transport) images(ctx context.Context, resp *http.Response, reply media
 		if err != nil {
 			return nil, oif.Document{}, stageFailure(err)
 		}
-		return Images{&media.ImageResult{CreatedAt: time.Now().Unix(), Images: []media.ImageArtifact{{Handle: &artifact.Handle}}}}, source, nil
+		return Images{&media.ImageResult{CreatedAt: t.now().Unix(), Images: []media.ImageArtifact{{Handle: &artifact.Handle}}}}, source, nil
 	}
 	staged := &stagedImages{ctx: ctx, transport: t}
 	decoded, err := reply.Images(body, staged.put)
@@ -249,6 +255,9 @@ func (s *stagedImages) put(b64 string, index int) (*staging.Artifact, *media.Err
 }
 
 func (s *stagedImages) discard() {
+	if s.transport.deps.Spool == nil {
+		return
+	}
 	for _, handle := range s.handles {
 		if err := s.transport.deps.Spool.Remove(handle); err != nil {
 			s.transport.deps.Log.Warn("staged image was not removed", "error", err)
@@ -257,11 +266,17 @@ func (s *stagedImages) discard() {
 }
 
 func (t *Transport) stage(ctx context.Context, name, contentType string, body io.Reader) (*staging.Artifact, error) {
+	if t.deps.Spool == nil {
+		return nil, staging.ErrUnavailable
+	}
 	return t.deps.Spool.Put(ctx, staging.Upload{Filename: name, ContentType: contentType,
 		MaximumLength: t.deps.MaxResponseBytes, Body: io.LimitReader(body, t.deps.MaxResponseBytes+1)})
 }
 
 func (t *Transport) put(ctx context.Context, name, contentType string, body []byte) (*staging.Artifact, error) {
+	if t.deps.Spool == nil {
+		return nil, staging.ErrUnavailable
+	}
 	return t.deps.Spool.Put(ctx, staging.Upload{Filename: name, ContentType: contentType,
 		MaximumLength: int64(len(body)), Body: bytes.NewReader(body)})
 }
@@ -278,7 +293,8 @@ func (t *Transport) collect(body io.Reader) ([]byte, *Failure) {
 }
 
 func baseType(header string) string {
-	return strings.ToLower(strings.TrimSpace(strings.Split(header, ";")[0]))
+	mediaType, _, _ := strings.Cut(header, ";")
+	return strings.ToLower(strings.TrimSpace(mediaType))
 }
 
 func hasType(resp *http.Response, want string) bool {

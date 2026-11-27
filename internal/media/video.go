@@ -1,6 +1,7 @@
 package media
 
 import (
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -57,8 +58,8 @@ func encodeVideoCreate(r *Request, p VideoCreate, _ connectors.Config, model str
 	if p.InputRef != nil {
 		fields = append(fields, staging.Field{Name: "input_reference", Value: *p.InputRef})
 	}
-	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "videos"}, Accept: "application/json",
-		Body: FormBody(extraFields(fields, r.Extra())), Response: VideoJobReply{}, Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "videos"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.formExtra)), Response: VideoJobReply{}, Ambiguous: true}, nil
 }
 
 type JobCall interface {
@@ -97,7 +98,7 @@ func encodeVideoGet(job VideoGet) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: "GET", Endpoint: Path{Path: path}, Accept: "application/json", Response: job.reply(DecodeVideoObject)}, nil
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path}, Accept: "application/json", Response: job.reply(DecodeVideoObject)}, nil
 }
 
 func encodeVideoDelete(job VideoDelete) (*UpstreamCall, *Error) {
@@ -105,7 +106,7 @@ func encodeVideoDelete(job VideoDelete) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: "DELETE", Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoDeletedReply{}, Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodDelete, Endpoint: Path{Path: path}, Accept: "application/json", Response: VideoDeletedReply{}, Ambiguous: true}, nil
 }
 
 func encodeVideoContent(job VideoContent) (*UpstreamCall, *Error) {
@@ -117,7 +118,7 @@ func encodeVideoContent(job VideoContent) (*UpstreamCall, *Error) {
 	if job.Variant != "" {
 		query.Set("variant", job.Variant)
 	}
-	return &UpstreamCall{Method: "GET", Endpoint: Path{Path: path, Query: query}, Accept: "*/*", Response: VideoContentReply{}}, nil
+	return &UpstreamCall{Method: http.MethodGet, Endpoint: Path{Path: path, Query: query}, Accept: "*/*", Response: VideoContentReply{}}, nil
 }
 
 func (r *Request) VideoSeconds() (string, bool) {

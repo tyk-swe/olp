@@ -2,7 +2,6 @@ package media
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -26,15 +25,46 @@ type imageView struct {
 	extended                   bool
 }
 
+type stabilityImageResponse struct {
+	Image        string `json:"image"`
+	FinishReason string `json:"finish_reason"`
+}
+
+type recraftImageRequest struct {
+	Prompt      string  `json:"prompt"`
+	Model       string  `json:"model"`
+	Count       *int64  `json:"n,omitempty"`
+	Format      *string `json:"response_format,omitempty"`
+	ImageFormat *string `json:"image_format,omitempty"`
+	Size        string  `json:"size,omitempty"`
+}
+
+type bflImageRequest struct {
+	Prompt       string  `json:"prompt"`
+	OutputFormat *string `json:"output_format,omitempty"`
+	Width        int     `json:"width,omitempty"`
+	Height       int     `json:"height,omitempty"`
+}
+
+type bflPollResult struct {
+	Sample string `json:"sample"`
+}
+
+type bflPollResponse struct {
+	PollingURL string        `json:"polling_url"`
+	Status     string        `json:"status"`
+	Result     bflPollResult `json:"result"`
+}
+
 func generationView(r *Request, p ImageGeneration) imageView {
 	extended := p.Quality != nil || p.Style != nil || p.Background != nil || p.Moderation != nil || p.OutputCompression != nil ||
-		p.PartialImages != nil || p.Stream || p.User != nil || len(r.Extra()) > 0
+		p.PartialImages != nil || p.Stream || p.User != nil || r.hasExtra()
 	return imageView{p.Prompt, p.Count, p.Size, p.Format, p.OutputFormat, extended}
 }
 
 func editView(r *Request, p ImageEdit) imageView {
 	extended := p.Quality != nil || p.Background != nil || p.OutputCompression != nil || p.InputFidelity != nil ||
-		p.PartialImages != nil || p.Stream || p.User != nil || len(r.Extra()) > 0
+		p.PartialImages != nil || p.Stream || p.User != nil || r.hasExtra()
 	return imageView{p.Prompt, p.Count, p.Size, p.Format, p.OutputFormat, extended}
 }
 
@@ -127,25 +157,22 @@ func encodeStabilityEdit(r *Request, p ImageEdit, _ connectors.Config, model str
 }
 
 func decodeStabilityImage(body []byte, stage StageImage) (*ImageResult, *Error) {
-	var encodedWire struct {
-		Image        string `json:"image"`
-		FinishReason string `json:"finish_reason"`
-	}
-	if json.Unmarshal(body, &encodedWire) != nil {
+	var resp stabilityImageResponse
+	if json.Unmarshal(body, &resp) != nil {
 		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
 	switch {
-	case encodedWire.FinishReason == "CONTENT_FILTERED":
+	case resp.FinishReason == "CONTENT_FILTERED":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
-	case encodedWire.FinishReason != "SUCCESS" || encodedWire.Image == "":
+	case resp.FinishReason != "SUCCESS" || resp.Image == "":
 		return nil, ProtocolError("The provider image response carries no image.")
 	}
-	staged, failure := stage(encodedWire.Image, 0)
+	staged, failure := stage(resp.Image, 0)
 	if failure != nil {
 		return nil, failure
 	}
 	handle := staged.Handle
-	return &ImageResult{CreatedAt: time.Now().Unix(), Images: []ImageArtifact{{Handle: &handle}}}, nil
+	return &ImageResult{CreatedAt: nowUnix(), Images: []ImageArtifact{{Handle: &handle}}}, nil
 }
 
 func encodeRecraftImage(r *Request, p ImageGeneration, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -162,13 +189,16 @@ func encodeRecraftImage(r *Request, p ImageGeneration, _ connectors.Config, mode
 	if failure != nil {
 		return nil, failure
 	}
-	fields := map[string]any{"prompt": p.Prompt, "model": model, "n": p.Count, "response_format": p.Format, "image_format": p.OutputFormat}
-	if ratio != "" {
-		fields["size"] = ratio
-	}
-	body, failure := jsonDoc(fields, nil)
-	if failure != nil {
-		return nil, failure
+	body, err := json.Marshal(recraftImageRequest{
+		Prompt:      p.Prompt,
+		Model:       model,
+		Count:       p.Count,
+		Format:      p.Format,
+		ImageFormat: p.OutputFormat,
+		Size:        ratio,
+	})
+	if err != nil {
+		return nil, invalidMedia("The media request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "images/generations/raster"}, Body: JSONBody(body), Response: ImageReply{}, Ambiguous: true}, nil
 }
@@ -185,41 +215,40 @@ func encodeBFLImage(r *Request, p ImageGeneration, _ connectors.Config, model st
 	if p.OutputFormat != nil && *p.OutputFormat != "png" && *p.OutputFormat != "jpeg" {
 		return nil, invalidMedia("Black Forest Labs returns png or jpeg images.")
 	}
-	fields := map[string]any{"prompt": p.Prompt, "output_format": p.OutputFormat}
+	var width, height int
 	if p.Size != nil && *p.Size != "auto" {
-		var width, height int
-		if _, err := fmt.Sscanf(*p.Size, "%dx%d", &width, &height); err != nil || width < 64 || height < 64 {
+		var ok bool
+		width, height, ok = parseDimensions(*p.Size)
+		if !ok || width < 64 || height < 64 {
 			return nil, invalidMedia("The size is not supported by Black Forest Labs.")
 		}
-		fields["width"], fields["height"] = width, height
 	}
-	body, failure := jsonDoc(fields, nil)
-	if failure != nil {
-		return nil, failure
+	body, err := json.Marshal(bflImageRequest{
+		Prompt:       p.Prompt,
+		OutputFormat: p.OutputFormat,
+		Width:        width,
+		Height:       height,
+	})
+	if err != nil {
+		return nil, invalidMedia("The media request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: url.PathEscape(model)}, Accept: "application/json", Body: JSONBody(body),
 		Response: ImageReply{Poll: &Poll{Next: nextBFLStep, Domains: []string{"bfl.ai"}}}, Ambiguous: true}, nil
 }
 
 func nextBFLStep(body []byte) (Step, *Error) {
-	var encodedWire struct {
-		PollingURL string `json:"polling_url"`
-		Status     string `json:"status"`
-		Result     struct {
-			Sample string `json:"sample"`
-		} `json:"result"`
-	}
-	if json.Unmarshal(body, &encodedWire) != nil {
+	var resp bflPollResponse
+	if json.Unmarshal(body, &resp) != nil {
 		return nil, ProtocolError("The provider's image work answered with invalid JSON.")
 	}
 	switch {
-	case encodedWire.PollingURL != "" && encodedWire.Status == "":
-		return Visit{URL: encodedWire.PollingURL, Wait: bflPoll, Credentials: true}, nil
-	case encodedWire.Status == "Pending" || encodedWire.Status == "Reasoning" || encodedWire.Status == "Generating":
+	case resp.PollingURL != "" && resp.Status == "":
+		return Visit{URL: resp.PollingURL, Wait: bflPoll, Credentials: true}, nil
+	case resp.Status == "Pending" || resp.Status == "Reasoning" || resp.Status == "Generating":
 		return Again{}, nil
-	case encodedWire.Status == "Ready" && encodedWire.Result.Sample != "":
-		return Fetch{URL: encodedWire.Result.Sample, Prefix: "image/"}, nil
-	case encodedWire.Status == "Request Moderated" || encodedWire.Status == "Content Moderated":
+	case resp.Status == "Ready" && resp.Result.Sample != "":
+		return Fetch{URL: resp.Result.Sample, Prefix: "image/"}, nil
+	case resp.Status == "Request Moderated" || resp.Status == "Content Moderated":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 	}
 	return nil, ProtocolError("The provider's image work failed.")
