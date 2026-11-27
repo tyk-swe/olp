@@ -126,14 +126,19 @@ func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 }
 
 type envelopes struct {
-	mu   sync.Mutex
-	envs []events.Envelope
+	mu      sync.Mutex
+	envs    []events.Envelope
+	changed chan struct{}
 }
 
 func (c *envelopes) Terminal(e events.Envelope) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.envs = append(c.envs, e)
+	if c.changed != nil {
+		close(c.changed)
+		c.changed = nil
+	}
+	c.mu.Unlock()
 }
 
 func (c *envelopes) last(t *testing.T) events.Envelope {
@@ -146,19 +151,27 @@ func (c *envelopes) await(t *testing.T, n int) []events.Envelope {
 	t.Helper()
 	// Reading a known-length HTTP response can finish before the serving
 	// goroutine records its terminal event. Await that event explicitly.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
 		c.mu.Lock()
 		if len(c.envs) >= n {
 			envs := slices.Clone(c.envs)
 			c.mu.Unlock()
 			return envs
 		}
+		if c.changed == nil {
+			c.changed = make(chan struct{})
+		}
+		wait := c.changed
 		c.mu.Unlock()
-		time.Sleep(time.Millisecond)
+		select {
+		case <-wait:
+		case <-timer.C:
+			t.Fatalf("envelope %d not emitted within one second", n)
+			return nil
+		}
 	}
-	t.Fatalf("envelope %d not emitted within one second", n)
-	return nil
 }
 
 // mock is the upstream: one handler per provider prefix, swappable per test.

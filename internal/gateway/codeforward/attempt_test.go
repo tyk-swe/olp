@@ -706,6 +706,7 @@ func (refusalRuntime) CredentialRefused(string, int64) {}
 func TestTranslatedRecoveryBoundsStalledRejection(t *testing.T) {
 	for _, status := range []int{401, 429} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			t.Parallel()
 			ledger := &fakeCodeLedger{}
 			attempt := codexAttempt(t, ledger, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC))
 			attempt.permit.InitialRecovery = true

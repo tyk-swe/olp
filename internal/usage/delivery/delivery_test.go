@@ -82,44 +82,43 @@ func rejectConcurrently(d *Delivery, losses int) {
 }
 
 func TestCheckpointLossCoalescesConcurrentLosses(t *testing.T) {
-	const losses = 32
-	fake := &fakeLossCheckpoint{started: make(chan struct{}), release: make(chan struct{})}
-	d := newTestDelivery(fake)
+	synctest.Test(t, func(t *testing.T) {
+		const losses = 32
+		fake := &fakeLossCheckpoint{started: make(chan struct{}), release: make(chan struct{})}
+		d := newTestDelivery(fake)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		rejectConcurrently(d, losses)
-	}()
-	<-fake.started
-	deadline := time.Now().Add(5 * time.Second)
-	for d.Snapshot().Dropped < losses {
-		if time.Now().After(deadline) {
-			t.Fatalf("got %d dropped losses counted, want %d", d.Snapshot().Dropped, losses)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			rejectConcurrently(d, losses)
+		}()
+		<-fake.started
+		synctest.Wait()
+		if got := d.Snapshot().Dropped; got != losses {
+			t.Fatalf("got %d dropped losses counted, want %d", got, losses)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	close(fake.release)
-	<-done
+		close(fake.release)
+		<-done
 
-	if got := fake.maximum.Load(); got != 1 {
-		t.Fatalf("got %d concurrent loss checkpoints, want 1", got)
-	}
-	if got := fake.calls.Load(); got > 3 {
-		t.Fatalf("got %d loss checkpoints for %d concurrent losses, want a coalesced few", got, losses)
-	}
-	if got := fake.lastRecorded(); got != losses {
-		t.Fatalf("got last checkpoint covering %d dropped losses, want %d before the handlers completed", got, losses)
-	}
+		if got := fake.maximum.Load(); got != 1 {
+			t.Fatalf("got %d concurrent loss checkpoints, want 1", got)
+		}
+		if got := fake.calls.Load(); got > 3 {
+			t.Fatalf("got %d loss checkpoints for %d concurrent losses, want a coalesced few", got, losses)
+		}
+		if got := fake.lastRecorded(); got != losses {
+			t.Fatalf("got last checkpoint covering %d dropped losses, want %d before the handlers completed", got, losses)
+		}
 
-	callsBefore := fake.calls.Load()
-	d.Reject("request-after", errors.New("lost"))
-	if got := fake.calls.Load(); got != callsBefore+1 {
-		t.Fatalf("got %d loss checkpoints after one later loss, want %d", got, callsBefore+1)
-	}
-	if got := fake.lastRecorded(); got != losses+1 {
-		t.Fatalf("got follow-up checkpoint covering %d dropped losses, want %d", got, losses+1)
-	}
+		callsBefore := fake.calls.Load()
+		d.Reject("request-after", errors.New("lost"))
+		if got := fake.calls.Load(); got != callsBefore+1 {
+			t.Fatalf("got %d loss checkpoints after one later loss, want %d", got, callsBefore+1)
+		}
+		if got := fake.lastRecorded(); got != losses+1 {
+			t.Fatalf("got follow-up checkpoint covering %d dropped losses, want %d", got, losses+1)
+		}
+	})
 }
 
 func TestCheckpointLossCoalescesFailedCheckpoints(t *testing.T) {
