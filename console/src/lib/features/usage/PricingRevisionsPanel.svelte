@@ -1,6 +1,8 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { captureResult } from '#lib/editing/result.js';
@@ -219,112 +221,118 @@
     {#if services.pending}<div class="loading-state" role="status">
         Loading installation capabilities…
       </div>
-    {:else if services.error}<div class="inline-problem" role="alert">
+    {:else if services.error}<Callout tone="danger">
         Installation capabilities are unavailable, so pricing revisions cannot
         be listed.
-        <button
-          class="text-button"
-          type="button"
-          onclick={() => services.retry()}
-        >
-          Try again
-        </button>
-      </div>
-    {:else if !services.limitsEnforced}<div
-        class="card empty-state"
-        role="status"
+        {#snippet actions()}<button
+            class="button button-secondary"
+            type="button"
+            onclick={() => services.retry()}
+          >
+            Try again
+          </button>{/snippet}
+      </Callout>
+    {:else if !services.limitsEnforced}<EmptyState
+        title="Pricing revisions unavailable"
       >
         Pricing revisions become available once limits and accounting are
         enforced by this installation.
-      </div>
-    {:else if pricing.isPending}<div class="loading-state" role="status">
-        Loading revisions…
-      </div>
-    {:else if pricing.isError}<div class="inline-problem" role="alert">
-        {errorMessage(pricing.error)}
-        <button class="text-button" onclick={() => pricing.refetch()}>
-          Try again
-        </button>
-      </div>
-    {:else if pricing.data?.items.length === 0 && pricingPagination.history.length === 0}<div
-        class="card empty-state"
-      >
-        No pricing revisions. Usage cost will be marked unpriced.
-      </div>
+      </EmptyState>
     {:else}
-      <div class="revision-list">
-        {#each pricing.data?.items ?? [] as revision (revision.id)}
-          <details class="card">
-            <summary>
-              <span>
-                <strong>Revision {revision.revision}</strong><small>
-                  Effective {formatDate(revision.effective_at)}
-                </small><small>
-                  Created {formatDate(revision.created_at)} by
-                  <span class="mono">{revision.created_by}</span>
-                </small>{#if revision.source_name}<small>
-                    Published from
-                    <span class="mono">{revision.source_name}</span>
-                  </small>{/if}
-              </span><span class="badge">{revision.prices.length} entries</span>
-            </summary>
-            <ScrollTable label={`Prices in revision ${revision.revision}`}>
-              <table class="data-table">
-                <caption class="sr-only">
-                  Prices in revision {revision.revision}
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Provider / model</th><th scope="col">
-                      Operation
-                    </th><th scope="col">Input / million</th><th scope="col">
-                      Cached input / million
-                    </th><th scope="col">Cache write / million</th><th
-                      scope="col"
-                    >
-                      Write 5m / million
-                    </th><th scope="col">Write 1h / million</th><th scope="col">
-                      Output / million
-                    </th><th scope="col">Unit</th><th scope="col">
-                      Components
-                    </th><th scope="col">Currency</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr>
-                      <td>
-                        <strong>
-                          {price.vendor_id ?? price.provider_kind}
-                        </strong>{#if price.provider_id}<small>
-                            {price.provider_id}
-                          </small>{/if}<small>{price.model}</small>
-                      </td><td>{price.operation}</td><td>
-                        {price.input_per_million ?? '—'}
-                      </td><td>
-                        {price.cached_input_per_million ?? 'Billed as input'}
-                      </td><td>
-                        {price.cache_write_input_per_million ??
-                          'Billed as input'}
-                      </td><td>
-                        {price.cache_write_5m_input_per_million ?? '—'}
-                      </td><td>
-                        {price.cache_write_1h_input_per_million ?? '—'}
-                      </td><td>{price.output_per_million ?? '—'}</td><td>
-                        {price.unit_price ?? '—'}
-                      </td><td>{extraComponents(price) || '—'}</td><td>
-                        {price.currency}
-                      </td>
-                    </tr>{/each}
-                </tbody>
-              </table>
-            </ScrollTable>
-          </details>
-        {/each}
-      </div>
-      <CursorPagination
-        {...cursorPaginationProps(pricingPagination, pricing.data?.nextCursor)}
-        label="Pricing revision pages"
-      />
+      <QueryView
+        query={pricing}
+        loading="Loading revisions…"
+        failure={errorMessage(pricing.error)}
+        retryLabel="Try again"
+        emptyWhen={pricing.data?.items.length === 0 &&
+          pricingPagination.history.length === 0}
+      >
+        {#snippet empty()}
+          <EmptyState title="No pricing revisions">
+            Usage cost will be marked unpriced.
+          </EmptyState>
+        {/snippet}
+        <div class="revision-list">
+          {#each pricing.data?.items ?? [] as revision (revision.id)}
+            <details class="card">
+              <summary>
+                <span>
+                  <strong>Revision {revision.revision}</strong><small>
+                    Effective {formatDate(revision.effective_at)}
+                  </small><small>
+                    Created {formatDate(revision.created_at)} by
+                    <span class="mono">{revision.created_by}</span>
+                  </small>{#if revision.source_name}<small>
+                      Published from
+                      <span class="mono">{revision.source_name}</span>
+                    </small>{/if}
+                </span><span class="badge">
+                  {revision.prices.length} entries
+                </span>
+              </summary>
+              <ScrollTable label={`Prices in revision ${revision.revision}`}>
+                <table class="data-table">
+                  <caption class="sr-only">
+                    Prices in revision {revision.revision}
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Provider / model</th><th scope="col">
+                        Operation
+                      </th><th scope="col">Input / million</th><th scope="col">
+                        Cached input / million
+                      </th><th scope="col">Cache write / million</th><th
+                        scope="col"
+                      >
+                        Write 5m / million
+                      </th><th scope="col">Write 1h / million</th><th
+                        scope="col"
+                      >
+                        Output / million
+                      </th><th scope="col">Unit</th><th scope="col">
+                        Components
+                      </th><th scope="col">Currency</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each revision.prices as price, priceIndex (`${price.provider_kind}:${price.model}:${price.operation}:${priceIndex}`)}<tr>
+                        <td>
+                          <strong>
+                            {price.vendor_id ?? price.provider_kind}
+                          </strong>{#if price.provider_id}<small>
+                              {price.provider_id}
+                            </small>{/if}<small>{price.model}</small>
+                        </td><td>{price.operation}</td><td>
+                          {price.input_per_million ?? '—'}
+                        </td><td>
+                          {price.cached_input_per_million ?? 'Billed as input'}
+                        </td><td>
+                          {price.cache_write_input_per_million ??
+                            'Billed as input'}
+                        </td><td>
+                          {price.cache_write_5m_input_per_million ?? '—'}
+                        </td><td>
+                          {price.cache_write_1h_input_per_million ?? '—'}
+                        </td><td>{price.output_per_million ?? '—'}</td><td>
+                          {price.unit_price ?? '—'}
+                        </td><td>{extraComponents(price) || '—'}</td><td>
+                          {price.currency}
+                        </td>
+                      </tr>{/each}
+                  </tbody>
+                </table>
+              </ScrollTable>
+            </details>
+          {/each}
+        </div>
+        <CursorPagination
+          {...cursorPaginationProps(
+            pricingPagination,
+            pricing.data?.nextCursor
+          )}
+          label="Pricing revision pages"
+        />
+      </QueryView>
     {/if}
   </section>
 {/if}

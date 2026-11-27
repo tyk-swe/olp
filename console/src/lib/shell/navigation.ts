@@ -659,12 +659,28 @@ export function breadcrumbs(path: string): readonly Crumb[] {
   if (!item || item === OVERVIEW) return [];
   const section = sectionOf(item);
   const tab = activeTab(path, item.tabs ?? []);
+  const leafHref = tab?.href ?? item.tabs?.[0].href ?? item.href;
+  const normalized = path === '/' ? '/' : path.replace(/\/+$/, '');
+  const detailSuffix =
+    normalized !== leafHref && normalized.startsWith(`${leafHref}/`)
+      ? normalized.slice(leafHref.length + 1)
+      : '';
+  const lastSegment = detailSuffix.split('/').filter(Boolean).at(-1);
+  const detailLabel =
+    lastSegment === 'new'
+      ? 'New'
+      : lastSegment === 'revisions'
+        ? 'Revisions'
+        : lastSegment
+          ? 'Details'
+          : null;
   return [
     ...(section ? [{ label: section }] : []),
     { label: item.label, href: item.tabs?.[0].href ?? item.href },
     ...(tab && tab.label !== item.label
       ? [{ label: tab.label, href: tab.href }]
-      : [])
+      : []),
+    ...(detailLabel ? [{ label: detailLabel }] : [])
   ];
 }
 

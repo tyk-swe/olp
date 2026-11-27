@@ -1,7 +1,9 @@
 <script lang="ts">
   import { useAction } from '#lib/editing/action.svelte.js';
-  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
@@ -80,24 +82,28 @@
   {#if epochNotice}<Callout tone="success">
       {epochNotice}
     </Callout>{/if}
-  {#if epochAction.error}<div class="inline-problem" role="alert">
-      {epochAction.error}
+  {#if epochAction.error}<div class="epoch-problem">
+      <Callout tone="danger">{epochAction.error}</Callout>
     </div>{/if}
-  {#if epochs.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(epochs.error, 'Gateway epochs are unavailable.')}
-      <button class="text-button" onclick={() => epochs.refetch()}>
-        Try again
-      </button>
-    </div>
-  {:else if !epochs.data}
-    <div class="loading-state" role="status">Loading gateway epochs…</div>
-  {:else if epochs.data.items.length === 0 && pagination.history.length === 0}
-    <div class="card empty-state">
-      No unclean gateway epoch awaits acknowledgement.
-    </div>
-  {:else}
-    <ScrollTable label="Unresolved request metadata gateway epochs">
+  <QueryView
+    query={epochs}
+    compact
+    loading="Loading gateway epochs…"
+    failure={errorMessage(epochs.error, 'Gateway epochs are unavailable.')}
+    retryLabel="Try again"
+    updating={epochs.isPlaceholderData}
+    emptyWhen={epochs.data?.items.length === 0 &&
+      pagination.history.length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No unclean gateway epochs">
+        No unclean gateway epoch awaits acknowledgement.
+      </EmptyState>
+    {/snippet}
+    <ScrollTable
+      label="Unresolved request metadata gateway epochs"
+      busy={epochs.isPlaceholderData}
+    >
       <table class="data-table">
         <caption class="sr-only">
           Unclean request metadata gateway process epochs awaiting operator
@@ -115,7 +121,7 @@
             </th><th scope="col"><span class="sr-only">Action</span></th>
           </tr>
         </thead><tbody>
-          {#each epochs.data.items as epoch (epoch.process_epoch)}<tr>
+          {#each epochs.data?.items ?? [] as epoch (epoch.process_epoch)}<tr>
               <td>
                 <strong>{epoch.gateway_instance}</strong><code>
                   {epoch.process_epoch}
@@ -169,14 +175,17 @@
     <CursorPagination
       {...cursorPaginationProps(
         pagination,
-        epochs.isPlaceholderData ? null : epochs.data.nextCursor
+        epochs.isPlaceholderData ? null : epochs.data?.nextCursor
       )}
       label="Unresolved gateway epoch pages"
     />
-  {/if}
+  </QueryView>
 </section>
 
 <style>
+  .epoch-problem {
+    margin-bottom: 0.75rem;
+  }
   .section-description {
     max-width: 58rem;
     margin: 0.35rem 0 0;

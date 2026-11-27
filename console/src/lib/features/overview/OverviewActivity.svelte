@@ -1,5 +1,9 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';
@@ -30,111 +34,108 @@
     </a>
   </div>
   {#if services.pending}
-    <div class="loading-state" role="status">
+    <div class="loading-state compact" role="status">
       Loading recent request metadata…
     </div>
   {:else if services.error}
-    <div class="inline-problem" role="alert">
-      Request history capabilities are unavailable.
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => services.retry()}
-      >
-        Try again
-      </button>
+    <div class="activity-state">
+      <Callout tone="danger">
+        Request history capabilities are unavailable.
+        {#snippet actions()}<button
+            class="button button-secondary"
+            type="button"
+            onclick={() => services.retry()}
+          >
+            Try again
+          </button>{/snippet}
+      </Callout>
     </div>
   {:else if !services.retentionEnforced}
-    <div class="empty-state" role="status">
-      <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
-      <strong>Request history is not retained yet</strong>
-      <p>
+    <div class="activity-state">
+      <EmptyState title="Request history is not retained yet">
         This installation does not store request metadata, so recent requests
         cannot be listed here.
-      </p>
-    </div>
-  {:else if recentRequests.isPending}
-    <div class="loading-state" role="status">
-      Loading recent request metadata…
-    </div>
-  {:else if recentRequests.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(
-        recentRequests.error,
-        'Recent request metadata is unavailable.'
-      )}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => recentRequests.refetch()}
-      >
-        Try again
-      </button>
-    </div>
-  {:else if !recentRequests.data?.items.length}
-    <div class="empty-state">
-      <span aria-hidden="true"><NavIcon name="request" size={24} /></span>
-      <strong>No request metadata yet</strong>
-      <p>
-        Successful and failed attempts will appear here after a route is active.
-      </p>
+      </EmptyState>
     </div>
   {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-    <div
-      class="table-shell recent-table"
-      tabindex="0"
-      role="region"
-      aria-label="Five most recent requests"
-    >
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Started</th><th>Route</th><th>Operation</th><th>Status</th><th>
-              Latency
-            </th><th><span class="sr-only">Details</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each recentRequests.data.items as request (request.id)}
-            <tr>
-              <td>{formatDate(request.started_at)}</td>
-              <td><code>{request.route}</code></td>
-              <td>{request.operation} · {request.surface}</td>
+    <div class="activity-state">
+      <QueryView
+        query={recentRequests}
+        compact
+        loading="Loading recent request metadata…"
+        failure={errorMessage(
+          recentRequests.error,
+          'Recent request metadata is unavailable.'
+        )}
+        retryLabel="Try again"
+        emptyWhen={!recentRequests.data?.items.length}
+      >
+        {#snippet empty()}
+          <EmptyState title="No request metadata yet">
+            Successful and failed attempts will appear here after a route is
+            active.
+          </EmptyState>
+        {/snippet}
+        <ScrollTable label="Five most recent requests">
+          <table class="data-table recent-table">
+            <thead>
+              <tr>
+                <th>Started</th><th>Route</th><th>Operation</th><th>
+                  Status
+                </th><th>Latency</th><th>
+                  <span class="sr-only">Details</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each recentRequests.data?.items ?? [] as request (request.id)}
+                <tr>
+                  <td>{formatDate(request.started_at)}</td>
+                  <td><code>{request.route}</code></td>
+                  <td>{request.operation} · {request.surface}</td>
 
-              <td>
-                <span
-                  class="badge {statusTone(
-                    request.status_code,
-                    request.error_class
-                  )}"
-                >
-                  {statusLabel(request.status_code, request.error_class)}
-                </span>
-              </td>
+                  <td>
+                    <span
+                      class="badge {statusTone(
+                        request.status_code,
+                        request.error_class
+                      )}"
+                    >
+                      {statusLabel(request.status_code, request.error_class)}
+                    </span>
+                  </td>
 
-              <td>
-                {request.total_latency_ms == null
-                  ? '—'
-                  : `${request.total_latency_ms} ms`}
-              </td>
+                  <td class="num">
+                    {request.total_latency_ms == null
+                      ? '—'
+                      : `${request.total_latency_ms} ms`}
+                  </td>
 
-              <td>
-                <a class="row-link" href={resolve(`requests/${request.id}`)}>
-                  View timeline
-                </a>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+                  <td>
+                    <a
+                      class="table-link"
+                      href={resolve(`requests/${request.id}`)}
+                    >
+                      View timeline
+                    </a>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </ScrollTable>
+      </QueryView>
     </div>
   {/if}
 </section>
 
 <style>
-  .recent-table {
+  .activity-state {
     margin-top: 1rem;
+  }
+
+  .recent-table {
+    min-width: 42rem;
   }
 
   .activity {
@@ -150,27 +151,24 @@
   }
 
   .activity-heading > a {
+    display: inline-flex;
+    min-height: 2.5rem;
     flex: none;
+    align-items: center;
+    gap: 0.4rem;
     margin-top: 0;
-  }
-
-  .empty-state > span {
-    display: grid;
-    width: 2.75rem;
-    height: 2.75rem;
-    place-items: center;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    color: var(--foreground-muted);
-  }
-
-  .empty-state strong {
     color: var(--foreground);
+    font-size: var(--text-body-sm);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 4px;
+    transition:
+      color var(--motion),
+      text-decoration-color var(--motion);
   }
 
-  .empty-state p {
-    max-width: 34rem;
-    margin: 0;
-    font-size: var(--text-body-sm);
+  .activity-heading > a:hover {
+    color: var(--foreground-hover);
+    text-decoration-color: var(--signal);
   }
 </style>

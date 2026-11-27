@@ -52,7 +52,9 @@
       ?.querySelector('[aria-current="page"]')
       ?.scrollIntoView?.({ block: 'nearest' });
   });
-  const isMac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
+  const isMac = /(Mac|iPhone|iPad)/i.test(
+    globalThis.navigator?.userAgent ?? ''
+  );
 </script>
 
 {#snippet link(entry: VisibleItem)}
@@ -170,7 +172,7 @@
   kbd {
     padding: 0.05rem 0.35rem;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     color: var(--foreground-muted);
     font-family: var(--font-mono);
     font-size: 0.68rem;
@@ -223,6 +225,7 @@
   li a.active,
   .person.active {
     background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 0 var(--signal);
     color: var(--foreground);
   }
   li a.active :global(.icon) {

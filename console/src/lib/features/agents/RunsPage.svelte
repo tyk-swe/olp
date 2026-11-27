@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -53,14 +55,23 @@
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}
-  <p class="inline-problem" role="alert">{errorMessage(projects.error)}</p>
+  <Callout tone="danger">{errorMessage(projects.error)}</Callout>
 {/if}
 {#if runs.error}
-  <p class="inline-problem" role="alert">{errorMessage(runs.error)}</p>
+  <Callout tone="danger">
+    {errorMessage(runs.error)}
+    {#snippet actions()}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => runs.refetch()}
+      >
+        Retry
+      </button>{/snippet}
+  </Callout>
 {:else if runs.isFetching}
   <div class="loading-state" role="status">Loading runs…</div>
 {:else if !runs.data?.items.length}
-  <div class="card empty-state">No runs in this view.</div>
+  <EmptyState title="No runs in this view" />
 {:else}
   <ScrollTable label="Agent runs">
     <table class="data-table">
@@ -75,7 +86,7 @@
         {#each runs.data.items as run (run.id)}
           <tr>
             <td>
-              <a href={resolve(`activity/runs/${run.id}`)}>
+              <a class="table-link" href={resolve(`activity/runs/${run.id}`)}>
                 <code>{run.id}</code>
               </a>
             </td>

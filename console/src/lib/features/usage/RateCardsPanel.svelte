@@ -2,6 +2,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
@@ -163,7 +164,7 @@
   {#if !canEdit}<ReadOnlyNote>
       Your role can view rate cards but not publish them.
     </ReadOnlyNote>{/if}
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if error}<Callout tone="danger">{error}</Callout>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card card-form" onsubmit={addCard}>
     <div class="form-grid">
@@ -222,21 +223,19 @@
       {create.busy ? 'Creating…' : 'Create card'}
     </button>
   </form>
-  {#if cards.isPending}<div class="loading-state" role="status">
-      Loading rate cards…
-    </div>
-  {:else if cards.isError}<div class="inline-problem" role="alert">
-      {errorMessage(cards.error)}
-      <button class="text-button" onclick={() => cards.refetch()}>
-        Try again
-      </button>
-    </div>
-  {:else if (cards.data?.items ?? []).length === 0}
-    <EmptyState title="No rate cards yet">
-      A rate card sets what consumers are charged, separate from what the
-      provider costs you.
-    </EmptyState>
-  {:else}
+  <QueryView
+    query={cards}
+    loading="Loading rate cards…"
+    failure={errorMessage(cards.error)}
+    retryLabel="Try again"
+    emptyWhen={(cards.data?.items ?? []).length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No rate cards yet">
+        A rate card sets what consumers are charged, separate from what the
+        provider costs you.
+      </EmptyState>
+    {/snippet}
     <ScrollTable label="Rate cards">
       <table class="data-table">
         <caption class="sr-only">Rate cards by owner</caption>
@@ -298,5 +297,5 @@
       {...cursorPaginationProps(pagination, cards.data?.nextCursor)}
       label="Rate card pages"
     />
-  {/if}
+  </QueryView>
 </section>

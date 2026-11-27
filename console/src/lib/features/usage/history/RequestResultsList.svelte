@@ -1,4 +1,9 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import CursorPagination from '#lib/components/CursorPagination.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import SessionTimeline from './SessionTimeline.svelte';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -61,121 +66,115 @@
       Refresh
     </button>
   </div>
-  {#if exportError}<div class="inline-problem" role="alert">
-      {exportError}
+  {#if exportError}<div class="export-problem">
+      <Callout tone="danger">{exportError}</Callout>
     </div>{/if}
 
-  {#if requests.isPending}
-    <div class="loading-state" role="status">Loading request metadata…</div>
-  {:else if requests.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(requests.error, 'Request metadata is unavailable.')}
-      <button class="text-button" onclick={() => requests.refetch()}>
-        Try again
-      </button>
-    </div>
-  {:else if requests.data?.items.length === 0 && listState.history.length === 0}
-    <div class="card empty-state">
-      <div>
-        <strong>No matching requests</strong>
-        <p>Adjust the filters or send traffic through an active route.</p>
-      </div>
-    </div>
-  {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-    <div
-      class="table-shell desktop-results"
-      tabindex="0"
-      role="region"
-      aria-label="Request results"
-    >
-      <table class="data-table">
-        <caption class="sr-only">Request metadata, newest first</caption>
-        <thead>
-          <tr>
-            <th scope="col">Started</th><th scope="col">
-              Route / operation
-            </th><th scope="col">Status</th><th scope="col">Attempts</th><th
-              scope="col"
-            >
-              TTFT / latency
-            </th><th scope="col">Tokens</th><th scope="col">Cost</th><th
-              scope="col"
-            >
-              <span class="sr-only">Details</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each requests.data?.items ?? [] as request (request.id)}
+  <QueryView
+    query={requests}
+    loading="Loading request metadata…"
+    failure={errorMessage(requests.error, 'Request metadata is unavailable.')}
+    retryLabel="Try again"
+    updating={requests.isPlaceholderData}
+    emptyWhen={requests.data?.items.length === 0 &&
+      listState.history.length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No matching requests">
+        Adjust the filters or send traffic through an active route.
+      </EmptyState>
+    {/snippet}
+    <div class="desktop-results">
+      <ScrollTable label="Request results" busy={requests.isPlaceholderData}>
+        <table class="data-table">
+          <caption class="sr-only">Request metadata, newest first</caption>
+          <thead>
             <tr>
-              <td>
-                {formatDate(request.started_at)}<small>
-                  {request.completed_at
-                    ? `Completed ${formatDate(request.completed_at)}`
-                    : 'In flight'}
-                </small>
-              </td>
-              <td>
-                <strong>{request.route}</strong><small>
-                  {request.operation} · {request.surface}
-                </small>
-              </td>
-              <td>
-                <span
-                  class="badge {statusTone(
-                    request.status_code,
-                    request.error_class
-                  )}"
-                >
-                  {statusLabel(request.status_code, request.error_class)}
-                </span>{#if request.payload_captured}<br /><small
-                    class="capture-note"
-                    title="Queued in the volatile capture queue — does not guarantee delivery"
-                  >
-                    Capture queued
-                  </small>{/if}
-              </td>
-              <td>{request.attempt_count}</td>
-              <td>
-                {request.first_byte_ms == null
-                  ? '—'
-                  : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
-                null
-                  ? '—'
-                  : `${request.total_latency_ms} ms`}
-              </td>
-              <td>
-                {formatInteger(request.input_tokens)} in<br />{formatInteger(
-                  request.output_tokens
-                )} out<small>
-                  {formatInteger(request.cached_input_tokens)} cached · {formatInteger(
-                    request.cache_write_input_tokens
-                  )} write
-                </small>
-              </td>
-              <td>
-                <span class:unpriced={request.unpriced}>
-                  {formatCost(request.estimated_cost, request.currency)}
-                </span>{#if request.usage_complete === false}<small
-                    class="warning-text"
-                  >
-                    Incomplete usage
-                  </small>{/if}
-              </td>
-              <td>
-                <a
-                  class="row-link"
-                  href={resolve(`requests/${request.id}${page.url.search}`)}
-                  aria-label={`View request ${request.id}`}
-                >
-                  View
-                </a>
-              </td>
+              <th scope="col">Started</th><th scope="col">
+                Route / operation
+              </th><th scope="col">Status</th><th scope="col" class="num">
+                Attempts
+              </th><th scope="col" class="num">TTFT / latency</th><th
+                scope="col"
+                class="num"
+              >
+                Tokens
+              </th><th scope="col" class="num">Cost</th><th scope="col">
+                <span class="sr-only">Details</span>
+              </th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {#each requests.data?.items ?? [] as request (request.id)}
+              <tr>
+                <td>
+                  {formatDate(request.started_at)}<small>
+                    {request.completed_at
+                      ? `Completed ${formatDate(request.completed_at)}`
+                      : 'In flight'}
+                  </small>
+                </td>
+                <td>
+                  <strong>{request.route}</strong><small>
+                    {request.operation} · {request.surface}
+                  </small>
+                </td>
+                <td>
+                  <span
+                    class="badge {statusTone(
+                      request.status_code,
+                      request.error_class
+                    )}"
+                  >
+                    {statusLabel(request.status_code, request.error_class)}
+                  </span>{#if request.payload_captured}<br /><small
+                      class="capture-note"
+                      title="Queued in the volatile capture queue — does not guarantee delivery"
+                    >
+                      Capture queued
+                    </small>{/if}
+                </td>
+                <td class="num">{request.attempt_count}</td>
+                <td class="num">
+                  {request.first_byte_ms == null
+                    ? '—'
+                    : `${request.first_byte_ms} ms`} / {request.total_latency_ms ==
+                  null
+                    ? '—'
+                    : `${request.total_latency_ms} ms`}
+                </td>
+                <td class="num">
+                  {formatInteger(request.input_tokens)} in<br />{formatInteger(
+                    request.output_tokens
+                  )} out<small>
+                    {formatInteger(request.cached_input_tokens)} cached · {formatInteger(
+                      request.cache_write_input_tokens
+                    )} write
+                  </small>
+                </td>
+                <td class="num">
+                  <span class:unpriced={request.unpriced}>
+                    {formatCost(request.estimated_cost, request.currency)}
+                  </span>{#if request.usage_complete === false}<small
+                      class="warning-text"
+                    >
+                      Incomplete usage
+                    </small>{/if}
+                </td>
+                <td>
+                  <a
+                    class="table-link"
+                    href={resolve(`requests/${request.id}${page.url.search}`)}
+                    aria-label={`View request ${request.id}`}
+                  >
+                    View
+                  </a>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </ScrollTable>
     </div>
     <ul class="mobile-results" aria-label="Request results">
       {#each requests.data?.items ?? [] as request (request.id)}
@@ -252,33 +251,20 @@
         </li>
       {/each}
     </ul>
-    {@const pagination = cursorPaginationProps(
-      listState,
-      requests.isPlaceholderData ? null : requests.data?.nextCursor
-    )}
-    <nav class="pagination" aria-label="Request pages">
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={pagination.onPrevious}
-        disabled={!pagination.hasPrevious}
-      >
-        Previous
-      </button>
-      <span>Page {pagination.page}</span>
-      <button
-        class="button button-secondary"
-        type="button"
-        onclick={pagination.onNext}
-        disabled={!pagination.hasNext}
-      >
-        Next
-      </button>
-    </nav>
-  {/if}
+    <CursorPagination
+      {...cursorPaginationProps(
+        listState,
+        requests.isPlaceholderData ? null : requests.data?.nextCursor
+      )}
+      label="Request pages"
+    />
+  </QueryView>
 {/if}
 
 <style>
+  .export-problem {
+    margin-bottom: 0.75rem;
+  }
   .capture-note {
     color: var(--warning);
     font-size: var(--text-caption);
@@ -301,20 +287,6 @@
   .warning-text,
   .unpriced {
     color: var(--warning);
-  }
-  .row-link {
-    display: inline-flex;
-    min-height: 2.75rem;
-    align-items: center;
-    color: var(--foreground);
-    font-weight: 400;
-    text-decoration: underline;
-    text-decoration-color: var(--border-strong);
-    text-underline-offset: 4px;
-    transition: text-decoration-color var(--motion);
-  }
-  .row-link:hover {
-    text-decoration-color: currentColor;
   }
   .mobile-results {
     display: none;
@@ -341,16 +313,6 @@
   }
   .mobile-result-heading small {
     margin-top: 0.15rem;
-    color: var(--foreground-muted);
-  }
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-  .pagination span {
     color: var(--foreground-muted);
   }
 
@@ -396,9 +358,6 @@
     }
     .mobile-results dl {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .pagination {
-      justify-content: space-between;
     }
   }
 </style>

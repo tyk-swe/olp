@@ -102,6 +102,24 @@ describe('navigation', () => {
     expect(breadcrumbs('/')).toEqual([]);
   });
 
+  it('appends a detail crumb with a clickable parent link on nested routes', () => {
+    expect(breadcrumbs('/providers/prov_1')).toEqual([
+      { label: 'Build' },
+      { label: 'Providers', href: '/providers' },
+      { label: 'Details' }
+    ]);
+    expect(breadcrumbs('/keys/new')).toEqual([
+      { label: 'Access' },
+      { label: 'API keys', href: '/keys' },
+      { label: 'New' }
+    ]);
+    expect(breadcrumbs('/routes/rt_1/revisions')).toEqual([
+      { label: 'Build' },
+      { label: 'Routes', href: '/routes' },
+      { label: 'Revisions' }
+    ]);
+  });
+
   it('only offers create actions the grant can perform', () => {
     const labels = (grant: Grant) =>
       paletteEntries(grant, true)

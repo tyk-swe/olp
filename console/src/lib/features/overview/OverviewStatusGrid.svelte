@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { Overview } from './api.js';
@@ -27,13 +28,15 @@
     <div>
       <p>Providers</p>
       <strong>
-        {overview.isError
-          ? 'Unavailable'
-          : overview.isPending
-            ? 'Checking…'
-            : activeProviders
-              ? `${activeProviders} active`
-              : 'Not configured'}
+        {#if overview.isError}
+          Unavailable
+        {:else if overview.isPending}
+          Checking…
+        {:else}
+          <a class="status-link" href={resolve('providers')}>
+            {activeProviders ? `${activeProviders} active` : 'Not configured'}
+          </a>
+        {/if}
       </strong>
       {#if overview.isError}<button
           class="text-button"
@@ -56,13 +59,15 @@
     <div>
       <p>Active routes</p>
       <strong>
-        {overview.isError
-          ? 'Unavailable'
-          : overview.isPending
-            ? 'Checking…'
-            : readyRoutes
-              ? `${readyRoutes} active`
-              : 'Awaiting activation'}
+        {#if overview.isError}
+          Unavailable
+        {:else if overview.isPending}
+          Checking…
+        {:else}
+          <a class="status-link" href={resolve('routes')}>
+            {readyRoutes ? `${readyRoutes} active` : 'Awaiting activation'}
+          </a>
+        {/if}
       </strong>
       {#if overview.isError}<button
           class="text-button"
@@ -98,6 +103,26 @@
     align-items: center;
     gap: 1rem;
     padding: 1.25rem;
+    transition:
+      border-color var(--motion),
+      background-color var(--motion);
+  }
+
+  .status-card:hover {
+    border-color: var(--border);
+    background: var(--surface-raised);
+  }
+
+  .status-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .status-link:hover {
+    color: var(--foreground-hover);
+    text-decoration: underline;
+    text-decoration-color: var(--signal);
+    text-underline-offset: 4px;
   }
 
   .status-card > div {

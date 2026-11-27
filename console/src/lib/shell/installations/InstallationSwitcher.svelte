@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { OVERVIEW } from '#lib/shell/navigation.js';
   import {
@@ -85,7 +86,8 @@
     aria-label={`Choose installation: ${name}`}
     title={`Manage installations: ${name}`}
   >
-    {name}<span aria-hidden="true"> ▾</span>
+    <span class="name">{name}</span>
+    <NavIcon name="chevron" size={14} />
   </summary>
   <div class="switcher-menu">
     <label>
@@ -148,21 +150,35 @@
     min-width: 0;
   }
   summary {
-    display: block;
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 0.25rem;
     color: var(--foreground);
     cursor: pointer;
     font-size: var(--text-body-sm);
     font-weight: 500;
     list-style: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   summary::-webkit-details-marker {
     display: none;
   }
-  summary span {
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  summary :global(.icon-chevron) {
+    flex: none;
     color: var(--foreground-subtle);
+    transition: transform var(--motion);
+  }
+  .installation-switcher[open] > summary :global(.icon-chevron) {
+    transform: rotate(180deg);
+  }
+  .installation-switcher[open] .switcher-menu {
+    animation: pop-in 180ms var(--ease-out);
   }
   .switcher-menu {
     color: var(--foreground);

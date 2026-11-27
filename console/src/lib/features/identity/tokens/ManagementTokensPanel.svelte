@@ -327,11 +327,6 @@
 {/if}
 
 <style>
-  .lede {
-    max-width: 60ch;
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   .token-secret {
     display: block;
     overflow-x: auto;

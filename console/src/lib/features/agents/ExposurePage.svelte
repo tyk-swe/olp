@@ -1,5 +1,7 @@
 <script lang="ts">
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -30,13 +32,16 @@
     />
   </label><button class="button button-secondary" type="submit">Filter</button>
 </form>
-{#if exposure.error}<p class="inline-problem" role="alert">
-    {errorMessage(exposure.error)}
-  </p>{:else if exposure.isPending}<div class="loading-state" role="status">
-    Loading exposure…
-  </div>{:else if !exposure.data?.items.length}<div class="card empty-state">
-    No execution debit records.
-  </div>{:else}<ScrollTable label="Provisional exposure">
+<QueryView
+  query={exposure}
+  loading="Loading exposure…"
+  failure={errorMessage(exposure.error)}
+  emptyWhen={!exposure.data?.items.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No execution debit records" />
+  {/snippet}
+  <ScrollTable label="Provisional exposure">
     <table class="data-table">
       <thead>
         <tr>
@@ -60,26 +65,29 @@
           </tr>{/each}
       </tbody>
     </table>
-  </ScrollTable>{/if}
-<button
-  class="button button-secondary"
-  type="button"
-  disabled={!cursor || exposure.isFetching}
-  onclick={() => (cursor = undefined)}
->
-  Newest
-</button><button
-  class="button button-secondary"
-  type="button"
-  disabled={!exposure.data?.nextCursor || exposure.isFetching}
-  onclick={() => (cursor = exposure.data?.nextCursor ?? undefined)}
->
-  Older
-</button><button
-  class="button button-secondary"
-  type="button"
-  disabled={exposure.isFetching}
-  onclick={() => exposure.refetch()}
->
-  Refresh
-</button>
+  </ScrollTable>
+</QueryView>
+<nav class="page-actions list-pager" aria-label="Provisional exposure pages">
+  <button
+    class="button button-secondary"
+    type="button"
+    disabled={!cursor || exposure.isFetching}
+    onclick={() => (cursor = undefined)}
+  >
+    Newest
+  </button><button
+    class="button button-secondary"
+    type="button"
+    disabled={!exposure.data?.nextCursor || exposure.isFetching}
+    onclick={() => (cursor = exposure.data?.nextCursor ?? undefined)}
+  >
+    Older
+  </button><button
+    class="button button-secondary"
+    type="button"
+    disabled={exposure.isFetching}
+    onclick={() => exposure.refetch()}
+  >
+    Refresh
+  </button>
+</nav>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -70,18 +72,25 @@
   </label>
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
-{#if projects.error}<p class="inline-problem" role="alert">
+{#if projects.error}<Callout tone="danger">
     {errorMessage(projects.error)}
-  </p>{/if}
-{#if delegations.error}<p class="inline-problem" role="alert">
+  </Callout>{/if}
+{#if delegations.error}<Callout tone="danger">
     {errorMessage(delegations.error)}
-  </p>
+    {#snippet actions()}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => delegations.refetch()}
+      >
+        Retry
+      </button>{/snippet}
+  </Callout>
 {:else if delegations.isFetching}<div class="loading-state" role="status">
     Loading delegations…
   </div>
-{:else if !delegations.data?.items.length}<div class="card empty-state">
-    No delegations in this view
-  </div>
+{:else if !delegations.data?.items.length}<EmptyState
+    title="No delegations in this view"
+  />
 {:else}
   <ScrollTable label="Delegations">
     <table class="data-table">

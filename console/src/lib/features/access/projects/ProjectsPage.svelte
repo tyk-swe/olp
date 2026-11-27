@@ -4,10 +4,10 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
@@ -61,41 +61,36 @@
       </button>{/if}{/snippet}
 </PageHeader>
 
-{#if projects.isPending}
-  <div class="loading-state" role="status">Loading projects…</div>
-{:else if projects.isError}
-  <Callout tone="danger" title="Projects didn’t load">
-    {errorMessage(projects.error)}
-    {#snippet actions()}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => projects.refetch()}
-      >
-        Try again
-      </button>{/snippet}
-  </Callout>
-{:else if !projects.data.length}
-  <EmptyState title="No projects yet">
-    {canCreate
-      ? 'Create a project to give a team its own keys, routes and limits.'
-      : 'Ask an owner to add you to a project.'}
-    {#snippet action()}{#if canCreate}<button
-          class="button button-primary"
-          type="button"
-          onclick={startCreate}
-        >
-          New project
-        </button>{/if}{/snippet}
-  </EmptyState>
-{:else}
+<QueryView
+  query={projects}
+  loading="Loading projects…"
+  errorTitle="Projects didn’t load"
+  failure={errorMessage(projects.error)}
+  retryLabel="Try again"
+  emptyWhen={!projects.data?.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No projects yet">
+      {canCreate
+        ? 'Create a project to give a team its own keys, routes and limits.'
+        : 'Ask an owner to add you to a project.'}
+      {#snippet action()}{#if canCreate}<button
+            class="button button-primary"
+            type="button"
+            onclick={startCreate}
+          >
+            New project
+          </button>{/if}{/snippet}
+    </EmptyState>
+  {/snippet}
   <ScrollTable label="Projects">
     <table class="data-table">
       <thead><tr><th>Name</th><th>Your role</th></tr></thead>
       <tbody>
-        {#each projects.data as project (project.id)}
+        {#each projects.data ?? [] as project (project.id)}
           <tr>
             <td>
-              <a href={resolve(`projects/${project.id}`)}>
+              <a class="table-link" href={resolve(`projects/${project.id}`)}>
                 <strong>{project.name}</strong>
               </a>
             </td>
@@ -110,7 +105,7 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>
 
 {#if creating}
   <Dialog title="New project" onClose={() => (creating = false)}>

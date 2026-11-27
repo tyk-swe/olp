@@ -9,6 +9,8 @@
     failure,
     errorTitle,
     retryLabel = 'Retry',
+    updating = false,
+    compact = false,
     emptyWhen,
     empty,
     children
@@ -23,6 +25,8 @@
     failure?: string;
     errorTitle?: string;
     retryLabel?: string;
+    updating?: boolean;
+    compact?: boolean;
     emptyWhen?: boolean;
     empty?: Snippet;
     children: Snippet;
@@ -30,7 +34,7 @@
 </script>
 
 {#if query.isPending}
-  <div class="loading-state" role="status">{loading}</div>
+  <div class="loading-state" class:compact role="status">{loading}</div>
 {:else if query.isError}
   <Callout tone="danger" title={errorTitle}>
     {failure ?? errorMessage(query.error)}
@@ -45,5 +49,6 @@
 {:else if emptyWhen && empty}
   {@render empty()}
 {:else}
+  {#if updating}<p class="updating" role="status">Updating…</p>{/if}
   {@render children()}
 {/if}

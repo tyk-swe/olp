@@ -1,5 +1,7 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
@@ -274,7 +276,7 @@
   {#if !canEdit}<p class="section-help">
       Your role can view pricing sources but not change them.
     </p>{/if}
-  {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+  {#if error}<Callout tone="danger">{error}</Callout>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
 
   {#if canEdit}
@@ -289,23 +291,18 @@
     />
   {/if}
 
-  {#if sources.isPending}<div class="loading-state" role="status">
-      Loading pricing sources…
-    </div>
-  {:else if sources.isError}<div class="inline-problem" role="alert">
-      {errorMessage(sources.error)}
-      <button
-        class="text-button"
-        type="button"
-        onclick={() => sources.refetch()}
-      >
-        Try again
-      </button>
-    </div>
-  {:else if !(sources.data ?? []).length}<div class="card empty-state">
-      No pricing sources. Revisions can still be created manually below.
-    </div>
-  {:else}
+  <QueryView
+    query={sources}
+    loading="Loading pricing sources…"
+    failure={errorMessage(sources.error)}
+    retryLabel="Try again"
+    emptyWhen={!(sources.data ?? []).length}
+  >
+    {#snippet empty()}
+      <EmptyState title="No pricing sources">
+        Revisions can still be created manually below.
+      </EmptyState>
+    {/snippet}
     <div class="source-list">
       {#each sources.data ?? [] as source (source.id)}
         {@const fetched = refreshed[source.id]}
@@ -375,7 +372,7 @@
         </article>
       {/each}
     </div>
-  {/if}
+  </QueryView>
 </section>
 
 <style>

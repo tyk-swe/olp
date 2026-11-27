@@ -58,11 +58,13 @@
     />
   {/key}
 {:else if playground.plan.kind === 'unavailable'}
-  <section class="card strict-client-unavailable" role="status">
-    This route needs a native or negotiated public client. Choose Advanced,
-    Generation, OpenAI and the negotiated tool template for the currently
-    qualified tool workflow.
-  </section>
+  <div class="strict-client-unavailable">
+    <Callout tone="info">
+      This route needs a native or negotiated public client. Choose Advanced,
+      Generation, OpenAI and the negotiated tool template for the currently
+      qualified tool workflow.
+    </Callout>
+  </div>
 {:else if playground.plan.kind === 'audio'}
   {#key playground.model.trim()}<AudioTranslationPlayground
       route={playground.model.trim()}
@@ -71,7 +73,7 @@
   <RealtimeTrace />
 {/if}
 
-{#if playground.explanation}<section class="card composer">
+{#if playground.explanation}<section class="card explanation-card">
     <h2>Routing explanation</h2>
     <p class="explanation-source">
       {playground.explanation.dryRun
@@ -83,8 +85,17 @@
 
 <style>
   .strict-client-unavailable {
-    padding: 1.25rem;
     margin-top: 1rem;
+  }
+  .explanation-card {
+    margin-top: 1rem;
+    padding: 1.5rem;
+  }
+  .explanation-card h2 {
+    margin: 0 0 0.35rem;
+    font-size: var(--text-body);
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .explanation-source {
     margin: 0 0 1rem;

@@ -1,5 +1,8 @@
 <script lang="ts">
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import ProviderBulkActions from './ProviderBulkActions.svelte';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
@@ -114,111 +117,97 @@
     }}
   />{/if}
 
-{#if providers.isPending}
-  <div class="loading-state" role="status">Loading providers…</div>
-{:else if providers.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(providers.error)}
-    <button
-      class="button button-secondary"
-      type="button"
-      onclick={() => providers.refetch()}
-    >
-      Retry
-    </button>
-  </div>
-{:else if providers.data?.items.length === 0 && listState.history.length === 0}
-  <section class="card empty-state">
-    <div>
-      <h2>No providers configured</h2>
-      <p>Connect an upstream and test it before building a route.</p>
-      {#if canManage}<a
-          class="button button-primary"
-          href={resolve('providers/new')}
-        >
-          Connect provider
-        </a>
-      {/if}
-    </div>
-  </section>
-{:else}
-  {#if providers.isPlaceholderData}
-    <p class="updating" role="status">Updating…</p>
-  {/if}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-  <div
-    class="table-shell provider-table"
-    tabindex="0"
-    role="region"
-    aria-label="Providers"
-    aria-busy={providers.isPlaceholderData}
-  >
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th><span class="sr-only">Select</span></th><th>Name</th><th>
-            Vendor / connector
-          </th><th>Status</th><th>Models</th><th>Last probe</th><th>
-            <span class="sr-only">Actions</span>
-          </th>
-        </tr>
-      </thead><tbody>
-        {#each groups as [vendor, connections] (vendor)}<tr
-            class="vendor-group"
+<QueryView
+  query={providers}
+  loading="Loading providers…"
+  failure={errorMessage(providers.error)}
+  updating={providers.isPlaceholderData}
+  emptyWhen={providers.data?.items.length === 0 &&
+    listState.history.length === 0}
+>
+  {#snippet empty()}
+    <EmptyState title="No providers configured">
+      Connect an upstream and test it before building a route.
+      {#snippet action()}
+        {#if canManage}<a
+            class="button button-primary"
+            href={resolve('providers/new')}
           >
-            <th colspan="7" scope="rowgroup">
-              {vendor} · {connections.length} connections on this page
+            Connect provider
+          </a>
+        {/if}
+      {/snippet}
+    </EmptyState>
+  {/snippet}
+  <div class="provider-table">
+    <ScrollTable label="Providers" busy={providers.isPlaceholderData}>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th><span class="sr-only">Select</span></th><th>Name</th><th>
+              Vendor / connector
+            </th><th>Status</th><th>Models</th><th>Last probe</th><th>
+              <span class="sr-only">Actions</span>
             </th>
-          </tr>{#each connections as item (item.id)}<tr>
-              <td>
-                {#if canManage}<input
-                    type="checkbox"
-                    aria-label="Select {item.name}"
-                    checked={selectedSet.has(item.id)}
-                    disabled={providers.isPlaceholderData}
-                    onchange={(e) => {
-                      selectedIds = e.currentTarget.checked
-                        ? [...selectedIds, item.id]
-                        : selectedIds.filter((id) => id !== item.id);
-                    }}
-                  />
-                {/if}
-              </td>
-              <td>
-                <a class="table-link" href={resolve(`providers/${item.id}`)}>
-                  {item.name}
-                </a>
-                <br />
-                <small>{item.project_name ?? 'Installation-wide'}</small>
-              </td>
-              <td>
-                {item.vendor_id ?? 'Custom'}
-                <small class="connector-name">{stateLabel(item.kind)}</small>
-              </td>
-              <td>
-                <span class="badge {providerStatusTone(item)}">
-                  {providerStatus(item)}
-                </span>
-              </td>
-              <td>{item.enabled_model_count} enabled</td>
-              <td>
-                {item.last_probe_at
-                  ? formatDate(item.last_probe_at)
-                  : 'Not tested'}
-              </td>
-              <td>
-                <a
-                  class="button button-secondary"
-                  href={resolve(`providers/${item.id}`)}
-                >
-                  {canManage ? 'Manage' : 'View'}
-                </a>
-              </td>
-            </tr>
+          </tr>
+        </thead><tbody>
+          {#each groups as [vendor, connections] (vendor)}<tr
+              class="vendor-group"
+            >
+              <th colspan="7" scope="rowgroup">
+                {vendor} · {connections.length} connections on this page
+              </th>
+            </tr>{#each connections as item (item.id)}<tr>
+                <td>
+                  {#if canManage}<input
+                      type="checkbox"
+                      aria-label="Select {item.name}"
+                      checked={selectedSet.has(item.id)}
+                      disabled={providers.isPlaceholderData}
+                      onchange={(e) => {
+                        selectedIds = e.currentTarget.checked
+                          ? [...selectedIds, item.id]
+                          : selectedIds.filter((id) => id !== item.id);
+                      }}
+                    />
+                  {/if}
+                </td>
+                <td>
+                  <a class="table-link" href={resolve(`providers/${item.id}`)}>
+                    {item.name}
+                  </a>
+                  <br />
+                  <small>{item.project_name ?? 'Installation-wide'}</small>
+                </td>
+                <td>
+                  {item.vendor_id ?? 'Custom'}
+                  <small class="connector-name">{stateLabel(item.kind)}</small>
+                </td>
+                <td>
+                  <span class="badge {providerStatusTone(item)}">
+                    {providerStatus(item)}
+                  </span>
+                </td>
+                <td>{item.enabled_model_count} enabled</td>
+                <td>
+                  {item.last_probe_at
+                    ? formatDate(item.last_probe_at)
+                    : 'Not tested'}
+                </td>
+                <td>
+                  <a
+                    class="button button-secondary"
+                    href={resolve(`providers/${item.id}`)}
+                  >
+                    {canManage ? 'Manage' : 'View'}
+                  </a>
+                </td>
+              </tr>
+            {/each}
           {/each}
-        {/each}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </ScrollTable>
   </div>
   <CursorPagination
     {...cursorPaginationProps(
@@ -228,7 +217,7 @@
     )}
     label="Provider pages"
   />
-{/if}
+</QueryView>
 
 <style>
   /* Vendor group rows read as a band between the column headers and the
@@ -251,22 +240,7 @@
   .provider-table {
     margin-top: 0.75rem;
   }
-  .updating + .provider-table {
+  .provider-table :global(.scroll-table) {
     margin-top: 0;
-  }
-  .table-link {
-    min-height: 2.75rem;
-    color: var(--foreground);
-    font-weight: 400;
-    text-decoration: underline;
-    text-decoration-color: var(--border-strong);
-    text-underline-offset: 4px;
-    transition:
-      color var(--motion),
-      text-decoration-color var(--motion);
-  }
-  .table-link:hover {
-    color: var(--foreground-hover);
-    text-decoration-color: currentColor;
   }
 </style>

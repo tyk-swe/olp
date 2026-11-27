@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
 
   let {
     title,
@@ -28,7 +29,11 @@
     dialog.showModal();
     dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => {
-      if (!document.querySelector('dialog.dialog[open]'))
+      if (
+        !document.querySelector(
+          'dialog.dialog[open], dialog.secret-dialog[open]'
+        )
+      )
         document.documentElement.classList.remove('dialog-open');
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
@@ -54,15 +59,17 @@
   }}
 >
   <div class="frame">
-    <header>
-      <h2 id="{id}-title">{title}</h2>
-      <button class="close" type="button" aria-label="Close" onclick={close}>
-        ×
-      </button>
-    </header>
-    {#if description}<p id="{id}-description" class="description">
-        {description}
-      </p>{/if}
+    <div class="header-group">
+      <header>
+        <h2 id="{id}-title">{title}</h2>
+        <button class="close" type="button" aria-label="Close" onclick={close}>
+          <NavIcon name="close" size={18} />
+        </button>
+      </header>
+      {#if description}<p id="{id}-description" class="description">
+          {description}
+        </p>{/if}
+    </div>
     <div class="content">{@render children(close)}</div>
   </div>
 </dialog>
@@ -130,12 +137,16 @@
     flex-direction: column;
   }
 
+  .header-group {
+    padding: 1.25rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1.25rem 1.5rem 0;
   }
 
   h2 {
@@ -146,7 +157,7 @@
   }
 
   .description {
-    padding: 0.4rem 1.5rem 0;
+    padding: 0.4rem 0 0;
     color: var(--foreground-muted);
     font-size: var(--text-body-sm);
   }
@@ -159,6 +170,8 @@
   }
 
   .close {
+    display: grid;
+    place-items: center;
     width: 2.5rem;
     height: 2.5rem;
     flex: none;
@@ -166,8 +179,6 @@
     border-radius: var(--radius-control);
     background: transparent;
     color: var(--foreground-muted);
-    font-size: 1.4rem;
-    line-height: 1;
     transition:
       background-color var(--motion),
       color var(--motion);

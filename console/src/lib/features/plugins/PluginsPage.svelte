@@ -4,7 +4,9 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 
@@ -122,8 +124,12 @@
   title="Plugins"
   description="Provider plugins supply authentication and hosting around built-in dialects. OpenLLMProxy runs them confined and stores each module by its digest. A plugin can't be used until an owner approves the origins it declares. A deployment may also enable experimental unconfined plugins, which an owner permits one by one."
 />
-{#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
-{#if notice}<Callout tone="success">{notice}</Callout>{/if}
+{#if error}<div class="plugin-banner">
+    <Callout tone="danger">{error}</Callout>
+  </div>{/if}
+{#if notice}<div class="plugin-banner">
+    <Callout tone="success">{notice}</Callout>
+  </div>{/if}
 
 {#if canManage}
   <section class="card install-panel" aria-labelledby="plugin-install-heading">
@@ -160,25 +166,19 @@
   </ReadOnlyNote>
 {/if}
 
-{#if plugins.isPending}
-  <div class="loading-state" role="status">Loading plugins…</div>
-{:else if plugins.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(plugins.error)}
-    <button class="text-button" type="button" onclick={() => plugins.refetch()}>
-      Retry
-    </button>
-  </div>
-{:else if !plugins.data?.items.length}
-  <section class="card empty-state">
-    <h2>No plugins installed</h2>
-    <p>
+<QueryView
+  query={plugins}
+  loading="Loading plugins…"
+  failure={errorMessage(plugins.error)}
+  emptyWhen={!plugins.data?.items.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No plugins installed">
       Installed plugins and the profiles and origins they declare appear here.
-    </p>
-  </section>
-{:else}
+    </EmptyState>
+  {/snippet}
   <div class="plugin-list">
-    {#each plugins.data.items as plugin (plugin.digest)}
+    {#each plugins.data?.items ?? [] as plugin (plugin.digest)}
       <PluginCard
         {plugin}
         listed={indexEntryForDigest(pluginIndex.data, plugin.digest)}
@@ -190,7 +190,7 @@
       />
     {/each}
   </div>
-{/if}
+</QueryView>
 
 {#if pluginIndex.data}<PluginIndexSection index={pluginIndex.data} />{/if}
 
@@ -207,6 +207,9 @@
 {/if}
 
 <style>
+  .plugin-banner {
+    margin-bottom: 1rem;
+  }
   h2 {
     margin: 0;
     font-size: var(--text-body);

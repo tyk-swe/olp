@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { personOptions } from '#lib/features/identity/index.js';
   import { confirmAction } from '#lib/components/confirm.js';
@@ -231,8 +233,8 @@
     Your role can view API keys but not create, edit, rotate, or revoke them.
   </ReadOnlyNote>
 {/if}
-{#if submitError || write.error}<div class="inline-problem" role="alert">
-    {submitError || write.error}
+{#if submitError || write.error}<div class="key-problem">
+    <Callout tone="danger">{submitError || write.error}</Callout>
   </div>{/if}
 {#if pauseSavedFor}<p class="muted" role="status">
     {pauseRollout.data?.paused && pauseRollout.data.enforced
@@ -259,16 +261,13 @@
   emptyWhen={!keys.data?.items.length && listState.history.length === 0}
 >
   {#snippet empty()}
-    <section class="card empty-state">
-      <div>
-        <h2>
-          {createdBy ? 'No API keys created by this person' : 'No API keys'}
-        </h2>
-        <p>
-          {createdBy
-            ? 'Pick someone else or show every key.'
-            : 'Create a scoped key for your clients.'}
-        </p>
+    <EmptyState
+      title={createdBy ? 'No API keys created by this person' : 'No API keys'}
+    >
+      {createdBy
+        ? 'Pick someone else or show every key.'
+        : 'Create a scoped key for your clients.'}
+      {#snippet action()}
         {#if createdBy}<button
             class="button button-secondary"
             type="button"
@@ -283,8 +282,8 @@
             Create first key
           </a>
         {/if}
-      </div>
-    </section>
+      {/snippet}
+    </EmptyState>
   {/snippet}
   <ApiKeyTable
     items={keys.data?.items ?? []}
@@ -362,6 +361,9 @@
 {/if}
 
 <style>
+  .key-problem {
+    margin-top: 1rem;
+  }
   .issuer-filter {
     margin-top: 1.5rem;
   }

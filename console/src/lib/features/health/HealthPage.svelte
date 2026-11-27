@@ -1,5 +1,7 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { healthKeys } from '#lib/features/health/healthKeys.js';
@@ -118,13 +120,18 @@
 </p>
 
 {#if readiness.isError}
-  <div class="inline-problem" role="alert">
-    <strong>Control health is unavailable.</strong>
-    {errorMessage(readiness.error, 'The control API did not respond.')} The gateway
-    may still be serving its last-known-good runtime.
-    <button class="text-button" onclick={() => readiness.refetch()}>
-      Try again
-    </button>
+  <div class="health-problem">
+    <Callout tone="danger" title="Control health is unavailable.">
+      {errorMessage(readiness.error, 'The control API did not respond.')} The gateway
+      may still be serving its last-known-good runtime.
+      {#snippet actions()}<button
+          class="button button-secondary"
+          type="button"
+          onclick={() => readiness.refetch()}
+        >
+          Try again
+        </button>{/snippet}
+    </Callout>
   </div>
 {:else if !readiness.data}
   <div class="loading-state" role="status">Checking the installation…</div>
@@ -150,22 +157,21 @@
         <h2 id="runtime-title">Runtime generations</h2>
       </div>
     </div>
-    {#if generations.isError}
-      <div class="inline-problem" role="alert">
-        {errorMessage(
-          generations.error,
-          'Runtime generations are unavailable.'
-        )}
-        <button class="text-button" onclick={() => generations.refetch()}>
-          Try again
-        </button>
-      </div>
-    {:else if !generations.data}
-      <div class="loading-state" role="status">
-        Loading runtime generations…
-      </div>
-    {:else}
-      <ScrollTable label="Runtime generation history">
+    <QueryView
+      query={generations}
+      compact
+      loading="Loading runtime generations…"
+      failure={errorMessage(
+        generations.error,
+        'Runtime generations are unavailable.'
+      )}
+      retryLabel="Try again"
+      updating={generations.isPlaceholderData}
+    >
+      <ScrollTable
+        label="Runtime generation history"
+        busy={generations.isPlaceholderData}
+      >
         <table class="data-table">
           <caption class="sr-only">
             Recently published immutable runtime generations
@@ -180,7 +186,7 @@
               </th>
             </tr>
           </thead><tbody>
-            {#each generations.data.items as generation (generation.id)}<tr>
+            {#each generations.data?.items ?? [] as generation (generation.id)}<tr>
                 <td><strong>#{generation.sequence}</strong></td><td
                   class="mono"
                 >
@@ -201,15 +207,18 @@
       <CursorPagination
         {...cursorPaginationProps(
           generationPagination,
-          generations.isPlaceholderData ? null : generations.data.nextCursor
+          generations.isPlaceholderData ? null : generations.data?.nextCursor
         )}
         label="Runtime generation pages"
       />
-    {/if}
+    </QueryView>
   </section>
 {/if}
 
 <style>
+  .health-problem {
+    margin-top: 1rem;
+  }
   .refresh-note {
     margin: 1rem 0 0;
     color: var(--foreground-muted);

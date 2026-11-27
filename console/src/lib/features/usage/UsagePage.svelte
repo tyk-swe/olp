@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import SavedFilters from './SavedFilters.svelte';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
 
@@ -163,8 +165,8 @@
     </button>
   </div>
 </div>
-{#if exportError}<div class="inline-problem" role="alert">
-    {exportError}
+{#if exportError}<div class="problem-row">
+    <Callout tone="danger">{exportError}</Callout>
   </div>{/if}
 <UsageFilterForm
   bind:draft
@@ -173,33 +175,44 @@
   onReset={clear}
 />
 
-{#if validation}<div class="inline-problem" role="alert">{validation}</div>{/if}
+{#if validation}<div class="problem-row">
+    <Callout tone="danger">{validation}</Callout>
+  </div>{/if}
 
 {#if urlProblem}
-  <div class="inline-problem" role="alert">{urlProblem}</div>
-{:else if usage.isPending}
-  <div class="loading-state" role="status">Calculating usage…</div>
-{:else if usage.isError}
-  <div class="inline-problem" role="alert">
-    {errorMessage(usage.error, 'Usage could not be loaded.')}
-    <button class="text-button" onclick={() => usage.refetch()}>
-      Try again
-    </button>
-  </div>
-{:else if usage.data}
-  <UsageCompletenessStatus completeness={usage.data.completeness} />
-  <UsageDetails
-    apiKey={usage.data.apiKey}
-    completeness={usage.data.completeness}
-    summary={usage.data.summary}
-  />
+  <div class="problem-row"><Callout tone="danger">{urlProblem}</Callout></div>
+{:else}
+  <div class="usage-body">
+    <QueryView
+      query={usage}
+      loading="Calculating usage…"
+      failure={errorMessage(usage.error, 'Usage could not be loaded.')}
+      retryLabel="Try again"
+    >
+      {#if usage.data}
+        <UsageCompletenessStatus completeness={usage.data.completeness} />
+        <UsageDetails
+          apiKey={usage.data.apiKey}
+          completeness={usage.data.completeness}
+          summary={usage.data.summary}
+        />
 
-  <UsageReport
-    report={{
-      summary: usage.data.summary,
-      points: usage.data.points,
-      breakdown: usage.data.breakdown
-    }}
-    {applied}
-  />
+        <UsageReport
+          report={{
+            summary: usage.data.summary,
+            points: usage.data.points,
+            breakdown: usage.data.breakdown
+          }}
+          {applied}
+        />
+      {/if}
+    </QueryView>
+  </div>
 {/if}
+
+<style>
+  .problem-row,
+  .usage-body {
+    margin-top: 1rem;
+  }
+</style>

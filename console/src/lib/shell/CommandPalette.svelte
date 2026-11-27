@@ -118,6 +118,11 @@
       <p class="none">Nothing matches “{query}”</p>
     {/each}
   </div>
+  <footer class="hints" aria-hidden="true">
+    <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+    <span><kbd>↵</kbd> Open</span>
+    <span><kbd>Esc</kbd> Close</span>
+  </footer>
 </dialog>
 
 <style>
@@ -166,13 +171,30 @@
   kbd {
     padding: 0.05rem 0.35rem;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     font-family: var(--font-mono);
     font-size: 0.68rem;
   }
   .results {
+    min-height: 0;
+    flex: 1;
     overflow-y: auto;
     padding: 0.4rem;
+  }
+  .hints {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.55rem 1rem;
+    border-top: 1px solid var(--border-hairline);
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .hints span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
   }
   .group {
     margin: 0.6rem 0 0.25rem;
@@ -196,6 +218,7 @@
   }
   .option.selected {
     background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 0 var(--signal);
     color: var(--foreground);
   }
   .none {
