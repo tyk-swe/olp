@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -36,6 +37,7 @@ type Deps struct {
 	Spool            *staging.Spool
 	MaxResponseBytes int64
 	Log              *slog.Logger
+	Now              func() time.Time
 }
 
 type Transport struct {
@@ -44,7 +46,28 @@ type Transport struct {
 }
 
 func New(deps Deps) *Transport {
-	return &Transport{deps: deps, connections: egress.NewConnectionClientCache(128)}
+	policy := cmp.Or(deps.Egress, &egress.Policy{})
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	normalized := Deps{
+		Client:           deps.Client,
+		Auth:             cmp.Or(deps.Auth, connectors.NewAuth(policy, func(string) string { return "" })),
+		Egress:           policy,
+		Spool:            deps.Spool,
+		MaxResponseBytes: deps.MaxResponseBytes,
+		Log:              cmp.Or(deps.Log, slog.New(slog.DiscardHandler)),
+		Now:              now,
+	}
+	return &Transport{deps: normalized, connections: egress.NewConnectionClientCache(128)}
+}
+
+func (t *Transport) now() time.Time {
+	if t.deps.Now != nil {
+		return t.deps.Now()
+	}
+	return time.Now()
 }
 
 type Target struct {
@@ -175,14 +198,14 @@ func (t *Transport) do(ctx context.Context, target Target, sensitive *egress.Sen
 		return nil, t.refusal(resp, signed, call, credentials, outbound)
 	}
 	if err := outbound.finish(nil); err != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, &Failure{Class: upstream.Connect, Dispatched: true, Ambiguous: call.Ambiguous, Detail: "multipart upload stream failed"}
 	}
-	firstByte := time.Since(started)
+	firstByte := t.now().Sub(started)
 	reading := poller{transport: t, ctx: ctx, client: client, target: signed}
 	payload, source, failure := t.decode(ctx, resp, call.Response, options.Strict, reading)
 	if _, events := payload.(Events); !events {
-		resp.Body.Close()
+		drainAndClose(resp.Body)
 	}
 	if failure != nil {
 		dispatched := *failure
@@ -199,6 +222,9 @@ func (t *Transport) client(target Target) (*http.Client, error) {
 		return t.deps.Egress.EphemeralClient(target.Config.Network, target.NetworkSecret, connectionTimeout)
 	case target.Config.Network != nil || target.Config.ProfileID != "":
 		return t.connections.ClientScoped(target.ConnectionScope, *t.deps.Egress, target.Config.Network, target.NetworkSecret, connectionTimeout)
+	}
+	if t.deps.Client == nil {
+		return nil, errors.New("media http client is not configured")
 	}
 	return t.deps.Client, nil
 }
@@ -228,7 +254,7 @@ func (t *Transport) outbound(body media.Body) (outbound, *Failure) {
 		}
 		return jsonOutbound(inlined), nil
 	case media.UploadBody:
-		opened, err := t.deps.Spool.Open(b.Handle)
+		opened, err := t.openSpool(b.Handle)
 		if err != nil {
 			return outbound{}, &Failure{Class: upstream.Connect, Detail: "staged media upload is unavailable"}
 		}
@@ -238,7 +264,7 @@ func (t *Transport) outbound(body media.Body) (outbound, *Failure) {
 				return nil
 			}}, nil
 	case media.FormBody:
-		return t.formOutbound(b), nil
+		return t.formOutbound(b, t.openPart), nil
 	}
 	return outbound{}, &Failure{Class: upstream.Protocol, Detail: "media request body is not supported"}
 }
@@ -247,19 +273,21 @@ func jsonOutbound(body []byte) outbound {
 	return outbound{reader: bytes.NewReader(body), contentType: "application/json", signed: body, finish: settled}
 }
 
-func (t *Transport) formOutbound(fields []staging.Field) outbound {
+func (t *Transport) formOutbound(fields []staging.Field, open media.OpenPart) outbound {
 	reader, writer := io.Pipe()
 	form := multipart.NewWriter(writer)
 	done := make(chan error, 1)
 	go func() {
-		err := media.WriteForm(form, fields, t.openPart)
-		writer.CloseWithError(err)
+		defer panics.Recover(t.deps.Log, "media multipart upload", func(err error) {
+			_ = writer.CloseWithError(err)
+			done <- err
+		})
+		err := media.WriteForm(form, fields, open)
+		_ = writer.CloseWithError(err)
 		done <- err
 	}()
 	return outbound{reader: reader, contentType: form.FormDataContentType(), finish: func(abort error) error {
-		if abort != nil {
-			reader.CloseWithError(abort)
-		}
+		_ = reader.CloseWithError(cmp.Or(abort, io.ErrClosedPipe))
 		return <-done
 	}}
 }
@@ -289,7 +317,7 @@ func (t *Transport) send(ctx context.Context, client *http.Client, target Target
 	if call.Streaming() {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	maps.Copy(req.Header, options.Headers)
+	maps.Copy(req.Header, options.Headers.Clone())
 	credentials, err := t.deps.Auth.Apply(ctx, req, target.Config, target.Secret, body.signed)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -301,7 +329,7 @@ func (t *Transport) send(ctx context.Context, client *http.Client, target Target
 	if target.Sensitive != nil {
 		target.Sensitive.Include(credentials)
 	}
-	started := time.Now()
+	started := t.now()
 	resp, err := client.Do(req)
 	if err != nil {
 		sent := dispatched.Load()
@@ -325,7 +353,7 @@ func accepted(response media.Response, status int) bool {
 func (t *Transport) refusal(resp *http.Response, target Target, call *media.UpstreamCall, credentials egress.Sensitive, body outbound) *Failure {
 	_ = body.finish(errAbandoned)
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	declared := openai.ParseErrorBody(raw).Redact(credentials.Redact)
 	outcome := upstream.Classifier{Declared: target.Config.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: declared})
 	return &Failure{
@@ -334,19 +362,26 @@ func (t *Transport) refusal(resp *http.Response, target Target, call *media.Upst
 		Dispatched: true,
 		Ambiguous:  call.Ambiguous && outcome.Acceptance.Unresolved(),
 		Upstream:   declared,
-		RetryAfter: retryAfter(outcome.Class, resp),
+		RetryAfter: t.retryAfter(outcome.Class, resp),
 	}
 }
 
-func retryAfter(class upstream.Class, resp *http.Response) time.Duration {
+func (t *Transport) retryAfter(class upstream.Class, resp *http.Response) time.Duration {
 	if class != upstream.RateLimit {
 		return 0
 	}
-	return upstream.RetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	return upstream.RetryAfter(resp.Header.Get("Retry-After"), t.now())
+}
+
+func (t *Transport) openSpool(handle staging.Handle) (*staging.Opened, error) {
+	if t.deps.Spool == nil {
+		return nil, staging.ErrUnavailable
+	}
+	return t.deps.Spool.Open(handle)
 }
 
 func (t *Transport) openPart(part staging.Part) (io.ReadCloser, staging.Part, error) {
-	opened, err := t.deps.Spool.Open(part.Handle)
+	opened, err := t.openSpool(part.Handle)
 	if err != nil {
 		return nil, staging.Part{}, err
 	}
@@ -357,23 +392,34 @@ func (t *Transport) openPart(part staging.Part) (io.ReadCloser, staging.Part, er
 }
 
 func (t *Transport) readPart(part staging.Part) ([]byte, *media.Error) {
-	opened, err := t.deps.Spool.Open(part.Handle)
+	opened, err := t.openSpool(part.Handle)
 	if err != nil {
 		return nil, media.Fail(http.StatusInternalServerError, "media_unavailable", "The uploaded file is unavailable.")
 	}
 	defer opened.File.Close()
 	data, err := io.ReadAll(io.LimitReader(opened.File, media.DefaultAudioUploadLimit+1))
-	if err != nil || int64(len(data)) > media.DefaultAudioUploadLimit {
+	if err != nil {
+		return nil, media.Fail(http.StatusInternalServerError, "media_unavailable", "The uploaded file could not be read.")
+	}
+	if int64(len(data)) > media.DefaultAudioUploadLimit {
 		return nil, media.Fail(http.StatusRequestEntityTooLarge, "file_too_large", "The uploaded file exceeds the inline upload bound.")
 	}
 	return data, nil
+}
+
+func drainAndClose(body io.ReadCloser) {
+	if body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, errorBodyLimit))
+	_ = body.Close()
 }
 
 func interrupted(ctx context.Context, err error) error {
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
-	if ctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
 		return context.DeadlineExceeded
 	}
 	if timeout, ok := errors.AsType[interface {
