@@ -172,6 +172,7 @@ body {
    deeper 700 step, and green and amber stay non-text inside: neither clears
    4.5:1 on paper. */
 .card-light {
+  color-scheme: light;
   --canvas: var(--color-paper);
   --surface: var(--color-paper);
   --surface-subtle: var(--color-paper-shade);
@@ -286,6 +287,7 @@ body {
   font-weight: 500;
   letter-spacing: -0.24px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .data-table tbody tr:last-child td {
@@ -421,6 +423,17 @@ body {
 .loading-state {
   position: relative;
   overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  letter-spacing: -0.01em;
+}
+
+.loading-state.compact {
+  min-height: 6.5rem;
+  margin-top: 0.75rem;
 }
 
 .loading-state::before {
@@ -480,6 +493,16 @@ body {
 .form-field textarea:hover,
 .filter-control:hover {
   border-color: var(--border-strong);
+}
+
+.form-field select,
+select.filter-control {
+  appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a93a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
+  background-size: 1rem 1rem;
 }
 
 /* Focused fields trade the outline for a signal border and a soft halo; the
@@ -876,11 +899,15 @@ button:not(:disabled),
 }
 
 .button-danger {
+  --hatch: color-mix(in srgb, var(--danger) 24%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
 .button-danger:hover:not(:disabled) {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface));
   color: var(--danger);
 }
 
@@ -932,6 +959,46 @@ button:not(:disabled),
 }
 
 /* Arrow icons lean into their destination. */
+:is(.button, .text-button, .table-link, a) .icon-arrow {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+:is(.button, .text-button, .table-link, a):hover:not(:disabled) .icon-arrow {
+  transform: translateX(3px);
+}
+
+.table-link {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--foreground);
+  font-weight: 400;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 4px;
+  transition:
+    color var(--motion),
+    text-decoration-color var(--motion);
+}
+
+.table-link:hover {
+  color: var(--foreground-hover);
+  text-decoration-color: var(--signal);
+}
+
+.lede {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--foreground-muted);
+  line-height: 1.5;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 /* Eyebrows lead with a short signal rule: the one blue thread that runs
    through every page heading. */
 .eyebrow {
@@ -1239,6 +1306,19 @@ button:not(:disabled),
   .button-primary {
     background: ButtonFace;
     color: ButtonText;
+  }
+
+  .button-danger {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .form-field select,
+  select.filter-control {
+    appearance: auto;
+    padding-right: 0.75rem;
+    background-image: none;
   }
 
   .eyebrow-live::before,

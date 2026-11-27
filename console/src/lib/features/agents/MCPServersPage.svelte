@@ -5,6 +5,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
@@ -78,15 +79,17 @@
   <Callout tone="danger">{errorMessage(projects.error)}</Callout>
 {/if}
 
-{#if servers.error}
-  <Callout tone="danger">{errorMessage(servers.error)}</Callout>
-{:else if servers.isPending}
-  <div class="loading-state" role="status">Loading servers…</div>
-{:else if !servers.data?.length}
-  <EmptyState title="No MCP servers yet">
-    Register a server to make its tools available to agents.
-  </EmptyState>
-{:else}
+<QueryView
+  query={servers}
+  loading="Loading servers…"
+  failure={errorMessage(servers.error)}
+  emptyWhen={!servers.data?.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No MCP servers yet">
+      Register a server to make its tools available to agents.
+    </EmptyState>
+  {/snippet}
   <ScrollTable label="MCP servers">
     <table class="data-table">
       <caption class="sr-only">Registered MCP servers</caption>
@@ -100,7 +103,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each servers.data as server (server.id)}
+        {#each servers.data ?? [] as server (server.id)}
           <tr>
             <td><strong>{server.name}</strong></td>
             <td>{stateLabel(server.transport)}</td>
@@ -144,7 +147,7 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>
 
 {#if editorOpen && (!selected || current)}
   <Dialog

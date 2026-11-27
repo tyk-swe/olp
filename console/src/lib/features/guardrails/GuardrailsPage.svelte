@@ -181,7 +181,9 @@
     {error}
   </Callout>{/if}
 {#if definitions.isPending || policies.isPending || projects.isPending}
-  <p role="status">Loading guardrail inventory…</p>
+  <div class="loading-state compact" role="status">
+    Loading guardrail inventory…
+  </div>
 {/if}
 {#if definitions.isError || policies.isError || attachments.isError || projects.isError}<Callout
     tone="danger"

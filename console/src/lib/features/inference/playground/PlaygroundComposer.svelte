@@ -43,6 +43,21 @@
     { value: 'tools', label: 'Tools' },
     { value: 'structured', label: 'Structured output' }
   ];
+  const isMac = /(Mac|iPhone|iPad)/i.test(
+    globalThis.navigator?.userAgent ?? ''
+  );
+
+  function submitShortcut(event: KeyboardEvent) {
+    if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    if (
+      playground.mutation.isPending ||
+      playground.streaming ||
+      Boolean(playground.plan.submissionError)
+    )
+      return;
+    (event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+  }
 </script>
 
 <form class="card composer" onsubmit={playground.submit}>
@@ -218,6 +233,7 @@
         id="playground-input"
         bind:value={playground.input}
         rows="9"
+        onkeydown={submitShortcut}
         placeholder="Ask the model something…"></textarea>
     </div>
     {#if playground.mode === 'tools'}<div class="form-field">
@@ -226,6 +242,7 @@
           bind:value={playground.toolsJson}
           rows="12"
           class="mono"
+          onkeydown={submitShortcut}
           spellcheck="false"></textarea>
       </div>{/if}
     {#if playground.mode === 'structured'}<div class="form-field">
@@ -234,6 +251,7 @@
           bind:value={playground.schemaJson}
           rows="12"
           class="mono"
+          onkeydown={submitShortcut}
           spellcheck="false"></textarea>
       </div>{/if}
   {:else if playground.operation !== 'realtime' && playground.operation !== 'translation'}
@@ -243,6 +261,7 @@
         bind:value={playground.rawJson}
         rows="16"
         class="mono"
+        onkeydown={submitShortcut}
         spellcheck="false"
         aria-describedby="raw-help"></textarea>
       <small id="raw-help">
@@ -315,6 +334,9 @@
       >
         Clear
       </button>{/if}
+    <span class="shortcut-hint" aria-hidden="true">
+      <kbd>{isMac ? '⌘' : 'Ctrl'}</kbd><kbd>↵</kbd>
+    </span>
   </div>
 </form>
 
@@ -331,7 +353,24 @@
   }
   .run-actions {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
+  }
+  .shortcut-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+    color: var(--foreground-muted);
+    font-size: var(--text-caption);
+  }
+  .shortcut-hint kbd {
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
   }
   .stream-toggle {
     margin: 0;

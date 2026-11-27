@@ -1,5 +1,6 @@
 <script lang="ts">
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { ProviderHealth } from '#lib/features/health/api.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -41,7 +42,11 @@
     </div>
     <div class="heading-controls">
       <label class="window-select" for="provider-window">
-        Window <select id="provider-window" bind:value={windowMinutes}>
+        Window <select
+          id="provider-window"
+          class="filter-control"
+          bind:value={windowMinutes}
+        >
           {#each windowOptions as option (option.minutes)}<option
               value={option.minutes}
             >
@@ -53,22 +58,25 @@
         </span>{/if}
     </div>
   </div>
-  {#if providers.isError}
-    <div class="inline-problem" role="alert">
-      {errorMessage(providers.error, 'Provider outcomes are unavailable.')}
-      <button class="text-button" onclick={() => providers.refetch()}>
-        Try again
-      </button>
-    </div>
-  {:else if !providers.data}
-    <div class="loading-state" role="status">Loading provider outcomes…</div>
-  {:else if providers.data.items.length === 0}
-    <EmptyState title="No providers yet">
-      Health appears here once a provider is connected.
-    </EmptyState>
-  {:else}
+  <QueryView
+    query={providers}
+    compact
+    loading="Loading provider outcomes…"
+    failure={errorMessage(
+      providers.error,
+      'Provider outcomes are unavailable.'
+    )}
+    retryLabel="Try again"
+    updating={providers.isPlaceholderData}
+    emptyWhen={providers.data?.items.length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No providers yet">
+        Health appears here once a provider is connected.
+      </EmptyState>
+    {/snippet}
     <div class="provider-grid">
-      {#each providers.data.items as provider (provider.provider_id)}
+      {#each providers.data?.items ?? [] as provider (provider.provider_id)}
         <article class="card provider-card">
           <div class="provider-heading">
             <div>
@@ -121,12 +129,14 @@
         </article>
       {/each}
     </div>
-    <p class="section-link">
-      Counted over the last {providers.data.window_minutes}
-      {providers.data.window_minutes === 1 ? 'minute' : 'minutes'}. Provider
-      probe failures stay separate from gateway admission failures.
-    </p>
-  {/if}
+    {#if providers.data}
+      <p class="section-link">
+        Counted over the last {providers.data.window_minutes}
+        {providers.data.window_minutes === 1 ? 'minute' : 'minutes'}. Provider
+        probe failures stay separate from gateway admission failures.
+      </p>
+    {/if}
+  </QueryView>
 </section>
 
 <style>

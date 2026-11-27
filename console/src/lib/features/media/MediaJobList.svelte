@@ -1,6 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import { timeInputType } from '#lib/listing/filters.js';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
@@ -52,7 +54,7 @@
   <label>
     State
 
-    <select bind:value={listState.jobState}>
+    <select class="filter-control" bind:value={listState.jobState}>
       <option value="">All states</option>
 
       {#if listState.jobState && !mediaJobStates.includes(listState.jobState)}
@@ -66,7 +68,7 @@
   <label>
     Lifecycle
 
-    <select bind:value={listState.lifecycle}>
+    <select class="filter-control" bind:value={listState.lifecycle}>
       <option value="">All lifecycles</option>
 
       {#if listState.lifecycle && !mediaJobLifecycles.includes(listState.lifecycle)}
@@ -117,20 +119,30 @@
     </button>
   </div>
 </form>
-{#if problem}<div class="inline-problem" role="alert">
-    {problem}
+{#if problem}<div class="job-problem">
+    <Callout tone="danger">{problem}</Callout>
   </div>{/if}
 {#if !blocked}
   {#if pending}<div class="loading-state" role="status">
       Loading media jobs…
     </div>
-  {:else if error}<div class="inline-problem" role="alert">
-      {error}
-      <button class="text-button" type="button" onclick={onRetry}>Retry</button>
+  {:else if error}<div class="job-problem">
+      <Callout tone="danger">
+        {error}
+        {#snippet actions()}<button
+            class="button button-secondary"
+            type="button"
+            onclick={onRetry}
+          >
+            Retry
+          </button>{/snippet}
+      </Callout>
     </div>
-  {:else if items.length === 0 && !hasHistory}<section class="card empty-state">
-      <p>No media jobs match these filters.</p>
-    </section>
+  {:else if items.length === 0 && !hasHistory}<EmptyState
+      title="No matching media jobs"
+    >
+      No media jobs match these filters.
+    </EmptyState>
   {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
     <div
       class="table-shell job-table-shell"
@@ -195,6 +207,9 @@
 {/if}
 
 <style>
+  .job-problem {
+    margin: 1rem 0;
+  }
   .filters {
     display: flex;
     flex-wrap: wrap;

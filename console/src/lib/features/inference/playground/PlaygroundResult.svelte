@@ -1,12 +1,28 @@
 <script lang="ts">
+  import { copyText } from '#lib/clipboard.js';
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import { notify } from '#lib/components/toasts.svelte.js';
   import { formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import OperationResult from './OperationResult.svelte';
   import type { PlaygroundState } from './playgroundState.svelte';
 
   let { playground }: { playground: PlaygroundState } = $props();
+
+  let copiedKey = $state('');
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => () => copyTimer && clearTimeout(copyTimer));
+
+  async function copyOutput(key: string, value: string) {
+    if (!(await copyText(value))) {
+      notify('Clipboard access is unavailable.', 'warning');
+      return;
+    }
+    copiedKey = key;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (copiedKey = ''), 1800);
+  }
 
   const hasResultContent = $derived(
     Boolean(
@@ -33,11 +49,20 @@
       </span>{/if}
   </div>
   {#if playground.streaming || playground.streamText || playground.streamDone || playground.streamProblem}
-    {#if playground.streamProblem}<div class="inline-problem" role="alert">
-        {playground.streamProblem}
+    {#if playground.streamProblem}<div class="output">
+        <Callout tone="danger">{playground.streamProblem}</Callout>
       </div>{/if}
     {#if playground.streamText}<div class="output">
-        <h3>Frames</h3>
+        <div class="output-head">
+          <h3>Frames</h3>
+          <button
+            class="button button-quiet copy-button"
+            type="button"
+            onclick={() => copyOutput('stream', playground.streamText)}
+          >
+            {copiedKey === 'stream' ? 'Copied' : 'Copy'}
+          </button>
+        </div>
         <pre data-testid="stream-frames">{playground.streamText}</pre>
       </div>{/if}
     {#if playground.streaming}<div class="loading-state" role="status">
@@ -71,14 +96,13 @@
     >
       Waiting for the route…
     </div>
-  {:else if playground.mutation.isError}<div
-      class="inline-problem"
-      role="alert"
-    >
-      {errorMessage(
-        playground.mutation.error,
-        'The playground request failed.'
-      )}
+  {:else if playground.mutation.isError}<div class="output">
+      <Callout tone="danger">
+        {errorMessage(
+          playground.mutation.error,
+          'The playground request failed.'
+        )}
+      </Callout>
     </div>
   {:else if playground.mutation.data}
     {#if playground.mutation.data.refusal}
@@ -105,26 +129,48 @@
         />
       </div>{/if}
     {#if playground.mutation.data.output_text}<div class="output">
-        <h3>Text</h3>
+        <div class="output-head">
+          <h3>Text</h3>
+          <button
+            class="button button-quiet copy-button"
+            type="button"
+            onclick={() =>
+              copyOutput('text', playground.mutation.data?.output_text ?? '')}
+          >
+            {copiedKey === 'text' ? 'Copied' : 'Copy'}
+          </button>
+        </div>
         <pre>{playground.mutation.data.output_text}</pre>
       </div>{/if}
-    {#if playground.mutation.data.tool_calls?.length}<div class="output">
-        <h3>Tool calls</h3>
-        <pre>{JSON.stringify(
-            playground.mutation.data.tool_calls,
-            null,
-            2
-          )}</pre>
+    {#if playground.mutation.data.tool_calls?.length}{@const toolJson =
+        JSON.stringify(playground.mutation.data.tool_calls, null, 2)}
+      <div class="output">
+        <div class="output-head">
+          <h3>Tool calls</h3>
+          <button
+            class="button button-quiet copy-button"
+            type="button"
+            onclick={() => copyOutput('tools', toolJson)}
+          >
+            {copiedKey === 'tools' ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <pre>{toolJson}</pre>
       </div>{/if}
-    {#if playground.mutation.data.structured_output !== undefined && playground.mutation.data.structured_output !== null}<div
-        class="output"
-      >
-        <h3>Structured output</h3>
-        <pre>{JSON.stringify(
-            playground.mutation.data.structured_output,
-            null,
-            2
-          )}</pre>
+    {#if playground.mutation.data.structured_output !== undefined && playground.mutation.data.structured_output !== null}{@const structuredJson =
+        JSON.stringify(playground.mutation.data.structured_output, null, 2)}
+      <div class="output">
+        <div class="output-head">
+          <h3>Structured output</h3>
+          <button
+            class="button button-quiet copy-button"
+            type="button"
+            onclick={() => copyOutput('structured', structuredJson)}
+          >
+            {copiedKey === 'structured' ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <pre>{structuredJson}</pre>
       </div>{/if}
     <dl>
       <div>
@@ -193,14 +239,26 @@
     font-weight: 500;
     letter-spacing: -0.02em;
   }
+  .output-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
   h3 {
-    margin: 0 0 0.5rem;
+    margin: 0;
     color: var(--foreground-subtle);
     font-family: var(--font-mono);
     font-size: var(--text-caption);
     font-weight: 400;
     letter-spacing: -0.02em;
     text-transform: uppercase;
+  }
+  .copy-button {
+    min-height: 2rem;
+    padding: 0.25rem 0.6rem;
+    font-size: var(--text-caption);
   }
   .output {
     margin-top: 1rem;

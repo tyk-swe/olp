@@ -3,6 +3,7 @@
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { providerOptions } from '#lib/features/providers/index.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
@@ -122,9 +123,7 @@
   {#if !canEdit}<ReadOnlyNote>
       Your role can view discounts but not publish them.
     </ReadOnlyNote>{/if}
-  {#if create.error}<p class="inline-problem" role="alert">
-      {create.error}
-    </p>{/if}
+  {#if create.error}<Callout tone="danger">{create.error}</Callout>{/if}
   {#if notice}<Callout tone="success">{notice}</Callout>{/if}
   <form class="card discount-form" onsubmit={addDiscount}>
     <div class="form-grid">
@@ -197,20 +196,18 @@
       {create.busy ? 'Publishing…' : 'Publish discount'}
     </button>
   </form>
-  {#if discounts.isPending}<div class="loading-state" role="status">
-      Loading discounts…
-    </div>
-  {:else if discounts.isError}<div class="inline-problem" role="alert">
-      {errorMessage(discounts.error)}
-      <button class="text-button" onclick={() => discounts.refetch()}>
-        Try again
-      </button>
-    </div>
-  {:else if (discounts.data?.items ?? []).length === 0}
-    <EmptyState title="No discounts yet">
-      Add a discount to reflect negotiated provider pricing in cost reports.
-    </EmptyState>
-  {:else}
+  <QueryView
+    query={discounts}
+    loading="Loading discounts…"
+    failure={errorMessage(discounts.error)}
+    retryLabel="Try again"
+    emptyWhen={(discounts.data?.items ?? []).length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No discounts yet">
+        Add a discount to reflect negotiated provider pricing in cost reports.
+      </EmptyState>
+    {/snippet}
     <ScrollTable label="Discounts">
       <table class="data-table">
         <caption class="sr-only">Discounts, newest first</caption>
@@ -238,5 +235,5 @@
       {...cursorPaginationProps(pagination, discounts.data?.nextCursor)}
       label="Discount pages"
     />
-  {/if}
+  </QueryView>
 </section>

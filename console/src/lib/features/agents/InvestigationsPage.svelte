@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate } from '#lib/format.js';
@@ -67,17 +69,24 @@
   </label>
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
-{#if projects.error}<p class="inline-problem" role="alert">
+{#if projects.error}<Callout tone="danger">
     {errorMessage(projects.error)}
-  </p>{/if}
+  </Callout>{/if}
 {#if investigations.error}
-  <p class="inline-problem" role="alert">
+  <Callout tone="danger">
     {errorMessage(investigations.error)}
-  </p>
+    {#snippet actions()}<button
+        class="button button-secondary"
+        type="button"
+        onclick={() => investigations.refetch()}
+      >
+        Retry
+      </button>{/snippet}
+  </Callout>
 {:else if investigations.isFetching}
   <div class="loading-state" role="status">Loading investigations…</div>
 {:else if !investigations.data?.items.length}
-  <div class="card empty-state">No investigations in this view.</div>
+  <EmptyState title="No investigations in this view" />
 {:else}
   <ScrollTable label="Investigations">
     <table class="data-table">
@@ -95,7 +104,7 @@
           <tr>
             <td>
               <a
-                class="text-button"
+                class="table-link"
                 href={resolve(`investigations/${investigation.id}`)}
               >
                 {investigation.summary}

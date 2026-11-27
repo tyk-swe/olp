@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
 
   let { label, children }: { label: string; children: Snippet } = $props();
 
@@ -37,7 +38,7 @@
   popovertarget="{id}-menu"
   aria-label={label}
 >
-  <span class="dots" aria-hidden="true">⋯</span>
+  <NavIcon name="more" size={18} />
 </button>
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Clicks bubble from the menu's own buttons and links, which handle keyboard activation.) -->
 <div
@@ -56,12 +57,7 @@
   .trigger {
     min-width: 2.75rem;
     padding-inline: 0.5rem;
-  }
-
-  .dots {
     color: var(--foreground-muted);
-    font-size: var(--text-body);
-    line-height: 1;
   }
 
   .menu {
@@ -105,6 +101,11 @@
   }
 
   .menu :global(:is(a, button).danger) {
+    color: var(--danger);
+  }
+
+  .menu :global(:is(a, button).danger:hover:not(:disabled)) {
+    background: var(--danger-soft);
     color: var(--danger);
   }
 

@@ -318,11 +318,6 @@
     padding: 0;
     margin: 1rem 0;
   }
-  .lede {
-    max-width: 60ch;
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   td code,
   .muted {
     display: block;

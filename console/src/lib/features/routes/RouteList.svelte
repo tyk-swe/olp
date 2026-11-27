@@ -1,5 +1,8 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -100,12 +103,9 @@
 {#if drafts.isPending && activeRoutes.isPending}
   <div class="loading-state" role="status">Loading routes and drafts…</div>
 {:else if !drafts.data?.items.length && !activeRoutes.data?.items.length && !drafts.isError && !activeRoutes.isError && !drafts.isPending && !activeRoutes.isPending && listState.draft.history.length === 0 && listState.route.history.length === 0}
-  <section class="card empty-state">
-    <div>
-      <h2>No routes yet</h2>
-      <p>
-        Enable a provider model, then build and simulate a public route slug.
-      </p>
+  <EmptyState title="No routes yet">
+    Enable a provider model, then build and simulate a public route slug.
+    {#snippet action()}
       {#if canManage}<a
           class="button button-primary"
           href={resolve('routes/new')}
@@ -113,8 +113,8 @@
           Build first route
         </a>
       {/if}
-    </div>
-  </section>
+    {/snippet}
+  </EmptyState>
 {:else}
   <section class="route-section" aria-labelledby="published-routes-heading">
     <div class="list-heading">
@@ -128,29 +128,21 @@
     </div>
     <!-- Active routes and drafts come from separate endpoints; one failing must not hide the other. -->
     {#if retireError}
-      <div class="inline-problem" role="alert">{retireError}</div>
+      <div class="retire-error">
+        <Callout tone="danger">{retireError}</Callout>
+      </div>
     {/if}
-    {#if activeRoutes.isPending}
-      <div class="loading-state" role="status">Loading published routes…</div>
-    {:else if activeRoutes.isError}
-      <div class="inline-problem" role="alert">
-        {errorMessage(activeRoutes.error)}
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => activeRoutes.refetch()}
-        >
-          Retry
-        </button>
-      </div>
-    {:else if !activeRoutes.data?.items.length}
-      <div class="card empty-state compact">
-        <p>No published routes on this page.</p>
-      </div>
-    {:else}
-      {#if activeRoutes.isPlaceholderData}
-        <p class="updating" role="status">Updating…</p>
-      {/if}
+    <QueryView
+      query={activeRoutes}
+      compact
+      loading="Loading published routes…"
+      failure={errorMessage(activeRoutes.error)}
+      updating={activeRoutes.isPlaceholderData}
+      emptyWhen={!activeRoutes.data?.items.length}
+    >
+      {#snippet empty()}
+        <EmptyState title="No published routes on this page" />
+      {/snippet}
       <ScrollTable
         label="Published routes table"
         busy={activeRoutes.isPlaceholderData}
@@ -165,7 +157,7 @@
               </th>
             </tr>
           </thead><tbody>
-            {#each activeRoutes.data.items as item (item.id)}{@const retiringCount =
+            {#each activeRoutes.data?.items ?? [] as item (item.id)}{@const retiringCount =
                 retiringTargets(item.latest_revision.targets)}<tr>
                 <td>
                   <strong><code>{item.slug}</code></strong><br /><small>
@@ -198,7 +190,7 @@
 
                   {#if canManage && item.state === 'active'}
                     <button
-                      class="button button-secondary"
+                      class="button button-secondary button-danger"
                       type="button"
                       disabled={retiring !== null}
                       onclick={() => retire(item)}
@@ -210,7 +202,7 @@
           </tbody>
         </table>
       </ScrollTable>
-    {/if}
+    </QueryView>
     {#if !activeRoutes.isError}<CursorPagination
         {...cursorPaginationProps(
           listState.route,
@@ -226,27 +218,17 @@
         <h2 id="draft-routes-heading">Route drafts</h2>
       </div>
     </div>
-    {#if drafts.isPending}
-      <div class="loading-state" role="status">Loading route drafts…</div>
-    {:else if drafts.isError}
-      <div class="inline-problem" role="alert">
-        {errorMessage(drafts.error)}
-        <button
-          class="button button-secondary"
-          type="button"
-          onclick={() => drafts.refetch()}
-        >
-          Retry
-        </button>
-      </div>
-    {:else if !drafts.data?.items.length}
-      <div class="card empty-state compact">
-        <p>No unpublished drafts on this page.</p>
-      </div>
-    {:else}
-      {#if drafts.isPlaceholderData}
-        <p class="updating" role="status">Updating…</p>
-      {/if}
+    <QueryView
+      query={drafts}
+      compact
+      loading="Loading route drafts…"
+      failure={errorMessage(drafts.error)}
+      updating={drafts.isPlaceholderData}
+      emptyWhen={!drafts.data?.items.length}
+    >
+      {#snippet empty()}
+        <EmptyState title="No unpublished drafts on this page" />
+      {/snippet}
       <ScrollTable label="Route drafts table" busy={drafts.isPlaceholderData}>
         <table class="data-table">
           <thead>
@@ -263,12 +245,12 @@
           </thead>
 
           <tbody>
-            {#each drafts.data.items as item (item.id)}
+            {#each drafts.data?.items ?? [] as item (item.id)}
               {@const retiringCount = retiringTargets(item.targets)}
 
               <tr>
                 <td>
-                  <a class="route-link" href={resolve(`routes/${item.id}`)}>
+                  <a class="table-link" href={resolve(`routes/${item.id}`)}>
                     {item.slug}
                   </a>
 
@@ -307,7 +289,7 @@
           </tbody>
         </table>
       </ScrollTable>
-    {/if}
+    </QueryView>
     {#if !drafts.isError}<CursorPagination
         {...cursorPaginationProps(
           listState.draft,
@@ -325,8 +307,8 @@
     font-weight: 500;
     letter-spacing: -0.02em;
   }
-  .compact {
-    min-height: 6rem;
+  .retire-error {
+    margin-bottom: 0.75rem;
   }
   .route-section {
     margin-top: 1.5rem;
@@ -341,17 +323,6 @@
   }
   .list-heading h2 {
     margin: 0;
-  }
-  .route-link {
-    color: var(--foreground);
-    font-weight: 400;
-    text-decoration: underline;
-    text-decoration-color: var(--border-strong);
-    text-underline-offset: 4px;
-    transition: text-decoration-color var(--motion);
-  }
-  .route-link:hover {
-    text-decoration-color: currentColor;
   }
   .row-actions {
     display: flex;

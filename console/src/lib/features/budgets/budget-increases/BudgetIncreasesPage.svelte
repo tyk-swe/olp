@@ -332,11 +332,6 @@
 <BudgetIncreaseRequests />
 
 <style>
-  .lede {
-    max-width: 60ch;
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   td code,
   .muted {
     display: block;

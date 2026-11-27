@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
+  import NavIcon from '#lib/components/NavIcon.svelte';
 
   let {
     eyebrow,
@@ -22,16 +23,18 @@
 
   onMount(() => {
     const opener = document.activeElement;
-    document.body.classList.add('secret-dialog-open');
+    document.documentElement.classList.add('dialog-open');
     dialog.showModal();
     dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => {
       if (
         !Array.from(
-          document.querySelectorAll('dialog.secret-dialog[open]')
+          document.querySelectorAll(
+            'dialog.dialog[open], dialog.secret-dialog[open]'
+          )
         ).some((other) => other !== dialog)
       )
-        document.body.classList.remove('secret-dialog-open');
+        document.documentElement.classList.remove('dialog-open');
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   });
@@ -57,7 +60,7 @@
       aria-label="Close"
       onclick={close}
     >
-      ×
+      <NavIcon name="close" size={18} />
     </button>
   </div>
   <h2 id={`${dialogId}-title`} class="dialog-title">{title}</h2>
@@ -66,7 +69,7 @@
 </dialog>
 
 <style>
-  :global(body.secret-dialog-open) {
+  :global(html.dialog-open) {
     overflow: hidden;
   }
 
@@ -124,6 +127,8 @@
   }
 
   .dialog-close {
+    display: grid;
+    place-items: center;
     width: 2.75rem;
     height: 2.75rem;
     flex: none;
@@ -132,8 +137,6 @@
     border-radius: var(--radius-control);
     background: transparent;
     color: var(--foreground-muted);
-    font-size: 1.4rem;
-    line-height: 1;
     transition:
       background-color var(--motion),
       color var(--motion),

@@ -378,11 +378,6 @@
     flex-wrap: wrap;
     gap: 0.75rem;
   }
-  .lede {
-    max-width: 60ch;
-    margin: 0;
-    color: var(--foreground-muted);
-  }
   .row-actions {
     display: flex;
     justify-content: flex-end;

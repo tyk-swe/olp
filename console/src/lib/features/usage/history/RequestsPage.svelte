@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import SavedFilters from '../SavedFilters.svelte';
@@ -95,18 +97,23 @@
 {#if services.pending}<div class="loading-state" role="status">
     Loading request history…
   </div>
-{:else if services.error}<div class="inline-problem" role="alert">
-    Request history capabilities are unavailable.
-    <button class="text-button" type="button" onclick={() => services.retry()}>
-      Try again
-    </button>
+{:else if services.error}<div class="service-state">
+    <Callout tone="danger">
+      Request history capabilities are unavailable.
+      {#snippet actions()}<button
+          class="button button-secondary"
+          type="button"
+          onclick={() => services.retry()}
+        >
+          Try again
+        </button>{/snippet}
+    </Callout>
   </div>
-{:else if !services.retentionEnforced}<div
-    class="card empty-state"
-    role="status"
-  >
-    Request history is not retained by this installation yet, so request
-    metadata cannot be explored here.
+{:else if !services.retentionEnforced}<div class="service-state">
+    <EmptyState title="Request history is not retained">
+      Request history is not retained by this installation yet, so request
+      metadata cannot be explored here.
+    </EmptyState>
   </div>
 {:else if requestId}
   <RequestTimeline {detail} />
@@ -119,3 +126,9 @@
     problem={validation ?? urlProblem}
     queryProblem={urlProblem}
   />{/if}
+
+<style>
+  .service-state {
+    margin-top: 1.5rem;
+  }
+</style>

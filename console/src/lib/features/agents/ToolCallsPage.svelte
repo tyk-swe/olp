@@ -1,5 +1,8 @@
 <script lang="ts">
+  import Callout from '#lib/components/Callout.svelte';
+  import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
@@ -60,15 +63,17 @@
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}
-  <p class="inline-problem" role="alert">{errorMessage(projects.error)}</p>
+  <Callout tone="danger">{errorMessage(projects.error)}</Callout>
 {/if}
-{#if calls.error}
-  <p class="inline-problem" role="alert">{errorMessage(calls.error)}</p>
-{:else if calls.isPending}
-  <div class="loading-state" role="status">Loading tool calls…</div>
-{:else if !calls.data?.items.length}
-  <div class="card empty-state">No tool calls in this view.</div>
-{:else}
+<QueryView
+  query={calls}
+  loading="Loading tool calls…"
+  failure={errorMessage(calls.error)}
+  emptyWhen={!calls.data?.items.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No tool calls in this view" />
+  {/snippet}
   <ScrollTable label="Tool calls">
     <table class="data-table">
       <thead>
@@ -82,13 +87,16 @@
         </tr>
       </thead>
       <tbody>
-        {#each calls.data.items as value (value.id)}
+        {#each calls.data?.items ?? [] as value (value.id)}
           <tr>
             <td>
               <code>{value.tool_alias}</code>
               <details>
                 <summary>Attempt {value.id}</summary>
-                <a href={resolve(`activity/tool-calls/${value.id}`)}>
+                <a
+                  class="table-link"
+                  href={resolve(`activity/tool-calls/${value.id}`)}
+                >
                   Inspect and resolve
                 </a>
 
@@ -149,7 +157,7 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>
 <nav class="page-actions list-pager" aria-label="Tool call pages">
   <button
     class="button button-secondary"

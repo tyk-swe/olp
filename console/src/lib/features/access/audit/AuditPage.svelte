@@ -3,9 +3,10 @@
   import EntityPicker from '#lib/components/EntityPicker.svelte';
   import { personOptions } from '#lib/features/identity/index.js';
   import Advanced from '#lib/components/Advanced.svelte';
-  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { auditKeys } from '#lib/features/access/audit/auditKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
@@ -97,7 +98,7 @@
     Action <input bind:value={listState.action} placeholder="All actions" />
   </label>
   <label>
-    Outcome <select bind:value={listState.outcome}>
+    Outcome <select class="filter-control" bind:value={listState.outcome}>
       <option value="">
         All outcomes
       </option>{#if listState.outcome && !['success', 'failure'].includes(listState.outcome)}<option
@@ -169,68 +170,59 @@
 </form>
 
 {#if !urlProblem}
-  {#if audit.isPending}
-    <div class="loading-state" role="status">Loading audit events…</div>
-  {:else if audit.isError}
-    <Callout tone="danger">
-      {errorMessage(audit.error, 'Audit events are unavailable.')}
-      {#snippet actions()}<button
-          class="text-button"
-          type="button"
-          onclick={() => audit.refetch()}
-        >
-          Try again
-        </button>{/snippet}
-    </Callout>
-  {:else if audit.data?.items.length === 0 && listState.history.length === 0}
-    <EmptyState title="No audit events">
-      Security and configuration changes matching these filters show up here.
-    </EmptyState>
-  {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
-    <div
-      class="table-shell audit-table"
-      tabindex="0"
-      role="region"
-      aria-label="Audit event results"
-    >
-      <table class="data-table">
-        <caption class="sr-only">Audit events, newest first</caption><thead>
-          <tr>
-            <th scope="col">Occurred</th><th scope="col">Actor</th><th
-              scope="col"
-            >
-              Action
-            </th><th scope="col">Resource</th><th scope="col">Outcome</th><th
-              scope="col"
-            >
-              Source IP
-            </th><th scope="col">User agent</th>
-          </tr>
-        </thead><tbody>
-          {#each audit.data?.items ?? [] as event (event.id)}<tr>
-              <td>{formatDate(event.occurred_at)}</td><td>
-                {auditActorLabel(event)}
-              </td><td><code>{event.action}</code></td><td>
-                <strong>
-                  {event.resource_type}
-                </strong>{#if event.resource_id}<small class="mono">
-                    {event.resource_id}
-                  </small>{/if}
-              </td><td>
-                <span
-                  class="badge"
-                  class:success={event.outcome === 'success'}
-                  class:danger={event.outcome !== 'success'}
-                >
-                  {event.outcome}
-                </span>
-              </td><td class="mono">{event.source_ip ?? '—'}</td><td>
-                {event.user_agent_family ?? '—'}
-              </td>
-            </tr>{/each}
-        </tbody>
-      </table>
+  <QueryView
+    query={audit}
+    loading="Loading audit events…"
+    failure={errorMessage(audit.error, 'Audit events are unavailable.')}
+    retryLabel="Try again"
+    updating={audit.isPlaceholderData}
+    emptyWhen={audit.data?.items.length === 0 && listState.history.length === 0}
+  >
+    {#snippet empty()}
+      <EmptyState title="No audit events">
+        Security and configuration changes matching these filters show up here.
+      </EmptyState>
+    {/snippet}
+    <div class="audit-table">
+      <ScrollTable label="Audit event results" busy={audit.isPlaceholderData}>
+        <table class="data-table">
+          <caption class="sr-only">Audit events, newest first</caption><thead>
+            <tr>
+              <th scope="col">Occurred</th><th scope="col">Actor</th><th
+                scope="col"
+              >
+                Action
+              </th><th scope="col">Resource</th><th scope="col">Outcome</th><th
+                scope="col"
+              >
+                Source IP
+              </th><th scope="col">User agent</th>
+            </tr>
+          </thead><tbody>
+            {#each audit.data?.items ?? [] as event (event.id)}<tr>
+                <td>{formatDate(event.occurred_at)}</td><td>
+                  {auditActorLabel(event)}
+                </td><td><code>{event.action}</code></td><td>
+                  <strong>
+                    {event.resource_type}
+                  </strong>{#if event.resource_id}<small class="mono">
+                      {event.resource_id}
+                    </small>{/if}
+                </td><td>
+                  <span
+                    class="badge"
+                    class:success={event.outcome === 'success'}
+                    class:danger={event.outcome !== 'success'}
+                  >
+                    {event.outcome}
+                  </span>
+                </td><td class="mono">{event.source_ip ?? '—'}</td><td>
+                  {event.user_agent_family ?? '—'}
+                </td>
+              </tr>{/each}
+          </tbody>
+        </table>
+      </ScrollTable>
     </div>
     <CursorPagination
       {...cursorPaginationProps(
@@ -239,7 +231,7 @@
       )}
       label="Audit pages"
     />
-  {/if}
+  </QueryView>
 {/if}
 
 <style>
@@ -301,6 +293,9 @@
   }
   .audit-table {
     margin-top: 1.5rem;
+  }
+  .audit-table :global(.scroll-table) {
+    margin-top: 0;
   }
   code {
     font-family: var(--font-mono);

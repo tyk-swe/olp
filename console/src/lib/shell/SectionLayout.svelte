@@ -5,6 +5,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import Tabs from '#lib/components/Tabs.svelte';
+  import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { activeTab } from '#lib/components/tabLinks.js';
@@ -32,15 +33,12 @@
   });
 </script>
 
-<svelte:head>
-  {#if item}<title
-      >{current && current.label !== item.label
-        ? `${current.label} · ${item.label}`
-        : item.label} · OpenLLMProxy</title
-    >{/if}
-</svelte:head>
-
 {#if item}
+  <PageTitle
+    title={current && current.label !== item.label
+      ? `${current.label} · ${item.label}`
+      : item.label}
+  />
   <PageHeader title={item.label} description={item.description} {actions} />
 {/if}
 {#if !visible}

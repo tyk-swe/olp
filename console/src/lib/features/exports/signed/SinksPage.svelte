@@ -1,8 +1,8 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
-  import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
@@ -79,15 +79,17 @@
     </div>
   </div>
 </div>
-{#if sinks.error}
-  <Callout tone="danger">{errorMessage(sinks.error)}</Callout>
-{:else if sinks.isPending}
-  <div class="loading-state" role="status">Loading exports…</div>
-{:else if !sinks.data?.length}
-  <EmptyState title="No signed exports yet">
-    Create one to deliver signed records to your own endpoint.
-  </EmptyState>
-{:else}
+<QueryView
+  query={sinks}
+  loading="Loading exports…"
+  failure={errorMessage(sinks.error)}
+  emptyWhen={!sinks.data?.length}
+>
+  {#snippet empty()}
+    <EmptyState title="No signed exports yet">
+      Create one to deliver signed records to your own endpoint.
+    </EmptyState>
+  {/snippet}
   <ScrollTable label="Signed fact exports">
     <table class="data-table">
       <caption class="sr-only">Signed fact exports and delivery counts</caption>
@@ -95,15 +97,15 @@
         <tr>
           <th scope="col">Export</th>
           <th scope="col">State</th>
-          <th scope="col">Delivered</th>
-          <th scope="col">Failed</th>
-          <th scope="col">Expired</th>
+          <th scope="col" class="num">Delivered</th>
+          <th scope="col" class="num">Failed</th>
+          <th scope="col" class="num">Expired</th>
           <th scope="col">Last delivery</th>
           <th scope="col">Actions</th>
         </tr>
       </thead>
       <tbody>
-        {#each sinks.data as value (value.id)}
+        {#each sinks.data ?? [] as value (value.id)}
           <tr>
             <td>
               <strong>{value.name}</strong><br /><code>
@@ -119,9 +121,9 @@
                 <span class="badge">Disabled</span>
               {/if}
             </td>
-            <td>{formatInteger(value.delivery.delivered)}</td>
-            <td>{formatInteger(value.delivery.failed)}</td>
-            <td>{formatInteger(value.delivery.expired)}</td>
+            <td class="num">{formatInteger(value.delivery.delivered)}</td>
+            <td class="num">{formatInteger(value.delivery.failed)}</td>
+            <td class="num">{formatInteger(value.delivery.expired)}</td>
             <td>
               {value.delivery.last_delivered_at
                 ? formatDate(value.delivery.last_delivered_at)
@@ -155,7 +157,7 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
+</QueryView>
 
 {#if editorOpen && (!selected || current) && !current?.retired_at && access.allows(current ? 'PUT /api/v1/sinks/{sink_id}' : 'POST /api/v1/sinks')}
   <Dialog

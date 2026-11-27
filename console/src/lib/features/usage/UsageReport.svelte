@@ -151,18 +151,18 @@
         <thead>
           <tr>
             <th scope="col">{applied.dimension.replace('_', ' ')}</th>
-            <th scope="col">Requests</th>
-            <th scope="col">Input tokens</th>
-            <th scope="col">Cached input</th>
-            <th scope="col">Cache write</th>
-            <th scope="col">Output tokens</th>
-            <th scope="col">Audio tokens</th>
-            <th scope="col">Image tokens</th>
-            <th scope="col">Allocated commitment</th>
-            <th scope="col">Estimated / reported input</th>
-            <th scope="col">Estimate error</th>
-            <th scope="col">Estimated cost</th>
-            <th scope="col">Charge</th>
+            <th scope="col" class="num">Requests</th>
+            <th scope="col" class="num">Input tokens</th>
+            <th scope="col" class="num">Cached input</th>
+            <th scope="col" class="num">Cache write</th>
+            <th scope="col" class="num">Output tokens</th>
+            <th scope="col" class="num">Audio tokens</th>
+            <th scope="col" class="num">Image tokens</th>
+            <th scope="col" class="num">Allocated commitment</th>
+            <th scope="col" class="num">Estimated / reported input</th>
+            <th scope="col" class="num">Estimate error</th>
+            <th scope="col" class="num">Estimated cost</th>
+            <th scope="col" class="num">Charge</th>
             <th scope="col">Completeness</th>
           </tr>
         </thead>
@@ -171,26 +171,30 @@
             {@const rowEstimate = presentEstimate(row)}
             <tr>
               <td><strong>{row.dimension}</strong></td>
-              <td>{formatCompact(row.request_count)}</td>
-              <td>{formatCompact(row.input_tokens)}</td>
-              <td>{formatCompact(row.cached_input_tokens)}</td>
-              <td>{formatCompact(row.cache_write_input_tokens)}</td>
-              <td>{formatCompact(row.output_tokens)}</td>
-              <td>
+              <td class="num">{formatCompact(row.request_count)}</td>
+              <td class="num">{formatCompact(row.input_tokens)}</td>
+              <td class="num">{formatCompact(row.cached_input_tokens)}</td>
+              <td class="num">{formatCompact(row.cache_write_input_tokens)}</td>
+              <td class="num">{formatCompact(row.output_tokens)}</td>
+              <td class="num">
                 {formatCompact(row.audio_input_tokens)} / {formatCompact(
                   row.audio_output_tokens
                 )}
               </td>
-              <td>
+              <td class="num">
                 {formatCompact(row.image_input_tokens)} / {formatCompact(
                   row.image_output_tokens
                 )}
               </td>
-              <td>{formatCost(row.allocated_commitment, row.currency)}</td>
-              <td>{rowEstimate.comparison}</td>
-              <td>{rowEstimate.error}</td>
-              <td>{formatCost(row.estimated_cost, row.currency)}</td>
-              <td>
+              <td class="num">
+                {formatCost(row.allocated_commitment, row.currency)}
+              </td>
+              <td class="num">{rowEstimate.comparison}</td>
+              <td class="num">{rowEstimate.error}</td>
+              <td class="num">
+                {formatCost(row.estimated_cost, row.currency)}
+              </td>
+              <td class="num">
                 {formatCost(
                   row.charge,
                   row.currency

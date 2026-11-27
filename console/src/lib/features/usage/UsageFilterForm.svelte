@@ -1,5 +1,6 @@
 <script lang="ts">
   import Advanced from '#lib/components/Advanced.svelte';
+  import { dateTimeLocalValue } from '#lib/format.js';
   import type { UsageDraft } from '#lib/features/usage/usageState.js';
 
   let {
@@ -13,9 +14,34 @@
     onApply: (event: SubmitEvent) => void;
     onReset: () => void;
   } = $props();
+
+  const presets = [
+    { label: 'Last 24h', hours: 24, granularity: 'hour' as const },
+    { label: 'Last 7d', hours: 24 * 7, granularity: 'day' as const },
+    { label: 'Last 30d', hours: 24 * 30, granularity: 'day' as const }
+  ];
+
+  function applyPreset(hours: number, granularity: 'hour' | 'day') {
+    const end = new Date();
+    const start = new Date(end.valueOf() - hours * 60 * 60 * 1000);
+    draft.start = dateTimeLocalValue(start.toISOString());
+    draft.end = dateTimeLocalValue(end.toISOString());
+    draft.granularity = granularity;
+  }
 </script>
 
 <form class="card filters" aria-label="Usage filters" onsubmit={onApply}>
+  <div class="presets" role="group" aria-label="Time range presets">
+    {#each presets as preset (preset.label)}
+      <button
+        class="button button-quiet preset-button"
+        type="submit"
+        onclick={() => applyPreset(preset.hours, preset.granularity)}
+      >
+        {preset.label}
+      </button>
+    {/each}
+  </div>
   <div class="filter-grid">
     <label>
       From <input bind:value={draft.start} type="datetime-local" required />
@@ -24,7 +50,7 @@
       To <input bind:value={draft.end} type="datetime-local" required />
     </label>
     <label>
-      Break down by <select bind:value={draft.dimension}>
+      Break down by <select class="filter-control" bind:value={draft.dimension}>
         <option value="route">Route</option><option value="provider">
           Provider
         </option><option value="end_user">End user (digest)</option><option
@@ -47,7 +73,10 @@
       </select>
     </label>
     <label>
-      Time buckets <select bind:value={draft.granularity}>
+      Time buckets <select
+        class="filter-control"
+        bind:value={draft.granularity}
+      >
         <option value="hour">Hourly</option><option value="day">Daily</option>
       </select>
     </label>
@@ -123,6 +152,19 @@
   .filters {
     margin-top: 1.5rem;
     padding: 1.5rem;
+  }
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+  }
+  .preset-button {
+    min-height: 2rem;
+    padding: 0.25rem 0.65rem;
+    border-color: var(--border-hairline);
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
   }
   .filter-grid {
     display: grid;
