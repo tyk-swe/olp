@@ -18,7 +18,7 @@ Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 ## Commands
 
-Run from the repository root after setup:
+Run these commands from the repository root after setup.
 
 | Command                    | Purpose                                                       |
 | -------------------------- | ------------------------------------------------------------- |
@@ -27,63 +27,64 @@ Run from the repository root after setup:
 | `make test-e2e-browser`    | Run Playwright browser journeys against a built console       |
 | `pnpm --dir console build` | Static assets                                                 |
 
-Management requests use the generated `openapi-fetch` client. Update
-`management/management.json` alongside Go handlers and run `make api`; never edit
-`src/lib/management/schema.d.ts` by hand. See [Contributing](../CONTRIBUTING.md) for
-repository-wide commands.
+Management requests use the generated `openapi-fetch` client and route
+authorization metadata. Update `management/management.json` alongside Go
+handlers and run `make api`. Never edit `src/lib/management/schema.d.ts` or
+`src/lib/management/requirements.ts` by hand. See
+[Contributing](../CONTRIBUTING.md) for repository-wide commands.
 
 ## API wiring
 
-- `apiClient` lives in `#lib/session/client.ts`, which gives the management
-  transport its session authentication, and is imported only by feature api
-  modules (plus the session and branding api modules and tests). A slice with
-  one API module uses `api.ts`; larger slices split their API modules by domain
-  and register those modules in `eslint.config.mjs`. Api modules hold the
-  API-call functions and the schema-derived types they return; pure helpers
-  stay in the slice's domain modules.
-- Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
-  `ensureOk(fetched)` from `#lib/management/http.js`.
-- Every query key comes from the slice's `*Keys.ts` module.
-- The browser reaches the inference gateway only through `gatewayFetch` in
-  `#lib/management/gateway.ts`, which omits the session cookie and refuses redirects.
-- Writes build their `Idempotency-Key` and `If-Match` headers with `ifMatch`,
-  `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
-- ESLint enforces the `apiClient`, `fetch` and header restrictions. The
-  `apiClient` one is part of `eslint/feature-boundary.mjs`, so it holds for any
-  spelling of the path.
+`apiClient` lives in `#lib/session/client.ts`, which gives the management
+transport its session authentication, and is imported only by feature API
+modules alongside the session and branding API modules and tests. A slice with
+one API module uses `api.ts`, while larger slices split their API modules by
+domain and register those modules in `eslint.config.mjs`. API modules hold the
+API-call functions and the schema-derived types they return, while pure helpers
+stay in the slice's domain modules.
+
+Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
+`ensureOk(fetched)` from `#lib/management/http.js`, and every query key comes
+from the slice's `*Keys.ts` module. The browser reaches the inference gateway
+only through `gatewayFetch` in `#lib/management/gateway.ts`, which omits the
+session cookie and refuses redirects. Writes build their `Idempotency-Key` and
+`If-Match` headers with `ifMatch`, `mutationHeaders` or `createHeaders` from
+`#lib/management/http.js`. ESLint enforces the `apiClient`, `fetch` and header
+restrictions, and the `apiClient` rule lives in `eslint/feature-boundary.mjs`
+so it holds for any spelling of the path.
 
 ## Feature ownership
 
-`src/lib/features/` owns product workflows; shared UI lives in
-`src/lib/components/`, the application frame in `src/lib/shell/` and pages in
-`src/routes/`. Keep route components thin.
-The application is client-only: use the static adapter and avoid server routes,
-server hooks or `lib/server/`. See the [architecture map](../docs/develop/architecture.md).
+`src/lib/features/` owns product workflows, shared UI lives in
+`src/lib/components/`, the application frame lives in `src/lib/shell/` and
+pages live in `src/routes/`. Keep route components thin. The application is
+client-only, so use the static adapter and avoid server routes, server hooks or
+`lib/server/`. See the [architecture map](../docs/develop/architecture.md).
 
 A feature is one management resource family and the pages that read and edit
 it, so a feature can own several top-level routes. The folders under
-`src/lib/features/` and the routes they render are:
+`src/lib/features/` and the routes they render are listed below.
 
-| Feature         | Routes                                                                           | Owns                                                                                                                                                                                   |
-| --------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `access`        | `/organizations`, `/projects`, `/keys`, `/audit`                                 | Organizations, projects with their members and policies (limit templates, attribution budgets, catalog publication), API keys, attribution, end users, route groups and the audit log. |
-| `agents`        | `/agents`, `/mcp-servers`, `/activity`, `/investigations`, `/budgets/exposure`   | Agent publications, grants and delegations, MCP servers, runs, tasks, tool calls, investigations and provisional exposure.                                                             |
-| `budgets`       | `/budgets`                                                                       | The installation budget, budget groups, budget increases, aggregate budgets and the limit fields other features embed.                                                                 |
-| `code-mode`     | `/code-mode`                                                                     | Code mode accounts, pools, routes, bindings, budgets and diagnostics.                                                                                                                  |
-| `exports`       | `/exports`                                                                       | Capture and telemetry export settings at the root and signed export sinks in `signed/`.                                                                                                |
-| `guardrails`    | `/guardrails`                                                                    | Guardrail definitions, policies, credentials and attachments.                                                                                                                          |
-| `health`        | `/health`                                                                        | Readiness, provider health, gateway epochs and runtime generations.                                                                                                                    |
-| `identity`      | `/login`, `/setup`, `/invitations`, `/members`, `/identity`, `/settings/profile` | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.                                               |
-| `inference`     | `/playground`                                                                    | The playground and its request templates.                                                                                                                                              |
-| `media`         | `/media-jobs`                                                                    | Media job metadata.                                                                                                                                                                    |
-| `notifications` | `/notifications`                                                                 | Notification rules, destinations and deliveries.                                                                                                                                       |
-| `overview`      | `/`                                                                              | The landing page and its summaries.                                                                                                                                                    |
-| `plugins`       | `/plugins`                                                                       | The plugin index, installed plugins and the unconfined plugin and MCP executable reviews.                                                                                              |
-| `providers`     | `/providers`, `/models`, `/catalog`                                              | Provider connections, credentials, grants and models, with the published model catalog in `model-catalog/`.                                                                            |
-| `resources`     | `/provider-resources`                                                            | Retained provider resources and retrieval bindings.                                                                                                                                    |
-| `routes`        | `/routes`                                                                        | Route drafts, activation, routing policy and inspection, with the route cache editor in `cache/`.                                                                                      |
-| `settings`      | `/settings`                                                                      | Installation settings and the branding write, with declarative configuration in `configuration/`.                                                                                      |
-| `usage`         | `/usage`, `/requests`, `/pricing`                                                | Usage reports, request records, pricing, rate cards and reconciliation.                                                                                                                |
+| Feature         | Routes                                                                                                                | Owns                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `access`        | `/organizations`, `/projects`, `/keys`, `/audit`                                                                      | Organizations, projects with their members and policies (limit templates, attribution budgets, catalog publication), API keys, attribution, end users, route groups and the audit log.           |
+| `agents`        | `/agents`, `/mcp-servers`, `/activity`, `/investigations`, `/budgets/exposure`                                        | Agent publications, grants and delegations, MCP servers, runs, tasks, tool calls, investigations and provisional exposure.                                                                       |
+| `budgets`       | `/budgets`                                                                                                            | The installation budget, budget groups, budget increases, aggregate budgets and the limit fields other features embed.                                                                           |
+| `code-mode`     | `/code-mode`                                                                                                          | Code mode accounts, pools, routes, bindings, budgets and diagnostics.                                                                                                                            |
+| `exports`       | `/exports`                                                                                                            | Capture and telemetry export settings at the root and signed export sinks in `signed/`.                                                                                                          |
+| `guardrails`    | `/guardrails`, `/guardrails/preview`, `/guardrails/try`                                                               | Guardrail definitions, policies, credentials, attachments, pre-dispatch preview and the Try it evaluator.                                                                                        |
+| `health`        | `/health`                                                                                                             | Readiness, provider health, gateway epochs and runtime generations.                                                                                                                              |
+| `identity`      | `/login`, `/setup`, `/invitations/accept`, `/members`, `/members/invitations`, `/identity`, `/settings/profile`       | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.                                                         |
+| `inference`     | `/playground`                                                                                                         | The playground and its request templates.                                                                                                                                                        |
+| `media`         | `/media-jobs`                                                                                                         | Media job metadata.                                                                                                                                                                              |
+| `notifications` | `/notifications`                                                                                                      | Notification rules, destinations and deliveries.                                                                                                                                                 |
+| `overview`      | `/`                                                                                                                   | The landing page and its summaries.                                                                                                                                                              |
+| `plugins`       | `/plugins`                                                                                                            | The plugin index, installed plugins and the unconfined plugin and MCP executable reviews.                                                                                                        |
+| `providers`     | `/providers`, `/models`, `/models/catalog`, `/catalog/public/[projectId]`                                             | Provider connections, credentials, grants, billing imports, commitments and models, with cross-provider model comparison in `provider-models/` and published model catalogs in `model-catalog/`. |
+| `resources`     | `/provider-resources`                                                                                                 | Retained provider resources and retrieval bindings.                                                                                                                                              |
+| `routes`        | `/routes`, `/routes/templates`                                                                                        | Route drafts, route templates, activation, routing policy and inspection, with the route cache editor in `cache/`.                                                                               |
+| `settings`      | `/settings`, `/settings/routing`                                                                                      | Installation settings, default routing and the branding write, with declarative configuration in `configuration/`.                                                                               |
+| `usage`         | `/usage`, `/usage/routing`, `/usage/calculator`, `/requests`, `/pricing`                                              | Usage reports, routing savings, cost calculator, request records in `history/`, pricing, rate cards and reconciliation.                                                                          |
 
 Two pages sit under another feature's route section. `agents` renders
 `/budgets/exposure`, because the page lists agent exposure, and `identity`
@@ -105,10 +106,10 @@ so a feature that no other feature imports has none.
 
 ## Boundaries
 
-ESLint enforces eight structural rules. `eslint.config.mjs` is their source,
+ESLint enforces eleven structural rules. `eslint.config.mjs` is their source,
 and `eslint/feature-boundary.mjs` resolves alias and relative imports for the
-first five, in `import` and `export` statements, dynamic imports and inline
-`import('...')` types:
+first five in `import` and `export` statements, dynamic imports and inline
+`import('...')` types.
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
   `listing/`, `components/` and `shell/`) never import from
@@ -122,17 +123,25 @@ first five, in `import` and `export` statements, dynamic imports and inline
 - Only a test file imports a `*.test.ts` file, a `test/` folder, `#test/*`, or
   `console/tests/`. Test files are exempt from these rules, so code that
   production needs moves out of them.
+- Non-CSS local side-effect imports are forbidden by `console/side-effect-import`
+  (`eslint/side-effect-import.mjs`) because `package.json` marks only `**/*.css`
+  as having side effects, so the build drops bare JS or TS imports.
+- Programmatic navigation in Svelte files must use `$app/paths` `resolve` under
+  `svelte/no-navigation-without-resolve` (with `ignoreLinks: true`).
 - A `.svelte` file holds at most 400 lines of code. Split a larger one into
   parts beside it.
 - The `Idempotency-Key` and `If-Match` header names appear only in
   `src/lib/management/`.
 - A `.svelte` file has no `try` block. See "Writes" below.
+- Test files outside `tests/unit/support/eventually.ts` must use `eventually`
+  from `#test/eventually.js` instead of `vi.waitFor` or `vi.waitUntil`, because
+  Vitest's 50 ms polling interval dominates the console unit budget.
 
 ### Shared layers
 
 The shared layers form one strict order, so no two of them import each other.
 The list runs from the lowest layer to the highest, and a layer imports only
-itself and the layers listed before it:
+itself and the layers listed before it.
 
 1. `src/lib/*.ts` holds pure helpers such as formatting and imports no other
    layer.
@@ -165,57 +174,67 @@ response that arrives after the signed-in user changed.
 
 `useAction` runs `run(send, accept?, feedback?)` and returns whether the write
 still belonged to the mounted principal when it settled. `send` makes the one
-API call; `accept` does everything that follows a success, such as updating
+API call, and `accept` does everything that follows a success, such as updating
 the query cache, showing a toast and navigating. `feedback` supplies an
 optional `key`, a `fallback` message, and a `failure(cause, stage)` mapper for
 `'send'` or `'accept'` failures. Only a send-stage ETag mismatch sets
 `conflict` and invokes the optional refresh callback. `useMutation` adds an
-`Idempotency-Key`: its `submit(input, send, accept?, feedback?)` gives `send`
-a request ID that stays the same when the user retries the same input, so a
-retry cannot create a second resource.
+`Idempotency-Key` through `submit(input, send, accept?, feedback?)`, giving
+`send` a request ID that stays the same when the user retries the same input so
+a retry cannot create a second resource. When the submitted payload includes
+generated values such as timestamps that must also stay fixed across retries of
+the same logical form input, `submitBuilt(input, build, send, accept?, feedback?)`
+runs `build` once per logical input and reuses both the built payload and the
+request ID on retry until the input changes or the write commits.
 
-An action is principal-scoped by default: a principal change or unmount
+An action is principal-scoped by default, so a principal change or unmount
 retires it. Lifecycle-authorized sign-in and sign-out pass `'authentication'`
-to stay alive through their own transition, ending only at unmount.
-`reset()` clears the reported error and conflict; a mutation's `reset()`
-also drops the saved retry intent. Reads that can fail return the problem as
-a value through `captureResult`/`readResult` in `src/lib/editing/result.ts`
-rather than throwing through the component.
+to stay alive through their own transition, ending only at unmount. `reset()`
+clears the reported error and conflict, and a mutation's `reset()` also drops
+the saved retry intent. Reads that can fail return the problem as a value
+through `captureResult` or `readResult` in `src/lib/editing/result.ts` rather
+than throwing through the component.
 
-`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a form
-that creates and updates. Other logic that can fail, such as parsing what the
-user typed, belongs in a `.ts` module that returns the problem as a value, like
-`src/lib/editing/json.ts`.
+`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a
+form that creates and updates. Other logic that can fail, such as parsing what
+the user typed, belongs in a `.ts` module that returns the problem as a value,
+like `src/lib/editing/json.ts`.
 
 ## Page building blocks
 
 Pages are built from the shared components in `src/lib/components/` rather than
 hand-rolled markup. A standalone page starts with `PageHeader`. A page with
-several views is a route folder whose `+layout.svelte` renders
-`SectionLayout`, which reads the title, description and tabs from
-`src/lib/shell/navigation.ts`, so each tab is its own URL. A query-backed
-region goes through `QueryView`, which renders the loading status, a danger
-`Callout` with the failure message and a retry button, an optional empty
-state, or its children. Lists open create and
-edit forms in a `Dialog` with `placement="side"`. Errors and empty
-states use `Callout` and `EmptyState`. Rarely used fields go in
-`Advanced`. Destructive or hard-to-undo actions await `confirmAction` from
-`confirm.ts`, and successful saves call `notify` from `toasts.svelte.ts` instead
-of leaving a notice on the page. A new page also needs an entry in
-`navigation.ts` so it appears in the sidebar, breadcrumbs and command palette.
+several views is a route folder whose `+layout.svelte` renders `SectionLayout`,
+which reads the title, description and tabs from `src/lib/shell/navigation.ts`,
+so each tab is its own URL. A query-backed region goes through `QueryView`,
+which renders the loading status, a danger `Callout` with the failure message
+and a retry button, an optional empty state, or its children. Lists open create
+and edit forms in a `Dialog` with `placement="side"`. Errors and empty states
+use `Callout` and `EmptyState`. Rarely used fields go in `Advanced`.
+Destructive or hard-to-undo actions await `confirmAction` from `confirm.ts`,
+and successful saves call `notify` from `toasts.svelte.ts` instead of leaving a
+notice on the page. A new page also needs an entry in `navigation.ts` so it
+appears in the sidebar, breadcrumbs and command palette.
 
 ## Design system
 
-The console is dark-only: black canvas, carbon surfaces and electric blue as the
-brand accent. Use semantic tokens from `src/app.css`, never raw colors;
-`.card-light` remaps tokens for the paper hero card. Blue means active/primary,
-green success, amber warning and red danger. Text must meet WCAG AA.
-No browser suite enforces that today, so check contrast when changing color.
+The console is dark-only, using a near-black canvas, carbon surfaces and
+electric blue as the default brand accent. An installation's configured brand
+color dynamically replaces the `--color-accent-*` token scale at runtime. Use
+semantic tokens from `src/app.css`, never raw colors, because `.card-light`
+remaps those tokens for the paper hero card. Blue (or the active installation
+brand accent) means active or primary, green means success, amber means warning
+and red means danger. Text must meet WCAG AA contrast across every surface. Go
+unit tests in `internal/settings/accent_test.go` check WCAG AA contrast for
+every accepted installation brand color and its derived accent shades against
+the surfaces in `src/app.css`, while no browser suite enforces contrast for
+other style changes, so verify contrast whenever editing palette tokens or
+component colors.
 
 Use CSS motion on `transform` and `opacity`, with shared keyframes and
-`--ease-out`/`--dur-*` tokens. Disable hover/entrance effects under
-`prefers-reduced-motion`.
-Keep text readable on hover, preserve its wording and avoid gradients behind copy.
+`--ease-out` and `--dur-*` tokens. Disable hover and entrance effects under
+`prefers-reduced-motion`. Keep text readable on hover, preserve its wording and
+avoid gradients behind copy.
 
 ## Testing
 

@@ -3,13 +3,13 @@
 Install Go 1.26.0 or newer, Node.js 22.22.2 or newer, and pnpm 10.26.0 or newer.
 Use the current stable Go and pnpm releases and the latest Node.js LTS release
 (selected by `.nvmrc`) for development. pnpm 10.26.0 is needed for the workspace's
-build-script permissions. Building and checking Go also needs a C compiler/linker
-and glibc development headers. Running the development stack needs Docker Compose
-and Python 3. Operational scripts need additional tools such as PostgreSQL 18
-clients, OpenSSL, curl, jq, bubblewrap and ripgrep. Run commands from the
-repository root.
-Release platforms are native Linux amd64 and arm64. macOS and musl are
-unqualified.
+build-script permissions. Building and checking Go also needs a C compiler and
+linker plus glibc development headers. Running the development stack needs Docker
+Compose and Python 3. Dependency, end-to-end and image scripts use `jq` and
+`curl`, operational scripts need additional tools such as PostgreSQL 18 clients
+and OpenSSL, and the code-mode fixture qualification lanes (`make qualify-code`)
+need `bubblewrap`. Run commands from the repository root. Release platforms are
+native Linux amd64 and arm64. macOS and musl are unqualified.
 
 | Command | Purpose |
 | --- | --- |
@@ -34,11 +34,12 @@ unqualified.
 | `make dev-stop` | Stop development containers and preserve data |
 | `make dev-reset` | Delete development containers and volumes, preserving local secrets |
 
-`make help` groups everyday commands, focused checks, and maintenance commands.
-Run `make setup` after cloning or changing dependencies or the watcher version.
-`make dev` and `make build` consume prepared contracts without reinstalling
-dependencies or regenerating tracked files. After editing an API schema or
-generator, run `make api` explicitly.
+`make help` groups targets into four sections, covering Everyday commands,
+Focused checks, Tests, and Services and maintenance. Run `make setup` after
+cloning or changing dependencies or the watcher version. `make dev` and
+`make build` consume prepared contracts without reinstalling dependencies or
+regenerating tracked files. After editing an API schema or generator, run
+`make api` explicitly.
 
 Required CI includes `check-go`, `check-console`, `test-unit-go`,
 `test-unit-console`, `test-integration`, `test-e2e-api`, `test-e2e-browser`,
@@ -46,8 +47,8 @@ Required CI includes `check-go`, `check-console`, `test-unit-go`,
 each gated on the paths a change touches. Helm, dependency and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
 `management/management.json` is the checked-in source of truth. Update it
-alongside handlers and regenerate with
-`make api`. Never edit generated Go or TypeScript files by hand.
+alongside handlers and regenerate with `make api`. Never edit generated Go or
+TypeScript files by hand.
 
 ## Local development
 
@@ -90,12 +91,14 @@ make dev
 ## Tests and changes
 
 Keep feature types, validation, SQL, handlers and workflows together. The
-[architecture map](docs/develop/architecture.md) identifies backend and console owners;
-[testing](tests/README.md) covers the test tiers, their budgets and the placement rules.
+[architecture map](docs/develop/architecture.md) identifies backend and console
+owners, and [testing](tests/README.md) covers the test tiers, their budgets and
+the placement rules.
 
-Use `gofmt`, `go vet`, and `make lint` for Go; console source uses Prettier, two spaces,
-single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
-Svelte route components thin and use the [console design system](console/README.md#design-system).
+Use `gofmt`, `go vet`, and `make lint` for Go. Console source uses Prettier, two
+spaces, single quotes, no trailing commas, `camelCase` helpers and
+`PascalCase.svelte` components. Keep Svelte route components thin and use the
+[console design system](console/README.md#design-system).
 
 Place Go unit tests beside their feature as `*_test.go`, console unit tests
 as Vitest `*.test.ts` in the `unit` project, and reactive Svelte tests as
@@ -130,14 +133,16 @@ SDKs remains part of the product contract.
 
 Use current stable dependencies and update Go and pnpm through their package
 managers. Commit the corresponding lockfiles with each update.
-`scripts/check-dependencies.sh` checks reachable Go
-vulnerabilities, licenses and production JavaScript packages. A reachable
-advisory that was reviewed and does not apply is accepted there by pinning its
-ID and `modified` time, so a revised record fails the check again. Image qualification
-also scans runtime/build SBOMs and retains native linking/license evidence.
+`scripts/check-dependencies.sh` verifies that `deploy/Dockerfile` matches the
+Go toolchain in `go.mod`, the Node.js release in `.nvmrc`, and `packageManager`
+in root `package.json`, then checks reachable Go vulnerabilities, licenses and
+production JavaScript packages. A reachable advisory that was reviewed and does
+not apply is accepted there by pinning its ID and `modified` time, so a revised
+record fails the check again. Image qualification also scans runtime and build
+SBOMs and retains native linking and license evidence.
 
-The embedded OpenAI token ranks carry their MIT notice and SHA-256 checks;
-oracle fixtures use test-only tiktoken under `tests/fixtures/tokens`.
+The embedded OpenAI token ranks carry their MIT notice and SHA-256 checks,
+while oracle fixtures use test-only tiktoken under `tests/fixtures/tokens`.
 
 TypeScript stays on the newest 6.0 patch until both
 [typescript-eslint](https://typescript-eslint.io/users/dependency-versions/) and
@@ -146,10 +151,12 @@ Other version exceptions need a concrete incompatibility and removal condition.
 
 ## Releases
 
-Root `package.json` owns the version. Console/SDK package versions, chart
-metadata, Docker/Compose tags, OpenAPI `info.version` and release tags must agree;
-`node scripts/check-release-version.mjs` enforces this. The Makefile injects the
-version into the binary. Build Linux amd64 and arm64 images natively; static
+Root `package.json` owns the version. `node scripts/check-release-version.mjs`
+enforces version parity across `console/package.json`, `deploy/helm/Chart.yaml`,
+`deploy/Dockerfile`, `deploy/compose.yaml`, `management/management.json`, the
+two versioned documentation pins in `docs/operate/deployment.md` and
+`docs/use/plugins.md`, and the release tag. The Makefile injects the version
+into the binary. Build Linux amd64 and arm64 images natively because static
 console assets ship separately in the nonroot distroless image.
 
 Platform digests form one candidate index. Packaged image mode, service,
@@ -158,9 +165,10 @@ that exact index, and promotion tags and attests it without rebuilding. A manual
 workflow dispatch qualifies without publishing. A `v0.*` tag push can publish
 `:<version>` and `:<major>.<minor>` only after all gates pass.
 
-Provider/protocol/media reviews must cover native conformance, refused or lossy
-semantics, body/time/admission limits, pricing and missing usage, cancellation,
-privacy, SDK pins and recovery/credential-reference effects. Publish the generated
-management OpenAPI contract and record deliberate 0.x breaking changes in the
-[changelog](CHANGELOG.md). Weekly scans retain digest-specific released-image
-reports; triage through the [security policy](SECURITY.md).
+Provider, protocol and media reviews must cover native conformance, refused or
+lossy semantics, body, time and admission limits, pricing and missing usage,
+cancellation, privacy, SDK pins and recovery or credential-reference effects.
+Publish the generated management OpenAPI contract and record deliberate 0.x
+breaking changes in the [changelog](CHANGELOG.md). Weekly scans retain
+digest-specific released-image reports, and findings are triaged through the
+[security policy](SECURITY.md).

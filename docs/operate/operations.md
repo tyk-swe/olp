@@ -1,683 +1,265 @@
 # Operations runbook
 
-This runbook covers production availability, monitoring, recovery, version
-changes, incidents and key rotation. Keep the runbook version with the deployed
-release because recovery details can depend on the storage and runtime contract
-in that release. Installation topology and first deployment belong in
-[Deployment](deployment.md).
+This runbook covers production availability, monitoring, recovery, version changes, incidents, and key rotation. Keep the runbook version matched with the deployed release because recovery details can depend on the storage and runtime contract in that release. Installation topology and first deployment belong in [Deployment](deployment.md).
 
 ## Commitment accounting recovery
 
-Connection disablement stops traffic while retaining published commitments.
-Check the existing FOCUS dataset view for purchased, allocated and unused totals,
-provisional state and incomplete coverage. Pending edits apply at UTC period
-boundaries; removing a draft amount does not cancel the current obligation.
+Disabling a provider connection stops traffic while retaining published commitments. Inspect the FOCUS dataset view for purchased, allocated, and unused totals, provisional state, and incomplete coverage. Pending edits apply at UTC period boundaries, and removing a draft amount does not cancel the active obligation.
 
-The FOCUS worker builds history from published runtime snapshots and retained
-facts/hourly evidence and catches up in bounded batches;
-incomplete historical or partial export coverage is reported explicitly. Keep
-`commitment_schedules`, `commitment_periods` and `commitment_usage` in the normal
-whole-schema backup. Allocation context remains available for the lifetime of retained hourly
-reporting, including periods outside the FOCUS export window. Restore preserves the originating installation history;
-configuration promotion carries desired settings, and the destination establishes
-its own obligations when it publishes. Do not copy period rows during promotion.
+The FOCUS worker builds history from published runtime snapshots and retained facts or hourly evidence, catching up in bounded batches and reporting incomplete historical or partial export coverage explicitly. Keep `commitment_schedules`, `commitment_periods`, and `commitment_usage` in the normal whole-schema backup. Allocation context stays available for the lifetime of retained hourly reporting, including periods outside the FOCUS export window. Restoring a backup preserves the originating installation history, whereas configuration promotion carries desired settings so a destination establishes its own obligations upon publication. Never copy period rows during promotion.
 
-Late facts restate affected days under the existing delivery lease and retry
-rules. Read the manifest last, deduplicate by day and revision, and replace the
-previous dataset revision. Never move an out-of-window purchase forward to make
-a partial export appear complete. See [FinOps](finops.md#commitments).
+Late facts restate affected days under the standard delivery lease and retry rules. Consumers should read the manifest last, deduplicate by day and revision, and replace the prior dataset revision. Never shift an out-of-window purchase forward to make a partial export appear complete. See [FinOps](finops.md#commitments).
 
 ## Objectives and monitoring
 
-Measure public-listener availability/added latency and accounting/recovery
-capacity. Gateway operators own availability and metadata completeness; provider
-owners own credentials, quotas and upstream model availability.
+Measure public-listener availability, added gateway latency, and accounting and recovery capacity. Gateway operators own listener availability and metadata completeness, while provider owners own credentials, quotas, and upstream model availability.
 
-Scrape private port 9090 every 15 seconds; public health/metrics paths return 404.
-Readiness refreshes every five seconds, expensive rollups every fifteen. Page on
-five minutes without readiness, metadata loss/persistence failure, unavailable
-hard limits or stale worker/cost checkpoints. Warn on ten-minute backlog.
-Bundled Prometheus rules/ServiceMonitors are starting points, not an SLO guarantee.
+Scrape private port 9090 every 15 seconds because public health and metrics paths return HTTP 404. Readiness refreshes every five seconds and expensive operational rollups refresh every fifteen seconds. Page on five minutes without readiness, metadata loss or persistence failure, unavailable hard limits, or stale worker and cost checkpoints, and warn on ten-minute backlogs. Bundled Prometheus rules and ServiceMonitors are starting points rather than an SLO guarantee.
+
+For container health checks without `curl`, run `olp health-probe`. It reads `OLP_OBSERVABILITY_LISTEN_ADDR` (default `127.0.0.1:9090`, mapping wildcard bind addresses to loopback), issues `GET /health/ready` with a 3-second timeout and redirects disabled, and exits non-zero on any status other than 200. For Kubernetes pod draining before SIGTERM, use `olp internal-pre-stop --seconds N` (default 10 seconds, maximum 3600 seconds), which waits for `N` seconds or exits promptly on cancellation so load balancers can stop routing traffic before the shared `OLP_SHUTDOWN_TIMEOUT` budget starts.
 
 ### Export and billing incidents
 
-Use [Observability](observability.md) for sink, tracing, capture and alert
-configuration. Monitor export pending counts, lag, gap counts and task checkpoints.
-An unavailable remote destination leaves durable work queued; failed claim,
-outcome or checkpoint writes make the delivery task unhealthy.
+Use [Observability](observability.md) for sink, tracing, capture, and notification configuration. Monitor export pending counts, lag, gap counts, and worker task checkpoints. An unreachable remote destination leaves durable work queued, while failed claim, outcome, or checkpoint writes mark the delivery task unhealthy.
 
-A FOCUS day with `last_error_code` remains in `focus_datasets` with a future
-`next_attempt_at`. Fix endpoint, credentials or egress and let the worker retry
-the same revision, manifest last. Do not edit the row. `current: false` marks a
-dirty day awaiting restatement.
+A FOCUS day recording `last_error_code` stays in `focus_datasets` with a future `next_attempt_at`. Repair the endpoint, credentials, or egress rules and let the worker retry the same revision with the manifest written last, without manually editing database rows. `current: false` marks a dirty day awaiting restatement.
 
-For billing-import errors, `credential` means a missing, invalid or unreadable
-sealed billing credential, or an upstream authentication or authorization
-failure. `status` and `response` indicate upstream or export errors, and
-`endpoint` means a missing provider or egress refusal. Imported costs expire at
-`retention.usage_days`. Restricted egress deployments need
-`api.stripe.com`, `api.openai.com` and `api.anthropic.com` for the corresponding
-meter or import APIs. Cloud export and authentication access depend on the
-selected source and credential. See [FinOps](finops.md#billing-imports).
+For billing-import errors, `credential` indicates a missing, invalid, or unreadable sealed billing credential or an upstream authentication or authorization failure. `status` and `response` indicate upstream or export failures, and `endpoint` indicates a missing provider or egress refusal. Imported costs expire at `retention.usage_days`. Restricted egress deployments must allow `api.stripe.com`, `api.openai.com`, and `api.anthropic.com` for the corresponding meter or import APIs, while cloud export and authentication hosts depend on the selected source and credential. See [FinOps](finops.md#billing-imports).
 
-Capture failures drop records without changing inference. Review
-`olp_capture_dropped_total` and `olp_capture_redaction_failed_total`; a queued
-capture is not delivery evidence. Notifications require task checkpoints and
-receiver evidence, not just a configured capability flag.
+Payload capture failures drop records without affecting inference. Review `olp_capture_dropped_total`, `olp_capture_failed_total`, and `olp_capture_redaction_failed_total`, bearing in mind that a queued capture does not confirm delivery. Notifications require healthy task checkpoints and receiver evidence rather than a configured capability flag alone.
 
 ### Replicated worker health
 
-Worker mode has only private observability. Production needs Valkey plus worker
-or `all`; configured capability flags do not establish live worker health.
+Worker mode exposes only the private observability listener. Production deployments require Valkey plus `worker` or `all` processes, and configured capability flags never prove live worker health. OLP tracks 16 checkpointed tasks in `olp.worker_task_health` (`internal/platform/workerhealth/health.go`). Three regional tasks (`request_metadata_consumer`, `cost_reconciliation`, and `health_probes`) also checkpoint per region in `olp.regional_worker_task_health` when `OLP_REGION` is set.
 
-| Task | Schedule/authority |
-| --- | --- |
-| Retained settlement | Five-second wake; sixteen claims, four concurrent polls, two-minute leases and thirty-second heartbeats; sixty-second observations with backoff; also without Valkey |
-| Media reconciliation | Durable claims; historical pins and live revocation; also without Valkey |
-| Plugin grant refresh | Five-second scan; per-grant advisory lock; record answered refresh during shutdown; also without Valkey |
-| Active probes | 15-second scan; fleet claim per configured interval/model; low-priority accounted system work |
-| Metadata consumer | Replay/reclaim, commit once then acknowledge/delete; dedicated blocking Valkey connection |
-| Export delivery | PostgreSQL leases, independent of Valkey |
-| Epoch detection | Two confirming passes before unclean-exit gap |
-| Maintenance | 60-second advisory-lock pass: roll up before purge; bounded resource expiry/savepoints |
-| Cost reconciliation | 60-second region-scoped leader pass |
-| Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
-| FOCUS dataset export | 60-second pass; PostgreSQL leases, no Valkey; at most four due days per sink |
-| Billing import | The scan runs every 60 seconds. Imports run hourly after success, with Google backfill eligible after one minute. Failures use five-minute geometric backoff |
-| Batch settlement | 5-second durable claim scan for submission reconciliation, polling and result settlement |
+| Task label | Stale threshold | Schedule and authority |
+| --- | --- | --- |
+| `request_metadata_consumer` | 20s | Regional. Dedicated blocking Valkey connection that replays, reclaims, commits once to PostgreSQL, and then acknowledges and deletes entries. |
+| `request_metadata_gateway_epoch_detection` | 20s | Two confirming passes before recording an unclean-exit completeness gap. Also runs without Valkey. |
+| `media_reconciliation` | 20s | Durable claims reconciling accepted media jobs with historical pins and live revocation. Also runs without Valkey. |
+| `grant_refresh` | 20s | Five-second scan with per-grant advisory locks that records answered refreshes during shutdown. Also runs without Valkey. |
+| `export_delivery` | 30s | Five-second rotating pass (20-second budget) over PostgreSQL leases for `/api/v1/observability/sinks`. Independent of Valkey. |
+| `code_allowance_read` | 60s | 15-second scan with per-account advisory locks reading up to 50 due coding-subscription allowance accounts per pass (5-minute freshness window). Independent of Valkey. |
+| `batch_settlement` | 180s | Five-second durable claim scan for batch submission reconciliation, polling, and result settlement. Also runs without Valkey. |
+| `retained_settlement` | 180s | Five-second wake claiming up to 16 items with four concurrent polls, two-minute leases, 30-second heartbeats, and 60-second observations with backoff. Also runs without Valkey. |
+| `maintenance` | 180s | 60-second advisory-lock pass that rolls up usage before purging and bounds resource expiry with savepoints. |
+| `cost_reconciliation` | 180s | Regional. 60-second region-scoped leader pass publishing authoritative budget snapshots to Valkey. |
+| `execution_debits` | 180s | 60-second pass (40-second budget) reconciling prepared and in-flight execution debits, recovering orphaned MCP tool dispatches, and draining up to 256 expired call identities. Also runs without Valkey. |
+| `notification_delivery` | 180s | 60-second claims with durable attempt evidence and up to five retries using exponential minute backoff. |
+| `managed_export_delivery` | 180s | Five-second idle ticker (drains backlogs continuously) expiring rows past seven days in batches of 1,000 and claiming up to 16 `/api/v1/sinks` deliveries per pass with 1-minute leases and 5-second HTTP timeouts. Independent of Valkey. |
+| `health_probes` | 180s | Regional. 15-second scan using fleet claims per configured interval and model for low-priority accounted probes. |
+| `billing_import` | 180s | 60-second scan running hourly imports after success (Google backfill eligible after one minute) with five-minute geometric backoff on failures. Independent of Valkey. |
+| `focus_export` | 180s | 60-second pass over PostgreSQL leases exporting at most four due days per sink. Independent of Valkey. |
 
-Media/grant/consumer/epoch/batch settlement checkpoints stale at 20 seconds; maintenance/cost/
-notification/focus-export/billing-import checkpoints at 180. Follower skips do not prove leader success.
-Healthy async status requires expected current tasks and zero pending/lag;
-backlogged is not lost, and missing evidence is unknown. Unsupported integer
-metadata versions remain pending; invalid supported formats create gaps.
+Checkpoints turn stale after 20 seconds for `request_metadata_consumer`, `request_metadata_gateway_epoch_detection`, `media_reconciliation`, and `grant_refresh`, after 30 seconds for `export_delivery`, after 60 seconds for `code_allowance_read`, and after 180 seconds for the remaining ten tasks (`batch_settlement`, `retained_settlement`, `maintenance`, `cost_reconciliation`, `execution_debits`, `notification_delivery`, `managed_export_delivery`, `health_probes`, `billing_import`, and `focus_export`). Follower skips never prove leader success. Healthy asynchronous status requires every expected task to be current alongside zero pending and lag counts. A backlog is delayed rather than lost, while missing evidence is unknown. Unsupported integer metadata versions remain pending, and invalid supported formats record explicit gaps.
 
-Metadata reclaim is eligible after 30 seconds, scanned every five; investigate
-if recovery has not begun by 35 seconds. Run three workers across failure domains.
-Watch pending/lag/oldest age, reclaim/duplicate counts and `olp_worker_task_*`.
-Counters are shared durable totals; unavailable summary reads are not resets.
-Restart a consumer after startup misconfiguration; there is no outer supervisor.
+Metadata reclaim becomes eligible after 30 seconds and is scanned every five seconds, so investigate if recovery has not started by 35 seconds. Run three workers across failure domains. Monitor pending count, lag, oldest pending age, reclaim and duplicate counters, and the `olp_worker_task_*` series. Recovery counters are shared durable totals, and unavailable summary reads never indicate counter resets. Restart a stopped consumer after fixing startup misconfiguration because OLP includes no outer process supervisor.
 
-Runtime publication is synchronous under the installation lock, so there is no
-runtime outbox to watch. Monitor release convergence and independent authority
-freshness. Without Valkey, media/grants/exports run, but
-accounting/retention are not production-ready and readiness can remain degraded.
+Runtime publication commits synchronously under the installation lock, so there is no runtime outbox to monitor. Track release convergence via `GET /api/v1/runtime-generations` (cursor-paginated immutable release history with sequence number, SHA-256 digest, creator, and timestamp) and independent authority freshness. Without Valkey, PostgreSQL-only tasks such as media reconciliation, grant refresh, managed exports, observability exports, FOCUS exports, billing imports, and code allowance reads continue running, but accounting and retention are not production-ready and readiness can stay degraded.
 
 ### Spend-budget reconciliation
 
-PostgreSQL facts are spend authority; Valkey holds exact-decimal admission
-snapshots across the [budget hierarchy](../use/access.md#installation-and-project-budgets).
-Accounting/reconciliation alone initialize balances. Unknown/malformed/wrong-window
-state returns 503; known exhaustion returns 429. New budgets normally wait for
-next minute's pass. Never insert zero, remove policy or reset a valid counter to
-bypass initialization. Supply caps skip targets while unknown/exhausted.
+PostgreSQL facts are the spend authority, and Valkey holds exact-decimal admission snapshots across the [budget hierarchy](../use/access.md#installation-and-project-budgets). Only accounting and reconciliation initialize balances. Unknown, malformed, or wrong-window state returns HTTP 503, while known exhaustion returns HTTP 429. Newly configured budgets normally wait for the next minute's pass. Never seed zero, drop a policy, or delete a valid counter to bypass initialization. Supply caps skip targets while their window is unknown or exhausted.
 
-Accounting installs every owner's spend on both bases. It derives `accrued` and
-`unpriced_attempts` from `estimated_cost`, and `charged` and
-`uncharged_attempts` from `charge`. A `cost_basis` change therefore takes effect
-on the next admission. Reconciliation likewise installs both bases for every
-owner it reconciles.
+Accounting installs every owner's spend on both cost bases, deriving `accrued` and `unpriced_attempts` from `estimated_cost` and `charged` and `uncharged_attempts` from `charge`. Changing `cost_basis` therefore takes effect on the next admission without migrating state. Reconciliation likewise populates both bases for every reconciled owner.
 
-Each region has one dedicated PostgreSQL leader session, never returned while
-locked. Failure/cancellation/120-second pass deadline closes it; followers cannot
-claim leader success. Regional stores use the same durable facts, not global
-instantaneous monetary reservations; see [regional fleets](deployment.md#regional-fleets).
-Malformed hashes can be rebuilt from matching authoritative windows; valid
-inflated totals need reviewed repair. Future/stale snapshots cannot initialize
-another period. Day/week/month windows use the configured calendar.
+Each region maintains one dedicated PostgreSQL leader session that stays detached while holding its advisory lock. Any failure, cancellation, or 120-second pass deadline closes the session, and followers never report leader success. Regional Valkey stores consume the same durable facts rather than sharing instantaneous monetary holds across regions, as described in [regional fleets](deployment.md#regional-fleets). Malformed hashes can be rebuilt from matching authoritative windows, whereas valid inflated totals need reviewed repair. Future or stale snapshots cannot initialize a different period, and day, week, and month windows follow the configured budget calendar.
 
-1. Inspect consumer, database, Valkey, clocks and leader checkpoint on persistent
-   503s or unexplained spend. Revoke affected keys if continued admission is unsafe.
-2. After Valkey loss, fence budgeted traffic until checkpoint and accrued values
-   confirm reconstruction. Do not lower/delete valid counters or rate leases.
-3. Only during stopped traffic and failed reconciliation may an exact malformed
-   cost hash be removed; never use wildcard deletion.
-4. Review missing prices/usage and retained pending native work. Keep upstream
-   quotas: local [reservations](../develop/architecture.md#cost-reservation) are not invoice caps.
+1. Inspect the consumer, database, Valkey, clocks, and leader checkpoint on persistent 503 responses or unexplained spend, and revoke affected keys if continued admission is unsafe.
+2. After Valkey loss, fence budgeted traffic until the checkpoint and accrued values confirm reconstruction, without lowering or deleting valid counters or rate leases.
+3. Only when traffic is stopped and reconciliation fails may an operator remove an exact malformed cost hash, never using wildcard deletion.
+4. Review missing prices, incomplete usage, and pending retained native work, and keep upstream provider quotas because local [reservations](../develop/architecture.md#cost-reservation) are not invoice caps.
 
-Holds can produce 429 below displayed spend and lapse at deadline plus five
-minutes, retired in bounded pages. Damaged advisory holds cannot block accounting.
-Deleting `cost:pending`/`cost:expiry` loses in-flight protection, not accrued spend.
-No maximum ingestion lag or monetary overshoot has been qualified.
+In-flight holds can return HTTP 429 below displayed spend and lapse at deadline plus five minutes, retired in bounded pages. Damaged advisory holds cannot block accounting. Removing `cost:pending` or `cost:expiry` drops in-flight protection without altering accrued spend. No maximum ingestion lag or monetary overshoot envelope has been qualified.
 
 ## Accounting delivery and shutdown
 
-Every caller/playground/probe terminal event is content-free. Each producing
-process has an 8192-event nonblocking buffer feeding the installation's Valkey
-stream. Overflow checkpoints local loss so other replicas can refuse incomplete
-cost admission. Never store prompts/outputs/tools/raw headers/cookies/uploads;
-provider names, route slugs and labels must also remain secret-free.
+Every caller, playground, and probe terminal event is content-free. Each producing process holds an 8,192-event nonblocking buffer feeding the installation's Valkey stream. Buffer overflow checkpoints local loss so other replicas can refuse incomplete cost admission. Never store prompts, outputs, tools, raw headers, cookies, or uploads, and keep provider names, route slugs, and labels free of secrets.
 
-Supported wire format is JSON `event`, `version: 1`. Unsupported integer versions
-stay in stream/pending for compatible consumers; malformed supported records become
-durable gaps. PostgreSQL commit precedes acknowledge/delete; replay does not
-repeat charges. Attributable attempts use key project, then provider project,
-then route project for aggregate monetary ownership, including retries/rollups.
+The supported wire format is JSON `event` at `version: 1`. Unsupported integer versions stay pending in the stream for compatible consumers, while malformed supported records create durable gaps. PostgreSQL commits before acknowledging and deleting stream entries so replays never double-charge. Attributable attempts assign aggregate monetary ownership to the key project, then the provider project, and finally the route project, including retries and rollups.
 
-Retained Response/Interaction mappings own immutable original financial events
-and pending subject projections. Newly enabled budgets cannot hide unresolved
-spend. Native completion, durable attachment and HTTP delivery are separate;
-usage survives projection/write/flush failure. Null unfinished HTTP metadata is
-not success. A detached two-second finalizer patches only receipt-qualified
-original observations without changing identities/prices/usage. Investigate
-`deferred generation HTTP outcome not recorded` warnings. Delete/expiry saves
-partial usage/uncertainty first; unsupported templates remain, with bounded
-maintenance/savepoints. See [retained accounting](../develop/architecture.md#retained-generation-accounting).
+Retained Response and Interaction mappings own immutable original financial events and pending subject projections so newly enabled budgets cannot hide unresolved spend. Native completion, durable attachment, and HTTP delivery stay decoupled so usage survives projection, write, or flush failures. Null unfinished HTTP metadata does not prove success. A detached two-second finalizer patches only receipt-qualified original observations without altering identities, prices, or usage. Investigate `deferred generation HTTP outcome not recorded` warnings. Deletion and expiry save partial usage or uncertainty first, while unsupported templates stay visible with bounded maintenance and savepoints. See [retained accounting](../develop/architecture.md#retained-generation-accounting).
 
-Retained identity includes caller, immutable revisions, selected route target,
-slot and credential version. Null or ambiguous pins refuse dispatch. Never repair
-using mutable current configuration. Retired budget groups retain policy-free
-historical UUIDs for late settlement; same-name replacements are distinct.
-Audio duration is recorded to microseconds; invalid duration is missing billing
-evidence, not a fabricated zero.
+Retained identity pins the caller, immutable revisions, selected route target, credential slot, and credential version. Null or ambiguous pins refuse dispatch, and operators must never repair records using mutable current configuration. Retired budget groups keep policy-free historical UUIDs for late settlement while same-name replacements get distinct UUIDs. Audio duration is stored to microseconds, and an invalid duration records missing billing evidence rather than a fabricated zero.
 
-Management exposes usage summary/breakdown/timeseries/completeness, request
-history, pricing revisions and metadata epochs. Project readers see only their
-scope. Partial boundary buckets are approximate with exclusion/gap evidence.
-Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
-Estimate error compares only attempts with both estimated/reported input;
-model family/provenance breakdowns distinguish unestimated and historical unknown.
-Committed connections report zero marginal cost; `allocated_commitment`
-apportions each commitment amount across the period's list-cost weight. See
-[Pricing](pricing.md#commitments) for the allocation contract.
+Management endpoints expose usage summaries, breakdowns, timeseries, completeness, request history, pricing revisions, runtime generations (`GET /api/v1/runtime-generations`), and gateway metadata epochs (`GET /api/v1/request-metadata/gateway-epochs`, filterable by `state` set to `open`, `gracefully_closed`, `unresolved`, or `acknowledged`, plus `POST /api/v1/request-metadata/gateway-epochs/{process_epoch}/acknowledge` to record an audited `request_metadata.gateway_epoch_acknowledge` event for an unresolved epoch). Project readers see only their authorized scope. Partial boundary buckets are approximate and surface exclusion or gap evidence. Attribution filters and end-user digest breakdowns protect raw caller identifiers. Estimate error compares only attempts having both estimated and reported input tokens, and model family or provenance breakdowns distinguish unestimated and historical unknown rows. Committed connections record zero marginal cost while `allocated_commitment` apportions each commitment across the period's list-cost weight. See [Pricing](pricing.md#commitments).
 
-Pricing entries and every component's exact billing semantics are covered in
-[pricing](pricing.md). Managed pricing sources refresh bounded, egress-checked immutable snapshots and
-return diffs; only explicit publication affects accounting. Negotiated rates use
-publish-time overrides. `catalog` sources verify detached signatures, refuse
-catalog rollback and map supported model aliases. Bundled refresh is offline;
-remote catalog URL must serve directly with `.sig` and allowed egress. Plugin
-prices require provider scope (`provider_id`), otherwise remain unpriced.
-See [catalog](../develop/catalog.md) and the management contract for endpoints.
+Pricing entries and component billing semantics are detailed in [pricing](pricing.md). Managed pricing sources fetch bounded, egress-checked immutable snapshots and emit diffs, while only explicit publication changes accounting. Negotiated rates use publish-time overrides. `catalog` sources verify detached signatures, block catalog rollback, and map supported model aliases. Bundled refresh works offline, whereas a remote catalog URL must serve directly alongside `.sig` within allowed egress. Plugin prices require provider scope (`provider_id`) and remain unpriced otherwise. See [catalog](../develop/catalog.md) and the management OpenAPI contract for endpoints.
 
-Shutdown and failed-startup cleanup share one `OLP_SHUTDOWN_TIMEOUT` deadline
-(default 30 seconds): drain requests/shadows/probes while authority remains,
-close/flush metadata, then stop delivery/workers/dependencies/traces. Deadline
-expiry forcibly unblocks resources and logs incomplete joins; it never adds an
-unbounded wait. Only verified drain closes the producer epoch. Forced producers
-leave it open; undelivered buffered events become explicit loss.
+Shutdown and failed-startup cleanup share a single `OLP_SHUTDOWN_TIMEOUT` deadline (default 30 seconds) to drain requests, shadows, and probes while authority remains available, close and flush metadata, and stop delivery, workers, dependencies, and traces. Deadline expiry forcibly unblocks resources and logs incomplete joins rather than waiting indefinitely. Only verified drain closes the producer epoch, while forced exits leave the epoch open so undelivered buffered events surface as explicit loss.
 
-Receipts/replay evidence last seven days plus five-minute skew grace. Size receipt
-storage for `sustained_requests_per_second * 604800`; recover queues within this
-window, not by suspending retention. Late events remain uncertain, never silently
-double-counted.
+Receipts and replay evidence remain for seven days plus a five-minute skew grace. Size receipt storage for `sustained_requests_per_second * 604800` and recover backlogged queues within that window instead of suspending retention. Late events remain marked uncertain rather than silently double-counted.
 
 ### Queue durability
 
-Acknowledgment is not fsync. Compose AOF `everysec` can lose about one second on
-power/storage failure; replication adds risk. Surviving gaps/epochs expose known
-loss but cannot enumerate facts lost with their evidence. Fence budgeted traffic
-during suspected loss and reconcile provider billing. Qualify actual persistence/
-replication storage for tighter RPO; no fleet guarantee follows from fsync alone.
+Stream acknowledgment does not equal fsync. Compose AOF `everysec` can lose roughly one second of data on power or storage failure, and asynchronous replication adds further exposure. Surviving gaps and open epochs report known loss without enumerating facts lost alongside their evidence. Fence budgeted traffic during suspected queue loss and reconcile against provider invoices. Qualify persistence and replication storage directly for tighter RPO targets because fsync alone does not establish a fleet-wide guarantee.
 
 ## Shared state in Valkey
 
-Every key is prefixed with the installation namespace
-`olp:<installation>:`, so installations sharing one Valkey service never
-read, acknowledge, or reconcile one another's state.
+Every key carries the installation namespace prefix `olp:<installation>:`, isolating independent installations that share a Valkey service.
 
 | Key | Contents |
 | --- | --- |
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
 | `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
-| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
-| `<prefix>limits:{<cost owner>}:charge:day`, `:charge:week` and `:charge:month` | The same windows under the consumer-charge basis, installed for every owner so a budget can switch `cost_basis` without state migration. |
-| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
-| `<prefix>limits:{<cost owner>}:charge:pending` and `:charge:expiry` | The same in-flight state for charge-basis reservations. |
-| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
-| `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
-| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |
-| `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
+| `<prefix>limits:{<lookup>}:members` | Generation-stamped shared-quota membership set and ceiling synced by gateways for `sg_` shared quota lookups. |
+| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week`, `:cost:month` | Current calendar spend windows for caller and supply owners (supply caps use day and month). Custom calendar hashes also record start and end instants. |
+| `<prefix>limits:{<cost owner>}:charge:day`, `:charge:week`, `:charge:month` | Equivalent windows on the consumer-charge basis, maintained for every owner so changing `cost_basis` needs no state migration. |
+| `<prefix>limits:{<cost owner>}:cost:pending`, `:cost:expiry` | Advisory in-flight cost reservations per owner, holding each request's reserved amount, the total, and expiry timestamps. Absent when idle. |
+| `<prefix>limits:{<cost owner>}:charge:pending`, `:charge:expiry` | Equivalent in-flight reservation state for charge-basis budgets. |
+| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and credential-slot cooldown markers. |
+| `<prefix>limits:health:circuits` | Providers whose circuit the fleet holds open and their expiry timestamps, refreshed by gateways every two seconds. |
+| `<prefix>limits:health:probes`, `:health:probe:<provider>/<model>` | Latest active probe result per provider and the coordination claim keeping one probe per model and interval. |
+| `<prefix>request-metadata` | Request metadata stream read by consumer group `olp:persistence`. |
 
-A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
-`ps_<slot uuid>` for a credential slot, or `rt_<route uuid>` for a route's
-spend cap; the braces are the cluster hash tag,
-so one key's dimensions stay on one slot. Cost keys are tagged by the API key or
-budget-group UUID, so key rotation preserves spend and group members share one
-balance.
+Lookup identifiers use cluster hash tags inside braces so one subject's rate, concurrency, and membership keys map to the same Valkey cluster slot (`internal/limits/owners.go`). Lookups use the API key's lookup ID for key limits, `pc_<provider uuid>` for a provider connection, `ps_<slot uuid>` for a credential slot, `rt_<route uuid>` for a route spend cap, `bg_<budget group uuid>` for a budget group, `ab_<aggregate owner uuid>` for an aggregate budget (organization, project, key-route, or attribution), `eu_<end-user account uuid>` for an end-user budget, `sg_<shared quota group uuid>` for a shared quota group, and `tr_<16-byte SHA-256 hex of key id>` for per-key inbound trace ingestion rate limits. Cost keys are tagged by the owner UUID so key rotation preserves accrued spend and group members share one balance.
 
-The gateway runs its Lua scripts by SHA-1 digest and sends a script's source only
-to a Valkey that answers it holds none, which happens once after a restart, a
-failover or `SCRIPT FLUSH`, and is cached from then on. Flushing the script cache
-is therefore safe; it costs one slower call per script.
+Gateways invoke Lua scripts by SHA-1 digest and upload script source only when Valkey reports a cache miss after a restart, failover, or `SCRIPT FLUSH`. Flushing the script cache is therefore safe and adds only one reload round-trip per script.
 
 ### Request metadata stream loss
 
-If the request metadata stream is lost before the persistence consumer reads it,
-for example after a Valkey failure without persistence, usage reports cannot
-recover those events. Record the loss as an explicit gap so reports and the
-`olp_request_metadata_consumer_healthy` signal stop treating it as pending work.
-Run `scripts/record-request-metadata-stream-loss.sh` with an incident
-identifier, the number of lost events, `exact` or `lower-bound` for how sure
-that count is, and the first and last affected times as whole-second UTC
-timestamps. The script needs `OLP_DATABASE_URL` and
-`OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap`. It writes one
-content-free gap row and an audit row, and running it again with the same
-incident identifier records nothing new.
+If the request metadata stream is lost before persistence consumes it, such as after a Valkey failure without persistence, usage reports cannot recover those events. Record the loss as an explicit gap so reports and `olp_request_metadata_consumer_healthy` stop treating the missing entries as pending work. Run `scripts/record-request-metadata-stream-loss.sh` with an incident identifier, the lost event count, `exact` or `lower-bound` for count certainty, and whole-second UTC start and end timestamps. The script requires `OLP_DATABASE_URL` and `OLP_CONFIRM_REQUEST_METADATA_STREAM_LOSS=record-explicit-gap`. It inserts one content-free gap row and an audit entry, and rerunning it with the same incident identifier is idempotent.
 
 ## Routine checks
 
-1. Confirm readiness, release convergence and independently fresh key authority.
-2. Check PostgreSQL replication/WAL/disk/backup age and Valkey latency/memory/AOF.
-3. Review completeness/pricing before cost exports; missing usage is not zero.
-4. Review bounded `/api/v1/audit` pages for auth/role/key/credential/publication
-   changes. Direct-peer/coarse-UA metadata is not trusted forwarded identity.
-5. Revoke/rotate keys when offboarding: disabling a user does not revoke API keys.
-6. Compare spool used/capacity metrics and readiness. The chart budgets 1 GiB in a
-   2 GiB volume, separate from the 64 MiB general `/tmp` mount.
-7. Watch independent management/inference admission pools (default 32/256).
+1. Confirm readiness, runtime generation convergence (`GET /api/v1/runtime-generations`), and independently fresh key authority.
+2. Check PostgreSQL replication lag, WAL growth, disk usage, and backup age alongside Valkey latency, memory, and AOF health.
+3. Review completeness, unresolved gateway epochs (`GET /api/v1/request-metadata/gateway-epochs?state=unresolved`), and pricing coverage before exporting cost totals because missing usage is never zero.
+4. Review bounded `/api/v1/audit` pages for authentication, role, key, credential, and publication changes, keeping in mind that direct-peer and coarse user-agent metadata are not trusted forwarded client identity.
+5. Revoke or rotate API keys during offboarding because disabling a user account does not revoke issued API keys.
+6. Compare media spool used and capacity metrics against readiness. The Helm chart budgets a 1 GiB spool inside a 2 GiB volume, separate from the 64 MiB memory-backed `/tmp` mount.
+7. Monitor independent management and inference admission pools (defaults 32 and 256) and admission queue metrics when queueing is enabled.
 
-Separate upstream/probe failures from local admission or rollout regressions.
-Never include bodies/raw headers/credentials/session/master secrets in tickets.
+Separate upstream or probe failures from local admission or rollout regressions. Never attach request bodies, raw headers, credentials, session cookies, or master secrets to incident tickets.
 
 ### OpenAI-compatible capability certification
 
-[Review, certify and activate](../use/provider-routing.md#provider-lifecycle) exact model/
-operation tuples. Re-certify transport/semantic changes and validate rotation;
-capability claims alone never qualify a provider.
+[Review, certify, and activate](../use/provider-routing.md#provider-lifecycle) exact model and operation tuples. Re-certify after transport or semantic changes and validate credential rotation because capability claims alone never qualify a provider.
 
 ## Backup and restore
 
 ### Create a backup
 
-1. Stop new inference admission and control writes, leave workers running,
-   and wait for admitted work, pending acknowledgements, and Stream lag to
-   drain. Keep traffic fenced until the backup finishes.
-2. On an encrypted volume with PostgreSQL 18 client, `jq`, and GNU `sha256sum`,
-   run `scripts/backup.sh` with `OLP_DATABASE_URL` and
-   `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
+1. Stop new inference admission and control writes, keep workers running, and wait for admitted work, pending acknowledgements, and stream lag to drain completely. Keep traffic fenced until the backup completes.
+2. On an encrypted volume with the PostgreSQL 18 client, `jq`, and GNU `sha256sum`, run `scripts/backup.sh` with `OLP_DATABASE_URL` and `OLP_BACKUP_TRAFFIC_QUIESCED=true`.
 
-The script requires a zero, at-most-30-second-old durable checkpoint. The
-quiescence flag is an operator assertion, not a server admission fence: verify
-the load balancer/ingress configuration and all replicas. A fresh zero backlog
-alone does not prove quiescence.
+The script requires a zero-backlog durable checkpoint no older than 30 seconds. `OLP_BACKUP_TRAFFIC_QUIESCED=true` is an operator assertion rather than a server admission fence, so verify load balancers, ingress rules, and all replicas independently because a fresh zero backlog alone does not prove quiescence.
 
-The script exports one PostgreSQL snapshot of the `olp` schema. Its manifest
-records format/schema markers `olp`, dump checksum, installation identity,
-migration count and versions/checksums, runtime generation, and the script
-checkout's application version. Set `OLP_BACKUP_APP_VERSION` and
-`OLP_BACKUP_IMAGE_DIGEST` for the producing deployment when it differs from that
-checkout. Export has bounded database waits and a dump timeout
-(`OLP_BACKUP_TIMEOUT_SECONDS`, default 600). Dump and manifest publish together
-by atomic directory rename; hidden partial directories are incomplete.
+The backup exports one PostgreSQL snapshot of schema `olp`. Its manifest records format and schema markers (`olp`), the dump SHA-256 checksum, installation identity, migration count, migration versions and checksums, runtime generation, and the checkout's application version. Set `OLP_BACKUP_APP_VERSION` and `OLP_BACKUP_IMAGE_DIGEST` when the producing deployment differs from the script checkout. Export applies bounded database waits and a dump timeout (`OLP_BACKUP_TIMEOUT_SECONDS`, default 600). Dump and manifest publish together via atomic directory rename, and hidden partial directories indicate incomplete backups.
 
-The dump contains password hashes, session/API-key digests and encrypted
-provider/OIDC credentials. Store it with authenticated encryption, independent
-off-site retention and audited access. Back up master-key rings and
-authentication HMAC files separately through a secret manager and tested key
-holders; retain historical key versions while records or backups need them.
-Checksums detect corruption, not malicious replacement of both dump and
-manifest. Rehearse restoration from the actual off-site store.
+The dump holds password hashes, session and API-key digests, and encrypted provider and OIDC credentials. Store it with authenticated encryption, independent off-site retention, and audited access. Back up master-key rings and authentication HMAC files separately in a secret manager with tested key custodians, retaining older master-key versions as long as records or backups need them. Checksums detect corruption rather than coordinated tampering of both dump and manifest. Rehearse restores directly from the off-site store.
 
 ### Restore a replacement
 
-Run `scripts/restore.sh BACKUP` using the dump path printed by the backup
-script, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database.
-Put the database name in the URL path, such as `postgresql://host/replacement`.
-A `dbname` query option is rejected before database access because it would
-override the staging database path. Other connection options remain supported.
-Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate
-empty Valkey service, and mount the original master and auth key files. Set
-`OLP_MAINTENANCE_BIN` to the qualified binary when using a nondefault path.
+Run `scripts/restore.sh BACKUP` using the dump path printed by `scripts/backup.sh`, with `OLP_RESTORE_DATABASE_URL` identifying an empty isolated database. The script requires PostgreSQL 18 client utilities (`psql`, `createdb`, `dropdb`, `pg_restore`, and `pg_dump`), `jq`, `sha256sum`, `python3`, and `openssl`. Put the database name in the URL path, such as `postgresql://host/replacement`. A `dbname` query parameter is rejected before database access because it would override the disposable staging database path, while other connection options remain supported. Set `OLP_RESTORE_VALKEY_ISOLATED=true`, point `OLP_VALKEY_URL` at a separate empty Valkey service, and mount the original master-key and authentication HMAC files. `scripts/restore.sh` defaults `OLP_MAINTENANCE_BIN` to `$repo_dir/.local/bin/olp`, so set `OLP_MAINTENANCE_BIN` to the qualified binary path whenever the binary lives elsewhere.
 
-Use the migration owner for the restore connection. It needs `CREATE` on the
-replacement database and `CREATEDB` for the disposable staging database. The
-migration owner will own the restored objects. The command
-restores to staging, verifies the manifest/checksum/history/identity and
-included migration hashes against local files, applies the binary's migrations,
-and authenticates every encrypted record with `olp doctor`. Only then does one
-transaction recheck and populate the empty destination. Failure removes
-staging and leaves the destination unchanged.
+Use the migration owner for the restore connection. It requires `CREATE` on the replacement database and `CREATEDB` for the temporary staging database, and it owns the restored objects. The script restores into staging, verifies the manifest, checksum, migration history, installation identity, and local migration file hashes, runs the binary's migrations, and authenticates every encrypted record with `olp doctor`. Only after all checks succeed does one transaction recheck and populate the empty destination. Any failure drops staging and leaves the destination untouched.
 
-If you use a separate runtime login, keep the replacement stopped after restore.
-The restore omits grants, and verification as the owner in staging does not
-check the runtime login. Ensure the restricted login exists on the destination
-server and can connect to the replacement database. Set the shell variable
-`runtime_role` to its name, for example `olp_runtime`. Using the same
-migration-owner URL for the replacement (not the source or staging), reapply the
-[runtime grants](deployment.md#database-roles):
+If you use a separate runtime login, keep the replacement stopped after restore because `pg_restore --no-privileges` omits grants and verification as the owner in staging does not test the runtime login. Ensure the restricted login exists on the destination server and can connect to the replacement database. Set the shell variable `runtime_role` to its name, for example `olp_runtime`. Using the same migration-owner URL for the replacement rather than the source or staging database, reapply the [runtime grants](deployment.md#database-roles).
 
 ```sh
 OLP_DATABASE_URL="${OLP_RESTORE_DATABASE_URL:?}" OLP_DATABASE_URL_FILE= \
   "${OLP_MAINTENANCE_BIN:-olp}" migrate --runtime-role "${runtime_role:?}"
 ```
 
-This grants schema usage, data access and read-only migration history. Do not
-grant ownership, CREATE privileges or migration-owner membership to the runtime
-login. Once the grant command succeeds, configure all application processes
-to use the runtime login's connection to the replacement database.
+This grants schema usage, table and sequence access, and read-only migration history. Never grant ownership, `CREATE` privileges, or migration-owner membership to the runtime login. Once the grant command succeeds, configure all application processes to use the runtime login's connection to the replacement database.
 
-Start the replacement with its original keys and isolated Valkey service.
-Check readiness before reopening traffic.
-Recovery preserves the installation UUID, namespace and historical references;
-never let a rehearsal consume the source's streams or leases. An independently
-writable database clone is unsupported. For independent use, create a fresh
-installation and recreate nonsecret configuration through
-[configuration promotion](configuration.md#configuration-promotion-artifacts).
+Start the replacement with its original keys and isolated Valkey service, then check readiness before reopening traffic. Recovery preserves the installation UUID, Valkey namespace, and historical references, so never allow a rehearsal to share streams or leases with the source installation. An independently writable database clone is unsupported. For an independent environment, provision a fresh installation and apply nonsecret state via [configuration promotion](configuration.md#configuration-promotion-artifacts).
 
 ### Recovery qualification
 
-For PostgreSQL point-in-time recovery, use the managed service's tested PITR
-procedure or
-[continuous WAL archiving](https://www.postgresql.org/docs/18/continuous-archiving.html)
-with base backups, a restore target and verified WAL continuity. Record the
-service's measured RPO/RTO; neither this repository nor a logical dump promises
-one. Fence traffic first, restore to an isolated replacement, preserve the
-installation identity/keyring, and use isolated Valkey. Reconcile external
-provider/media outcomes and database/queue time skew before reopening budgeted
-traffic; see [queue durability](#queue-durability).
+For PostgreSQL point-in-time recovery, follow the managed service's tested PITR procedure or [continuous WAL archiving](https://www.postgresql.org/docs/18/continuous-archiving.html) with base backups, a restore target, and verified WAL continuity. Record the service's measured RPO and RTO because neither this repository nor a logical dump promises one. Fence traffic first, restore into an isolated replacement, preserve the installation identity and keyring, and attach an isolated Valkey service. Reconcile external provider and media outcomes and database or queue time skew before reopening budgeted traffic. See [queue durability](#queue-durability).
 
-Former process suites performed a logical restore, authenticated,
-decrypted a retained provider credential by making a request, and verified
-that historical accounting was preserved and new accounting added. Those
-suites were subtracted, and they never simulated storage power loss or
-certified a managed service PITR implementation. Rehearse restores against
-an isolated replacement before relying on them.
+Former process suites performed a logical restore, authenticated, decrypted a retained provider credential by making a request, and verified that historical accounting remained intact while new accounting appended. Those suites were removed, and they never simulated storage power loss or certified a managed PITR implementation. Rehearse restores against an isolated replacement before relying on them.
 
 ## Master-key rotation and recovery
 
-1. Retain every key version still in use, add a higher version, and select it as
-   `active_version` in the private ring file. Take a
-   [drained database backup](#backup-and-restore) and retain its
-   required key material separately.
-2. Stop management writers for a controlled maintenance window, mount the new
-   ring, and run `olp master-key reencrypt` using the same database and auth key.
-3. Rerun the command after an interruption. It commits batches of 100 records;
-   authenticated old records remain readable with the retained keys. A stale
-   process cannot write ciphertext using the retired active version. Keep the
-   same key material for each version: every run authenticates existing
-   destination-version records before committing any batches.
-4. Run `olp master-key status` and `olp doctor`. They authenticate stored
-   ciphertext and emit only installation/version/count metadata. Remove an old
-   key only after `olp master-key verify-retirement VERSION` succeeds and backup
-   retention permits removal. `olp master-key reencrypt --dry-run` authenticates
-   records without changing them.
-5. Restart all processes that decrypt credentials with the new ring. Existing
-   sessions and API credentials retain their HMAC identity; encrypted replays retain
-   their original response. Rotation records a metadata-only audit event.
+1. Keep every master-key version still in use, add a higher version number, and set it as `active_version` in the private ring file. Take a [drained database backup](#backup-and-restore) and store its required key material separately.
+2. Stop management writers for a controlled maintenance window, mount the updated ring, and run `olp master-key reencrypt` with the same database and authentication HMAC key.
+3. Rerun `olp master-key reencrypt` if interrupted. It commits batches of 100 records while older authenticated records stay readable through retained keys, and stale processes cannot write ciphertext under a retired active version. Keep each version's key material unchanged because every run authenticates existing destination-version records before committing batches.
+4. Run `olp master-key status` and `olp doctor` to authenticate stored ciphertext and emit only installation, version, and count metadata. Remove an older key only after `olp master-key verify-retirement VERSION` succeeds and backup retention allows retirement. Run `olp master-key reencrypt --dry-run` to verify records without modifying them.
+5. Restart every process that decrypts credentials with the updated ring. Existing sessions and API keys preserve their HMAC identity, encrypted replays return their original responses, and rotation logs a metadata-only audit event.
 
 ## Installation and versions
 
-Each installation starts from an empty PostgreSQL database and uses its own
-Valkey namespace. During 0.x, OLP makes no compatibility, upgrade,
-mixed-version or rollback promises: any release may change the management API,
-configuration and storage, and a release may require a fresh installation.
+Each installation begins from an empty PostgreSQL database and uses its own Valkey namespace. During 0.x, OLP makes no compatibility, upgrade, mixed-version, or rollback guarantees because any release may alter the management API, configuration, or storage schema and may require a fresh installation.
 
-Run one version across every process mode. To run a new release against an
-existing database, take a [drained backup](#backup-and-restore), stop every
-process, run `olp migrate` once with the new binary, and start all process
-modes on that version. With Helm, scale the gateway, control and worker
-Deployments to zero before [upgrading the release](deployment.md#upgrade-an-existing-release).
-Helm's pre-upgrade hook runs the migration Job before the new pods start.
-Verify readiness, generation convergence, backlog, usage completeness,
-provider probes, and latency before resuming admission. There is no rollback:
-a binary refuses a database whose schema is newer than its own, and migrations
-never run in reverse. Never edit
-migration history or checksums. The runner checks the recorded checksums,
-rejects gaps and refuses a database created before the `0001_schema.sql`
-baseline, which needs a fresh installation. Failed migrations roll back
-in the same transaction as their history updates.
+Run the same version across every process mode. To upgrade an existing database to a newer release, take a [drained backup](#backup-and-restore), stop every process, run `olp migrate` once with the new binary, and start all process modes on that version. With Helm, scale the gateway, control, and worker Deployments to zero before [upgrading the release](deployment.md#upgrade-an-existing-release) so the pre-upgrade hook runs the migration Job before new pods start. Verify readiness, generation convergence, backlog drain, usage completeness, provider probes, and latency before resuming traffic. Rollback is unsupported because binaries refuse newer schemas and migrations never run in reverse. Never edit migration history or checksums. The migration runner validates recorded checksums, rejects gaps, and refuses databases created before the `0001_schema.sql` baseline, which require a fresh installation. Failed migrations roll back atomically alongside their history rows.
 
 ## Database deadlines and privileges
 
-Pool connections set a ten-second statement deadline, ten-second lock wait
-and fifteen-second idle-transaction deadline. Commands additionally obey the
-startup/dependency deadlines in the configuration reference. Backup should use a
-dedicated read role with access to migration history and all backed-up tables
-rather than sharing the runtime login. Large maintenance/export operations
-should use their own role and explicitly chosen deadlines, not an unlimited
-interactive account. PostgreSQL classifies statement cancellation as `57014` and
-lock expiry as `55P03`; a timeout does not imply a committed mutation.
+Pool connections enforce a 10-second statement timeout, a 10-second lock wait timeout, and a 15-second idle-in-transaction timeout, while commands also obey the startup and dependency timeouts from the configuration reference. Backups should use a dedicated read role with access to migration history and backed-up tables rather than reusing the runtime login. Large maintenance or export tasks should run under their own role with explicit deadlines rather than an unlimited interactive account. PostgreSQL reports statement cancellations as `57014` and lock timeouts as `55P03`, and a timeout never proves whether a mutation committed.
 
-Provision separate migration-owner and runtime logins, and reapply runtime
-grants after migrations, following [database roles](deployment.md#database-roles).
+Provision separate migration-owner and runtime logins and reapply runtime grants after migrations as described in [database roles](deployment.md#database-roles).
 
 ## Metric aggregation and incidents
 
-Database-derived request counts, provider samples, worker counters and metadata
-summaries are shared installation state exported by several replicas. Choose one
-current exporter or use `max` across replicas of the **same installation**; do
-not sum duplicated global values. Add a stable installation label at scrape time
-if Prometheus monitors more than one installation. Rolling five/fifteen minute
-values are gauges, not monotonic request counters. Never sum or average
-precomputed p95/p99 values into a fleet percentile. Provider quantitative series
-use stable provider IDs; names/status remain on the descriptive health series.
-No sampled attempts means no success/latency series, not measured 100% success.
+Database-derived request counts, provider samples, worker counters, and metadata summaries represent shared installation state exported by every replica. Pick one current exporter or aggregate with `max` across replicas of the **same installation**, never summing duplicated global gauges or counters. Attach a stable installation label at scrape time when Prometheus monitors multiple installations. Rolling five-minute and fifteen-minute series are gauges rather than monotonic request counters. Never sum or average precomputed p95 or p99 quantiles into a fleet percentile. Quantitative provider series key on stable provider IDs while names and health status live on `olp_provider_health`. Zero sampled attempts emit no success or latency series rather than claiming 100 percent success.
 
-`olp_provider_metrics_complete=0` means collection failed or exceeded its
-10,000-provider cap. Check `olp_provider_metrics_emitted` and
-`olp_observability_metrics_snapshot_fresh`; a refresh exceeding four seconds
-retains the last successful snapshot and exposes its age. Do not interpret stale
-data as current health. Investigate database latency before increasing
-cardinality. Process-local admission, trace-drop and Go runtime counters (the
-standard Prometheus Go collector's `go_*` series, including
-`go_memstats_mallocs_total` and `go_memstats_alloc_bytes_total`) may be summed
-across replicas; retain each counter's reset semantics when using `rate`.
+`olp_provider_metrics_complete=0` signals a query failure or truncation past the 10,000-provider cap. Inspect `olp_provider_metrics_emitted` and `olp_observability_metrics_snapshot_fresh`. When a refresh takes longer than four seconds, OLP retains the previous snapshot and exports its age, so never read stale snapshots as live health. Investigate database latency before raising cardinality. Process-local admission, queue, shadow, trace-drop, business, and Go runtime counters (the standard Prometheus Go collector `go_*` series, including `go_memstats_mallocs_total` and `go_memstats_alloc_bytes_total`) may be summed across replicas while honoring counter reset semantics in `rate`.
 
-Compare `olp_runtime_desired_generation` with `olp_runtime_generation` on each
-gateway. A gap identifies a pending/rejected observed generation. Check
-`olp_api_key_authority_age_seconds` separately: provider activation failure must
-not hide successful authority refresh. At 60 seconds, new key-authenticated
-requests are refused. Restore database reachability and confirm that authority
-age falls and the desired generation converges before returning traffic.
+Compare `olp_runtime_desired_generation` against `olp_runtime_generation` on every gateway to spot pending or rejected generations. Monitor `olp_api_key_authority_age_seconds` independently so a provider activation failure never masks fresh key authority. At 60 seconds, new key-authenticated requests fail closed. Restore database reachability and confirm that authority age drops and the desired generation converges before restoring traffic.
 
-For metadata/worker alerts, first check database and Valkey reachability,
-consumer heartbeat and pending/lag counts. Preserve the queue; restart the
-failed worker, allow the 30-second reclaim plus five-second scan window, and
-confirm progress and cost attribution. For provider alerts, distinguish zero
-samples, failed probes, provider rate limits and circuit failures. Group
-notifications by installation and incident cause, inhibit secondary backlog
-alerts during a confirmed dependency outage, and test routing/recovery in the
-operator's Alertmanager configuration. Repository tests cannot prove that a
-production notification reached an on-call responder.
+For metadata or worker alerts, inspect database and Valkey reachability, consumer heartbeat age, and pending or lag counts first. Preserve the queue, restart any failed worker, wait through the 30-second reclaim and five-second scan window, and verify progress and cost attribution. For provider alerts, distinguish zero samples, failed probes, provider rate limits, and open circuits. Group Alertmanager notifications by installation and incident cause, inhibit secondary backlog alerts during a confirmed dependency outage, and test alert routing directly because repository tests cannot verify delivery to an on-call responder.
 
-Success SLIs must identify their denominator. `olp_request_success_ratio_5m`
-counts persisted user requests with no terminal error and a 2xx/3xx status;
-provider success ratios count attempts. A retried request can have a successful
-request and a failed attempt. First byte is a latency milestone, not successful
-completion. A stream failing after headers is a terminal failure; client
-cancellations must be reported separately, with an explicit inclusion/exclusion
-policy. Refusals and missing usage need distinct product/accounting indicators.
-Cost totals are estimates from recorded priced usage; always read their
-unpriced, incomplete, pending and loss coverage alongside the total.
+Success SLIs must state their denominator explicitly. `olp_request_success_ratio_5m` measures persisted user requests having no terminal error and a 2xx or 3xx status, whereas provider success ratios measure individual attempts so a retried request can produce both a failed attempt and a successful request. First byte marks a latency milestone rather than completion. A stream failing after headers counts as a terminal failure, and client cancellations should be tracked separately with a clear inclusion policy. Local refusals and missing usage need distinct operational indicators. Cost totals are estimates derived from recorded priced usage and must always be read alongside unpriced, incomplete, pending, and loss indicators.
 
-Budget-zone changes are scheduled, not immediate resets. See
-[budget time zones](../use/access.md#budget-time-zone) for the effective-boundary display,
-DST behavior and retained-cost precision. If a newly active period returns 503,
-check the existing cost-reconciliation worker before retrying; never seed an
-unknown balance with zero. The calendar tables are backed up with PostgreSQL and
-are required to interpret delayed and retained usage correctly.
+Budget time-zone changes take effect at future period boundaries rather than resetting active spend immediately. See [budget time zones](../use/access.md#budget-time-zone) for boundary display, DST handling, and retained-cost precision. If a newly active period returns HTTP 503, inspect the `cost_reconciliation` worker before retrying and never seed an unknown balance with zero. Keep the budget calendar tables in PostgreSQL backups because delayed and retained usage depend on them.
 
 ### Local MFA recovery
 
-Before enforcing local MFA, enroll at least one working factor and store the
-one-use recovery codes separately. Security keys need the configured HTTPS DNS
-public origin (localhost is the development exception). Keep the relying-party
-hostname stable during a deployment migration; use TOTP or a recovery code if a
-key cannot operate at the current origin. A recovered factor still requires the
-account password for a new local session.
+Before enforcing local MFA, enroll at least one working factor and store one-use recovery codes outside the browser. Security keys require the configured HTTPS DNS public origin (localhost is the development exception). Keep the relying-party hostname stable across deployment migrations, using TOTP or a recovery code if a key cannot operate on the current origin. Recovering a factor still requires the account password for a new local session.
 
-An ordinary offline password reset keeps MFA enabled. Only use
-`olp account reset-password EMAIL PASSWORD_FILE --reset-mfa [flags]` for an
-explicit operator-approved factor reset: it invalidates factors, codes and
-sessions, records `user.mfa_recover`, and preserves the required-MFA policy.
-The next password sign-in bootstraps a new factor when policy requires it.
-See [local MFA and account recovery](../use/access.md#local-multi-factor-authentication)
-for the proof protocol, storage inventory and recovery-file permissions.
+A standard offline password reset leaves MFA enabled. Run `olp account reset-password EMAIL PASSWORD_FILE --reset-mfa [flags]` only for an operator-approved factor reset. It invalidates enrolled factors, recovery codes, and active sessions, records `user.mfa_recover`, and keeps the required-MFA policy active so the next password sign-in prompts for fresh factor enrollment. See [local MFA and account recovery](../use/access.md#local-multi-factor-authentication) for proof protocol, storage details, and file permissions.
 
-SAML operators should register the console's stable public origin and current SP
-signing certificate with the IdP, preserve the sealed-key inventory during backup,
-and keep an independent owner recovery method. A signing-key rotation invalidates
-pending flows and requires distributing the new public certificate. Do not solve a
-callback failure by loosening session SameSite policy or allowing unsigned
-assertions. See [SAML console sign-in](../use/access.md#saml-console-sign-in) for supported
-bindings, expiry, promotion and recovery semantics.
+SAML operators should register the console's stable public origin and current SP signing certificate with the identity provider, preserve the sealed-key inventory in backups, and retain an independent owner recovery path. Rotating the signing key invalidates in-flight flows and requires updating the public certificate at the IdP. Never work around callback issues by weakening session `SameSite` settings or accepting unsigned assertions. See [SAML console sign-in](../use/access.md#saml-console-sign-in) for supported bindings, expiry, promotion, and recovery rules.
 
 ## Guardrail operations
 
-Guardrail activation publishes a complete immutable release. If activation fails,
-inspect the definition's timeout, project references, route fidelity and required
-plugin or credential availability. A failed release does not replace the active
-snapshot. `guardrails.stream_window_bytes` is changed through installation
-settings and publishes a new release.
+Activating guardrails publishes a complete immutable runtime release. If activation fails, check the definition's timeout, project references, route fidelity, and required plugin or credential availability. A failed release leaves the active snapshot unchanged. Changing `guardrails.stream_window_bytes` through installation settings publishes a new release immediately.
 
-Monitor `olp_guardrail_decisions_total` and `olp_guardrail_duration_seconds` by
-phase, action and outcome. `failed_open` means evaluation could not complete and
-the configured policy allowed continuation; `failed_closed` means continuation
-was refused. External circuit breakers are independent per definition revision.
-Do not enable provider or webhook body logging to diagnose guardrail failures.
-Use the content-free request/attempt evidence and explicit sandbox evaluations.
+Monitor `olp_guardrail_decisions_total` and `olp_guardrail_duration_seconds` by route, phase, action, and outcome. `failed_open` means evaluation could not finish and policy permitted continuation, while `failed_closed` means continuation was blocked. External circuit breakers track each definition revision independently. Never turn on provider or webhook body logging to debug guardrail failures, and instead use content-free request and attempt evidence alongside explicit sandbox evaluations.
 
-External adapters are tested against local contract fakes. Live-account vendor
-qualification and reference-hardware performance qualification must be recorded
-separately before declaring the guardrail release checklist complete.
+External adapters are exercised against local contract fakes. Record live-account vendor qualification and reference-hardware performance qualification separately before signing off a guardrail release checklist.
 
 ## Managed Gemini resources
 
-Use the `gemini-agents` profile at revision `1` with a Gemini API-key credential
-and a `/v1beta` endpoint. Certify `agent_resource/gemini/unary`, then publish a
-route for that capability. Inference keys must allow the route and provider
-state. Resource-control routes do not admit configured execution prices or
-rate cards; running an agent is outside this API.
+Configure the `gemini-agents` profile at revision `1` with a Gemini API-key credential and a `/v1beta` endpoint, certify `agent_resource/gemini/unary`, and publish a route for that capability. Inference keys must allow both the route and provider state. Resource-control routes refuse configured execution prices and rate cards, and running an agent stays outside this API.
 
-The provider-resources console supports create, list, inspect and delete using
-an inference key held in page memory. The management API's
-`GET /api/v1/provider-resource-contracts` exposes implemented capability metadata
-to the generated management SDK, CLI and MCP. The same console also exposes
-the declared fine-tuning, vector-store, conversation, container, eval, skill and
-context-cache methods, including typed nested parent identifiers.
+The provider-resources console handles create, list, inspect, and delete operations using an inference key kept in page memory. `GET /api/v1/provider-resource-contracts` publishes implemented capability metadata to the generated management SDK, CLI, and MCP tools. The same console exposes declared fine-tuning, vector-store, conversation, container, eval, skill, and context-cache operations including typed nested parent IDs.
 
-Creates require `X-OLP-Route` and a stable `Idempotency-Key`. A successful or
-ambiguous create returns `X-OLP-Resource-ID`. Recovery compares the original
-caller request before selecting a target, so republishing the route or losing
-capacity does not lose the recovery ID. Equivalent JSON whitespace and object
-key order do not change the identity; changed request content returns an
-idempotency conflict. Retrying a submitted identity returns 409 and cannot
-dispatch another create. Inspect that local ID instead;
-do not change the submission key to retry an ambiguous request. A
-`submission_unknown` resource requires provider-side investigation. It cannot
-be safely adopted by guessing a provider ID, automatically redispatched or
-cleared by a retention timer. A crash before dispatch likewise retains its fence.
+Creates require `X-OLP-Route` and a stable `Idempotency-Key`, returning `X-OLP-Resource-ID` for both successful and ambiguous creates. Recovery compares the original caller payload before selecting a target, so republishing the route or losing capacity never loses the recovery ID. Equivalent JSON whitespace and key ordering preserve identity, while changed request content produces an idempotency conflict. Retrying an already submitted identity returns HTTP 409 without dispatching a second create. Inspect the local resource ID instead of changing the idempotency key to retry an ambiguous submission. A `submission_unknown` resource needs provider-side inspection and cannot be adopted by guessing an upstream ID, redispatched automatically, or cleared by retention. A crash prior to dispatch retains its fence as well.
 
-Listing returns only resources created by the inference key, with local
-pagination tokens. Provider-deleted agents are tombstoned and skipped without
-blocking later pages. Reads and deletes enforce the original route's admission
-limits and use the resource's original provider,
-target and credential version. Revoked or missing credentials yield
-`provider_resource_credential_unavailable`; replacements never inherit access.
-Foreign IDs return 404. Provider errors are sanitized. Native environment
-references and unbound nested IDs are refused. No agent definitions, prompts,
-tool content or provider results are stored in resource metadata.
+Listing returns only resources created by the calling inference key using local pagination tokens, tombstoning and skipping provider-deleted agents without blocking later pages. Reads and deletes enforce the original route's admission limits against the resource's original provider, target, and credential version. Revoked or missing credentials return `provider_resource_credential_unavailable` and replacement credentials never inherit access. Foreign IDs return HTTP 404, provider errors are sanitized, and native environment references or unbound nested IDs are refused. Resource metadata stores no agent definitions, prompts, tool content, or provider results.
 
-Before release, run the service-backed retained-agent ownership, route-limit,
-replay-recovery and deletion scenarios and live qualification against the pinned Gemini
-contract. The local implementation checks do not establish those results.
+Before release, run service-backed retained-agent ownership, route-limit, replay-recovery, and deletion scenarios alongside live qualification against the pinned Gemini contract because local implementation checks do not establish those results.
 
 ## Retained work and evidence
 
-Paid retained creation, uploads and expiry mutations commit their owner, immutable
-connection/credential/pricing pins, accounting templates and submission fence
-before dispatch. Unknown acceptance never authorizes another dispatch. Recovery
-can adopt only an authenticated provider result correlated with the original
-intent; an upstream ID alone grants no authority. Containers and Gemini caches
-have no qualified native create-correlation field, so unknown acceptance stays
-pending rather than being guessed. A durable intent proven never dispatched may
-close without inventing usage.
+Paid retained creations, uploads, and expiry mutations commit their owner, immutable connection, credential, and pricing pins, accounting templates, and submission fence prior to dispatch. Unknown acceptance never authorizes another dispatch. Recovery adopts only an authenticated provider result correlated to the original intent, and an upstream ID alone confers no authority. Containers and Gemini caches expose no qualified native create-correlation field, so unknown acceptance remains pending rather than being guessed. A durable intent proven never dispatched may close without inventing usage.
 
-Unbounded retained paid work requires an uncapped caller and uncapped applicable
-supply owners. Delayed training and eval work always refuse applicable TPM caps.
-A monetary hold cannot enforce a token rate. Storage-only liabilities block
-monetary admission; unresolved token-consuming work also blocks token admission,
-including owners added after acceptance. Zero-cost housekeeping remains available
-under late caps. Credential revocation, polling errors and missing usage preserve
-liability. Unsettled retained resources keep their original refreshable grant
-reference through deletion and expiry; explicit credential revocation still wins.
+Unbounded retained paid work requires an uncapped caller and uncapped applicable supply owners. Delayed training and eval jobs always refuse applicable TPM caps because a monetary hold cannot enforce a token rate. Storage-only liabilities block monetary admission, while unresolved token-consuming work blocks token admission as well, including owners added after acceptance. Zero-cost housekeeping stays permitted under late caps. Credential revocation, polling errors, and missing usage preserve liability. Unsettled retained resources keep their original refreshable grant reference through deletion and expiry, while explicit credential revocation still wins.
 
-The provider-resources inventory shows settlement state, pinned models, expiry
-and missing evidence. Use `POST /api/v1/provider-resources/{id}/reconcile` with
-configuration permission and project-change authority to schedule a poll. Its
-optional `upstream_id` is only a correlation-verification hint.
+The provider-resources inventory displays settlement state, pinned models, expiry, and missing evidence. Call `POST /api/v1/provider-resources/{id}/reconcile` with `configure` permission and project-change authority to schedule a poll, passing an optional `upstream_id` strictly as a correlation-verification hint.
 
-An installation settings administrator with project-change authority can submit
-`POST /api/v1/provider-resources/{id}/usage-evidence`. Supply `idempotency_key`,
-a lowercase SHA-256 `evidence_digest`, UTC `start`/`end`, applicable exact
-quantities and `terminal`. Choose an originally pinned `model` when more than
-one exists. Evaluation evidence includes explicit input, output, cached-input
-and invocation counts. Interval boundaries use microsecond precision; raw
-quantities remain exact. Ownership, price revisions and credentials come from
-the original acceptance, and provenance is recorded as `operator_verified`.
-Do not allocate an aggregate invoice to one resource or infer storage/session
-charges from snapshots or elapsed age.
+An installation settings administrator with project-change authority can submit `POST /api/v1/provider-resources/{id}/usage-evidence` with `idempotency_key`, a lowercase SHA-256 `evidence_digest`, UTC `start` and `end`, applicable exact quantities, and `terminal`. Choose an originally pinned `model` whenever multiple models exist. Evaluation evidence must provide explicit input, output, cached-input, and invocation counts. Interval boundaries use microsecond precision and raw quantities remain exact. Ownership, price revisions, and credentials come from the original acceptance and record `operator_verified` provenance. Never apportion an aggregate invoice onto a single resource or infer storage or session charges from snapshots or elapsed age.
 
-Automatic and operator evidence share one atomic coverage ledger. Exact duplicate
-coverage cannot charge twice, and overlapping or conflicting intervals return
-409. Omitted applicable quantities are unknown. Terminal evidence closes liability
-only after independent remote-termination verification and complete coverage of
-all billed models/components. A missing asynchronous job alone cannot prove
-that its execution stopped. Store deletion preserves underlying files; native
-history, training examples, cache contents and eval samples remain provider-side.
-Keep retained settlements, mutations, coverage, evidence and minimal tombstones
-in the normal whole-schema backup, independently of request-history retention.
+Automatic and operator evidence share one atomic coverage ledger. Exact duplicates never double-charge, overlapping or conflicting intervals return HTTP 409, and omitted applicable quantities remain unknown. Terminal evidence closes liability only after independent remote-termination verification and complete coverage across every billed model and component because a missing asynchronous job alone cannot prove execution stopped. Deleting a vector store preserves underlying files, and native history, training examples, cache contents, and eval samples remain on the provider side. Keep retained settlements, mutations, coverage, evidence, and minimal tombstones in whole-schema backups independently of request-history retention.
 
-Project-owned retrieval bindings are revisioned operator-managed references to
-Bedrock Knowledge Bases, Vertex RAG corpora or Azure AI Search indexes. Grant
-specific project API keys explicitly and configure backend field mappings.
-Bindings promote with configuration; queries enforce their current grant and
-certified route/target/credential. Index creation and synchronization are outside
-this API. Unsupported filters or ranking controls refuse before dispatch.
+Project-owned [cloud retrieval bindings](../use/retrieval.md) are revisioned operator-managed references to Bedrock Knowledge Bases, Vertex RAG corpora, or Azure AI Search indexes. Grant specific project API keys explicitly and configure backend field mappings. Bindings promote with configuration, and queries enforce their current grant alongside the certified route, target, and credential. Index creation and synchronization remain outside this API, and unsupported filters or ranking options fail before dispatch.
 
-OpenAI availability limits remain provider qualification concerns. The
-[announced deprecations](https://developers.openai.com/api/docs/deprecations)
-restrict new fine-tuning customers from May 7, 2026, further restrict inactive
-customers from July 2, 2026, and end new jobs for active customers on January 6,
-2027. Evals become read-only on October 31, 2026 and its API shuts down November
-30, 2026. The frozen endpoint scope remains implemented without calendar-based
-gateway switches. The locked OpenAI SDK has removed Evals methods; frozen REST
-fixtures support local qualification. Service, SDK-service, browser and live
-qualification remain separate release gates.
+OpenAI availability limits remain provider qualification concerns. The [announced deprecations](https://developers.openai.com/api/docs/deprecations) restrict new fine-tuning customers from May 7, 2026, further restrict inactive customers from July 2, 2026, and end new jobs for active customers on January 6, 2027, while Evals become read-only on October 31, 2026 and shut down on November 30, 2026. The frozen endpoint scope remains implemented without calendar-based gateway switches. Because the locked OpenAI SDK removed Evals methods, frozen REST fixtures support local qualification, while service, SDK-service, browser, and live qualification stay separate release gates.
 
 ## Response cache
 
-Response caching is opt-in per route and uses `OLP_CACHE_VALKEY_URL` (or its
-`_FILE` form), a separate evicting Valkey deployment. The optional Compose cache
-profile uses a 256 MiB limit and no persistence; Valkey Search is required for
-semantic matching. A cache failure produces `bypass` and leaves coordination,
-admission and accounting on their original Valkey. Monitor
-`olp_cache_requests_total`, `olp_cache_bytes_stored_total` and
-`olp_cache_errors_total`. Route/project purges invalidate a namespace without
-scanning content. [Configuration, controls and accounting](../use/caching.md).
+Response caching is opt-in per route and uses `OLP_CACHE_VALKEY_URL` (or `OLP_CACHE_VALKEY_URL_FILE`), pointing to a separate evicting Valkey deployment. The optional Compose cache profile sets a 256 MiB memory cap with persistence disabled, and Valkey Search is required for semantic matching. Cache failures return `bypass` and keep coordination, admission, and accounting unaffected on the primary Valkey. Monitor `olp_cache_requests_total`, `olp_cache_bytes_stored_total`, and `olp_cache_errors_total`. Route and project purges invalidate namespaces without scanning stored entries. See [response caching](../use/caching.md) for configuration, controls, and accounting.
 
 ## Batch settlement recovery
 
-The `batch_settlement` worker claims due work on its 5-second pass. Normal
-transitions move from `submitting` to `active`, then `settling`, then `settled`.
-Ambiguous creates
-remain `submission_unknown` until provider-specific reconciliation proves one
-job. Conflicting evidence closes as `conflict`; missing or incomplete result
-evidence closes as `uncertain`, never as zero cost. Monitor its health task,
-pending count, oldest age and checkpoint freshness.
+The `batch_settlement` worker claims due work on its 5-second pass. Normal transitions progress from `submitting` to `active`, then `settling`, and finally `settled`. Ambiguous creates remain `submission_unknown` until provider-specific reconciliation proves a single job. Conflicting evidence closes as `conflict`, while missing or incomplete result evidence closes as `uncertain` rather than zero cost. Monitor the `batch_settlement` health task, pending count, oldest age, and checkpoint freshness.
 
-- For `submission_unknown`, inspect the stored submission cursor and the
-  provider control plane. Vertex matches the preallocated submission label;
-  Bedrock reissues the original body with the same client request token. Do not
-  submit a second job manually.
-- For `conflict`, preserve the metadata and compare the provider identifier and
-  reconciliation evidence. Escalate rather than attaching a guessed job.
-- Unmapped `conflict` and `uncertain` submission intents retain duplicate-submit
-  protection until their normal retention cutoff; they remain visible in the
-  resource inventory.
-- Vertex checkpoints include completed-shard bytes so the result limit applies
-  across shards and restarts. A legacy checkpoint without this proof enters
-  `conflict`; review it rather than guessing the remaining allowance.
-- For `uncertain`, inspect `last_error_class`, result gaps and configured
-  storage scope. Restore read access or provider output evidence and use the
-  reviewed recovery process; never rewrite a missing result as zero usage.
-- Retain batch settlement rows and result facts under the configured usage
-  retention. Do not delete individual rows to unblock a worker.
+For `submission_unknown`, inspect the stored submission cursor and the provider control plane instead of submitting a second job manually. Vertex matches the preallocated submission label, and Bedrock reissues the original request body with the same client request token. For `conflict`, preserve all metadata, compare the provider identifier against reconciliation evidence, and escalate instead of attaching a guessed job. Unmapped `conflict` and `uncertain` submission intents retain duplicate-submit protection through their normal retention cutoff and stay visible in the resource inventory.
 
-Allow provider egress to the Gemini upload host `generativelanguage.googleapis.com`,
-`{location}-aiplatform.googleapis.com`, `storage.googleapis.com`,
-`bedrock.{region}.amazonaws.com` and
-`{bucket}.s3.{region}.amazonaws.com` (or `s3.{region}.amazonaws.com` for dotted
-bucket names). Keep configured storage objects available
-to the reader identity until settlement closes.
+Vertex checkpoints record completed-shard bytes so the result limit holds across shards and worker restarts. A legacy checkpoint lacking that proof transitions to `conflict` for operator review rather than guessing remaining allowance. For `uncertain`, inspect `last_error_class`, result gaps, and configured storage scope, restore read access or output evidence, and run reviewed recovery without rewriting missing results as zero usage. Retain batch settlement rows and result facts under `retention.usage_days` and never delete individual rows to unblock a worker.
+
+Allow provider egress to the Gemini upload host `generativelanguage.googleapis.com`, `{location}-aiplatform.googleapis.com`, `storage.googleapis.com`, `bedrock.{region}.amazonaws.com`, and `{bucket}.s3.{region}.amazonaws.com` (or `s3.{region}.amazonaws.com` for dotted bucket names). Keep configured storage objects readable by the configured reader identity until settlement completes.

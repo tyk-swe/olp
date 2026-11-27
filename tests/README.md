@@ -8,9 +8,9 @@ tier that can catch the failure it guards against.
 | --- | --- | --- | --- |
 | `make test-unit-go` | Every Go test without a build tag | Go | 30s |
 | `make test-unit-console` | Vitest `unit` and `svelte` projects and `scripts/*.test.mjs` | pnpm workspace, Node.js, Python 3 | 30s |
-| `make test-integration` | `tests/integration` | Docker | 30s |
-| `make test-e2e-api` | `tests/e2e` | Docker and Node.js | 45s |
-| `make test-e2e-browser` | `console/tests/e2e` | Docker, Chromium, and Python 3 | 60s |
+| `make test-integration` | `tests/integration` | Docker, Go | 30s |
+| `make test-e2e-api` | `tests/e2e` | Docker, Go with a C compiler, Node.js, `jq` | 45s |
+| `make test-e2e-browser` | `console/tests/e2e` | Docker, Go with a C compiler, `pnpm` and Node.js, Chromium, Python 3, `jq`, `curl` | 60s |
 
 `make test-unit` runs both unit suites side by side, `make test-e2e` runs both
 end-to-end suites, and `make test` runs every tier with the cheapest first.
@@ -29,9 +29,13 @@ metadata, but they do not rewrite tracked files.
 
 A budget covers the time a suite spends running tests. For a Go suite that is
 the sum of the package times `go test` reports, and for Vitest and Playwright
-it is the wall time of the runner. Compiling, building the console and starting
-containers are printed next to it and are not enforced, because they follow
-the cache of the machine and say nothing about the tests.
+it is the wall time of the runner. Container startup, building the `olp` and
+fixture vendor binaries, and building the console all run before
+`scripts/lib/test.sh` records `began=$SECONDS`, so they stay outside both the
+enforced run budget and the printed wall time. For Go suites, the printed wall
+time covers `go test` package compilation plus execution and is not enforced,
+because compile times follow the cache of the machine and say nothing about the
+tests. For Vitest and Playwright, the printed wall time equals the runner time.
 
 Each suite ends with one line such as
 `integration: ran 8.5s of a 30s budget (10s wall with builds)` and fails when
@@ -57,15 +61,16 @@ versions, publication isolation, guardrail detection and previews, MCP
 registration and tool pricing, grant binding, gateway execution kernel and
 surfaces, staging spool behavior, promotion snapshot guards, telemetry metric
 exposition, provider egress policy, SCIM parsing, SAML verification, admission
-queuing, response caching, secret resolution against a scripted Vault, operator
-CLI setup, and harness startup failure cleanup.
+queuing, response caching including `internal/gateway/kernel/cache_test.go`,
+secret resolution against a scripted Vault, operator CLI setup, and harness
+startup failure cleanup.
 
 The console unit suite separates pure logic tests (`*.test.ts` in the Node
 `unit` project) from reactive Svelte component tests (`*.svelte.test.ts` in the
 jsdom `svelte` project), backed by shared helpers in `console/tests/unit/support/`
 (imported via `#test/*`). The script unit tests cover documentation checks,
 release version parity, `dev.sh` port wiring, management operation generation,
-configuration promotion review/comment helpers, `restore.sh` URL preflight
+configuration promotion review and comment helpers, `restore.sh` URL preflight
 checks, and `secrets.sh` provisioning.
 
 ## Integration tier
@@ -75,9 +80,9 @@ tag against disposable PostgreSQL and Valkey containers. Tests call project
 packages in process, so this is the tier for behavior that only a real
 database or a real Valkey can decide.
 
-The suite is organized by domain across `tests/integration/`: migrations
-concurrency and checksum history (`migrations_test.go`), provider drafts,
-revisions, external secrets and grant enrollments (`providers_test.go`,
+The suite is organized by domain across `tests/integration/`, covering
+migrations concurrency and checksum history (`migrations_test.go`), provider
+drafts, revisions, external secrets and grant enrollments (`providers_test.go`,
 `providers_grants_test.go`), retained provider resources across OpenAI,
 Anthropic, Gemini and vector stores (`resources_test.go`,
 `resources_openai_test.go`, `resources_anthropic_gemini_test.go`,
@@ -114,13 +119,13 @@ database and ports, and provider calls go to the scripted vendor in
 `tests/harness/vendor`. The suite covers port collision retries and split-mode
 listener boundaries (`harness_test.go`), restricted runtime role grants and
 Valkey-less epoch recovery (`runtime_role_test.go`), route publication to
-durable usage, bootstrap token waiting, origin/CSRF transport checks and
+durable usage, bootstrap token waiting, origin and CSRF transport checks and
 playground streaming (`journey_test.go`), management write idempotency, ETag
 preconditions and audit trails (`management_writes_test.go`), secured read and
 cross-project isolation sweeps with guardrail and configuration promotion
 journeys (`sweep_test.go`, `guardrail_journey_test.go`,
 `promotion_journey_test.go`), provider, billing, capture, code account, fixture,
-identity, key overlap/pause, and SCIM journeys.
+identity, key overlap and pause, and SCIM journeys.
 
 `make test-e2e-browser` builds the console, starts one `olp all` that serves
 it, and runs the Playwright journeys in `console/tests/e2e` in Chromium. The
@@ -134,9 +139,11 @@ and streamed playground requests, and build a keyword guardrail and try it.
 Journeys build their state through the console and never seed it through the
 API, so the screens a new operator meets first are the ones under test.
 
-Install the browser once with
-`pnpm --dir console exec playwright install chromium`. A failed journey leaves
-a trace under `console/test-results`, and CI uploads it.
+Install the browser once locally with
+`pnpm --dir console exec playwright install chromium`. CI installs the headless
+shell and its system dependencies with
+`pnpm --dir console exec playwright install --with-deps --only-shell chromium`.
+A failed journey leaves a trace under `console/test-results`, and CI uploads it.
 
 ## Qualification lanes
 
@@ -209,8 +216,8 @@ live-provider checks, backup and restore, race detection, and console rendering
 beyond the retained Vitest files and the browser journeys have no automated
 signal. Release image qualification still runs the image mode and service
 smokes and the vulnerability scan through `scripts/qualify-image.sh`. Broader
-suites that were removed for speed remain in git history before commit
-`99234cb0`.
+suites that were removed for speed remain in git history at commit `99234cb0`,
+before commit `dbce24318`.
 
 ## Focused runs
 
@@ -233,8 +240,8 @@ Authorization changes surface as diffs to
 `internal/access/testdata/authorization.golden.json`, which records the
 callers every management route admits, derived from the contract and the
 policy, and is maintained by hand. Review such a diff as a security change.
-Secret-purpose changes surface in the generated tables in the security
-architecture documentation. Regenerate those tables deliberately with
+Secret-purpose changes surface in the generated table in the security
+architecture documentation. Regenerate that table deliberately with
 `go test ./internal/platform/secrets -run TestPurposeDocumentation -update` after
 reviewing the purpose change.
 
@@ -242,9 +249,10 @@ reviewing the purpose change.
 
 The language-neutral corpus under `tests/fixtures` (embedded via
 `tests/fixtures/fixtures.go` and `tests/fixtures/fidelity/fixtures.go`) stays as
-reference data for the routing, stream, batch reader, protocol fidelity, and
-token tests. The comparator in `tests/fidelity` stays because the protocol
-tests use it. Neither is a test suite on its own.
+reference data for the routing, stream, batch reader, protocol fidelity, vendor
+batch and job payloads (`tests/fixtures/vendors`), and token tests. The
+comparator in `tests/fidelity` stays because the protocol tests use it. Neither
+is a test suite on its own.
 
 `tests/fixtures/tokens` holds the ground truth for the token estimator in
 `internal/domain/operations/tokenization/estimate`. `generate.py` is the only

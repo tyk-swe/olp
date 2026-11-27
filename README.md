@@ -5,10 +5,12 @@ team connect model providers, certify the exact capabilities it will serve,
 publish stable route names and manage access, budgets and attempt-level
 accounting from one installation.
 
-The gateway serves OpenAI, Anthropic, Gemini and Bedrock client interfaces. Its
-persisted request history and telemetry are content-free by default.
-Provider-retained resources, response caching and optional external capture each
-have a separate and explicit storage contract.
+The gateway serves OpenAI, Anthropic, Gemini and Bedrock client interfaces
+alongside governed agent and MCP tool workflows, cloud retrieval bindings,
+guardrails and subscription-backed code mode for coding clients. Its persisted
+request history and telemetry are content-free by default. Provider-retained
+resources, response caching and optional external capture each have a separate
+and explicit storage contract.
 
 ## Start here
 

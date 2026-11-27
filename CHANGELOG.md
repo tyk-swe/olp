@@ -19,13 +19,14 @@ semantic versioning and take their source from root `package.json`. The
   once per rule and day when the last complete UTC day of priced spend clears
   both a percentage and an absolute increase over the mean of its complete
   priced baseline days, and it stays silent on insufficient history or
-  incomplete pricing. Migration 0150 allows the new event on notification
-  rules.
+  incomplete pricing. The schema baseline (`0001_schema.sql`) allows the new
+  event on notification rules.
 - Installation branding now covers a brand color. The General settings tab
   takes a `#rrggbb` color with at least 4.5:1 contrast for white button text,
   and the console derives readable shades of it for every surface. The
   installation name and logo now also appear on the sign-in page, in browser
-  tab titles and as the favicon. Migration 0149 adds the `accent` column.
+  tab titles and as the favicon. The schema baseline (`0001_schema.sql`)
+  includes the `accent` column.
 - `olp init-secrets` creates the master-key ring, authentication HMAC key,
   setup token, database password and `pgpass` without replacing existing
   files. `olp setup-token` prints the first-owner setup link and token.
@@ -58,9 +59,9 @@ semantic versioning and take their source from root `package.json`. The
   backfill resumes a minute later. A closed month is not read again once its
   import covers every retained day, so only the current and previous months
   pick up restatements. AWS and Azure sweeps also walk newest first, and Azure
-  reads the newest run of a month across its export folders. Migration 0143
-  replaces the per-source resume columns with one cursor, which now also
-  resets for Google when the scope changes.
+  reads the newest run of a month across its export folders. The schema
+  baseline (`0001_schema.sql`) replaces the per-source resume columns with one
+  cursor, which now also resets for Google when the scope changes.
 
 - The mounted connector file (`OLP_CONNECTOR_CONFIG_FILE`) no longer accepts a
   per-provider `model`. The gateway never used it, since mounted connectors
@@ -81,10 +82,14 @@ semantic versioning and take their source from root `package.json`. The
   `content_policy_blocked`, usage records drop `policy_decisions`, and
   configuration import accepts only `openllmproxy.dev/config/v2`. Express each
   former rule as a `builtin.regex` guardrail with a policy and attachment.
-- The migration history is squashed into one `0001_schema.sql` baseline that
-  also drops the retired content policy columns and the route guardrail
-  migration trigger. `olp migrate` and startup refuse a database migrated by an
-  earlier build, so start a fresh installation in a new empty database.
+- The console models page moved back from `/provider-models` to `/models`,
+  with the published catalog tab at `/models/catalog` and public project
+  catalogs at `/catalog/public/{projectId}`.
+- The migration history is squashed into `0001_schema.sql` (which also drops
+  the retired content policy columns and the route guardrail migration trigger)
+  followed by `0002_drop_plpgsql_pricing.sql` (which removes legacy PL/pgSQL
+  pricing functions). `olp migrate` and startup refuse a database migrated by
+  an earlier build, so start a fresh installation in a new empty database.
 
 ### Fixed
 
@@ -205,7 +210,7 @@ semantic versioning and take their source from root `package.json`. The
   and add an automated documentation check for scoped local links, anchors and
   handbook index coverage.
 
-Code-mode diagnostics now represent paid API ownership separately. Paid attempts and pins have nullable subscription account and binding fields, and expose paid binding, provider and slot identifiers instead. Paid target configuration is explicit per native model, with current pricing, separate cost and charge, and durable uncertainty holds.
+- Code-mode diagnostics now represent paid API ownership separately. Paid attempts and pins have nullable subscription account and binding fields, and expose paid binding, provider and slot identifiers instead. Paid target configuration is explicit per native model, with current pricing, separate cost and charge, and durable uncertainty holds.
 
 - A2A 1.0 requests require `A2A-Version: 1.0` or the equivalent query
   parameter. Requests without a version use the A2A 0.3 adapter.

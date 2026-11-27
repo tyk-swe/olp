@@ -15,11 +15,13 @@ documentation unless a guide links to them for that purpose.
 | --- | --- |
 | Connect providers, certify models and publish routes | [Provider connections and routing](use/provider-routing.md) |
 | Choose connection profiles, provider authentication and private networking | [Provider profiles](use/provider-profiles.md) |
-| Connect Azure, Bedrock, SageMaker or watsonx | [Azure](use/providers/azure.md), [Bedrock](use/providers/bedrock.md), [SageMaker](use/providers/sagemaker.md) and [watsonx](use/providers/watsonx.md) |
-| Serve or consume supported media operations | [Media providers](use/providers/media.md) |
+| Connect Azure, Bedrock, SageMaker, Vertex AI or watsonx | [Azure](use/providers/azure.md), [Bedrock](use/providers/bedrock.md), [SageMaker](use/providers/sagemaker.md), [Vertex AI](use/providers/vertex.md) and [watsonx](use/providers/watsonx.md) |
+| Serve media codecs and manage durable media jobs | [Media providers](use/providers/media.md) |
+| Query cloud knowledge bases, RAG corpora and search indexes | [Cloud retrieval bindings](use/retrieval.md) |
 | Check endpoint, protocol and translation support | [Compatibility](use/compatibility.md) |
 | Configure SDKs, frameworks and coding clients | [Clients](use/clients.md) and [Code mode](use/code-mode.md) |
 | Manage users, projects, keys, identity and budgets | [Access](use/access.md) |
+| Publish toolsets, prompts, A2A agents, approvals, delegations and investigations | [Agents](use/agents.md) |
 | Enforce content and tool policies | [Guardrails](use/guardrails.md) |
 | Connect named external guardrail services | [Guardrail integrations](use/guardrail-integrations.md) |
 | Cache responses or control provider prompt caching | [Caching](use/caching.md) |
@@ -55,5 +57,5 @@ remaining guides cover the implementation contracts behind a change.
 | Review qualification status and outstanding external checks | [Qualification](develop/qualification.md) |
 
 The eight retained console screenshots live in [images](images/). The provider,
-console and external-secrets guides link to the screenshot that belongs to each
-workflow.
+console, code-mode and external-secrets guides link to the screenshot that
+belongs to each workflow.

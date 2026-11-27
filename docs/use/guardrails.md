@@ -1,37 +1,20 @@
 # Guardrails
 
-Guardrails inspect requests, responses and tool content under project-owned
-policy. A guardrail definition supplies typed evaluator configuration, a timeout
-and an error policy. An ordered guardrail policy pins immutable definition
-revisions and decides how findings affect a request.
+Guardrails inspect requests, responses and tool content under project-owned policy. A guardrail definition supplies typed evaluator configuration, a timeout and an error policy. An ordered guardrail policy pins immutable definition revisions and decides how findings affect a request.
 
-Definitions and policies each move through draft and explicitly activated
-revisions. Editing a draft does not change serving traffic or existing
-attachments until the new revision is activated and published through the normal
-route flow.
+Definitions and policies each move through draft and explicitly activated revisions. Editing a draft does not change serving traffic or existing attachments until the new revision is activated and published through the normal route flow.
 
-The console Guardrails page manages definitions, policies, activation and
-attachments. Its playground runs the same evaluation engine without storing the
-entered content, subject to playground access and project visibility. An external
-evaluator still receives the content required by its configured service.
+The console **Guardrails** page manages definitions (**Checks**), policies (**Policies**), attachments (**Where they apply**) and external credentials (**Credentials**). The **Try it** tab at `/guardrails/try` runs the same evaluation engine without storing the entered content, subject to playground access and project visibility. An external evaluator still receives the content required by its configured service.
 
 ## Preview before dispatch
 
-In **Guardrails → Preview**, select an active route, an API key in the same
-project, and the operation and request surface. The preview shows the serving
-release, flags it if a newer one is published, and lists visible checks in
-serving order. It checks static constraints such as streaming and
-provider-retained output. It does not accept sample content, run checks, reserve
-quota, or dispatch a request.
+In **Guardrails -> Preview** (`/guardrails/preview`), select an active route, an API key in the same project, and the operation and request surface. The preview shows the serving release, flags it if a newer one is published, and lists visible checks in serving order. It checks static constraints such as streaming and provider-retained output. It does not accept sample content, run checks, reserve quota or dispatch a request.
 
-Installation-wide readers see the full chain. Scoped readers see the same
-partial-visibility notice even when their list is empty. The preview does not
-report compatibility for policies they cannot read. The management API is
-`GET /api/v1/guardrails/preview`.
+Installation-wide readers see the full chain. Scoped readers see the same partial-visibility notice even when their list is empty, and the preview does not report compatibility for policies they cannot read. The management API is `GET /api/v1/guardrails/preview`.
 
 ## Definitions and policies
 
-Create a definition with `POST /api/v1/guardrails`:
+Create a definition with `POST /api/v1/guardrails`.
 
 ```json
 {
@@ -44,9 +27,7 @@ Create a definition with `POST /api/v1/guardrails`:
 }
 ```
 
-Activate its `revision_id` with
-`POST /api/v1/guardrails/{guardrail_id}/activate`. Create a policy with
-`POST /api/v1/guardrail-policies`:
+Activate its `revision_id` with `POST /api/v1/guardrails/{guardrail_id}/activate`. Create a policy with `POST /api/v1/guardrail-policies`.
 
 ```json
 {
@@ -63,15 +44,9 @@ Activate its `revision_id` with
 }
 ```
 
-Activate the policy through
-`POST /api/v1/guardrail-policies/{policy_id}/activate`. Referenced definition
-revisions must have been activated. Old activated revisions remain usable;
-activation never changes what an existing revision means. Writes use
-`Idempotency-Key`; edits, activation and retirement require the observed
-`If-Match`. Readers need project visibility, and changes require configuration
-permission and project change authority. Attachment writes additionally use the scope's existing permission: `settings` for installation, `manage_organization` for an organization, `configure` for project/route, and `keys` for an API key.
+Activate the policy through `POST /api/v1/guardrail-policies/{policy_id}/activate`. Referenced definition revisions must have been activated. Old activated revisions remain usable, and activation never changes what an existing revision means. Writes use `Idempotency-Key`, while edits, activation and retirement require the observed `If-Match`. Readers need project visibility, and changes require configuration permission and project change authority. Attachment writes additionally use the scope's existing management permission, which is `settings` for `installation`, `manage_organization` for `organization`, `configure` for `project`, `route` or `toolset`, and `keys` for `api-key`.
 
-`POST /api/v1/guardrail-attachments` attaches an activated policy revision:
+`POST /api/v1/guardrail-attachments` attaches an activated policy revision.
 
 ```json
 {
@@ -82,182 +57,75 @@ permission and project change authority. Attachment writes additionally use the 
 }
 ```
 
-Scopes run in installation, organization, project, route, then API-key order.
-The installation identifier is `installation`; other identifiers are the
-resource UUIDs. Attachment positions and policy entry order are preserved.
-Attachments add safeguards. Removing a narrower attachment cannot remove an
-inherited entry, including a mandatory entry. Project, route and key attachments
-must reference policies in that project; organization policies must belong to a
-project in that organization. All published definitions, policies, attachments
-and plugin references live in the immutable runtime release. Requests pin that
-release and perform no PostgreSQL guardrail-configuration lookup.
+Scopes run in `installation`, `organization`, `project`, `route` and `toolset`, then `api-key` order. `route` and `toolset` share the same precedence rank, with ties ordered by attachment `order` and then attachment ID. The installation identifier is `installation`, while other identifiers are the resource UUIDs. Attachment positions and policy entry order are preserved. Attachments only add safeguards, so removing a narrower attachment cannot remove an inherited entry, including a mandatory entry. Project, route, toolset and key attachments must reference policies in that same project, while organization policies must belong to a project in that organization. All published definitions, policies, attachments and plugin references live in the immutable runtime release. Requests pin that release and perform no PostgreSQL guardrail-configuration lookup.
 
 ## Execution
 
 | Phase | Behavior |
 | --- | --- |
-| `input` | Inspect the actual provider request after defaults, before estimating tokens or dispatching. May transform it. |
-| `input_parallel` | Evaluate during the provider call; a refusal cancels upstream work and retains observed usage. |
-| `output` | Inspect a complete unary result after observing provider usage. |
-| `output_stream` | Inspect decoded native text through a bounded byte holdback, including matches across chunks. Tool arguments remain buffered until complete and governed. |
+| `input` | Inspects the actual provider request after defaults, before estimating tokens or dispatching. May transform the request. |
+| `input_parallel` | Evaluates during the provider call. A refusal cancels upstream work and retains observed usage. |
+| `output` | Inspects a complete unary result after observing provider usage. |
+| `output_stream` | Inspects decoded native text through a bounded byte holdback, including matches across chunks. Tool arguments remain buffered until complete and governed. |
 
-Actions are `block`, `redact`, `mask`, and `annotate`. `monitor: true` records
-results without acting. Redaction and masking require transformed routes;
-masking requires synchronous input. A request's placeholder map is kept only in
-memory, reused across its attempts, and restored before inspecting output.
-Strict routes retain successful native frames byte-for-byte.
+Actions are `block`, `redact`, `mask` and `annotate`. Setting `monitor: true` records results without acting. Redaction and masking require transformed routes, and masking requires synchronous input. A request's placeholder map is kept only in memory, reused across its attempts, and restored before inspecting output. Strict routes retain successful native frames byte-for-byte.
 
-The `guardrails.stream_window_bytes` installation setting controls retained
-stream data (default 65,536 bytes, maximum 1,048,576). Expressions requiring
-unbounded lookbehind or complete content, schema validation of a whole result,
-and enforcing external evaluators require unary delivery when their requirements
-cannot fit the window. Such requests return `422 guardrail_surface_unavailable`;
-there is no silent reduction in enforcement. Opaque media and retained surfaces
-without a complete inspection contract are refused in the same way.
-Generation with owned files, vector stores, conversations or context caches
-refuses enforcing `input` or `input_parallel` rules because the referenced
-content cannot be inspected. Monitoring and annotation record unavailable
-coverage for those input checks and continue.
-Chat and legacy text-completion streams requesting `logprobs` are refused before
-dispatch when output guardrails or input masking are active, including when
-provider defaults enable them. Unexpected log-probability payloads are refused
-before their frame is sent.
+The `guardrails.stream_window_bytes` installation setting controls retained stream data (default 65,536 bytes, maximum 1,048,576). Expressions requiring unbounded lookbehind or complete content, schema validation of a whole result, and enforcing external evaluators require unary delivery when their requirements cannot fit the window. Such requests return `422 guardrail_surface_unavailable` with no silent reduction in enforcement. Opaque media and retained surfaces without a complete inspection contract are refused in the same way. Generation with owned files, vector stores, conversations or context caches refuses enforcing `input` or `input_parallel` rules because the referenced content cannot be inspected. Monitoring and annotation record unavailable coverage for those input checks and continue. Chat and legacy text-completion streams requesting `logprobs` are refused before dispatch when output guardrails or input masking are active, including when provider defaults enable them. Unexpected log-probability payloads are refused before their frame is sent.
 
-Legacy text completions inspect each text prompt as input and each choice's
-`text` as unary or streamed output; token-ID prompts have no text inspection
-contract and refuse. Output policies refuse any non-null completion `logprobs`
-value. A choice's stream segment stays open until it reports a nonempty finish
-reason, so TGI's empty nonterminal reason does not end it. Decisions inspect
-input text, question instructions, and criteria, plus native answers as
-unary output.
-Gemini Decisions input checks join text blocks the same way the provider
-does. Enforcing text input checks refuse Gemini media because they cannot
-inspect its contents.
+Legacy text completions inspect each text prompt as input and each choice's `text` as unary or streamed output, while token-ID prompts have no text inspection contract and refuse. Output policies refuse any non-null completion `logprobs` value. A choice's stream segment stays open until it reports a nonempty finish reason, so TGI's empty nonterminal reason does not end it. Decisions inspect input text, question instructions and criteria, plus native answers as unary output. Gemini Decisions input checks join text blocks the same way the provider does. Enforcing text input checks refuse Gemini media because they cannot inspect its contents.
 
-Stored or background Responses requests are refused when an output policy or
-input masking is configured, because later retrieval cannot replay that
-inspection or restore the request's masking map. Input-only policies remain
-active on requests that use a previous response or continuation, including
-when its provider or route revision is historical.
+Stored or background Responses requests are refused when an output policy or input masking is configured because later retrieval cannot replay that inspection or restore the request's masking map. Input-only policies remain active on requests that use a previous response or continuation, including when its provider or route revision is historical.
 
-Refusals use `400 guardrail_blocked`; refusals after stream commitment use the
-native in-band error. The gateway joins parallel evaluators before sending a
-successful terminal marker.
+Refusals use `400 guardrail_blocked`, and refusals after stream commitment use the native in-band error. The gateway joins parallel evaluators before sending a successful terminal marker.
 
 ## Bounds and failure policy
 
-The engine accepts at most 128 effective entries, 2,048 segments, 8 MiB of text,
-4,096 findings and 256 KiB of evidence. Timeouts are 1–300,000 ms and cannot
-exceed the route deadline. Ordered transformations feed the next entry; the
-first enforced refusal stops evaluation. Parallel input evaluation may block or
-annotate but cannot change input already dispatched.
+The engine accepts at most 128 effective entries, 2,048 segments, 8 MiB of text, 4,096 findings and 256 KiB of evidence. Timeouts are 1 to 300,000 ms and cannot exceed the route deadline. Ordered transformations feed the next entry, and the first enforced refusal stops evaluation. Parallel input evaluation may block or annotate but cannot change input already dispatched.
 
-`on_error: fail_open | fail_closed` covers timeouts, service errors and invalid
-verdicts, recording `failed_open` or `failed_closed`. Missing inspection capability
-refuses before dispatch with 422 regardless of `fail_open`. Monitoring never
-blocks. Masking restores placeholders before output inspection. Tool trust rules
-cover provenance within one request; they are not cross-request taint tracking
-or authority to execute tools. Confined guardrail WASM calls have no HTTP access.
+`on_error` accepts `fail_open` or `fail_closed` and covers timeouts, service errors and invalid verdicts, recording `failed_open` or `failed_closed`. Missing inspection capability refuses before dispatch with 422 regardless of `fail_open`. Monitoring never blocks. Masking restores placeholders before output inspection. Tool trust rules cover provenance within one request rather than cross-request taint tracking or authority to execute tools. Confined guardrail WASM calls have no HTTP access.
 
 ## Built-in configuration
 
 | Type | Configuration |
 | --- | --- |
-| `builtin.regex` | `rules: [{id, pattern, replacement?}]`; bounded RE2, literal replacements, at most 64 rules and 16 KiB of patterns. |
-| `builtin.pii` | Optional `categories`, `patterns`, and `replacement`. Omitting categories selects all built-in PII categories. |
-| `builtin.secrets` | Optional `categories`, `patterns`, and `replacement`. |
-| `builtin.keywords` | `words`, optional `substrings`, and `replacement`; Unicode case folding and one compiled automaton. |
-| `builtin.schema` | `schema`; JSON Schema with remote-reference loading disabled. |
-| `builtin.code_execution` | Optional `blocked_languages`, `confidence_threshold` (default 0.5), `detect_execution_intent` (default true). Input checks execution intent; output checks fenced code. |
-| `builtin.tool_permission` | Ordered `rules` with `id`, `tool_name`/`tool_type` RE2 patterns, `decision`, optional `allowed_param_patterns`; `default_action` defaults to deny. Captured function definitions/calls only; block or annotate. |
-| `builtin.tools` | `allow`, `deny`, `privileged`, `untrusted` glob lists, and `schemas` keyed by tool name. Deny wins over allow. |
+| `builtin.regex` | `rules` entries with `id`, `pattern` and optional `replacement`. Uses bounded RE2 with literal replacements, at most 64 rules and 16 KiB of patterns. |
+| `builtin.pii` | Optional `categories`, `patterns` and `replacement`. Omitting categories selects all built-in PII categories. |
+| `builtin.secrets` | Optional `categories`, `patterns` and `replacement`. |
+| `builtin.keywords` | `words`, optional `substrings` and `replacement`, using Unicode case folding and one compiled automaton. |
+| `builtin.schema` | `schema` with JSON Schema validation and remote-reference loading disabled. |
+| `builtin.code_execution` | Optional `blocked_languages`, `confidence_threshold` (default 0.5) and `detect_execution_intent` (default true). Input checks execution intent and output checks fenced code. |
+| `builtin.tool_permission` | Ordered `rules` with `id`, `tool_name` or `tool_type` RE2 patterns, `decision` and optional `allowed_param_patterns`. `default_action` defaults to deny. Covers captured function definitions and calls with block or annotate actions. |
+| `builtin.tools` | `allow`, `deny`, `privileged` and `untrusted` glob lists, plus `schemas` keyed by tool name. Deny wins over allow. |
 
-PII categories are `pii.email`, `pii.phone`, `pii.payment_card`, `pii.iban`,
-`pii.us_ssn`, `pii.ip_address`, and `pii.custom`. Payment cards use Luhn and IBANs
-use their country length and mod-97 checksum. Tool-result provenance is retained
-for output governance; unattributed tool results are treated conservatively when
-privileged calls are requested.
+PII categories are `pii.email`, `pii.phone`, `pii.payment_card`, `pii.iban`, `pii.us_ssn`, `pii.ip_address` and `pii.custom`. Payment cards use Luhn validation, and IBANs use their country length and mod-97 checksum. Tool-result provenance is retained for output governance, and unattributed tool results are treated conservatively when privileged calls are requested.
 
-Secret categories are `secret.private_key`, `secret.jwt`,
-`secret.aws_access_key`, `secret.google_cloud`, `secret.azure`, `secret.github`,
-`secret.gitlab`, `secret.slack`, `secret.stripe`, `secret.openai`, and
-`secret.anthropic`. They identify documented token formats; random unprefixed
-strings cannot be reliably classified as credentials. Formats with documented
-checksums validate them, without claiming the credential is live. JWT detection recognizes
-structure, and does not claim to authenticate the token's signature.
+Secret categories are `secret.private_key`, `secret.jwt`, `secret.aws_access_key`, `secret.google_cloud`, `secret.azure`, `secret.github`, `secret.gitlab`, `secret.slack`, `secret.stripe`, `secret.openai` and `secret.anthropic`. They identify documented token formats because random unprefixed strings cannot be reliably classified as credentials. Formats with documented checksums validate them without claiming the credential is live. JWT detection recognizes structure without claiming to authenticate the token's signature.
 
 ## External and model evaluation
 
-`webhook`, `bedrock`, `azure.content_safety`, `azure.prompt_shields`,
-`model_armor`, `lakera`, and `presidio` use the shared segment/verdict contract.
-External configuration requires an `endpoint`, a `credential_ref`, and explicit
-`content_egress: true`. The acknowledgement is audited. Requests use the provider
-egress policy, pinned credential material, bounded bodies and response sizes,
-per-definition deadlines, and independent circuit breakers. A circuit opens
-after five failures and permits one probe after 30 seconds.
+`webhook`, `bedrock`, `azure.content_safety`, `azure.prompt_shields`, `model_armor`, `lakera` and `presidio` use the shared segment and verdict contract. External configuration requires an `endpoint`, a `credential_ref` and explicit `content_egress: true`. The acknowledgement is audited. Requests use the provider egress policy, pinned credential material, bounded bodies and response sizes, per-definition deadlines and independent circuit breakers. A circuit opens after five failures and permits one probe after 30 seconds.
 
-Credentials are created through `POST /api/v1/guardrail-credentials` and sealed
-with the `guardrail_credential` purpose. The credential document can contain
-`api_key`, `signing_key`, OAuth `client_id` and `client_secret`, or AWS `access_key_id`, `secret_access_key`, and optional
-`session_token`. Network credential references use the same project-owned
-credential mechanism. The `network` object supports the provider network
-settings, including mutual TLS and an approved proxy. Secrets never enter
-configuration export.
+Credentials are created through `POST /api/v1/guardrail-credentials` and sealed with the `guardrail_credential` purpose. The credential document can contain `api_key`, `signing_key`, OAuth `client_id` and `client_secret`, or AWS `access_key_id`, `secret_access_key` and optional `session_token`. Network credential references use the same project-owned credential mechanism. The `network` object supports the provider network settings, including mutual TLS and an approved proxy. Secrets never enter configuration export.
 
-Webhooks receive `{guardrail, phase, request_id, route, segments}` and return
-`{action, categories, redactions}`. Redactions contain a segment ID, UTF-8 byte
-`start` and `end`, and a literal replacement. The `X-OLP-Signature` header carries
-`t=<unix-seconds>,v1=<HMAC-SHA256>` over the timestamp, a dot, and the exact request
-body. Use a signing key of at least 32 bytes and reject replayed timestamps.
-Overlapping spans, invalid boundaries, unknown segments and malformed verdicts
-fail according to `on_error`; diagnostics do not include submitted content.
+Webhooks receive `{guardrail, phase, request_id, route, segments}` and return `{action, categories, redactions}`. Redactions contain a segment ID, UTF-8 byte `start` and `end`, and a literal replacement. The `X-OLP-Signature` header carries `t=<unix-seconds>,v1=<HMAC-SHA256>` over the timestamp, a dot and the exact request body. Use a signing key of at least 32 bytes and reject replayed timestamps. Overlapping spans, invalid boundaries, unknown segments and malformed verdicts fail according to `on_error`, and diagnostics do not include submitted content.
 
-Bedrock additionally specifies `region`, `guardrail`, and `version`. Model Armor
-specifies its `projects/.../locations/.../templates/...` resource in `template`.
-Presidio accepts `language` (default `en`). Azure Content Safety accepts a severity
-`threshold`. Contract references: [Bedrock ApplyGuardrail](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ApplyGuardrail.html),
-[Azure Prompt Shields](https://learn.microsoft.com/en-us/rest/api/contentsafety/text-operations/shield-prompt?view=rest-contentsafety-2024-09-01),
-[Azure Content Safety](https://learn.microsoft.com/en-us/rest/api/contentsafety/text-operations/analyze-text?view=rest-contentsafety-2024-09-01),
-[Model Armor](https://docs.cloud.google.com/model-armor/sanitize-prompts-responses),
-[Lakera](https://docs.lakera.ai/api-reference/lakera-api/guard/screen-content).
+Bedrock additionally specifies `region`, `guardrail` and `version`. Model Armor specifies its `projects/.../locations/.../templates/...` resource in `template`. Presidio accepts `language` (default `en`). Azure Content Safety accepts a severity `threshold`. Upstream contract references are [Bedrock ApplyGuardrail](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ApplyGuardrail.html), [Azure Prompt Shields](https://learn.microsoft.com/en-us/rest/api/contentsafety/text-operations/shield-prompt?view=rest-contentsafety-2024-09-01), [Azure Content Safety](https://learn.microsoft.com/en-us/rest/api/contentsafety/text-operations/analyze-text?view=rest-contentsafety-2024-09-01), [Model Armor](https://docs.cloud.google.com/model-armor/sanitize-prompts-responses) and [Lakera](https://docs.lakera.ai/api-reference/lakera-api/guard/screen-content).
 
-The [named integration reference](guardrail-integrations.md) documents all
-additional native text adapters, their exact operation endpoints, authentication,
-validated `parameters`, transformations and phase restrictions. A single
-revision deadline covers credential loading and every segment request.
+The [named integration reference](guardrail-integrations.md) documents all additional native text adapters, their exact operation endpoints, authentication, validated `parameters`, transformations and phase restrictions. A single revision deadline covers credential loading and every segment request.
 
-A `semantic_guard` configuration specifies an embedding `route` and
-`semantic: {category, similarity_threshold, utterances}`. It embeds the inspected
-segments and reference utterances in one accounted batch, then compares validated
-vectors by cosine similarity. At most 128 segments, 64 reference utterances and
-4,096 dimensions are supported. References are bounded to 64 KiB in total.
-Threshold must be greater than zero and at most one. Its actions are block and
-annotate; it uses the same caller authorization, budgets and recursion protection
-as the model evaluator.
+A `semantic_guard` configuration specifies an embedding `route` and `semantic: {category, similarity_threshold, utterances}`. It embeds the inspected segments and reference utterances in one accounted batch, then compares validated vectors by cosine similarity. At most 128 segments, 64 reference utterances and 4,096 dimensions are supported, and references are bounded to 64 KiB in total. The threshold must be greater than zero and at most one. Its actions are block and annotate, and it uses the same caller authorization, budgets and recursion protection as the model evaluator.
 
-A `model` (or `decision_model`) configuration specifies `route` and `rule: {pointer, equals, category,
-prompt?}`. The evaluator uses a generation, classification or moderation route
-under the caller's authorization, deadlines and budgets. Its usage is a child
-request attributed to the parent and guardrail. Internal evaluator requests skip
-model, decision and semantic guardrails to prevent recursion.
-Evaluator routes resolve from the request's full pinned release, including for
-retained continuations. Evaluator usage preserves the caller's resolved end-user
-identity. Keyless playground evaluations reserve installation, organization and
-project budgets before dispatch and stop when cost accounting is unavailable.
+A `model` or `decision_model` configuration specifies `route` and `rule: {pointer, equals, category, prompt?}`. The evaluator uses a generation, classification or moderation route under the caller's authorization, deadlines and budgets. Its usage is a child request attributed to the parent and guardrail. Internal evaluator requests skip model, decision, semantic and `typesafe` guardrails to prevent recursion. Evaluator routes resolve from the request's full pinned release, including for retained continuations. Evaluator usage preserves the caller's resolved end-user identity. Keyless playground evaluations reserve installation, organization and project budgets before dispatch and stop when cost accounting is unavailable.
 
-Presidio may also specify `anonymizer_endpoint`; its `/anonymize` request uses the analyzer results and the same egress policy, credentials and deadline. Without it, analyzer offsets drive local replacement.
+A native `typesafe` configuration takes `{"route": "<decision-route-slug>"}` naming an authorized System One `decision` route. When attached on the `input` phase with `monitor: false` during a gateway agent workflow, `typesafe` groups complete prior tool calls and tool results into ordered exchanges, keeps the latest complete exchange, skips recovered exchanges, and asks the decision route to score each prior exchange for relevance in batches of up to 256 exchanges. Exchanges scoring below 0.2 are pruned by removing their calls and results together. Each relevance call is accounted as a child classifier attempt under the workflow run and skips recursive model guardrails.
 
-A `plugin` configuration pins the manifest name in `plugin_id` and the module digest in
-`plugin_version`. Its manifest declares `guardrail: true`, and the optional SDK
-`Guardrail` interface receives the same segments and returns the same verdict.
-Only approved confined WASM modules run this method. Modules are preloaded at
-release installation; the existing time and memory limits apply. Content-bearing
-plugin diagnostics are suppressed.
+Presidio may also specify `anonymizer_endpoint`, in which case its `/anonymize` request uses the analyzer results under the same egress policy, credentials and deadline. Without `anonymizer_endpoint`, analyzer offsets drive local replacement.
+
+A `plugin` configuration pins the manifest name in `plugin_id` and the module digest in `plugin_version`. Its manifest declares `guardrail: true`, and the optional SDK `Guardrail` interface receives the same segments and returns the same verdict. Only approved confined WASM modules run this method. Modules are preloaded at release installation with the existing time and memory limits applied, and content-bearing plugin diagnostics are suppressed.
 
 ## Apply API and evidence
 
-`POST /v1/guardrails/apply` requires the `guardrails` API-key scope, project
-visibility and the key's limits:
+`POST /v1/guardrails/apply` requires the `guardrails` API-key scope, project visibility and the key's limits.
 
 ```json
 {
@@ -267,28 +135,13 @@ visibility and the key's limits:
 }
 ```
 
-A successful evaluation returns `{blocked, segments, decisions}`, including
-`blocked: true` for a policy refusal. The operation is recorded as `guardrail`.
-The [OpenAPI contract](../../guardrails/guardrails.json) and generated Go and TypeScript
-clients live under [guardrails](../../guardrails). The Go client imports as
-`github.com/tyk-swe/olp/guardrails`.
+A successful evaluation returns `{blocked, segments, decisions}`, including `blocked: true` for a policy refusal. The operation is recorded as `guardrail`. The [OpenAPI contract](../../guardrails/guardrails.json) and generated Go and TypeScript clients live under [guardrails](../../guardrails), and the Go client imports as `github.com/tyk-swe/olp/guardrails`.
 
-Evidence contains only identifiers, revisions, phase, action, outcome,
-categories and latency. Request and attempt history, telemetry and the
-`guardrail_decisions` export stream never contain matches, offsets, replacements
-or patterns. Clients may request `X-OLP-Guardrails: true` metadata; late decisions
-use the response trailer. Values are bounded and may list only the first acting
-guardrails when the header limit is reached.
-Each attempt records its own input and output decisions; request history keeps
-the combined evidence across attempts.
+Evidence contains only identifiers, revisions, phase, action, outcome, categories and latency. Request and attempt history, telemetry and the `guardrail_decisions` export stream never contain matches, offsets, replacements or patterns. Clients may request `X-OLP-Guardrails: true` metadata, with late decisions delivered in the response trailer. Values are bounded and may list only the first acting guardrails when the header limit is reached. Each attempt records its own input and output decisions, and request history keeps the combined evidence across attempts.
 
 ## Run fixtures in CI
 
-Keep a small file of invented examples next to your pipeline and run it against
-two pinned revisions of one policy before you attach the candidate. The file is
-read by the `olp` command on your machine and is never stored by OLP. Use only
-synthetic text, never production prompts, credentials, real identifiers or
-personal data.
+Keep a small file of invented examples next to your pipeline and run it against two pinned revisions of one policy before you attach the candidate. The file is read by the `olp` command on your machine and is never stored by OLP. Use only synthetic text, never production prompts, credentials, real identifiers or personal data.
 
 ```json
 {
@@ -301,8 +154,7 @@ personal data.
 }
 ```
 
-Run it with a management token that holds the `playground` scope and can view
-the policy project.
+Run it with a management token that holds the `playground` scope and can view the policy project.
 
 ```sh
 olp guardrails run-fixtures --file guardrail-fixtures.json \
@@ -310,54 +162,20 @@ olp guardrails run-fixtures --file guardrail-fixtures.json \
   --candidate-revision CANDIDATE_POLICY_REVISION_UUID
 ```
 
-The command prints one line per fixture with its ID, the baseline and
-candidate outcomes, the expected outcome and whether the candidate matched,
-then a count of passing fixtures. With `--output REPORT` it also writes the
-JSON report returned by `POST /api/v1/guardrails/run-fixtures`. Neither form
-contains fixture text, expected redacted text, patterns or transformed text,
-and the command exits nonzero when the candidate misses an expectation or the
-run cannot be evaluated, naming the failing fixture IDs. The baseline outcome
-is reported for comparison and does not gate the run.
+The command prints one line per fixture with its ID, the baseline and candidate outcomes, the expected outcome and whether the candidate matched, followed by a count of passing fixtures. With `--output REPORT` it also writes the JSON report returned by `POST /api/v1/guardrails/run-fixtures`. Neither form contains fixture text, expected redacted text, patterns or transformed text, and the command exits nonzero when the candidate misses an expectation or the run cannot be evaluated, naming the failing fixture IDs. The baseline outcome is reported for comparison and does not gate the run.
 
-Every fixture needs an `id`, `phase`, `text` and `expected`, and `text` may be
-an empty string. A suite holds at most 32 uniquely named fixtures in a 256 KiB
-file, with at most 8192 bytes of text per fixture. Only the unary `input` and
-`output` phases run, and only policy entries over the deterministic built-in types
-`builtin.regex`, `builtin.pii`, `builtin.secrets` and `builtin.keywords` are
-supported, apart from `mask` entries whose placeholders are not repeatable.
-Both revisions are loaded, authorized and checked against these bounds
-before any fixture is evaluated, so an out-of-scope revision, an oversized
-suite or an unsupported evaluator fails the whole run with no partial pass
-and no external evaluator call. Evaluation uses the same engine as the
-console playground, runs in memory, and never changes policies, attachments
-or any stored fixture library. Repeating a suite against the same two
-revisions returns the same outcomes and exit status. An evaluator error, such
-as a fixture with more than 4096 findings, makes the whole run unevaluable
-whatever the entry's `on_error`, so a `failed_closed` result never counts as an
-expected block.
+Every fixture needs an `id`, `phase`, `text` and `expected`, and `text` may be an empty string. A suite holds at most 32 uniquely named fixtures in a 256 KiB file, with at most 8192 bytes of text per fixture. Only the unary `input` and `output` phases run, and only policy entries over the deterministic built-in types `builtin.regex`, `builtin.pii`, `builtin.secrets` and `builtin.keywords` are supported, apart from `mask` entries whose placeholders are not repeatable. Both revisions are loaded, authorized and checked against these bounds before any fixture is evaluated, so an out-of-scope revision, an oversized suite or an unsupported evaluator fails the whole run with no partial pass and no external evaluator call. Evaluation uses the same engine as the console **Try it** tab, runs in memory, and never changes policies, attachments or any stored fixture library. Repeating a suite against the same two revisions returns the same outcomes and exit status. An evaluator error, such as a fixture with more than 4096 findings, makes the whole run unevaluable whatever the entry's `on_error`, so a `failed_closed` result never counts as an expected block.
 
 ## Promotion and qualification
 
-Configuration export writes `openllmproxy.dev/config/v2` with guardrail
-definitions, ordered policies and attachments. Promotion resolves portable
-project, policy and definition names plus credential references. Local revision
-IDs and secret values are not exported, and repeated unchanged promotion reuses
-revisions. See the
-[guardrail and capture qualification](../develop/qualification.md#guardrail-and-capture-qualification) for
-what still runs. Reference-hardware and live-vendor checks no longer run.
+Configuration export writes `openllmproxy.dev/config/v2` with guardrail definitions, ordered policies and attachments. Promotion resolves portable project, policy and definition names plus credential references. Local revision IDs and secret values are not exported, and repeated unchanged promotion reuses revisions. See [guardrail and capture qualification](../develop/qualification.md#guardrail-and-capture-qualification) for what still runs. Reference-hardware and live-vendor checks no longer run.
 
 ## Capture and vendor qualification
 
-[Payload capture](../operate/observability.md#payload-capture) independently redacts complete selected
-fields using pinned local detector revisions before enqueue. Serving-time
-redaction does not establish that capture content has been inspected. External
-adapters are not eligible for capture redaction. The [pinned integration
-inventory](guardrail-integrations.md#vendor-inventory) records all 60 entries from the existing
-LiteLLM v1.105.0 baseline, local evidence, unsupported entries and follow-up owners.
-Aggregate vendor coverage remains `Partial`; live qualification is outstanding.
+[Payload capture](../operate/observability.md#payload-capture) independently redacts complete selected fields using pinned local detector revisions before enqueue. Serving-time redaction does not establish that capture content has been inspected, and external adapters are not eligible for capture redaction. The [pinned integration inventory](guardrail-integrations.md#vendor-inventory) records all 60 entries from the existing LiteLLM v1.105.0 baseline, local evidence, unsupported entries and follow-up owners. Aggregate vendor coverage is **Implemented within the recorded scope, with live qualification pending**.
 
 ## Credential and attachment maintenance
 
-The console Credentials tab and `GET /api/v1/guardrail-credentials` expose credential metadata without secret material. Read a credential through `GET /api/v1/guardrail-credentials/{credential_id}` to obtain its ETag. Deleting an unused credential requires that ETag and an idempotency key. Deletion returns `409 guardrail_credential_in_use` while any retained definition revision references the credential, including network authentication references.
+The console **Credentials** tab and `GET /api/v1/guardrail-credentials` expose credential metadata without secret material. Read a credential through `GET /api/v1/guardrail-credentials/{credential_id}` to obtain its ETag. Deleting an unused credential requires that ETag and an idempotency key. Deletion returns `409 guardrail_credential_in_use` while any retained definition revision references the credential, including network authentication references.
 
-Credential replacement creates a new credential and new definition and policy revisions. Activating a policy does not change existing attachments. Use `PUT /api/v1/guardrail-attachments/{attachment_id}` with a replacement `policy_revision_id`, the attachment ETag and an idempotency key to switch the pinned revision atomically. Scope and position remain unchanged, and a failed publication leaves the original attachment intact. Attachment listings include the owning policy and its currently active revision for comparison.
+Credential replacement creates a new credential along with new definition and policy revisions. Activating a policy does not change existing attachments. Use `PUT /api/v1/guardrail-attachments/{attachment_id}` with a replacement `policy_revision_id`, the attachment ETag and an idempotency key to switch the pinned revision atomically. Scope and position remain unchanged, and a failed publication leaves the original attachment intact. Attachment listings include the owning policy and its currently active revision for comparison.

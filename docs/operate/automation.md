@@ -6,13 +6,14 @@ scoped management token. They do not load the server's database URLs, bootstrap
 token or encryption keys.
 
 CLI commands and management MCP tool schemas are generated from
-`management/management.json` by `make api`, so automation follows the same contract
-as the console and other API clients.
+`management/management.json` by `make api`, so automation follows the same
+contract as the console and other API clients.
 
 ## Connect the CLI
 
-Create a [management token](../use/access.md#management-tokens-and-provisioning) with
-only the scopes and projects the automation needs. Mount it in a private file:
+Create a [management token](../use/access.md#management-tokens-and-provisioning)
+with only the scopes and projects the automation needs. Mount it in a private
+file:
 
 ```sh
 export OLP_MANAGEMENT_URL=https://olp.example.com
@@ -28,10 +29,23 @@ Credentials are never passed as arguments or printed in errors.
 
 ### Generated commands
 
-`olp GROUP help` lists commands, operation IDs, methods and paths in that group.
-`olp api help` lists machine-admitted operations with JSON or empty success
-responses. Uploads, downloads, live SSE and XML use their native console or HTTP
-transports. Use an operation ID to avoid ambiguity in nested resource names:
+Generated commands are organized into 41 contract groups matching the tags in
+`management/operations.gen.json` (including `api-keys`, `providers`, `routes`,
+`usage`, `configuration`, `guardrails`, `budgets`, `budget-groups`, `pricing`,
+`export-sinks`, `notifications`, `mcp-servers`, `agents`, `code-mode`,
+`projects`, `organizations`, `users`, `access`, `audit`, `observability`,
+`settings` and `runtime`), plus `olp api` which accepts any machine-admitted
+contract operation ID directly. Two short group aliases are built in. `keys`
+aliases `api-keys`, and `config` aliases `configuration` for `olp config help`
+while running the local `export`, `plan` and `apply` promotion workflow rather
+than raw endpoints (call `olp configuration` or `olp api` to invoke raw
+configuration endpoints directly).
+
+`olp GROUP help` lists commands, operation IDs, methods and paths in that
+group. `olp api help` lists all machine-admitted operations with JSON or empty
+success responses. Uploads, downloads, live SSE and XML use their native
+console or HTTP transports. Use an operation ID to avoid ambiguity in nested
+resource names:
 
 ```sh
 olp keys get KEY_ID
@@ -41,29 +55,29 @@ olp providers activate PROVIDER_ID --if-match OBSERVED_ETAG \
 olp api put_credential_slot PROVIDER_ID SLOT_ID \
   --body-file slot.json --if-match OBSERVED_ETAG \
   --idempotency-key SLOT_EDIT_KEY
-olp api simulate_route_draft ROUTE_ID --body-file request.json
+olp api simulate_route_draft DRAFT_ID --body-file request.json
 ```
 
-Path values are positional in contract order, or `--path NAME=VALUE`. Queries
-use repeatable `--query NAME=VALUE` for distinct names. Current generated query
-parameters are scalar strings, integers or booleans; repeated values for one
-name are refused. Optional null values are omitted by the Go client; zero and
-false remain explicit values. JSON requests use `--body-file FILE`;
-output goes to stdout or `--output FILE`. Output files are replaced atomically
-with owner-only permissions. The server validates schemas and project access
-just as it does for the console.
+Path values are positional in contract order, or passed with `--path NAME=VALUE`.
+Queries use repeatable `--query NAME=VALUE` for distinct names. Current
+generated query parameters are scalar strings, integers or booleans, and
+repeated values for one name are refused. Optional null values are omitted by
+the Go client, while zero and false remain explicit values. JSON requests use
+`--body-file FILE` (up to 4 MiB), and output goes to stdout or `--output FILE`.
+Output files are replaced atomically with owner-only permissions. The server
+validates schemas and project access just as it does for the console.
 
 Reads print an `ETag:` line to stderr when the API supplies one. Atomic child
-mutations also expose the previous and resulting parent ETags; MCP returns
-`previous_parent_etag` and `parent_etag` from the declared response contract. Conditional
-writes require that observed ETag with `--if-match`; the CLI never fetches a
-new ETag to force a stale write through. When the contract requires an
-idempotency key, supply `--idempotency-key` before the first write; omission
-fails before dispatch. Retain that key and the exact payload after an uncertain
-response, and reuse both for the same logical write. A deliberate new write
-requires a new identity.
-By default, each generated command makes one call on a fresh client. The CLI
-has no mutation retry loop.
+mutations also print `OLP-Previous-Parent-ETag:` and `OLP-Parent-ETag:` lines
+to stderr, while MCP returns `previous_parent_etag` and `parent_etag` from the
+declared response contract. Conditional writes require that observed ETag with
+`--if-match`, and the CLI never fetches a new ETag to force a stale write
+through. When the contract requires an idempotency key, supply
+`--idempotency-key` before the first write because omission fails before
+dispatch. Retain that key and the exact payload after an uncertain response,
+and reuse both for the same logical write. A deliberate new write requires a
+new identity. By default, each generated command makes one call on a fresh
+client, and the CLI has no mutation retry loop.
 
 Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
@@ -79,19 +93,20 @@ olp keys list --all-pages=true --output keys.json
 Only `list_providers` and `list_api_keys` accept `--all-pages=true`. The CLI
 keeps the filters and page size on every request. Use `--query cursor=CURSOR`
 to start from a specific page. The result is one JSON envelope with all
-`items` in API order and no `next_cursor`. This is a live walk, not a
-snapshot. Without the option, the command returns one page as usual.
+`items` in API order and no `next_cursor`. This is a live walk rather than a
+point-in-time snapshot. Without the option, the command returns one page as
+usual.
 
-The walk is limited to 100 pages and 16 MiB of JSON response bodies in
-total. If a page fails, a cursor repeats, or fetching the full result would
-exceed either limit, the command exits nonzero without writing to stdout or
-replacing an existing output file.
+The walk is limited to 100 pages and 16 MiB of JSON response bodies in total.
+If a page fails, a cursor repeats, or fetching the full result would exceed
+either limit, the command exits nonzero without writing to stdout or replacing
+an existing output file.
 
 ### Structured errors
 
-Set `OLP_CLI_ERROR_FORMAT=json` for generated management commands to write
-one JSON object followed by a newline to stderr on failure. The exit status
-is still 1. For example, a stale ETag produces:
+Set `OLP_CLI_ERROR_FORMAT=json` for generated management commands to write one
+JSON object followed by a newline to stderr on failure. The exit status is
+still 1. For example, a stale ETag produces:
 
 ```json
 {"kind":"api","status":412,"code":"etag_mismatch"}
@@ -117,34 +132,42 @@ A `transport` error does not say whether a write committed. The CLI does not
 resend a write after losing its response. If your script explicitly retries the
 same write, reuse the original idempotency key and payload.
 
-This setting does not change help, successful stdout or success ETags. It
-does not apply to server commands, `olp config` promotion workflows, or
-`olp code-setup`.
+This setting does not change help, successful stdout or success ETags. It does
+not apply to server commands, `olp config` promotion workflows, `olp client-env`,
+`olp code-setup`, or `olp guardrails run-fixtures`.
 
 ### Published route lifecycle
 
-`routes create` and `routes update` publish a validated route revision atomically.
-Use `routes create-draft` and `routes update-draft` for editable console drafts.
-Published updates require the observed published ETag and an Idempotency-Key;
-they retain the current routing policy and preserve independent drafts.
+`routes create` and `routes update` publish a validated route revision
+atomically. Use `routes create-draft` and `routes update-draft` for editable
+console drafts. Published updates require the observed published ETag and an
+Idempotency-Key, retaining the current routing policy and preserving
+independent drafts.
 
 ### Provider and credential-slot lifecycle
 
 `olp api delete_provider PROVIDER_ID --if-match ETAG --idempotency-key PROVIDER_DELETE_KEY`
 removes an unused draft provider. Published revisions, route drafts,
-provider-specific price history,
-notification evidence and other retained dependencies produce a conflict.
-Disable published providers through `disable_provider`. Successful deletion
-removes the draft's owned sealed credentials, advances authority and records
-one audit event; an explicit idempotency key replays its completed result.
+provider-specific price history, notification evidence and other retained
+dependencies produce a conflict. Disable published providers through
+`disable_provider`. Successful deletion removes the draft's owned sealed
+credentials, advances authority and records one audit event, and an explicit
+idempotency key replays its completed result.
 
 `get_credential_slot` returns one draft slot and its individual ETag. Use that
 observed value with `put_credential_slot` or `delete_credential_slot` to edit a
 slot independently. Pool edits can continue using the collection ETag from
 `credential_slots`. A stale individual or collection ETag refuses mutation.
 The default slot is required. Removing another draft slot preserves immutable
-credential versions and the slots pinned in published revisions; activate the
-changed provider draft to publish its new pool.
+credential versions and the slots pinned in published revisions, and activating
+the changed provider draft publishes its new pool.
+
+Slot PUT and DELETE responses include `OLP-Previous-Parent-ETag` and
+`OLP-Parent-ETag`, reporting the exact provider transition committed by that
+request. Idempotent replay preserves those original values. Clients coordinating
+parent and child resources can follow a contiguous chain of their own writes,
+while a missing transition remains a conflict and never authorizes adopting an
+unrelated edit.
 
 ### Usage export
 
@@ -155,11 +178,31 @@ olp usage breakdown --query start=2026-10-01T00:00:00Z \
   --query end=2026-10-09T00:00:00Z --format csv --output usage.csv
 ```
 
-CSV columns are sorted; nested objects remain JSON in cells. Cells that
+CSV columns are sorted, and nested objects remain JSON in cells. Cells that
 spreadsheets could interpret as formulas get an apostrophe prefix. JSON output
 preserves the API's coverage and completeness metadata.
 
-Slot PUT/DELETE responses include `OLP-Previous-Parent-ETag` and `OLP-Parent-ETag`: the exact provider transition committed by that request. Idempotent replay preserves those original values. Clients coordinating parent and child resources can follow a contiguous chain of their own writes; a missing transition remains a conflict and never authorizes adopting an unrelated edit.
+### Guardrail fixture runs
+
+`olp guardrails run-fixtures` evaluates a synthetic fixture suite against two
+guardrail policy revisions through `run_guardrail_fixtures`:
+
+```sh
+olp guardrails run-fixtures --file fixtures.json \
+  --baseline-revision BASELINE_REVISION_ID \
+  --candidate-revision CANDIDATE_REVISION_ID \
+  --output report.json
+```
+
+`--file` must be a single JSON document of at most 256 KiB containing
+`synthetic` and `fixtures`, decoded strictly with unknown fields rejected. Both
+`--baseline-revision` and `--candidate-revision` must be valid policy revision
+UUIDs. The command prints one summary line per fixture showing its baseline
+outcome, candidate outcome, expected outcome and pass or fail status, followed
+by a pass count summary. When `--output` is supplied, the raw JSON report is
+written atomically to that file. The command exits nonzero when any fixture
+fails and lists the failed fixture IDs in the error. See
+[Named guardrails](../use/guardrails.md) for policy revision and fixture rules.
 
 ## Configuration promotion
 
@@ -169,38 +212,52 @@ Export from the source, then plan and apply against the destination:
 olp config export --output configuration.json
 # Switch OLP_MANAGEMENT_URL and OLP_MANAGEMENT_TOKEN_FILE to the destination.
 olp config plan --file configuration.json \
-  --bindings-file /run/secrets/promotion-bindings.json --output plan.json
+  --bindings-file /run/secrets/promotion-bindings.json \
+  --external-bindings-file production-references.json \
+  --code-bindings-file code-bindings.json \
+  --output plan.json
 olp config apply --plan-file plan.json \
   --bindings-file /run/secrets/promotion-bindings.json \
+  --external-bindings-file production-references.json \
+  --code-bindings-file code-bindings.json \
   --idempotency-key DEPLOYMENT_KEY
 ```
 
-`--file` accepts the export envelope or its `document` object. Bindings are a
-JSON object mapping artifact credential references to secret strings. They are
-sent only to the destination and **never saved in the plan**. Supply them
-separately at both stages.
+`--file` accepts the export envelope or its `document` object. Secret bindings
+(`--bindings-file`) map artifact credential references to secret strings.
+External bindings (`--external-bindings-file`) map credential references to
+destination-specific pinned external secret references, as described in
+[external secrets](external-secrets.md#configuration-promotion). Code bindings
+(`--code-bindings-file`) are a strictly decoded JSON object with optional
+`credentials`, `users` and `api_keys` maps resolving exported code-mode
+references to destination UUIDs. All binding files are sent only to the
+destination and are **never saved in the plan**, so supply the same binding
+files at both stages.
 
-Saved plans use CLI format version 2. They record the destination origin and
-export digest, an external-reference binding digest, the secret-free desired
-document, actions, conflicts and blockers, and a local intent consistency
-checksum. Indentation changes preserve that checksum; changing native object
-member order or numeric representations does not. The checksum is a local
-consistency check; the server decides authorization and whether to mutate.
-Regenerate existing version 1 plan files with `config plan`. This CLI artifact
-format change does not change the configuration document or management API.
+Saved plans use CLI format version 2 and are capped at 32 MiB. They record the
+destination origin and `destination_digest`, `external_bindings_digest`,
+`code_bindings_digest`, the secret-free desired `document`, the server `plan`
+(actions, conflicts, blockers and plan digest), and `intent_digest` as a local
+intent consistency checksum. Indentation changes preserve that checksum, while
+changing native object member order or numeric representations does not. The
+checksum is a local consistency check, and the server decides authorization
+and whether to mutate. Regenerate existing version 1 plan files with
+`config plan`. This CLI artifact format change does not change the
+configuration document or management API.
 
 Planning saves the artifact even when blockers or conflicts cause a nonzero
-exit. Apply refuses such plans, a different destination, changed external
-references, or inconsistent saved intent. It sends the original document and
-destination digest directly to the apply API. The server checks current
-authority and exact completed replay before evaluating a new write against
-the destination digest. An intervening destination change refuses a new write;
-resolve it and compute a new plan.
+exit. Apply refuses plans with conflicts or blockers, a different destination,
+changed external bindings, changed code bindings, or an inconsistent saved
+intent digest. It sends the original document and destination digest directly
+to the apply API. The server checks current authority and exact completed
+replay before evaluating a new write against the destination digest. An
+intervening destination change refuses a new write, requiring you to resolve it
+and compute a new plan.
 
 After an uncertain apply response, retry the same saved plan with its original
 `--idempotency-key` and unchanged binding files. A completed replay returns the
 original result even if the destination changed afterward. The CLI does not
-re-plan that retry or replace its original precondition; revoked authority
+re-plan that retry or replace its original precondition, and revoked authority
 still prevents replay.
 
 ## Configure qualified clients
@@ -213,48 +270,77 @@ olp client-env claude-code --url https://olp.example.com \
 . ./client.sh
 ```
 
-Supported names are `openai`, `anthropic`, `gemini`, `claude-code`, `gemini-cli`
-and `codex`. The shell reads the key file when sourced. Claude Code's background
-models use the requested route. Codex setup defines `olp_codex`, a wrapper that
-selects the custom Responses provider and disables hosted tools unsupported
-on strict routes; run `olp_codex exec "Hello"`. It does not change sandbox or
-permission settings. See [client compatibility](../use/clients.md) for release records and
-compatibility boundaries.
+Supported names are `openai`, `anthropic`, `gemini`, `claude-code`,
+`gemini-cli` and `codex`. The shell reads the key file when sourced. Claude
+Code's background models use the requested route. Codex setup defines
+`olp_codex`, a wrapper that selects the custom Responses provider and disables
+hosted tools unsupported on strict routes, invoked as `olp_codex exec "Hello"`.
+It does not change sandbox or permission settings. See
+[client compatibility](../use/clients.md) for release records and compatibility
+boundaries.
 
 Qualified framework setup supports `openai-agents`, `vercel`, `langchain` and
 `llamaindex`. These names default to JavaScript modules, with `--surface openai`,
-`anthropic` or `gemini` selecting the qualified constructor. Agents uses the OpenAI
-Responses surface with tracing disabled and `store: false`; choose a route that
-supports those settings. Vercel uses Chat Completions for its OpenAI model. Native
-Anthropic/Google clients receive their required versioned endpoints. Frameworks
-that recognize model names require a compatible route name, as described in the
-[client compatibility guide](../use/clients.md).
+`anthropic` or `gemini` selecting the qualified constructor. Agents uses the
+OpenAI Responses surface with tracing disabled and `store: false`, so choose a
+route that supports those settings. Vercel uses Chat Completions for its OpenAI
+model. Native Anthropic and Google clients receive their required versioned
+endpoints. Frameworks that recognize model names require a compatible route
+name, as described in the [client compatibility guide](../use/clients.md).
 
 ```sh
 olp client-env langchain --surface anthropic --url https://olp.example.com \
-  --key-file /run/secrets/inference-key --model claude-sonnet-4-6 \
+  --key-file /run/secrets/inference-key --model claude-sonnet-5-5 \
   --output olp-client.mjs
 ```
 
-Import the exported `client` and `modelName` into your application; Vercel exports
-`model`, while Agents exports `runner` and `agent`. The generated module only
-configures clients and reads the mounted key when loaded. It makes no inference
-request. The aliases `agents`, `ai-sdk` and `llamaindex-ts` are also supported.
+Import the exported `client` and `modelName` into your application. Vercel
+exports `model`, while Agents exports `runner` and `agent`. The generated
+module only configures clients and reads the mounted key when loaded, making no
+inference request. The aliases `agents`, `ai-sdk` and `llamaindex-ts` are also
+supported.
 
 The native `openai`, `anthropic` and `gemini` names accept `--format javascript`,
 `python` or `go` in addition to their default shell environment. Python exports
-`client` and `model_name`; Go produces a formatted `olpclient` package with `New`
-and `Model`. Code formats set explicit keys and base URLs instead of depending on
-SDK-specific environment behavior. OpenAI loopback Go setup opts into plain HTTP
-only after the CLI's origin validation. SDK/framework retries are disabled where
-supported so application retries remain an explicit choice. Generated files never
-contain the key value.
+`client` and `model_name`, and Go produces a formatted `olpclient` package with
+`New` and `Model`. Code formats set explicit keys and base URLs instead of
+depending on SDK-specific environment behavior. OpenAI loopback Go setup opts
+into plain HTTP only after the CLI's origin validation. SDK and framework
+retries are disabled where supported so application retries remain an explicit
+choice. Generated files never contain the key value.
+
+### Codex setup for Code Mode
+
+`olp code-setup` manages the local Codex CLI TOML configuration at
+`$CODEX_HOME/config.toml` (or `~/.codex/config.toml`, up to 4 MiB, which must
+be a regular file and never a symlink) against a published Code Mode route via
+`get_code_client_configuration`:
+
+```sh
+olp code-setup preview --route ROUTE_ID --gateway-url https://olp.example.com [--model MODEL]
+olp code-setup apply --route ROUTE_ID --gateway-url https://olp.example.com [--model MODEL] [--revision REVISION_ID]
+olp code-setup status
+olp code-setup detach
+```
+
+`preview` fetches the published Codex TOML fragment, validates the merged
+configuration in memory without touching disk, and prints whether the file
+would be updated or is already configured along with the endpoint, model, and
+published route revision number and ID. `apply` writes the merged file
+atomically and stores a `# olp-code-setup ` state record containing the
+previous values so they can be restored later. Passing `--revision REVISION_ID`
+to `apply` fails if the published route revision changed since `preview`.
+`status` inspects the managed file and reports drift if any managed Codex
+setting was edited externally. `detach` verifies there is no unmanaged drift
+and restores the prior settings, removing the file only when `code-setup`
+created it and no other settings remain. See [Code mode](../use/code-mode.md)
+for Code Mode route publication and adapter rules.
 
 ## Management MCP
 
 Point a Streamable HTTP client at `https://olp.example.com/api/v1/mcp`, with
 `Authorization: Bearer MANAGEMENT_TOKEN`. This stateless endpoint accepts
-JSON-RPC over POST; it does not create sessions or maintain an SSE stream.
+JSON-RPC over POST and does not create sessions or maintain an SSE stream.
 It supports initialization, ping, `tools/list`, `tools/call`, and initialized
 and cancellation notifications. Supported protocol versions are `2025-03-26`,
 `2025-06-18` and `2025-11-25`.
@@ -278,20 +364,20 @@ Tool names are contract operation IDs. Generated JSON input schemas use `path`,
 }
 ```
 
-Only currently authorized tools appear in `tools/list`. Read-only tokens
-cannot mutate; guessing a hidden tool's name does not bypass authorization.
-Session-only operations, raw uploads/downloads, live SSE, XML and MCP itself
-are not JSON tools. Each call
-uses the API's authentication, scoped project access, validation, ETag check,
-idempotency and audit handler. MCP requires an explicit idempotency key wherever
-the API does; it does not invent one.
+Only currently authorized tools appear in `tools/list`. Read-only tokens cannot
+mutate, and guessing a hidden tool's name does not bypass authorization.
+Session-only operations, raw uploads and downloads, live SSE, XML and MCP
+itself are not JSON tools. Each call uses the API's authentication, scoped
+project access, validation, ETag check, idempotency and audit handler. MCP
+requires an explicit idempotency key wherever the API does and never invents
+one.
 
 Results include API status, non-secret body and ETag in `structuredContent` and
 text content. One-time keys, tokens, passwords and secret bindings are removed
-recursively. Failed responses omit details that could echo secret input.
-A key created through MCP therefore has **no retrievable secret**; use the CLI
-or console when you need to capture a new key. Token revocation and changes
-to the creator's authority apply to both transports.
+recursively. Failed responses omit details that could echo secret input. A key
+created through MCP therefore has **no retrievable secret**, so use the CLI or
+console when you need to capture a new key. Token revocation and changes to the
+creator's authority apply to both transports.
 
 ## GitHub Actions
 
@@ -299,8 +385,8 @@ The reusable
 [`configuration-promotion.yml`](../../.github/workflows/configuration-promotion.yml)
 plans a configuration artifact on a pull request, comments its actions,
 conflicts and blockers, and applies the merged artifact on a push to the
-configuration repository's default branch. It uses the generated management
-CLI and the same saved-plan destination digest checks as an interactive apply.
+configuration repository's default branch. It uses the generated management CLI
+and the same saved-plan destination digest checks as an interactive apply.
 
 Call it from a configuration repository:
 
@@ -328,48 +414,49 @@ jobs:
 ```
 
 Replace both commit placeholders with the same reviewed, full 40-character OLP
-commit containing this workflow and CLI. The workflow builds only that source;
-configuration checkout contents are read as data. Artifact and reference paths
-must resolve inside that checkout. Its token is written to a private temporary
-file for each operation and removed afterward. Fork pull requests require the
-caller's explicit secret-access policy; the workflow cannot manufacture missing
-credentials or permissions.
+commit containing this workflow and CLI. The workflow builds only that source,
+and configuration checkout contents are read as data. Artifact and reference
+paths must resolve inside that checkout. Its token is written to a private
+temporary file for each operation and removed afterward. Fork pull requests
+require the caller's explicit secret-access policy, and the workflow cannot
+manufacture missing credentials or permissions.
 
-The token needs installation-wide configuration/read authority and any
-additional scopes required by the artifact: pricing and external credential bindings require `settings`, and
-identity or public-catalog changes require `access`. Give a deployment token
-only the required scopes. Destination secret references belong in the optional
-external-bindings JSON; omit that input when there are no references. The
-workflow accepts no plaintext secret bindings in committed configuration.
-See [external bindings](external-secrets.md#configuration-promotion) and
+The token needs installation-wide configuration and read authority plus any
+additional scopes required by the artifact. Pricing and external credential
+bindings require `settings`, and identity or public-catalog changes require
+`access`. Give a deployment token only the required scopes. Destination secret
+references belong in the optional external-bindings JSON, which can be omitted
+when there are no references. The workflow accepts no plaintext secret bindings
+in committed configuration. See
+[external bindings](external-secrets.md#configuration-promotion) and
 [saved-plan semantics](#configuration-promotion).
 
 Planning failures fail the job after a review comment is prepared. The comment
 contains only actions, conflicts and blockers. The complete review artifact
 includes the destination origin, destination digest, external-reference digest,
-plan digest and actions,
-and is retained for seven days. Download `olp-plan-review.json`, commit it to
-the configuration pull request, and review that file together with the desired
-configuration. Set `reviewed_plan_path` to its path; apply refuses a missing
-review. Neither the desired document nor credential bindings enter comments
-or review artifacts.
+plan digest and actions, and is retained for seven days. Download
+`olp-plan-review.json`, commit it to the configuration pull request, and review
+that file together with the desired configuration. Set `reviewed_plan_path` to
+its path, because apply refuses a missing review. Neither the desired document
+nor credential bindings enter comments or review artifacts.
 
 Applies run only when `apply` is true and the event is a push to the caller's
 default branch. The push plan must exactly match the committed review,
 including the original destination digest and planned actions. Any intervening
 management edit, changed desired state or changed binding requires a new
 review. Per-installation workflow concurrency serializes jobs in that
-repository, and the server rechecks the destination digest transactionally. An uncertain response should be reconciled
-against installation state before rerunning deployment.
+repository, and the server rechecks the destination digest transactionally. An
+uncertain response should be reconciled against installation state before
+rerunning deployment.
 
 ## Terraform and OpenTofu
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
-lives in a separate repository. Projects,
-providers, credential slots, routes, routing policies, guardrails, export sinks, keys, budget groups,
-notification destinations, notification rules and upstream MCP servers have
-live create, update, import and destroy qualification with Terraform 1.16.5 and
-OpenTofu 1.13.1. All twelve resource types are represented. See
+lives in a separate repository. Projects, providers, credential slots, routes,
+routing policies, guardrails, export sinks, keys, budget groups, notification
+destinations, notification rules and upstream MCP servers have live create,
+update, import and destroy qualification with Terraform 1.16.5 and OpenTofu
+1.13.1. All twelve resource types are represented. See
 [Qualification](../develop/qualification.md#operator-ecosystem) for remaining
 release-candidate checks and the historical evidence boundary.
 
@@ -378,28 +465,28 @@ uses the generated management contract and reads the private token file for
 every operation. A token's creator role, project boundary and current scopes
 remain authoritative. Project resources require an installation-wide
 `manage_projects` token whose creator is an owner. Budget and notification
-resources use their ordinary `keys` or installation `settings` requirements;
-the provider does not require configuration-promotion permissions.
+resources use their ordinary `keys` or installation `settings` requirements,
+and the provider does not require configuration-promotion permissions.
 
 Each resource manages its own UUID, JSON `definition` and observed ETag.
-Creation-only field changes require replacement; updates use the API's declared
-mutable fields. Removing a nullable budget ceiling explicitly clears it.
-Equivalent fixed-scale monetary values keep the configured representation,
+Creation-only field changes require replacement, while updates use the API's
+declared mutable fields. Removing a nullable budget ceiling explicitly clears
+it. Equivalent fixed-scale monetary values keep the configured representation,
 avoiding repeated plans. Import discovers nonsecret creation fields from the
-current server response. An external edit after a reviewed plan's observed
-ETag refuses apply and requires a fresh review.
+current server response. An external edit after a reviewed plan's observed ETag
+refuses apply and requires a fresh review.
 
-Notification signing values use a separate write-only `secret` attribute,
-an ephemeral input and a positive `secret_version` change counter. Values are
+Notification signing values use a separate write-only `secret` attribute, an
+ephemeral input and a positive `secret_version` change counter. Values are
 excluded from saved plans and state. The acceptance suite checks that boundary
 with both engines. The provider rejects credential values in the state-bearing
 `definition` field.
 
-Destroy is conditional. Dependent resources and retained accounting/delivery
-history return a conflict. Delete notification rules before their destination
-or budget group, and detach dependent resources before deleting a project.
-Successful conditional deletion retains its audit and idempotent replay;
-deleting a signing destination removes its stored secret. See
+Destroy is conditional. Dependent resources and retained accounting and
+delivery history return a conflict. Delete notification rules before their
+destination or budget group, and detach dependent resources before deleting a
+project. Successful conditional deletion retains its audit and idempotent
+replay, and deleting a signing destination removes its stored secret. See
 [access administration](../use/access.md) for these API boundaries.
 
 The provider repository documents source builds, development overrides,
@@ -411,54 +498,60 @@ installation-wide artifact promotion through GitHub Actions, use the separate
 API keys use `openllmproxy_key` and revoke on destroy, preserving retained
 accounting. Their mutable ceiling fields are projected from budget windows,
 separately from accrued spend. An optional absolute `secret_file` atomically
-captures the one-time key into an owner-only file; state stores its path, not
-its value. Changing that path replaces the key. Omit the option when importing
-existing metadata, since an existing key's secret cannot be recovered. The
-operator removes the local file after revocation. An output failure preserves
-the created UUID in state so the authority can be reconciled or destroyed.
+captures the one-time key into an owner-only file, while state stores its path
+rather than its value. Changing that path replaces the key. Omit the option
+when importing existing metadata, since an existing key's secret cannot be
+recovered. The operator removes the local file after revocation. An output
+failure preserves the created UUID in state so the authority can be reconciled
+or destroyed.
 
-Providers manage draft configuration and validate write-only credential rotations
-before staging a new version. Normalized configuration defaults are projected to
-operator-selected fields. Credential slots use their own ETags and import with
-`PROVIDER_UUID/SLOT_UUID`; creation uses the observed pool ETag. Deleting a draft
-slot preserves published bindings and immutable versions. Parent deletion follows
-only atomic transitions from the same client's slot writes; foreign edits still
-refuse a saved destruction plan. See the provider README for the resource forms
-and partial-validation recovery behavior.
+Providers manage draft configuration and validate write-only credential
+rotations before staging a new version. Normalized configuration defaults are
+projected to operator-selected fields. Credential slots use their own ETags and
+import with `PROVIDER_UUID/SLOT_UUID`, while creation uses the observed pool
+ETag. Deleting a draft slot preserves published bindings and immutable
+versions. Parent deletion follows only atomic transitions from the same
+client's slot writes, and foreign edits still refuse a saved destruction plan.
+See the provider README for the resource forms and partial-validation recovery
+behavior.
 
-`openllmproxy_route` publishes validated immutable revisions atomically, preserving
-independent console drafts and existing routing policy. Target refresh preserves
-chosen facts; UUID import uses canonical provider-model references. Destroy retires
-the route and retains history and slug ownership. A project boundary change must
-use a new slug; saved plans refuse external publications committed afterward.
+`openllmproxy_route` publishes validated immutable revisions atomically,
+preserving independent console drafts and existing routing policy. Target
+refresh preserves chosen facts, and UUID import uses canonical provider-model
+references. Destroy retires the route and retains history and slug ownership. A
+project boundary change must use a new slug, and saved plans refuse external
+publications committed afterward.
 
-Routing-policy resources use `scope` and `scope_id`: installation (nil UUID),
-API key, or route draft. Import uses `SCOPE/UUID`. Their definitions replace the
-complete policy; removing a constraint returns it to the default. Destroy removes
-the explicit override while retaining a fresh ETag. The scoped API's settings,
-key or configuration authority remains required. Draft policy changes become
-live upon activation. Key/policy graphs coordinate only their own proven parent
-writes; a foreign parent or policy edit still invalidates a saved plan.
+Routing-policy resources use `scope` and `scope_id`, accepting installation
+(nil UUID), API key, or route draft. Import uses `SCOPE/UUID`. Their
+definitions replace the complete policy, and removing a constraint returns it
+to the default. Destroy removes the explicit override while retaining a fresh
+ETag. The scoped API's settings, key or configuration authority remains
+required. Draft policy changes become live upon activation. Key and policy
+graphs coordinate only their own proven parent writes, while a foreign parent
+or policy edit still invalidates a saved plan.
 
 `openllmproxy_guardrail` manages project-scoped `builtin.regex` definitions,
 conditional immutable policy revisions, UUID import and retirement. Existing
-serving revisions stay pinned; foreign saved
-plans are refused before dependent publication. Retained guardrail history can
-prevent project deletion. See [Named guardrails](../use/guardrails.md).
+serving revisions stay pinned, and foreign saved plans are refused before
+dependent publication. Retained guardrail history can prevent project deletion.
+See [Named guardrails](../use/guardrails.md).
 
 `openllmproxy_sink` manages scoped HTTPS JSON exports of content-free durable
 facts. Its UUID import reconstructs nonsecret definitions, and its sensitive
 write-only signing input uses a change counter and ephemeral variables. Neither
-saved plans nor state contain signing values. Actual installation workers deliver
-stable event IDs with exact-byte signatures and bounded retries; delivery counters
-do not change resource ETags. Destroy retires the destination and removes signing
-material while retaining identity/history. A saved plan refuses external edits.
-Project-owned history can prevent project deletion. See [Export sinks](observability.md#managed-export-sinks).
+saved plans nor state contain signing values. Actual installation workers
+deliver stable event IDs with exact-byte signatures and bounded retries, and
+delivery counters do not change resource ETags. Destroy retires the destination
+and removes signing material while retaining identity and history. A saved plan
+refuses external edits. Project-owned history can prevent project deletion. See
+[Export sinks](observability.md#managed-export-sinks).
 
 `openllmproxy_mcp_server` conditionally certifies project-owned Streamable HTTP
 registrations into immutable, pinned tool catalogs. Its sensitive write-only
 bearer uses an ephemeral value and public change counter. UUID imports exclude
-authentication material; reads never adopt live upstream drift. Updates repeat
-project authority and ETag checks after network certification outside database
-locks. Saved plans refuse foreign edits. Destroy removes the bearer and retains
-registration/revision history. See [Upstream MCP servers](../use/mcp-servers.md).
+authentication material, and reads never adopt live upstream drift. Updates
+repeat project authority and ETag checks after network certification outside
+database locks. Saved plans refuse foreign edits. Destroy removes the bearer
+and retains registration and revision history. See
+[Upstream MCP servers](../use/mcp-servers.md).
