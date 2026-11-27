@@ -3,6 +3,7 @@ package media
 import (
 	"encoding/json"
 	"math"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,21 +68,25 @@ func DecodeTranscription(form *staging.Form) (*Request, *Error) {
 		return nil, invalidMedia("The timestamp_granularities field requires verbose_json with word or segment values.")
 	case len(include) > 0 && (effective != "json" || !allOf(include, "logprobs")):
 		return nil, invalidMedia("The include field requires the json response format with logprobs values.")
-	case (len(names) > 0 || len(references) > 0) && (effective != "diarized_json" || len(names) == 0 || len(names) > 4 ||
-		len(names) != len(references) || !validSpeakerNames(names) || !validSpeakerReferences(references)):
+	case !validKnownSpeakers(effective, names, references):
 		return nil, invalidMedia("The known speaker fields require diarized_json with at most four name/reference pairs.")
 	case chunking != nil && *chunking != "auto" && !json.Valid([]byte(*chunking)):
 		return nil, invalidMedia(`chunking_strategy must be "auto" or JSON.`)
 	}
 	p := Transcription{
 		File: *file, Format: format, Language: language, Prompt: prompt, Temperature: temperature,
-		Include: include, TimestampGranularities: granularities, KnownSpeakerNames: names,
-		KnownSpeakerReferences: references, Stream: ptr.Value(stream),
-	}
-	if chunking != nil {
-		p.ChunkingStrategy = *chunking
+		Include: include, TimestampGranularities: granularities, ChunkingStrategy: ptr.Value(chunking),
+		KnownSpeakerNames: names, KnownSpeakerReferences: references, Stream: ptr.Value(stream),
 	}
 	return formRequest(form, route, p, extra)
+}
+
+func validKnownSpeakers(effective string, names, references []string) bool {
+	if len(names) == 0 && len(references) == 0 {
+		return true
+	}
+	return effective == "diarized_json" && len(names) > 0 && len(names) <= 4 &&
+		len(names) == len(references) && validSpeakerNames(names) && validSpeakerReferences(references)
 }
 
 var transcriptionControls = []string{"stream", "language", "include", "timestamp_granularities", "chunking_strategy", "known_speaker_names", "known_speaker_references"}
@@ -146,8 +151,8 @@ func encodeTranscription(r *Request, p Transcription, _ connectors.Config, model
 		fields = textValue(fields, "known_speaker_references[]", p.KnownSpeakerReferences[i])
 	}
 	fields = textValue(fields, "stream", strconv.FormatBool(p.Stream))
-	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/transcriptions"}, Accept: "application/json",
-		Body: FormBody(extraFields(fields, r.Extra())), Response: transcriptReply(p.Stream, ptr.Or(p.Format, "json")), Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "audio/transcriptions"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.formExtra)), Response: transcriptReply(p.Stream, ptr.Or(p.Format, "json")), Ambiguous: true}, nil
 }
 
 func encodeTranslation(r *Request, p Translation, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -156,8 +161,8 @@ func encodeTranslation(r *Request, p Translation, _ connectors.Config, model str
 	fields = textField(fields, "prompt", p.Prompt)
 	fields = textField(fields, "response_format", p.Format)
 	fields = textField(fields, "temperature", float64Text(p.Temperature))
-	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/translations"}, Accept: "application/json",
-		Body: FormBody(extraFields(fields, r.Extra())), Response: TranscriptReply{Format: ptr.Or(p.Format, "json")}, Ambiguous: true}, nil
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "audio/translations"}, Accept: "application/json",
+		Body: FormBody(extraFields(fields, r.formExtra)), Response: TranscriptReply{Format: ptr.Or(p.Format, "json")}, Ambiguous: true}, nil
 }
 
 func (p Transcription) withFormat(format *string) Transcription {

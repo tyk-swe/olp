@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,18 +51,19 @@ func (JSONSource) source() {}
 func (FormSource) source() {}
 
 type Request struct {
-	route  string
-	params Params
-	extra  map[string]any
-	origin Source
+	route     string
+	params    Params
+	jsonExtra map[string]json.RawMessage
+	formExtra map[string]string
+	origin    Source
 }
 
-func (r *Request) Route() string         { return r.route }
-func (r *Request) Params() Params        { return r.params }
-func (r *Request) Extra() map[string]any { return r.extra }
-func (r *Request) Source() Source        { return r.origin }
-func (r *Request) Op() Operation         { return r.params.Operation() }
-func (r *Request) Stream() bool          { return r.params.streaming() }
+func (r *Request) Route() string  { return r.route }
+func (r *Request) Params() Params { return r.params }
+func (r *Request) Source() Source { return r.origin }
+func (r *Request) Op() Operation  { return r.params.Operation() }
+func (r *Request) Stream() bool   { return r.params.streaming() }
+func (r *Request) hasExtra() bool { return len(r.jsonExtra) > 0 || len(r.formExtra) > 0 }
 
 func (r *Request) Mode() string {
 	switch {
@@ -168,71 +168,48 @@ func decode(op Operation, source Source) (*Request, *Error) {
 	return nil, invalidMedia("The media operation is not supported.")
 }
 
-func decodeJSON(body []byte, params any) (string, JSONSource, map[string]any, *Error) {
+func decodeJSON[P Params](body []byte, known ...string) (string, P, JSONSource, map[string]json.RawMessage, *Error) {
+	var zero P
 	invalid := invalidMedia("The request body is not valid JSON.")
 	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
-		return "", JSONSource{}, nil, invalid
+		return "", zero, JSONSource{}, nil, invalid
 	}
 	document, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil || document.Root().Kind() != oif.Object {
-		return "", JSONSource{}, nil, invalid
+		return "", zero, JSONSource{}, nil, invalid
 	}
 	var model struct {
 		Model string `json:"model"`
 	}
-	if json.Unmarshal(body, &model) != nil || json.Unmarshal(body, params) != nil {
-		return "", JSONSource{}, nil, invalid
+	var params P
+	if json.Unmarshal(body, &model) != nil || json.Unmarshal(body, &params) != nil {
+		return "", zero, JSONSource{}, nil, invalid
 	}
-	known := jsonNames(params)
-	extra := map[string]any{}
-	for name, raw := range document.Fields() {
-		if name == "model" || slices.Contains(known, name) {
-			continue
-		}
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.UseNumber()
-		var value any
-		if decoder.Decode(&value) != nil {
-			return "", JSONSource{}, nil, invalid
-		}
-		extra[name] = value
-	}
-	return model.Model, JSONSource{Document: document}, extra, nil
+	extra := diffRawFields(document.Fields(), append([]string{"model"}, known...)...)
+	return model.Model, params, JSONSource{Document: document}, extra, nil
 }
 
-func jsonNames(params any) []string {
-	t := reflect.TypeOf(params).Elem()
-	names := make([]string, 0, t.NumField())
-	for field := range t.Fields() {
-		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-func formExtensions(form *staging.Form) (map[string]any, *Error) {
+func formExtensions(form *staging.Form) (map[string]string, *Error) {
 	extensions := form.TakeExtensions()
 	if err := form.Err(); err != nil {
 		return nil, invalidMedia(err.Error())
 	}
-	extra := make(map[string]any, len(extensions))
-	for name, value := range extensions {
-		extra[name] = value
-	}
-	return extra, nil
+	return extensions, nil
 }
 
-func newRequest(route string, params Params, extra map[string]any, source Source) (*Request, *Error) {
+func newJSONRequest(route string, params Params, extra map[string]json.RawMessage, source JSONSource) (*Request, *Error) {
 	if !validRouteSlug(route) {
 		return nil, invalidMedia("The model field must name a route.")
 	}
-	return &Request{route: route, params: params, extra: extra, origin: source}, nil
+	return &Request{route: route, params: params, jsonExtra: extra, origin: source}, nil
 }
 
-func formRequest(form *staging.Form, route string, params Params, extra map[string]any) (*Request, *Error) {
+func formRequest(form *staging.Form, route string, params Params, extra map[string]string) (*Request, *Error) {
+	if !validRouteSlug(route) {
+		return nil, invalidMedia("The model field must name a route.")
+	}
 	parts, normalized := form.SourceFields()
-	return newRequest(route, params, extra, FormSource{Parts: parts, Normalized: normalized})
+	return &Request{route: route, params: params, formExtra: extra, origin: FormSource{Parts: parts, Normalized: normalized}}, nil
 }
 
 func validRouteSlug(value string) bool {

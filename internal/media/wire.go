@@ -2,12 +2,13 @@ package media
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
+	"maps"
 	"net/url"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/platform/staging"
@@ -20,34 +21,118 @@ const (
 	MaxVideoPromptLength             = 32000
 )
 
+var nowFunc = time.Now
+
+func nowUnix() int64 {
+	return nowFunc().Unix()
+}
+
 type AudioResult struct {
 	Audio       []byte
 	ContentType string
 	Tokens      *ImageUsage
 }
 
-func jsonDoc(fields map[string]any, extra map[string]any) ([]byte, *Error) {
-	doc := make(map[string]any, len(fields)+len(extra))
-	for name, value := range fields {
-		if value == nil {
-			continue
-		}
-		if v := reflect.ValueOf(value); v.Kind() == reflect.Pointer && v.IsNil() {
-			continue
-		}
-		doc[name] = value
+func parseRawObject(body []byte) (map[string]json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		return nil, errors.New("JSON value is not an object")
 	}
+	return fields, nil
+}
+
+func decodeField[T any](fields map[string]json.RawMessage, name string, target *T) error {
+	raw, ok := fields[name]
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(raw, target)
+}
+
+func firstErr(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func diffRawFields(doc map[string]json.RawMessage, known ...string) map[string]json.RawMessage {
+	var extra map[string]json.RawMessage
+	for name, value := range doc {
+		if slices.Contains(known, name) {
+			continue
+		}
+		if extra == nil {
+			extra = map[string]json.RawMessage{}
+		}
+		extra[name] = value
+	}
+	return extra
+}
+
+func mergeRawFields(base, extra map[string]json.RawMessage) map[string]json.RawMessage {
+	merged := make(map[string]json.RawMessage, len(base)+len(extra))
+	maps.Copy(merged, base)
 	for name, value := range extra {
-		if _, exists := doc[name]; exists {
+		if _, exists := merged[name]; !exists {
+			merged[name] = value
+		}
+	}
+	return merged
+}
+
+func encodeRequestJSON[T any](payload T, extra map[string]json.RawMessage) ([]byte, *Error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, invalidMedia("The media request could not be encoded.")
+	}
+	if len(extra) == 0 {
+		return raw, nil
+	}
+	fields, err := parseRawObject(raw)
+	if err != nil {
+		return nil, invalidMedia("The media request could not be encoded.")
+	}
+	merged := make(map[string]json.RawMessage, len(fields)+len(extra))
+	maps.Copy(merged, fields)
+	for name, value := range extra {
+		if _, exists := merged[name]; exists {
 			return nil, invalidMedia("The extension field " + strconv.Quote(name) + " collides with a request field.")
 		}
-		doc[name] = value
+		merged[name] = value
 	}
-	body, err := json.Marshal(doc)
+	body, err := json.Marshal(merged)
 	if err != nil {
 		return nil, invalidMedia("The media request could not be encoded.")
 	}
 	return body, nil
+}
+
+func marshalWithExtra[T any](payload T, extra map[string]json.RawMessage) ([]byte, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil || len(extra) == 0 {
+		return raw, err
+	}
+	fields, err := parseRawObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(mergeRawFields(fields, extra))
+}
+
+func parseDimensions(size string) (int, int, bool) {
+	widthText, heightText, ok := strings.Cut(size, "x")
+	if !ok {
+		return 0, 0, false
+	}
+	width, wErr := strconv.Atoi(widthText)
+	height, hErr := strconv.Atoi(heightText)
+	if wErr != nil || hErr != nil {
+		return 0, 0, false
+	}
+	return width, height, true
 }
 
 func textField(fields []staging.Field, name string, value *string) []staging.Field {
@@ -61,45 +146,14 @@ func textValue(fields []staging.Field, name, value string) []staging.Field {
 	return append(fields, staging.Field{Name: name, Value: staging.Text(value)})
 }
 
-func extraFields(fields []staging.Field, extra map[string]any) []staging.Field {
+func extraFields(fields []staging.Field, extra map[string]string) []staging.Field {
 	if len(extra) == 0 {
 		return fields
 	}
-	names := make([]string, 0, len(extra))
-	for name := range extra {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, name := range names {
-		value := extra[name]
-		if values, ok := value.([]any); ok {
-			field := name
-			if !strings.HasSuffix(field, "[]") {
-				field += "[]"
-			}
-			for _, item := range values {
-				text := extraText(item)
-				fields = append(fields, staging.Field{Name: field, Value: staging.Text(text)})
-			}
-			continue
-		}
-		text := extraText(value)
-		fields = append(fields, staging.Field{Name: name, Value: staging.Text(text)})
+	for _, name := range slices.Sorted(maps.Keys(extra)) {
+		fields = append(fields, staging.Field{Name: name, Value: staging.Text(extra[name])})
 	}
 	return fields
-}
-
-func extraText(value any) string {
-	switch value := value.(type) {
-	case string:
-		return value
-	default:
-		data, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Sprint(value)
-		}
-		return string(data)
-	}
 }
 
 type Order int

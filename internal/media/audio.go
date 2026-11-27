@@ -3,7 +3,7 @@ package media
 import "encoding/binary"
 
 func SilentWAV(milliseconds int) []byte {
-	return wavFromPCM(make([]byte, 16000*milliseconds/1000*2), 16000)
+	return wavFromPCM(make([]byte, 16000*max(milliseconds, 0)/1000*2), 16000)
 }
 
 func wavFromPCM(pcm []byte, rate int) []byte {

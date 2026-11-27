@@ -1,11 +1,9 @@
 package media
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,9 +14,9 @@ type ImageResult struct {
 	CreatedAt  int64
 	Images     []ImageArtifact
 	Usage      *ImageUsage
-	Extra      map[string]any
-	DataExtra  []map[string]any
-	UsageExtra map[string]any
+	Extra      map[string]json.RawMessage
+	DataExtra  []map[string]json.RawMessage
+	UsageExtra map[string]json.RawMessage
 }
 
 type ImageArtifact struct {
@@ -37,109 +35,155 @@ type ImageUsage struct {
 	ImageOutputTokens *int64
 }
 
+type imageTokenDetailWire struct {
+	ImageTokens *int64 `json:"image_tokens"`
+}
+
+type imageResponseItemWire struct {
+	URL           string  `json:"url,omitempty"`
+	B64JSON       string  `json:"b64_json,omitempty"`
+	RevisedPrompt *string `json:"revised_prompt,omitempty"`
+}
+
+type imageResponseUsageWire struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	TotalTokens  int64 `json:"total_tokens"`
+}
+
+type imageResponseWire struct {
+	Created int64             `json:"created"`
+	Data    []json.RawMessage `json:"data"`
+	Usage   json.RawMessage   `json:"usage,omitempty"`
+}
+
 func DecodeImageResponse(body []byte, stage StageImage) (*ImageResult, *Error) {
-	var encodedWire struct {
-		Created int64 `json:"created"`
-		Data    []struct {
-			URL           *string `json:"url"`
-			B64           *string `json:"b64_json"`
-			RevisedPrompt *string `json:"revised_prompt"`
-		} `json:"data"`
-		Usage *struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
-			TotalTokens  int64 `json:"total_tokens"`
-			InputDetail  *struct {
-				ImageTokens *int64 `json:"image_tokens"`
-			} `json:"input_tokens_details"`
-			OutputDetail *struct {
-				ImageTokens *int64 `json:"image_tokens"`
-			} `json:"output_tokens_details"`
-		} `json:"usage"`
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
+	raw, err := parseRawObject(body)
+	if err != nil {
 		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
+	var created int64
+	var rawData []json.RawMessage
+	if firstErr(decodeField(raw, "created", &created), decodeField(raw, "data", &rawData)) != nil {
 		return nil, ProtocolError("The provider image response is not valid JSON.")
 	}
-	if len(encodedWire.Data) == 0 {
+	if len(rawData) == 0 {
 		return nil, ProtocolError("The provider image response contains no images.")
 	}
-	extra := diffFields(doc, "created", "data", "usage")
-	result := &ImageResult{CreatedAt: encodedWire.Created, Extra: extra}
-	if data, ok := doc["data"].([]any); ok {
-		result.DataExtra = make([]map[string]any, len(data))
-		for i, item := range data {
-			if object, ok := item.(map[string]any); ok {
-				result.DataExtra[i] = diffFields(object, "url", "b64_json", "revised_prompt")
-			}
+	images := make([]ImageArtifact, len(rawData))
+	dataExtra := make([]map[string]json.RawMessage, len(rawData))
+	for i, itemBytes := range rawData {
+		artifact, extra, failure := decodeImageItem(itemBytes, i, stage)
+		if failure != nil {
+			return nil, failure
 		}
+		images[i] = artifact
+		dataExtra[i] = extra
 	}
-	if usageDoc, ok := doc["usage"].(map[string]any); ok {
-		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens")
+	usage, usageExtra, failure := decodeImageUsage(raw["usage"])
+	if failure != nil {
+		return nil, failure
 	}
-	for i, image := range encodedWire.Data {
-		artifact := ImageArtifact{RevisedPrompt: image.RevisedPrompt}
-		switch {
-		case image.URL != nil && image.B64 == nil:
-			artifact.URL = *image.URL
-		case image.B64 != nil && image.URL == nil:
-			staged, err := stage(*image.B64, i)
-			if err != nil {
-				return nil, err
-			}
-			handle := staged.Handle
-			artifact.Handle = &handle
-		default:
-			return nil, ProtocolError("The provider image result must carry exactly one of url or b64_json.")
-		}
-		result.Images = append(result.Images, artifact)
+	return &ImageResult{
+		CreatedAt:  created,
+		Images:     images,
+		Usage:      usage,
+		Extra:      diffRawFields(raw, "created", "data", "usage"),
+		DataExtra:  dataExtra,
+		UsageExtra: usageExtra,
+	}, nil
+}
+
+func decodeImageItem(raw []byte, index int, stage StageImage) (ImageArtifact, map[string]json.RawMessage, *Error) {
+	fields, err := parseRawObject(raw)
+	if err != nil {
+		return ImageArtifact{}, nil, ProtocolError("The provider image response is not valid JSON.")
 	}
-	if encodedWire.Usage != nil {
-		result.Usage = &ImageUsage{
-			InputTokens:  encodedWire.Usage.InputTokens,
-			OutputTokens: encodedWire.Usage.OutputTokens,
-			TotalTokens:  encodedWire.Usage.TotalTokens,
-		}
-		if encodedWire.Usage.InputDetail != nil {
-			result.Usage.ImageInputTokens = encodedWire.Usage.InputDetail.ImageTokens
-		}
-		if encodedWire.Usage.OutputDetail != nil && encodedWire.Usage.OutputDetail.ImageTokens != nil {
-			result.Usage.ImageOutputTokens = encodedWire.Usage.OutputDetail.ImageTokens
-		} else {
-			output := encodedWire.Usage.OutputTokens
-			result.Usage.ImageOutputTokens = &output
-		}
+	var urlValue, b64Value, revisedPrompt *string
+	if firstErr(
+		decodeField(fields, "url", &urlValue),
+		decodeField(fields, "b64_json", &b64Value),
+		decodeField(fields, "revised_prompt", &revisedPrompt),
+	) != nil {
+		return ImageArtifact{}, nil, ProtocolError("The provider image response is not valid JSON.")
 	}
-	return result, nil
+	extra := diffRawFields(fields, "url", "b64_json", "revised_prompt")
+	switch {
+	case urlValue != nil && b64Value == nil:
+		return ImageArtifact{URL: *urlValue, RevisedPrompt: revisedPrompt}, extra, nil
+	case b64Value != nil && urlValue == nil:
+		staged, failure := stage(*b64Value, index)
+		if failure != nil {
+			return ImageArtifact{}, nil, failure
+		}
+		handle := staged.Handle
+		return ImageArtifact{Handle: &handle, RevisedPrompt: revisedPrompt}, extra, nil
+	}
+	return ImageArtifact{}, nil, ProtocolError("The provider image result must carry exactly one of url or b64_json.")
+}
+
+func decodeImageUsage(raw json.RawMessage) (*ImageUsage, map[string]json.RawMessage, *Error) {
+	if len(raw) == 0 || isJSON(raw, "null") {
+		return nil, nil, nil
+	}
+	fields, err := parseRawObject(raw)
+	if err != nil {
+		return nil, nil, ProtocolError("The provider image response is not valid JSON.")
+	}
+	var inputTokens, outputTokens, totalTokens int64
+	var inputDetail, outputDetail *imageTokenDetailWire
+	if firstErr(
+		decodeField(fields, "input_tokens", &inputTokens),
+		decodeField(fields, "output_tokens", &outputTokens),
+		decodeField(fields, "total_tokens", &totalTokens),
+		decodeField(fields, "input_tokens_details", &inputDetail),
+		decodeField(fields, "output_tokens_details", &outputDetail),
+	) != nil {
+		return nil, nil, ProtocolError("The provider image response is not valid JSON.")
+	}
+	usage := &ImageUsage{
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		TotalTokens:  totalTokens,
+	}
+	if inputDetail != nil {
+		usage.ImageInputTokens = inputDetail.ImageTokens
+	}
+	if outputDetail != nil && outputDetail.ImageTokens != nil {
+		usage.ImageOutputTokens = outputDetail.ImageTokens
+	} else {
+		output := outputTokens
+		usage.ImageOutputTokens = &output
+	}
+	return usage, diffRawFields(fields, "input_tokens", "output_tokens", "total_tokens"), nil
 }
 
 type nativeImages func(body []byte, stage StageImage) (*ImageResult, *Error)
 
+type vertexPredictionWire struct {
+	BytesBase64Encoded string `json:"bytesBase64Encoded"`
+	MIMEType           string `json:"mimeType"`
+}
+
+type vertexImageResponseWire struct {
+	Predictions []vertexPredictionWire `json:"predictions"`
+	Error       *string                `json:"error"`
+}
+
 func vertexImages(expected int64) nativeImages {
 	return func(body []byte, stage StageImage) (*ImageResult, *Error) {
-		var encodedWire struct {
-			Predictions []struct {
-				BytesBase64Encoded string `json:"bytesBase64Encoded"`
-				MIMEType           string `json:"mimeType"`
-			} `json:"predictions"`
-			Error *string `json:"error"`
+		var wireResp vertexImageResponseWire
+		if err := json.Unmarshal(body, &wireResp); err != nil {
+			return nil, ProtocolError("The provider image response is not valid JSON.")
 		}
-		if failure := decodeNativeImages(body, &encodedWire); failure != nil {
-			return nil, failure
-		}
-		if encodedWire.Error != nil && *encodedWire.Error != "" {
+		if wireResp.Error != nil && *wireResp.Error != "" {
 			return nil, ProtocolError("The provider returned an image error.")
 		}
-		if encodedWire.Predictions == nil {
+		if wireResp.Predictions == nil {
 			return nil, ProtocolError("The provider image response has no predictions.")
 		}
-		encoded := make([]string, len(encodedWire.Predictions))
-		for i, prediction := range encodedWire.Predictions {
+		encoded := make([]string, len(wireResp.Predictions))
+		for i, prediction := range wireResp.Predictions {
 			if prediction.MIMEType != "" && !strings.HasPrefix(prediction.MIMEType, "image/") {
 				return nil, ProtocolError("The provider image response carries an invalid MIME type.")
 			}
@@ -149,20 +193,22 @@ func vertexImages(expected int64) nativeImages {
 	}
 }
 
+type bedrockImageResponseWire struct {
+	Images        []string  `json:"images"`
+	Error         *string   `json:"error"`
+	FinishReasons []*string `json:"finish_reasons"`
+}
+
 func bedrockImages(expected int64) nativeImages {
 	return func(body []byte, stage StageImage) (*ImageResult, *Error) {
-		var encodedWire struct {
-			Images        []string  `json:"images"`
-			Error         *string   `json:"error"`
-			FinishReasons []*string `json:"finish_reasons"`
+		var wireResp bedrockImageResponseWire
+		if err := json.Unmarshal(body, &wireResp); err != nil {
+			return nil, ProtocolError("The provider image response is not valid JSON.")
 		}
-		if failure := decodeNativeImages(body, &encodedWire); failure != nil {
-			return nil, failure
-		}
-		if encodedWire.Error != nil && *encodedWire.Error != "" {
+		if wireResp.Error != nil && *wireResp.Error != "" {
 			return nil, ProtocolError("The provider returned an image error.")
 		}
-		for _, reason := range encodedWire.FinishReasons {
+		for _, reason := range wireResp.FinishReasons {
 			switch {
 			case reason == nil:
 			case strings.HasPrefix(*reason, "Filter reason:"):
@@ -171,20 +217,11 @@ func bedrockImages(expected int64) nativeImages {
 				return nil, ProtocolError("The provider reported an image inference error.")
 			}
 		}
-		if encodedWire.Images == nil {
+		if wireResp.Images == nil {
 			return nil, ProtocolError("The provider image response has no images.")
 		}
-		return stageNativeImages(encodedWire.Images, expected, stage)
+		return stageNativeImages(wireResp.Images, expected, stage)
 	}
-}
-
-func decodeNativeImages(body []byte, target any) *Error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if decoder.Decode(target) != nil {
-		return ProtocolError("The provider image response is not valid JSON.")
-	}
-	return nil
 }
 
 func stageNativeImages(encoded []string, expected int64, stage StageImage) (*ImageResult, *Error) {
@@ -200,72 +237,51 @@ func stageNativeImages(encoded []string, expected int64, stage StageImage) (*Ima
 		if failure != nil {
 			return nil, failure
 		}
-		images[i] = ImageArtifact{Handle: &staged.Handle}
+		handle := staged.Handle
+		images[i] = ImageArtifact{Handle: &handle}
 	}
-	return &ImageResult{CreatedAt: time.Now().Unix(), Images: images}, nil
-}
-
-func diffFields(doc map[string]any, known ...string) map[string]any {
-	var extra map[string]any
-	for name, value := range doc {
-		keep := slices.Contains(known, name)
-		if !keep {
-			if extra == nil {
-				extra = map[string]any{}
-			}
-			extra[name] = value
-		}
-	}
-	return extra
+	return &ImageResult{CreatedAt: nowUnix(), Images: images}, nil
 }
 
 func EncodeImageResponse(result *ImageResult) ([]byte, []string, *Error) {
 	var markers []string
-	data := make([]any, len(result.Images))
+	data := make([]json.RawMessage, len(result.Images))
 	for i, image := range result.Images {
-		item := map[string]any{}
+		item := imageResponseItemWire{RevisedPrompt: image.RevisedPrompt}
 		switch {
 		case image.URL != "":
-			item["url"] = image.URL
+			item.URL = image.URL
 		case image.Handle != nil:
 			marker := "__olp_streamed_media_" + rand.Text() + "__"
-			item["b64_json"] = marker
+			item.B64JSON = marker
 			markers = append(markers, marker)
 		default:
 			return nil, nil, ProtocolError("The provider image result carries no payload.")
 		}
-		if image.RevisedPrompt != nil {
-			item["revised_prompt"] = *image.RevisedPrompt
-		}
+		var itemExtra map[string]json.RawMessage
 		if i < len(result.DataExtra) {
-			for name, value := range result.DataExtra[i] {
-				if _, exists := item[name]; !exists {
-					item[name] = value
-				}
-			}
+			itemExtra = result.DataExtra[i]
 		}
-		data[i] = item
+		rawItem, err := marshalWithExtra(item, itemExtra)
+		if err != nil {
+			return nil, nil, ProtocolError("The provider image metadata could not be encoded.")
+		}
+		data[i] = rawItem
 	}
-	doc := map[string]any{"created": result.CreatedAt, "data": data}
+	var rawUsage json.RawMessage
 	if result.Usage != nil {
-		usage := map[string]any{
-			"input_tokens":  result.Usage.InputTokens,
-			"output_tokens": result.Usage.OutputTokens,
-			"total_tokens":  result.Usage.TotalTokens,
+		usageWire := imageResponseUsageWire{
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+			TotalTokens:  result.Usage.TotalTokens,
 		}
-		for name, value := range result.UsageExtra {
-			if _, exists := usage[name]; !exists {
-				usage[name] = value
-			}
+		encodedUsage, err := marshalWithExtra(usageWire, result.UsageExtra)
+		if err != nil {
+			return nil, nil, ProtocolError("The provider image metadata could not be encoded.")
 		}
-		doc["usage"] = usage
+		rawUsage = encodedUsage
 	}
-	for name, value := range result.Extra {
-		if _, exists := doc[name]; !exists {
-			doc[name] = value
-		}
-	}
-	body, err := json.Marshal(doc)
+	body, err := marshalWithExtra(imageResponseWire{Created: result.CreatedAt, Data: data, Usage: rawUsage}, result.Extra)
 	if err != nil {
 		return nil, nil, ProtocolError("The provider image metadata could not be encoded.")
 	}
@@ -278,30 +294,37 @@ type MediaUsage struct {
 	ImageInput, ImageOutput *int64
 }
 
+type mediaInputDetailsWire struct {
+	CachedTokens *int64 `json:"cached_tokens"`
+	AudioTokens  *int64 `json:"audio_tokens"`
+	ImageTokens  *int64 `json:"image_tokens"`
+}
+
+type mediaOutputDetailsWire struct {
+	ImageTokens *int64 `json:"image_tokens"`
+}
+
+type mediaPromptDetailsWire struct {
+	CachedTokens *int64 `json:"cached_tokens"`
+}
+
+type mediaUsageWire struct {
+	InputTokens        *int64                  `json:"input_tokens"`
+	PromptTokens       *int64                  `json:"prompt_tokens"`
+	OutputTokens       *int64                  `json:"output_tokens"`
+	CompletionTokens   *int64                  `json:"completion_tokens"`
+	InputTokenDetails  *mediaInputDetailsWire  `json:"input_tokens_details"`
+	InputTokenDetail   *mediaInputDetailsWire  `json:"input_token_details"`
+	OutputTokenDetails *mediaOutputDetailsWire `json:"output_tokens_details"`
+	PromptTokenDetails *mediaPromptDetailsWire `json:"prompt_tokens_details"`
+}
+
+type mediaUsageFrameWire struct {
+	Usage *mediaUsageWire `json:"usage"`
+}
+
 func ObserveMediaUsage(data string, op Operation) *MediaUsage {
-	var frame struct {
-		Usage *struct {
-			InputTokens       *int64 `json:"input_tokens"`
-			PromptTokens      *int64 `json:"prompt_tokens"`
-			OutputTokens      *int64 `json:"output_tokens"`
-			CompletionTokens  *int64 `json:"completion_tokens"`
-			InputTokenDetails *struct {
-				CachedTokens *int64 `json:"cached_tokens"`
-				AudioTokens  *int64 `json:"audio_tokens"`
-				ImageTokens  *int64 `json:"image_tokens"`
-			} `json:"input_tokens_details"`
-			InputTokenDetail *struct {
-				AudioTokens *int64 `json:"audio_tokens"`
-				ImageTokens *int64 `json:"image_tokens"`
-			} `json:"input_token_details"`
-			OutputTokenDetails *struct {
-				ImageTokens *int64 `json:"image_tokens"`
-			} `json:"output_tokens_details"`
-			PromptTokenDetails *struct {
-				CachedTokens *int64 `json:"cached_tokens"`
-			} `json:"prompt_tokens_details"`
-		} `json:"usage"`
-	}
+	var frame mediaUsageFrameWire
 	if err := json.Unmarshal([]byte(data), &frame); err != nil || frame.Usage == nil {
 		return nil
 	}
@@ -309,44 +332,55 @@ func ObserveMediaUsage(data string, op Operation) *MediaUsage {
 	m := &MediaUsage{
 		Input:  firstInt(usage.InputTokens, usage.PromptTokens),
 		Output: firstInt(usage.OutputTokens, usage.CompletionTokens),
-	}
-	if usage.InputTokenDetails != nil && usage.InputTokenDetails.CachedTokens != nil {
-		m.Cached = usage.InputTokenDetails.CachedTokens
-	} else if usage.PromptTokenDetails != nil {
-		m.Cached = usage.PromptTokenDetails.CachedTokens
-	}
-	imageDetail := func() *int64 {
-		if usage.InputTokenDetails != nil && usage.InputTokenDetails.ImageTokens != nil {
-			return usage.InputTokenDetails.ImageTokens
-		}
-		if usage.InputTokenDetail != nil {
-			return usage.InputTokenDetail.ImageTokens
-		}
-		return nil
-	}
-	audioDetail := func() *int64 {
-		if usage.InputTokenDetails != nil && usage.InputTokenDetails.AudioTokens != nil {
-			return usage.InputTokenDetails.AudioTokens
-		}
-		if usage.InputTokenDetail != nil {
-			return usage.InputTokenDetail.AudioTokens
-		}
-		return nil
+		Cached: usageCachedTokens(usage),
 	}
 	switch op {
 	case OpSpeech:
 		m.AudioOutput = m.Output
 	case OpTranscription:
-		m.AudioInput = audioDetail()
+		m.AudioInput = usageAudioTokens(usage)
 	case OpImageGeneration, OpImageEdit, OpImageVariation:
-		m.ImageInput = imageDetail()
-		if usage.OutputTokenDetails != nil && usage.OutputTokenDetails.ImageTokens != nil {
-			m.ImageOutput = usage.OutputTokenDetails.ImageTokens
-		} else {
-			m.ImageOutput = m.Output
-		}
+		m.ImageInput = usageImageInputTokens(usage)
+		m.ImageOutput = usageImageOutputTokens(usage, m.Output)
 	}
 	return m
+}
+
+func usageCachedTokens(usage *mediaUsageWire) *int64 {
+	if usage.InputTokenDetails != nil && usage.InputTokenDetails.CachedTokens != nil {
+		return usage.InputTokenDetails.CachedTokens
+	}
+	if usage.PromptTokenDetails != nil {
+		return usage.PromptTokenDetails.CachedTokens
+	}
+	return nil
+}
+
+func usageImageInputTokens(usage *mediaUsageWire) *int64 {
+	if usage.InputTokenDetails != nil && usage.InputTokenDetails.ImageTokens != nil {
+		return usage.InputTokenDetails.ImageTokens
+	}
+	if usage.InputTokenDetail != nil {
+		return usage.InputTokenDetail.ImageTokens
+	}
+	return nil
+}
+
+func usageImageOutputTokens(usage *mediaUsageWire, fallback *int64) *int64 {
+	if usage.OutputTokenDetails != nil && usage.OutputTokenDetails.ImageTokens != nil {
+		return usage.OutputTokenDetails.ImageTokens
+	}
+	return fallback
+}
+
+func usageAudioTokens(usage *mediaUsageWire) *int64 {
+	if usage.InputTokenDetails != nil && usage.InputTokenDetails.AudioTokens != nil {
+		return usage.InputTokenDetails.AudioTokens
+	}
+	if usage.InputTokenDetail != nil {
+		return usage.InputTokenDetail.AudioTokens
+	}
+	return nil
 }
 
 func firstInt(values ...*int64) *int64 {

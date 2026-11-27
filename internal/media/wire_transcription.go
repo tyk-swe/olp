@@ -1,9 +1,6 @@
 package media
 
-import (
-	"bytes"
-	"encoding/json"
-)
+import "encoding/json"
 
 type TranscriptionResult struct {
 	TextOnly        bool
@@ -12,7 +9,7 @@ type TranscriptionResult struct {
 	Language        *string
 	DurationSeconds *float64
 	Segments        []TranscriptionSegment
-	Extra           map[string]any
+	Extra           map[string]json.RawMessage
 }
 
 type TranscriptionSegment struct {
@@ -21,7 +18,38 @@ type TranscriptionSegment struct {
 	End     float64
 	Text    string
 	Speaker *string
-	Extra   map[string]any
+	Extra   map[string]json.RawMessage
+}
+
+type transcriptionAudioDetailWire struct {
+	AudioTokens *int64 `json:"audio_tokens"`
+}
+
+type transcriptionUsageWire struct {
+	Type         string                        `json:"type"`
+	InputTokens  int64                         `json:"input_tokens"`
+	OutputTokens int64                         `json:"output_tokens"`
+	TotalTokens  int64                         `json:"total_tokens"`
+	InputDetail  *transcriptionAudioDetailWire `json:"input_token_details"`
+}
+
+type transcriptionTextOnlyWire struct {
+	Text string `json:"text"`
+}
+
+type transcriptionSegmentWire struct {
+	ID      json.RawMessage `json:"id,omitempty"`
+	Start   float64         `json:"start"`
+	End     float64         `json:"end"`
+	Text    string          `json:"text"`
+	Speaker *string         `json:"speaker,omitempty"`
+}
+
+type transcriptionResponseWire struct {
+	Text     string             `json:"text"`
+	Language *string            `json:"language,omitempty"`
+	Duration *float64           `json:"duration,omitempty"`
+	Segments *[]json.RawMessage `json:"segments,omitempty"`
 }
 
 func TranscriptionFormatIsText(format string) bool {
@@ -29,128 +57,151 @@ func TranscriptionFormatIsText(format string) bool {
 }
 
 func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
-	var encodedWire struct {
-		Text     *string  `json:"text"`
-		Language *string  `json:"language"`
-		Duration *float64 `json:"duration"`
-		Segments []struct {
-			ID      json.RawMessage `json:"id"`
-			Start   float64         `json:"start"`
-			End     float64         `json:"end"`
-			Text    string          `json:"text"`
-			Speaker *string         `json:"speaker"`
-		} `json:"segments"`
-		Usage *struct {
-			Type         string `json:"type"`
-			InputTokens  int64  `json:"input_tokens"`
-			OutputTokens int64  `json:"output_tokens"`
-			TotalTokens  int64  `json:"total_tokens"`
-			InputDetail  *struct {
-				AudioTokens *int64 `json:"audio_tokens"`
-			} `json:"input_token_details"`
-		} `json:"usage"`
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(body, &doc); err != nil {
+	raw, err := parseRawObject(body)
+	if err != nil {
 		return nil, ProtocolError("The provider transcription is not valid JSON.")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&encodedWire); err != nil {
+	var text, language *string
+	var duration *float64
+	var rawSegments []json.RawMessage
+	var usage *transcriptionUsageWire
+	if firstErr(
+		decodeField(raw, "text", &text),
+		decodeField(raw, "language", &language),
+		decodeField(raw, "duration", &duration),
+		decodeField(raw, "segments", &rawSegments),
+		decodeField(raw, "usage", &usage),
+	) != nil {
 		return nil, ProtocolError("The provider transcription is not valid JSON.")
 	}
-	if encodedWire.Text == nil {
+	if text == nil {
 		return nil, ProtocolError("The provider transcription is missing text.")
 	}
-	for _, segment := range encodedWire.Segments {
-		if len(segment.ID) == 0 || string(segment.ID) == "null" {
-			continue
-		}
-		var text string
-		if err := json.Unmarshal(segment.ID, &text); err == nil {
-			continue
-		}
-		var number int64
-		if err := json.Unmarshal(segment.ID, &number); err != nil {
-			return nil, ProtocolError("The provider transcription segment ID must be a string or integer.")
-		}
+	segments, failure := decodeTranscriptionSegments(rawSegments)
+	if failure != nil {
+		return nil, failure
 	}
-	result := &TranscriptionResult{
-		Text: *encodedWire.Text, Language: encodedWire.Language, DurationSeconds: encodedWire.Duration,
-		Extra: diffFields(doc, "text", "language", "duration", "segments"),
+	return &TranscriptionResult{
+		Text:            *text,
+		Language:        language,
+		DurationSeconds: duration,
+		Segments:        segments,
+		Tokens:          transcriptionTokens(usage),
+		Extra:           diffRawFields(raw, "text", "language", "duration", "segments"),
+	}, nil
+}
+
+func decodeTranscriptionSegments(rawSegments []json.RawMessage) ([]TranscriptionSegment, *Error) {
+	if len(rawSegments) == 0 {
+		return nil, nil
 	}
-	if encodedWire.Usage != nil && (encodedWire.Usage.Type == "" || encodedWire.Usage.Type == "tokens") {
-		result.Tokens = &ImageUsage{
-			InputTokens: encodedWire.Usage.InputTokens, OutputTokens: encodedWire.Usage.OutputTokens,
-			TotalTokens: encodedWire.Usage.TotalTokens,
+	segments := make([]TranscriptionSegment, len(rawSegments))
+	for i, itemBytes := range rawSegments {
+		segment, failure := decodeTranscriptionSegment(itemBytes)
+		if failure != nil {
+			return nil, failure
 		}
-		if encodedWire.Usage.InputDetail != nil {
-			result.Tokens.AudioInputTokens = encodedWire.Usage.InputDetail.AudioTokens
-		}
+		segments[i] = segment
 	}
-	if segments, ok := doc["segments"].([]any); ok && len(segments) == len(encodedWire.Segments) {
-		for i, item := range segments {
-			extra := map[string]any(nil)
-			if object, ok := item.(map[string]any); ok {
-				extra = diffFields(object, "id", "start", "end", "text", "speaker")
-			}
-			segment := encodedWire.Segments[i]
-			result.Segments = append(result.Segments, TranscriptionSegment{
-				ID: segment.ID, Start: segment.Start, End: segment.End,
-				Text: segment.Text, Speaker: segment.Speaker, Extra: extra,
-			})
-		}
-	} else {
-		for _, segment := range encodedWire.Segments {
-			result.Segments = append(result.Segments, TranscriptionSegment{
-				ID: segment.ID, Start: segment.Start, End: segment.End,
-				Text: segment.Text, Speaker: segment.Speaker,
-			})
-		}
+	return segments, nil
+}
+
+func decodeTranscriptionSegment(raw []byte) (TranscriptionSegment, *Error) {
+	fields, err := parseRawObject(raw)
+	if err != nil {
+		return TranscriptionSegment{}, ProtocolError("The provider transcription is not valid JSON.")
 	}
-	return result, nil
+	var start, end float64
+	var text string
+	var speaker *string
+	if firstErr(
+		decodeField(fields, "start", &start),
+		decodeField(fields, "end", &end),
+		decodeField(fields, "text", &text),
+		decodeField(fields, "speaker", &speaker),
+	) != nil {
+		return TranscriptionSegment{}, ProtocolError("The provider transcription is not valid JSON.")
+	}
+	id := fields["id"]
+	if failure := validateSegmentID(id); failure != nil {
+		return TranscriptionSegment{}, failure
+	}
+	return TranscriptionSegment{
+		ID:      id,
+		Start:   start,
+		End:     end,
+		Text:    text,
+		Speaker: speaker,
+		Extra:   diffRawFields(fields, "id", "start", "end", "text", "speaker"),
+	}, nil
+}
+
+func validateSegmentID(id json.RawMessage) *Error {
+	if len(id) == 0 || isJSON(id, "null") {
+		return nil
+	}
+	var text string
+	if json.Unmarshal(id, &text) == nil {
+		return nil
+	}
+	var number int64
+	if json.Unmarshal(id, &number) == nil {
+		return nil
+	}
+	return ProtocolError("The provider transcription segment ID must be a string or integer.")
+}
+
+func transcriptionTokens(usage *transcriptionUsageWire) *ImageUsage {
+	if usage == nil || (usage.Type != "" && usage.Type != "tokens") {
+		return nil
+	}
+	tokens := &ImageUsage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.TotalTokens,
+	}
+	if usage.InputDetail != nil {
+		tokens.AudioInputTokens = usage.InputDetail.AudioTokens
+	}
+	return tokens
 }
 
 func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
-	doc := map[string]any{"text": result.Text}
 	if result.TextOnly {
-		body, err := json.Marshal(doc)
+		body, err := json.Marshal(transcriptionTextOnlyWire{Text: result.Text})
 		if err != nil {
 			return nil, ProtocolError("The provider transcription could not be encoded.")
 		}
 		return body, nil
 	}
-	if result.Language != nil {
-		doc["language"] = *result.Language
-	}
-	if result.DurationSeconds != nil {
-		doc["duration"] = *result.DurationSeconds
-	}
-	segments := make([]any, len(result.Segments))
-	for i, segment := range result.Segments {
-		item := map[string]any{"start": segment.Start, "end": segment.End, "text": segment.Text}
-		if len(segment.ID) > 0 && string(segment.ID) != "null" {
-			item["id"] = segment.ID
-		}
-		if segment.Speaker != nil {
-			item["speaker"] = *segment.Speaker
-		}
-		for name, value := range segment.Extra {
-			if _, exists := item[name]; !exists {
-				item[name] = value
-			}
-		}
-		segments[i] = item
-	}
+	var encodedSegments *[]json.RawMessage
 	if result.Segments != nil {
-		doc["segments"] = segments
-	}
-	for name, value := range result.Extra {
-		if _, exists := doc[name]; !exists {
-			doc[name] = value
+		items := make([]json.RawMessage, len(result.Segments))
+		for i, segment := range result.Segments {
+			wireSeg := transcriptionSegmentWire{
+				Start:   segment.Start,
+				End:     segment.End,
+				Text:    segment.Text,
+				Speaker: segment.Speaker,
+			}
+			if len(segment.ID) > 0 && !isJSON(segment.ID, "null") {
+				wireSeg.ID = segment.ID
+			}
+			rawSeg, err := marshalWithExtra(wireSeg, segment.Extra)
+			if err != nil {
+				return nil, ProtocolError("The provider transcription could not be encoded.")
+			}
+			items[i] = rawSeg
 		}
+		encodedSegments = &items
 	}
-	body, err := json.Marshal(doc)
+	doc := transcriptionResponseWire{
+		Text:     result.Text,
+		Language: result.Language,
+		Duration: result.DurationSeconds,
+		Segments: encodedSegments,
+	}
+	body, err := marshalWithExtra(doc, result.Extra)
 	if err != nil {
 		return nil, ProtocolError("The provider transcription could not be encoded.")
 	}

@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
@@ -18,6 +17,88 @@ import (
 var geminiMediaCodec = codec{imageGeneration: encodeGeminiImage, speech: encodeGeminiSpeech, transcription: encodeGeminiTranscription}
 
 const geminiTranscriptPrompt = "Generate a transcript of the speech in this audio. Answer with the transcript only."
+
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
+type geminiRequestPart struct {
+	Text       string            `json:"text,omitempty"`
+	InlineData *geminiInlineData `json:"inlineData,omitempty"`
+}
+
+type geminiRequestContent struct {
+	Role  string              `json:"role"`
+	Parts []geminiRequestPart `json:"parts"`
+}
+
+type geminiImageConfig struct {
+	AspectRatio string `json:"aspectRatio"`
+}
+
+type geminiPrebuiltVoiceConfig struct {
+	VoiceName string `json:"voiceName"`
+}
+
+type geminiVoiceConfig struct {
+	PrebuiltVoiceConfig geminiPrebuiltVoiceConfig `json:"prebuiltVoiceConfig"`
+}
+
+type geminiSpeechConfig struct {
+	VoiceConfig geminiVoiceConfig `json:"voiceConfig"`
+}
+
+type geminiGenerationConfig struct {
+	ResponseModalities []string            `json:"responseModalities,omitempty"`
+	ImageConfig        *geminiImageConfig  `json:"imageConfig,omitempty"`
+	SpeechConfig       *geminiSpeechConfig `json:"speechConfig,omitempty"`
+	Temperature        *float64            `json:"temperature,omitempty"`
+}
+
+type geminiGenerateRequest struct {
+	Contents         []geminiRequestContent `json:"contents"`
+	GenerationConfig geminiGenerationConfig `json:"generationConfig"`
+}
+
+type geminiResponsePart struct {
+	Text       *string           `json:"text"`
+	Thought    bool              `json:"thought"`
+	InlineData *geminiInlineData `json:"inlineData"`
+}
+
+type geminiResponseContent struct {
+	Parts []geminiResponsePart `json:"parts"`
+}
+
+type geminiCandidate struct {
+	FinishReason string                `json:"finishReason"`
+	Content      geminiResponseContent `json:"content"`
+}
+
+type geminiPromptFeedback struct {
+	BlockReason string `json:"blockReason"`
+}
+
+type geminiModalityCount struct {
+	Modality   string `json:"modality"`
+	TokenCount int64  `json:"tokenCount"`
+}
+
+type geminiUsageMetadata struct {
+	Prompt           int64                 `json:"promptTokenCount"`
+	Candidates       int64                 `json:"candidatesTokenCount"`
+	Total            int64                 `json:"totalTokenCount"`
+	PromptDetails    []geminiModalityCount `json:"promptTokensDetails"`
+	CacheDetails     []geminiModalityCount `json:"cacheTokensDetails"`
+	CandidateDetails []geminiModalityCount `json:"candidatesTokensDetails"`
+}
+
+type geminiResult struct {
+	Candidates     []geminiCandidate     `json:"candidates"`
+	PromptFeedback *geminiPromptFeedback `json:"promptFeedback"`
+	Usage          *geminiUsageMetadata  `json:"usageMetadata"`
+}
 
 func generateContent(model string) string {
 	return "models/" + url.PathEscape(model) + ":generateContent"
@@ -37,43 +118,22 @@ func encodeGeminiImage(r *Request, p ImageGeneration, _ connectors.Config, model
 	if failure != nil {
 		return nil, failure
 	}
-	config := map[string]any{"responseModalities": []string{"IMAGE"}}
+	var imageConfig *geminiImageConfig
 	if ratio != "" {
-		config["imageConfig"] = map[string]string{"aspectRatio": ratio}
+		imageConfig = &geminiImageConfig{AspectRatio: ratio}
 	}
-	body, err := json.Marshal(map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": p.Prompt}}}}, "generationConfig": config})
+	body, err := json.Marshal(geminiGenerateRequest{
+		Contents: []geminiRequestContent{{Role: "user", Parts: []geminiRequestPart{{Text: p.Prompt}}}},
+		GenerationConfig: geminiGenerationConfig{
+			ResponseModalities: []string{"IMAGE"},
+			ImageConfig:        imageConfig,
+		},
+	})
 	if err != nil {
 		return nil, invalidMedia("The image request could not be encoded.")
 	}
 	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: generateContent(model)}, Body: JSONBody(body),
 		Response: ImageReply{Decode: decodeGeminiImage}, Ambiguous: true}, nil
-}
-
-type geminiResult struct {
-	Candidates []struct {
-		FinishReason string `json:"finishReason"`
-		Content      struct {
-			Parts []struct {
-				Text       *string `json:"text"`
-				Thought    bool    `json:"thought"`
-				InlineData *struct {
-					MimeType string `json:"mimeType"`
-					Data     string `json:"data"`
-				} `json:"inlineData"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
-	PromptFeedback *struct {
-		BlockReason string `json:"blockReason"`
-	} `json:"promptFeedback"`
-	Usage *struct {
-		Prompt           int64                 `json:"promptTokenCount"`
-		Candidates       int64                 `json:"candidatesTokenCount"`
-		Total            int64                 `json:"totalTokenCount"`
-		PromptDetails    []geminiModalityCount `json:"promptTokensDetails"`
-		CacheDetails     []geminiModalityCount `json:"cacheTokensDetails"`
-		CandidateDetails []geminiModalityCount `json:"candidatesTokensDetails"`
-	} `json:"usageMetadata"`
 }
 
 func readGemini(body []byte) (*geminiResult, *Error) {
@@ -92,11 +152,6 @@ func readGemini(body []byte) (*geminiResult, *Error) {
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter withheld the result.")
 	}
 	return &result, nil
-}
-
-type geminiModalityCount struct {
-	Modality   string `json:"modality"`
-	TokenCount int64  `json:"tokenCount"`
 }
 
 func (r *geminiResult) tokens() *ImageUsage {
@@ -141,14 +196,15 @@ func decodeGeminiImage(body []byte, stage StageImage) (*ImageResult, *Error) {
 		return nil, failure
 	}
 	for _, part := range result.Candidates[0].Content.Parts {
-		if part.InlineData != nil && strings.HasPrefix(part.InlineData.MimeType, "image/") && !part.Thought {
-			staged, failure := stage(part.InlineData.Data, 0)
-			if failure != nil {
-				return nil, failure
-			}
-			handle := staged.Handle
-			return &ImageResult{CreatedAt: time.Now().Unix(), Images: []ImageArtifact{{Handle: &handle}}, Usage: result.tokens()}, nil
+		if part.InlineData == nil || !strings.HasPrefix(part.InlineData.MimeType, "image/") || part.Thought {
+			continue
 		}
+		staged, failure := stage(part.InlineData.Data, 0)
+		if failure != nil {
+			return nil, failure
+		}
+		handle := staged.Handle
+		return &ImageResult{CreatedAt: nowUnix(), Images: []ImageArtifact{{Handle: &handle}}, Usage: result.tokens()}, nil
 	}
 	return nil, Fail(http.StatusBadRequest, "no_image", "The model answered without an image.")
 }
@@ -164,9 +220,16 @@ func encodeGeminiSpeech(r *Request, p Speech, _ connectors.Config, model string)
 	if p.Voice == "" {
 		return nil, invalidMedia("Gemini speech names one of its prebuilt voices, such as Kore.")
 	}
-	body, err := json.Marshal(map[string]any{
-		"contents":         []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": p.Input}}}},
-		"generationConfig": map[string]any{"responseModalities": []string{"AUDIO"}, "speechConfig": map[string]any{"voiceConfig": map[string]any{"prebuiltVoiceConfig": map[string]string{"voiceName": p.Voice}}}},
+	body, err := json.Marshal(geminiGenerateRequest{
+		Contents: []geminiRequestContent{{Role: "user", Parts: []geminiRequestPart{{Text: p.Input}}}},
+		GenerationConfig: geminiGenerationConfig{
+			ResponseModalities: []string{"AUDIO"},
+			SpeechConfig: &geminiSpeechConfig{
+				VoiceConfig: geminiVoiceConfig{
+					PrebuiltVoiceConfig: geminiPrebuiltVoiceConfig{VoiceName: p.Voice},
+				},
+			},
+		},
 	})
 	if err != nil {
 		return nil, invalidMedia("The speech request could not be encoded.")
@@ -184,37 +247,41 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 		if part.InlineData == nil || !strings.HasPrefix(strings.ToLower(part.InlineData.MimeType), "audio/") {
 			continue
 		}
-		audio, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-		if err != nil {
-			return nil, ProtocolError("The provider audio is not valid base64.")
-		}
-		mediaType, params, err := mime.ParseMediaType(part.InlineData.MimeType)
-		if err != nil {
-			return nil, ProtocolError("The provider audio names an invalid type.")
-		}
-		wav := mediaType == "audio/wav" || mediaType == "audio/x-wav"
-		switch {
-		case wav && format == "pcm":
-			if len(audio) < 44 || string(audio[:4]) != "RIFF" {
-				return nil, ProtocolError("The provider WAV audio is malformed.")
-			}
-			audio = audio[44:]
-		case !wav && format == "wav":
-			rate, err := strconv.Atoi(params["rate"])
-			if !strings.EqualFold(mediaType, "audio/l16") || err != nil || rate < 8000 {
-				return nil, ProtocolError("The provider audio is not 16-bit PCM of a known rate.")
-			}
-			audio = wavFromPCM(audio, rate)
-		case !wav && !strings.EqualFold(mediaType, "audio/l16"):
-			return nil, ProtocolError("The provider audio is neither WAV nor PCM.")
-		}
-		contentType := "audio/wav"
-		if format == "pcm" {
-			contentType = "audio/pcm"
-		}
-		return &AudioResult{Audio: audio, ContentType: contentType, Tokens: result.tokens()}, nil
+		return decodeGeminiAudioPart(part.InlineData, format, result.tokens())
 	}
 	return nil, ProtocolError("The model answered without audio.")
+}
+
+func decodeGeminiAudioPart(inline *geminiInlineData, format string, usage *ImageUsage) (*AudioResult, *Error) {
+	audio, err := base64.StdEncoding.DecodeString(inline.Data)
+	if err != nil {
+		return nil, ProtocolError("The provider audio is not valid base64.")
+	}
+	mediaType, params, err := mime.ParseMediaType(inline.MimeType)
+	if err != nil {
+		return nil, ProtocolError("The provider audio names an invalid type.")
+	}
+	wav := mediaType == "audio/wav" || mediaType == "audio/x-wav"
+	switch {
+	case wav && format == "pcm":
+		if len(audio) < 44 || string(audio[:4]) != "RIFF" {
+			return nil, ProtocolError("The provider WAV audio is malformed.")
+		}
+		audio = audio[44:]
+	case !wav && format == "wav":
+		rate, err := strconv.Atoi(params["rate"])
+		if !strings.EqualFold(mediaType, "audio/l16") || err != nil || rate < 8000 {
+			return nil, ProtocolError("The provider audio is not 16-bit PCM of a known rate.")
+		}
+		audio = wavFromPCM(audio, rate)
+	case !wav && !strings.EqualFold(mediaType, "audio/l16"):
+		return nil, ProtocolError("The provider audio is neither WAV nor PCM.")
+	}
+	contentType := "audio/wav"
+	if format == "pcm" {
+		contentType = "audio/pcm"
+	}
+	return &AudioResult{Audio: audio, ContentType: contentType, Tokens: usage}, nil
 }
 
 func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config, model string) (*UpstreamCall, *Error) {
@@ -222,45 +289,53 @@ func encodeGeminiTranscription(r *Request, p Transcription, _ connectors.Config,
 	switch {
 	case format != "json" && format != "text":
 		return nil, invalidMedia("Gemini transcripts are served as json or text.")
-	case p.Stream, p.Prompt != nil, p.Language != nil, len(p.Include) > 0, len(p.ChunkingStrategy) > 0, len(p.KnownSpeakerNames) > 0, len(p.TimestampGranularities) > 0, len(r.Extra()) > 0:
+	case p.Stream, p.Prompt != nil, p.Language != nil, len(p.Include) > 0, len(p.ChunkingStrategy) > 0, len(p.KnownSpeakerNames) > 0, len(p.TimestampGranularities) > 0, r.hasExtra():
 		return nil, invalidMedia("Gemini transcription does not support the requested transcription parameters.")
 	case !strings.HasPrefix(strings.ToLower(p.File.ContentType), "audio/"):
 		return nil, invalidMedia("Gemini transcription needs the audio file's content type.")
 	}
-	config := map[string]any{}
-	if p.Temperature != nil {
-		config["temperature"] = *p.Temperature
+	return &UpstreamCall{
+		Method:    http.MethodPost,
+		Endpoint:  Path{Path: generateContent(model)},
+		Body:      geminiTranscriptionBody(p.File, p.Temperature),
+		Response:  TranscriptReply{Format: format, Decode: decodeGeminiTranscription},
+		Ambiguous: true,
+	}, nil
+}
+
+func geminiTranscriptionBody(file staging.Part, temperature *float64) InlineBody {
+	return func(read func(staging.Part) ([]byte, *Error)) ([]byte, *Error) {
+		audio, failure := read(file)
+		if failure != nil {
+			return nil, failure
+		}
+		body, err := json.Marshal(geminiGenerateRequest{
+			Contents: []geminiRequestContent{{
+				Role: "user",
+				Parts: []geminiRequestPart{
+					{InlineData: &geminiInlineData{MimeType: file.ContentType, Data: base64.StdEncoding.EncodeToString(audio)}},
+					{Text: geminiTranscriptPrompt},
+				},
+			}},
+			GenerationConfig: geminiGenerationConfig{Temperature: temperature},
+		})
+		if err != nil {
+			return nil, invalidMedia("The transcription request could not be encoded.")
+		}
+		return body, nil
 	}
-	file := p.File
-	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: generateContent(model)}, Ambiguous: true,
-		Body: InlineBody(func(read func(staging.Part) ([]byte, *Error)) ([]byte, *Error) {
-			audio, failure := read(file)
-			if failure != nil {
-				return nil, failure
-			}
-			body, err := json.Marshal(map[string]any{
-				"contents": []any{map[string]any{"role": "user", "parts": []any{
-					map[string]any{"inlineData": map[string]string{"mimeType": file.ContentType, "data": base64.StdEncoding.EncodeToString(audio)}},
-					map[string]string{"text": geminiTranscriptPrompt},
-				}}},
-				"generationConfig": config,
-			})
-			if err != nil {
-				return nil, invalidMedia("The transcription request could not be encoded.")
-			}
-			return body, nil
-		}),
-		Response: TranscriptReply{Format: format, Decode: func(body []byte) (*TranscriptionResult, *Error) {
-			result, failure := readGemini(body)
-			if failure != nil {
-				return nil, failure
-			}
-			var text strings.Builder
-			for _, part := range result.Candidates[0].Content.Parts {
-				if part.Text != nil && !part.Thought {
-					text.WriteString(*part.Text)
-				}
-			}
-			return &TranscriptionResult{Text: strings.TrimSpace(text.String()), Tokens: result.tokens()}, nil
-		}}}, nil
+}
+
+func decodeGeminiTranscription(body []byte) (*TranscriptionResult, *Error) {
+	result, failure := readGemini(body)
+	if failure != nil {
+		return nil, failure
+	}
+	var text strings.Builder
+	for _, part := range result.Candidates[0].Content.Parts {
+		if part.Text != nil && !part.Thought {
+			text.WriteString(*part.Text)
+		}
+	}
+	return &TranscriptionResult{Text: strings.TrimSpace(text.String()), Tokens: result.tokens()}, nil
 }

@@ -1,6 +1,8 @@
 package media
 
 import (
+	"net/http"
+
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/staging"
@@ -15,13 +17,24 @@ type Speech struct {
 	StreamFormat *string  `json:"stream_format"`
 }
 
+var speechFields = []string{"input", "voice", "response_format", "instructions", "speed", "stream_format"}
+
+type speechRequestWire struct {
+	Model        string   `json:"model"`
+	Input        string   `json:"input"`
+	Voice        string   `json:"voice"`
+	Format       *string  `json:"response_format,omitempty"`
+	Instructions *string  `json:"instructions,omitempty"`
+	Speed        *float64 `json:"speed,omitempty"`
+	StreamFormat *string  `json:"stream_format,omitempty"`
+}
+
 func (Speech) Operation() Operation    { return OpSpeech }
 func (Speech) uploads() []staging.Part { return nil }
 func (p Speech) streaming() bool       { return ptr.Value(p.StreamFormat) == "sse" }
 
 func DecodeSpeech(body []byte) (*Request, *Error) {
-	var p Speech
-	route, source, extra, failure := decodeJSON(body, &p)
+	route, p, source, extra, failure := decodeJSON[Speech](body, speechFields...)
 	switch {
 	case failure != nil:
 		return nil, failure
@@ -32,19 +45,24 @@ func DecodeSpeech(body []byte) (*Request, *Error) {
 	case p.Speed != nil && (*p.Speed < 0.25 || *p.Speed > 4.0):
 		return nil, invalidMedia("The speech speed must be between 0.25 and 4.0.")
 	}
-	return newRequest(route, p, extra, source)
+	return newJSONRequest(route, p, extra, source)
 }
 
 func encodeSpeech(r *Request, p Speech, _ connectors.Config, model string) (*UpstreamCall, *Error) {
-	fields := map[string]any{
-		"model": model, "input": p.Input, "voice": p.Voice, "response_format": p.Format,
-		"instructions": p.Instructions, "speed": p.Speed, "stream_format": p.StreamFormat,
+	payload := speechRequestWire{
+		Model:        model,
+		Input:        p.Input,
+		Voice:        p.Voice,
+		Format:       p.Format,
+		Instructions: p.Instructions,
+		Speed:        p.Speed,
+		StreamFormat: p.StreamFormat,
 	}
-	body, failure := jsonDoc(fields, r.Extra())
+	body, failure := encodeRequestJSON(payload, r.jsonExtra)
 	if failure != nil {
 		return nil, failure
 	}
-	return &UpstreamCall{Method: "POST", Endpoint: Path{Path: "audio/speech"}, Accept: "application/json",
+	return &UpstreamCall{Method: http.MethodPost, Endpoint: Path{Path: "audio/speech"}, Accept: "application/json",
 		Body: JSONBody(body), Response: audioReply(p.streaming()), Ambiguous: true}, nil
 }
 
