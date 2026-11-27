@@ -11,47 +11,38 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
 
-// CompleteGenerationHTTP finalizes the original exchange under the same lock
-// used by generation observers and cleanup. Financial settlement may come
-// first; in that case only existing usage-owned HTTP history is updated.
 func (s *Store) CompleteGenerationHTTP(ctx context.Context, localID string, completion usage.HTTPCompletion) error {
-	id, err := parseLocal(localID)
+	parsedKind, id, err := ParseLocalID(localID)
 	if err != nil {
 		return err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	var kind, owner, provider string
-	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT kind,api_key_id::text,provider_id::text,metadata->'pending_usage' FROM olp.provider_resources
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var kind, owner, provider string
+		var raw []byte
+		queryErr := tx.QueryRow(ctx, `SELECT kind,api_key_id::text,provider_id::text,metadata->'pending_usage' FROM olp.provider_resources
 	 WHERE id=$1 AND kind IN ('response','strict_response','interaction') FOR UPDATE`, id).Scan(&kind, &owner, &provider, &raw)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	if err == nil && (localID != LocalID(kind, id) || owner != completion.APIKeyID || provider != completion.Attempt.ProviderID) {
-		return fmt.Errorf("%w: original HTTP completion has a different resource owner", ErrContract)
-	}
-	if err == nil && len(raw) != 0 && string(raw) != "null" {
-		pending, err := usage.DecodePendingGeneration(raw)
-		if err != nil {
+		if queryErr != nil && !errors.Is(queryErr, pgx.ErrNoRows) {
+			return queryErr
+		}
+		if queryErr == nil && (parsedKind != kind || owner != completion.APIKeyID || provider != completion.Attempt.ProviderID) {
+			return fmt.Errorf("%w: original HTTP completion has a different resource owner", ErrContract)
+		}
+		if queryErr == nil && hasPendingUsage(raw) {
+			pending, err := usage.DecodePendingGeneration(raw)
+			if err != nil {
+				return err
+			}
+			completed, err := pending.CompleteHTTP(completion)
+			if err != nil {
+				return err
+			}
+			encoded, err := completed.Encode()
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET metadata=jsonb_set(metadata,'{pending_usage}',$2::jsonb),updated_at=now() WHERE id=$1`, id, encoded)
 			return err
 		}
-		completed, err := pending.CompleteHTTP(completion)
-		if err != nil {
-			return err
-		}
-		encoded, err := completed.Encode()
-		if err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `UPDATE olp.provider_resources SET metadata=jsonb_set(metadata,'{pending_usage}',$2::jsonb),updated_at=now() WHERE id=$1`, id, encoded); err != nil {
-			return err
-		}
-	} else if err = ingest.CompleteRequestHTTPTx(ctx, tx, completion); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+		return ingest.CompleteRequestHTTPTx(ctx, tx, completion)
+	})
 }

@@ -308,7 +308,7 @@
       >
         Cancel
       </button>{/if}
-    {#if playground.streamFrames.length > 0 || playground.streamDone || playground.streamProblem || playground.mutation.data}<button
+    {#if playground.streamText || playground.streamDone || playground.streamProblem || playground.mutation.data}<button
         class="button button-secondary"
         type="button"
         onclick={playground.clearResult}

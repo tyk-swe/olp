@@ -3,6 +3,7 @@ import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import featureBoundary from './eslint/feature-boundary.mjs';
+import sideEffectImport from './eslint/side-effect-import.mjs';
 
 const tsFiles = ['**/*.{ts,tsx}'];
 const scriptFiles = [
@@ -114,8 +115,18 @@ export default [
   {
     files: sourceFiles,
     ignores: testFiles,
-    plugins: { console: { rules: { 'feature-boundary': featureBoundary } } },
-    rules: { 'console/feature-boundary': ['error', { layers: sharedLayers }] }
+    plugins: {
+      console: {
+        rules: {
+          'feature-boundary': featureBoundary,
+          'side-effect-import': sideEffectImport
+        }
+      }
+    },
+    rules: {
+      'console/feature-boundary': ['error', { layers: sharedLayers }],
+      'console/side-effect-import': 'error'
+    }
   },
   {
     files: sourceFiles,

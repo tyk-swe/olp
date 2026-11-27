@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -13,9 +15,6 @@ import (
 
 const expiryBatch = 100
 
-// Expire reclaims bounded, separately committed batches. Missing terminal
-// usage becomes durable uncertainty before its only owner is removed. Row
-// locks fence concurrent observers and SKIP LOCKED lets replicas share work.
 type ExpiryFailures struct {
 	Count int
 	first error
@@ -24,12 +23,21 @@ type ExpiryFailures struct {
 func (e *ExpiryFailures) Error() string {
 	return fmt.Sprintf("%d resource expiry owners refused accounting", e.Count)
 }
+
 func (e *ExpiryFailures) Unwrap() error { return e.first }
+
+func (e *ExpiryFailures) record(err error) {
+	if e.first == nil {
+		e.first = err
+	}
+	e.Count++
+}
 
 type expiryCursor struct {
 	at time.Time
 	id uuid.UUID
 }
+
 type expiryResult struct {
 	visited int
 	removed int64
@@ -37,12 +45,18 @@ type expiryResult struct {
 	failed  ExpiryFailures
 }
 
+type expiredResource struct {
+	id      uuid.UUID
+	at      time.Time
+	pending []byte
+}
+
 func (s *Store) Expire(ctx context.Context, now time.Time) (int64, error) {
 	var removed int64
 	var cursor *expiryCursor
 	var failed ExpiryFailures
 	for ctx.Err() == nil {
-		result, err := s.expireBatch(ctx, now, cursor)
+		result, err := expireBatch(ctx, s.pool, now, cursor)
 		if err != nil {
 			return removed, err
 		}
@@ -62,12 +76,30 @@ func (s *Store) Expire(ctx context.Context, now time.Time) (int64, error) {
 	return removed, ctx.Err()
 }
 
-func (s *Store) expireBatch(ctx context.Context, now time.Time, cursor *expiryCursor) (expiryResult, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return expiryResult{}, err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+func expireBatch(ctx context.Context, pool *pgxpool.Pool, now time.Time, cursor *expiryCursor) (expiryResult, error) {
+	return withTxValue(ctx, pool, func(tx pgx.Tx) (expiryResult, error) {
+		batch, err := loadExpiredBatch(ctx, tx, now, cursor)
+		if err != nil {
+			return expiryResult{}, err
+		}
+		result := expiryResult{visited: len(batch)}
+		for _, resource := range batch {
+			result.next = &expiryCursor{at: resource.at, id: resource.id}
+			accountErr, txErr := reclaimExpiredResource(ctx, tx, resource, now)
+			if txErr != nil {
+				return expiryResult{}, txErr
+			}
+			if accountErr != nil {
+				result.failed.record(accountErr)
+				continue
+			}
+			result.removed++
+		}
+		return result, nil
+	})
+}
+
+func loadExpiredBatch(ctx context.Context, tx pgx.Tx, now time.Time, cursor *expiryCursor) ([]expiredResource, error) {
 	var after any
 	id := uuid.Nil
 	if cursor != nil {
@@ -82,57 +114,40 @@ func (s *Store) expireBatch(ctx context.Context, now time.Time, cursor *expiryCu
  AND ($3::timestamptz IS NULL OR (expires_at,id)>($3,$4)) ORDER BY expires_at,id
  LIMIT $2 FOR UPDATE SKIP LOCKED`, now, expiryBatch, after, id)
 	if err != nil {
-		return expiryResult{}, err
+		return nil, err
 	}
-	type expired struct {
-		id      uuid.UUID
-		at      time.Time
-		pending []byte
-	}
-	batch := make([]expired, 0, expiryBatch)
+	defer rows.Close()
+	batch := make([]expiredResource, 0, expiryBatch)
 	for rows.Next() {
-		var resource expired
-		if err = rows.Scan(&resource.id, &resource.at, &resource.pending); err != nil {
-			rows.Close()
-			return expiryResult{}, err
+		var resource expiredResource
+		if err := rows.Scan(&resource.id, &resource.at, &resource.pending); err != nil {
+			return nil, err
 		}
 		batch = append(batch, resource)
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return expiryResult{}, err
+	return batch, rows.Err()
+}
+
+func reclaimExpiredResource(ctx context.Context, tx pgx.Tx, resource expiredResource, now time.Time) (error, error) {
+	child, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
 	}
-	result := expiryResult{visited: len(batch)}
-	for _, resource := range batch {
-		result.next = &expiryCursor{at: resource.at, id: resource.id}
-		child, err := tx.Begin(ctx)
-		if err != nil {
-			return expiryResult{}, err
-		}
-		_, err = persistPendingUsage(ctx, child, resource.pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, now, false)
-		if err == nil {
-			_, err = child.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, resource.id, secrets.ProviderContinuation)
-		}
-		if err == nil {
-			_, err = child.Exec(ctx, `DELETE FROM olp.provider_resources WHERE id=$1`, resource.id)
-		}
-		if err != nil {
-			if rollbackErr := child.Rollback(ctx); rollbackErr != nil {
-				return expiryResult{}, rollbackErr
-			}
-			result.failed.Count++
-			if result.failed.first == nil {
-				result.failed.first = err
-			}
-			continue
-		}
-		if err = child.Commit(ctx); err != nil {
-			return expiryResult{}, err
-		}
-		result.removed++
+	_, err = persistPendingUsage(ctx, child, resource.pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, now, false)
+	if err == nil {
+		_, err = child.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, resource.id, secrets.ProviderContinuation)
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return expiryResult{}, err
+	if err == nil {
+		_, err = child.Exec(ctx, `DELETE FROM olp.provider_resources WHERE id=$1`, resource.id)
 	}
-	return result, nil
+	if err != nil {
+		if rollbackErr := child.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+			return nil, rollbackErr
+		}
+		return err, nil
+	}
+	if err := child.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }

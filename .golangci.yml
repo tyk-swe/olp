@@ -58,6 +58,13 @@ linters:
           deny:
             - pkg: github.com/tyk-swe/olp/internal/gateway
               desc: Only cmd packages wire features to the gateway. Pass a narrow collaborator in through cmd/olp.
+        resources_isolation:
+          files: ["**/internal/resources/**", "!**/internal/resources/manage/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/access
+              desc: Resource persistence and workers must not depend on the management kit. Put HTTP handlers in internal/resources/manage.
+            - pkg: github.com/tyk-swe/olp/internal/management/contract
+              desc: Resource persistence and workers must not depend on management API contracts. Put HTTP handlers in internal/resources/manage.
         domain:
           files: ["**/internal/domain/**", "!$test"]
           list-mode: lax

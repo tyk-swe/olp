@@ -18,9 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// Strict and transformed resources keep separate kinds because their storage
-// contracts differ: a strict kind stores an encrypted native payload under a
-// contract version, while a transformed kind stores metadata only.
 const (
 	KindFile           = "file"
 	KindBatch          = "batch"
@@ -40,15 +37,14 @@ const (
 
 const StateDeleted = "deleted"
 
-// Only retained generation owners carry gateway-authored deferred usage.
-// Other resource metadata may contain opaque native fields with the same name.
 func ownsPendingUsage(kind string) bool {
 	return kind == KindResponse || kind == KindStrictResponse || kind == KindInteraction
 }
 
-var ErrNotFound = errors.New("provider resource not found")
-
-var ErrMetadataTooLarge = errors.New("provider resource metadata exceeds 16 KiB")
+var (
+	ErrNotFound         = errors.New("provider resource not found")
+	ErrMetadataTooLarge = errors.New("provider resource metadata exceeds 16 KiB")
+)
 
 const metadataLimit = 16384
 
@@ -80,31 +76,6 @@ type Resource struct {
 
 func LocalID(kind string, id uuid.UUID) string {
 	return kind + "_" + strings.ReplaceAll(id.String(), "-", "")
-}
-
-func parseLocal(local string) (uuid.UUID, error) {
-	i := strings.LastIndexByte(local, '_')
-	if i <= 0 {
-		return uuid.Nil, ErrNotFound
-	}
-	rest := local[i+1:]
-	if len(rest) != 32 {
-		return uuid.Nil, ErrNotFound
-	}
-	id, err := uuid.Parse(rest[:8] + "-" + rest[8:12] + "-" + rest[12:16] + "-" + rest[16:20] + "-" + rest[20:])
-	if err != nil || id == uuid.Nil || LocalID(local[:i], id) != local {
-		return uuid.Nil, ErrNotFound
-	}
-	switch local[:i] {
-	case KindFile, KindBatch, KindResponse, KindContinuation, KindStrictResponse, KindInteraction,
-		KindStrictFile, KindStrictBatch, KindAnthropicFile, KindAnthropicBatch, KindGeminiUpload,
-		KindGeminiFile, KindGeminiBatch, KindCloudBatch:
-	default:
-		if !slices.Contains(retainedapi.Kinds(), local[:i]) {
-			return uuid.Nil, ErrNotFound
-		}
-	}
-	return id, nil
 }
 
 type Store struct {
@@ -140,49 +111,70 @@ func scan(row pgx.Row) (*Resource, error) {
 }
 
 func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
-	return s.put(ctx, s.pool, r)
+	return putResource(ctx, s.pool, r)
 }
 
 func (s *Store) PutTx(ctx context.Context, tx pgx.Tx, r *Resource) (*Resource, error) {
-	return s.put(ctx, tx, r)
+	return putResource(ctx, tx, r)
 }
 
 type resourceRowQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-func (s *Store) put(ctx context.Context, query resourceRowQuerier, r *Resource) (*Resource, error) {
-	if r.TargetID == "" {
-		return nil, ErrContract
+func putResource(ctx context.Context, query resourceRowQuerier, r *Resource) (*Resource, error) {
+	prepared, err := prepareResourceForPut(r, time.Now())
+	if err != nil {
+		return nil, err
 	}
-	if r.Kind == KindContinuation || r.Kind == KindStrictResponse || r.Kind == KindStrictFile || r.Kind == KindStrictBatch {
-		return nil, ErrContract
-	}
-	if len(r.Metadata) == 0 {
-		r.Metadata = json.RawMessage(`{}`)
-	}
-	if len(r.Metadata) > metadataLimit {
-		return nil, ErrMetadataTooLarge
-	}
-
-	if r.ExpiresAt == nil && ownsPendingUsage(r.Kind) {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(r.Metadata, &fields); err != nil {
-			return nil, err
-		}
-		if pending := fields["pending_usage"]; len(pending) > 0 && string(pending) != "null" {
-			expires := time.Now().Add(ContinuationLifetime)
-			r.ExpiresAt = &expires
-		}
-	}
-	if r.UUID == uuid.Nil {
-		r.UUID = uuid.Must(uuid.NewV7())
-	}
-	out, err := insertResource(ctx, query, r)
+	out, err := insertResource(ctx, query, &prepared)
 	if err != nil {
 		return nil, fmt.Errorf("provider resource put: %w", err)
 	}
 	return out, nil
+}
+
+func prepareResourceForPut(r *Resource, now time.Time) (Resource, error) {
+	if r == nil || r.TargetID == "" {
+		return Resource{}, ErrContract
+	}
+	switch r.Kind {
+	case KindContinuation, KindStrictResponse, KindStrictFile, KindStrictBatch:
+		return Resource{}, ErrContract
+	}
+	prepared := *r
+	if len(prepared.Metadata) == 0 {
+		prepared.Metadata = json.RawMessage(`{}`)
+	}
+	if len(prepared.Metadata) > metadataLimit {
+		return Resource{}, ErrMetadataTooLarge
+	}
+	if prepared.ExpiresAt == nil && ownsPendingUsage(prepared.Kind) {
+		hasPending, err := metadataHasPendingUsage(prepared.Metadata)
+		if err != nil {
+			return Resource{}, err
+		}
+		if hasPending {
+			expires := now.Add(ContinuationLifetime)
+			prepared.ExpiresAt = &expires
+		}
+	}
+	if prepared.UUID == uuid.Nil {
+		id, err := newUUIDv7()
+		if err != nil {
+			return Resource{}, err
+		}
+		prepared.UUID = id
+	}
+	return prepared, nil
+}
+
+func metadataHasPendingUsage(raw json.RawMessage) (bool, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false, err
+	}
+	return hasPendingUsage(fields["pending_usage"]), nil
 }
 
 func insertResource(ctx context.Context, query resourceRowQuerier, r *Resource) (*Resource, error) {
@@ -195,8 +187,8 @@ func insertResource(ctx context.Context, query resourceRowQuerier, r *Resource) 
 }
 
 func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resource, error) {
-	id, err := parseLocal(localID)
-	if err != nil || LocalID(kind, id) != localID {
+	parsedKind, id, err := ParseLocalID(localID)
+	if err != nil || parsedKind != kind {
 		return nil, ErrNotFound
 	}
 	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
@@ -211,9 +203,6 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 	return r, nil
 }
 
-// NativeIdentity names one resource within the immutable serving source and
-// caller that accepted it. CredentialID is the credential-version row identity.
-// TargetID identifies the selected model in the exact historical route revision.
 type NativeIdentity struct {
 	Kind, APIKeyID, RouteSlug, ProviderID, ProviderRevisionID, RouteRevisionID, TargetID, SlotID, UpstreamID string
 	CredentialID                                                                                             *string
@@ -231,8 +220,6 @@ func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Re
 	return s.getByUpstream(ctx, s.pool, identity, liveUpstream())
 }
 
-// GetByUpstreamIncludingDeleted preserves an identifier mapping during
-// projection. User access still goes through Get, which rejects tombstones.
 func (s *Store) GetByUpstreamIncludingDeleted(ctx context.Context, identity NativeIdentity) (*Resource, error) {
 	return s.getByUpstream(ctx, s.pool, identity, newestUpstream())
 }
@@ -294,123 +281,11 @@ func (s *Store) getByUpstream(ctx context.Context, query secrets.RowQuerier, ide
 	return r, nil
 }
 
-type ListCursor struct {
-	ID        string
-	CreatedAt *time.Time
-}
-
-func (c ListCursor) localUUID(kinds []string) (uuid.UUID, error) {
-	if c.ID == "" {
-		return uuid.Nil, nil
-	}
-	id, err := parseLocal(c.ID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	for _, kind := range kinds {
-		if LocalID(kind, id) == c.ID {
-			return id, nil
-		}
-	}
-	return uuid.Nil, ErrNotFound
-}
-
-// ListKinds joins transformed and strict resource identities without changing
-// either storage contract. The cursor belongs to this owner and one of the
-// requested kinds; an unrelated local ID cannot move the page boundary.
-// Native upload intents without confirmed identities are not SDK file entries.
-func (s *Store) ListKinds(ctx context.Context, kinds []string, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.ListKindsPage(ctx, kinds, apiKeyID, limit, ListCursor{ID: afterID}, false)
-}
-
-func (s *Store) ListKindsPage(ctx context.Context, kinds []string, apiKeyID string, limit int, cursor ListCursor, ascending bool) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, kinds, apiKeyID, limit, cursor, false, ascending)
-}
-
-// ListLifecycle keeps owner-scoped cursors usable when reconciliation deletes
-// the last row in the previous page. It never returns deleted resources.
-func (s *Store) ListLifecycle(ctx context.Context, kind, apiKeyID string, limit int, afterID string) ([]*Resource, error) {
-	return s.ListLifecycleOrdered(ctx, kind, apiKeyID, limit, afterID, false)
-}
-
-// ListLifecycleOrdered optionally scopes rows and cursor membership to one route.
-func (s *Store) ListLifecycleOrdered(ctx context.Context, kind, owner string, limit int, after string, ascending bool, route ...string) ([]*Resource, error) {
-	return s.listKindsOrdered(ctx, []string{kind}, owner, limit, ListCursor{ID: after}, true, ascending, route...)
-}
-
-func (s *Store) listKindsOrdered(ctx context.Context, kinds []string, apiKeyID string, limit int, cursor ListCursor, deletedCursor, ascending bool, route ...string) ([]*Resource, error) {
-	var routeSlug string
-	if len(route) > 0 {
-		routeSlug = route[0]
-	}
-	anchor, err := cursor.localUUID(kinds)
-	if err != nil {
-		return nil, err
-	}
-	comparison, direction := "<", "DESC"
-	if ascending {
-		comparison, direction = ">", "ASC"
-	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources r
-		WHERE kind=ANY($1) AND api_key_id=$2 AND state<>$3 AND (expires_at IS NULL OR expires_at>now())
-		AND ($8='' OR route_slug=$8)
-		AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
-		 AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=r.id))
-		AND ($4::uuid IS NULL OR (created_at,id)`+comparison+`(COALESCE($9::timestamptz, (SELECT created_at FROM olp.provider_resources
-		 anchor WHERE id=$4 AND api_key_id=$2 AND kind=ANY($1) AND ($6 OR state<>$3) AND (expires_at IS NULL OR expires_at>now())
-		 AND ($8='' OR route_slug=$8)
-		 AND NOT(kind=$7 AND state IN ('submitting','submission_unknown','not_accepted')
-		  AND EXISTS(SELECT 1 FROM olp.retained_submissions s WHERE s.resource_id=anchor.id)))), $4))
-		ORDER BY created_at `+direction+`, id `+direction+` LIMIT $5`,
-		kinds, apiKeyID, StateDeleted, nilUUID(anchor), limit, deletedCursor, KindFile, routeSlug, cursor.CreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("provider resource list: %w", err)
-	}
-	defer rows.Close()
-	out := []*Resource{}
-	for rows.Next() {
-		r, err := scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("provider resource list scan: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) ListCloudBatches(ctx context.Context, apiKeyID, dialect string, limit int, cursor ListCursor) ([]*Resource, error) {
-	anchor, err := cursor.localUUID([]string{KindCloudBatch})
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM olp.provider_resources
-		WHERE kind=$1 AND api_key_id=$2 AND metadata->>'dialect'=$3 AND state<>$4
-		AND (expires_at IS NULL OR expires_at>now())
-		AND ($5::uuid IS NULL OR (created_at,id)<(COALESCE($7::timestamptz, (SELECT created_at FROM olp.provider_resources
-			WHERE id=$5 AND api_key_id=$2 AND kind=$1 AND metadata->>'dialect'=$3 AND state<>$4
-			AND (expires_at IS NULL OR expires_at>now()))), $5))
-		ORDER BY created_at DESC,id DESC LIMIT $6`,
-		KindCloudBatch, apiKeyID, dialect, StateDeleted, nilUUID(anchor), limit, cursor.CreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("cloud batch list: %w", err)
-	}
-	defer rows.Close()
-	out := []*Resource{}
-	for rows.Next() {
-		resource, err := scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("cloud batch list scan: %w", err)
-		}
-		out = append(out, resource)
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) Update(ctx context.Context, localID, state string, metadata json.RawMessage, expiresAt *time.Time) error {
 	if len(metadata) > metadataLimit {
 		return ErrMetadataTooLarge
 	}
-	id, err := parseLocal(localID)
+	_, id, err := ParseLocalID(localID)
 	if err != nil {
 		return ErrNotFound
 	}
@@ -430,41 +305,37 @@ func (s *Store) Update(ctx context.Context, localID, state string, metadata json
 }
 
 func (s *Store) Tombstone(ctx context.Context, localID string) error {
-	id, err := parseLocal(localID)
+	_, id, err := ParseLocalID(localID)
 	if err != nil {
 		return ErrNotFound
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	var kind string
-	var pending []byte
-	if err = tx.QueryRow(ctx, `SELECT kind,metadata->'pending_usage' FROM olp.provider_resources WHERE id=$1 AND state<>$2 FOR UPDATE`, id, StateDeleted).Scan(&kind, &pending); err != nil {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		var kind string
+		var pending []byte
+		err := tx.QueryRow(ctx, `SELECT kind,metadata->'pending_usage' FROM olp.provider_resources WHERE id=$1 AND state<>$2 FOR UPDATE`, id, StateDeleted).Scan(&kind, &pending)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
-	}
-	if ownsPendingUsage(kind) {
-		if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, time.Now(), false); err != nil {
+		if err != nil {
 			return err
 		}
-	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,
+		if ownsPendingUsage(kind) {
+			if _, err := persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, time.Now(), false); err != nil {
+				return err
+			}
+		}
+		tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,
  metadata=CASE WHEN olp.resource_owns_pending_usage(kind) THEN metadata-'pending_usage' ELSE metadata END,
  updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
-	if err != nil {
-		return fmt.Errorf("provider resource tombstone: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation); err != nil {
+		if err != nil {
+			return fmt.Errorf("provider resource tombstone: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation)
 		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 func nilIfEmpty(s string) any {
@@ -472,11 +343,4 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
-}
-
-func nilUUID(id uuid.UUID) any {
-	if id == uuid.Nil {
-		return nil
-	}
-	return id
 }

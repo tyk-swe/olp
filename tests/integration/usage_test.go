@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/resources"
+	resourcesmanage "github.com/tyk-swe/olp/internal/resources/manage"
 	"github.com/tyk-swe/olp/internal/resources/retainedworker"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
@@ -89,7 +90,7 @@ func testRetainedManagement(t *testing.T, fixture usageFixture, resource *resour
 	t.Helper()
 	ctx, pool := t.Context(), fixture.pool
 	client := managementHTTPAs(t, pool, fixture.ownerID, func(mux *http.ServeMux, server *access.Server) {
-		(&resources.Management{Access: server, Pool: pool}).Register(mux)
+		resourcesmanage.New(server).Register(mux)
 	})
 	post := func(action, body string) (int, []byte) {
 		t.Helper()
@@ -97,6 +98,16 @@ func testRetainedManagement(t *testing.T, fixture usageFixture, resource *resour
 		return res.status, res.body
 	}
 	testRetainedUsageEvidence(t, fixture, resource, post)
+	list := client.call(t, http.MethodGet, fmt.Sprintf("/api/v1/provider-resources?kind=fine_tuning_job&api_key_id=%s&provider_id=%s", fixture.keyID, fixture.providerID), "", "")
+	var listed contract.ProviderResourceListResponse
+	if err := json.Unmarshal(list.body, &listed); err != nil || list.status != http.StatusOK || len(listed.Items) != 1 || listed.Items[0].Id != resource.ID || listed.Items[0].ApiKeyId.String() != fixture.keyID || listed.Items[0].ProviderId.String() != fixture.providerID || listed.Items[0].RetainedSettlement == nil {
+		t.Fatalf("list provider resources = %d %s, want 200 with %s", list.status, list.body, resource.ID)
+	}
+	oversizedStatus, oversizedBody := post("reconcile", fmt.Sprintf(`{"upstream_id":%q}`, strings.Repeat("x", 513)))
+	var oversizedProblem struct{ Type string }
+	if err := json.Unmarshal(oversizedBody, &oversizedProblem); err != nil || oversizedStatus != http.StatusUnprocessableEntity || !strings.HasSuffix(oversizedProblem.Type, "/validation_failed") {
+		t.Fatalf("reconcile oversized hint = %d %s, want 422 validation_failed", oversizedStatus, oversizedBody)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE olp.retained_settlements SET state='closed' WHERE resource_id=$1`, resource.UUID); err != nil {
 		t.Fatal(err)
 	}

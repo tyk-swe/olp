@@ -11,12 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 const (
-	// A complete state includes native history, dependency metadata and delivery.
-	// The database separately caps ciphertext, including encryption overhead.
 	MaxContinuationBytes = 4 << 20
 	ContinuationLifetime = 24 * time.Hour
 	StateDispatching     = "dispatching"
@@ -31,19 +30,21 @@ var (
 	ErrPayloadTooLarge = errors.New("continuation payload exceeds its bound")
 )
 
-// NewEncrypted configures the existing resource owner to store recoverable
-// contracts with the installation's normal key lifecycle and transactions.
+type sealedContract struct {
+	resource *Resource
+	payload  []byte
+}
+
 func NewEncrypted(pool *pgxpool.Pool, installation string, keys *secrets.KeyRing) *Store {
 	return &Store{pool: pool, installation: installation, keys: keys}
 }
+
 func (s *Store) Encrypted() bool { return s != nil && s.keys != nil && s.installation != "" }
 
-// SubmissionID identifies one client invocation, including SDK/network retries.
-// Its timestamp prevents an expired, garbage-collected claim from becoming new
-// inference. A deliberately new invocation must have a new identity.
 func SubmissionID(at time.Time, id uuid.UUID) string {
 	return strconv.FormatInt(at.UnixMilli(), 10) + "." + id.String()
 }
+
 func ValidateSubmission(value string, now time.Time) error {
 	stamp, text, ok := strings.Cut(value, ".")
 	millis, err := strconv.ParseInt(stamp, 10, 64)
@@ -57,14 +58,22 @@ func ValidateSubmission(value string, now time.Time) error {
 	}
 	return nil
 }
+
 func (s *Store) validateContract(r *Resource, payload []byte) error {
-	if !s.Encrypted() || r == nil || (r.Kind != KindContinuation && r.Kind != KindStrictResponse) || r.ContractVersion == nil || len(*r.ContractVersion) == 0 || len(*r.ContractVersion) > 128 {
+	return validateContractAt(s.Encrypted(), r, payload, time.Now())
+}
+
+func validateContractAt(encrypted bool, r *Resource, payload []byte, now time.Time) error {
+	if !encrypted || r == nil || (r.Kind != KindContinuation && r.Kind != KindStrictResponse) {
+		return ErrContract
+	}
+	if r.ContractVersion == nil || len(*r.ContractVersion) == 0 || len(*r.ContractVersion) > 128 {
 		return ErrContract
 	}
 	if len(payload) == 0 || len(payload) > MaxContinuationBytes {
 		return ErrPayloadTooLarge
 	}
-	if r.ExpiresAt == nil || !r.ExpiresAt.After(time.Now()) || r.ExpiresAt.After(time.Now().Add(ContinuationLifetime)) {
+	if r.ExpiresAt == nil || !r.ExpiresAt.After(now) || r.ExpiresAt.After(now.Add(ContinuationLifetime)) {
 		return ErrContract
 	}
 	if len(r.Metadata) > metadataLimit {
@@ -73,9 +82,6 @@ func (s *Store) validateContract(r *Resource, payload []byte) error {
 	return nil
 }
 
-// ClaimForDispatch commits the encrypted initial dependency and the durable
-// dispatch journal together immediately before the Attempt owner calls the
-// provider. A crash after this commit is conservatively outcome-unknown.
 func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byte) (*Resource, bool, error) {
 	if err := s.validateContract(r, payload); err != nil {
 		return nil, false, err
@@ -89,19 +95,18 @@ func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byt
 	if err := ValidateSubmission(*r.SubmissionID, time.Now()); err != nil {
 		return nil, false, err
 	}
-	copy := *r
-	copy.UUID = uuid.Must(uuid.NewV7())
-	copy.State = StateDispatching
-	// A continuation has no provider resource ID; use its own internal identity.
-	copy.UpstreamID = copy.UUID.String()
-	if len(copy.Metadata) == 0 {
-		copy.Metadata = []byte(`{}`)
+	id, err := newUUIDv7()
+	if err != nil {
+		return nil, false, err
 	}
-	// The resource, its encrypted dependency, and the owner/parent/key-version
-	// locks share one PostgreSQL statement. Data-modifying CTEs are atomic: a
-	// failed ciphertext write cannot leave an accepted-work journal. The shared
-	// installation lock still fences rotation until this statement commits.
-	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, copy.UUID.String(), payload)
+	prepared := *r
+	prepared.UUID = id
+	prepared.State = StateDispatching
+	prepared.UpstreamID = id.String()
+	if len(prepared.Metadata) == 0 {
+		prepared.Metadata = []byte(`{}`)
+	}
+	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, prepared.UUID.String(), payload)
 	if err != nil {
 		return nil, false, err
 	}
@@ -129,9 +134,10 @@ func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byt
    ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
 )
 SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation, copy.TargetID))
+		prepared.UUID, prepared.Kind, prepared.APIKeyID, prepared.RouteSlug, prepared.ProviderID, prepared.ProviderRevisionID, prepared.RouteRevisionID, prepared.SlotID, prepared.CredentialID, prepared.UpstreamID, prepared.State, prepared.Metadata, prepared.ExpiresAt, prepared.ContractVersion, prepared.ParentID, prepared.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation, prepared.TargetID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return s.existingClaim(ctx, r)
+		existing, claimErr := s.existingClaim(ctx, r)
+		return existing, false, claimErr
 	}
 	if err != nil {
 		return nil, false, err
@@ -139,43 +145,41 @@ SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
 	return out, true, nil
 }
 
-// The conflict path uses a fresh snapshot: a concurrent claimant may have
-// committed while the single-statement INSERT waited on the unique index.
-func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
-		return nil, false, err
-	}
-	if r.ParentID != nil {
-		var valid bool
-		err = tx.QueryRow(ctx, `SELECT true FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state=$4 AND expires_at>now() FOR SHARE`, *r.ParentID, r.APIKeyID, KindContinuation, StateReady).Scan(&valid)
-		if err != nil || !valid {
-			return nil, false, ErrNotFound
+func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, error) {
+	return withReadTxValue(ctx, s.pool, func(tx pgx.Tx) (*Resource, error) {
+		if err := authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
+			return nil, err
 		}
-	}
-	out, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`, r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
-	if errors.Is(err, pgx.ErrNoRows) {
-		var active int
-		if keyErr := tx.QueryRow(ctx, `SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE`).Scan(&active); keyErr != nil {
-			return nil, false, keyErr
+		if r.ParentID != nil {
+			var valid bool
+			err := tx.QueryRow(ctx, `SELECT true FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2 AND kind=$3 AND state=$4 AND expires_at>now() FOR SHARE`,
+				*r.ParentID, r.APIKeyID, KindContinuation, StateReady).Scan(&valid)
+			if err != nil || !valid {
+				return nil, ErrNotFound
+			}
 		}
-		if active != s.keys.Active {
-			return nil, false, errors.New("reload the active master key before writing secrets")
+		out, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE api_key_id=$1 AND submission_id=$2 AND kind=$3 AND state<>$4 AND expires_at>now()`,
+			r.APIKeyID, *r.SubmissionID, KindContinuation, StateDeleted))
+		if errors.Is(err, pgx.ErrNoRows) {
+			var active int
+			if keyErr := tx.QueryRow(ctx, `SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE`).Scan(&active); keyErr != nil {
+				return nil, keyErr
+			}
+			if active != s.keys.Active {
+				return nil, errors.New("reload the active master key before writing secrets")
+			}
+			return nil, ErrNotFound
 		}
-		return nil, false, ErrNotFound
-	}
-	return out, false, err
+		return out, err
+	})
 }
 
 func (s *Store) MarkUnknown(ctx context.Context, r *Resource) error {
-	return s.transition(ctx, r, StateDispatching, StateUnknown)
+	return transitionContinuation(ctx, s.pool, r, StateDispatching, StateUnknown)
 }
-func (s *Store) transition(ctx context.Context, r *Resource, from, to string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,updated_at=now() WHERE id=$1 AND api_key_id=$2 AND state=$3 AND kind=$5 AND expires_at>now()`, r.UUID, r.APIKeyID, from, to, KindContinuation)
+
+func transitionContinuation(ctx context.Context, pool *pgxpool.Pool, r *Resource, from, to string) error {
+	tag, err := pool.Exec(ctx, `UPDATE olp.provider_resources SET state=$4,updated_at=now() WHERE id=$1 AND api_key_id=$2 AND state=$3 AND kind=$5 AND expires_at>now()`, r.UUID, r.APIKeyID, from, to, KindContinuation)
 	if err != nil {
 		return err
 	}
@@ -185,9 +189,6 @@ func (s *Store) transition(ctx context.Context, r *Resource, from, to string) er
 	return nil
 }
 
-// CompleteContinuation is the actionability barrier. Ready is published in the
-// same commit as the complete encrypted payload. Ready snapshots are immutable;
-// a next turn creates a new child instead of consuming or modifying its parent.
 func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload []byte) error {
 	if err := s.validateContract(r, payload); err != nil {
 		return err
@@ -196,8 +197,6 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
 	if err != nil {
 		return err
 	}
-	// The ready UPDATE feeds the ciphertext INSERT through RETURNING. Both must
-	// commit together, while owner and installation rows stay shared-locked.
 	var owner, active, updated, stored bool
 	err = s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
  SELECT id FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL
@@ -238,9 +237,6 @@ SELECT EXISTS(SELECT 1 FROM owner),
 	return nil
 }
 
-// ReadContract returns the encrypted operation-owned document only to its live
-// owner. The caller separately enforces route/provider/credential authority and
-// contract version, and only exposes delivery when StateReady is present.
 func (s *Store) ReadContract(ctx context.Context, kind, owner, localID string) (*Resource, []byte, error) {
 	if kind != KindContinuation && kind != KindStrictResponse {
 		return nil, nil, ErrContract
@@ -252,33 +248,34 @@ func (s *Store) readSealedContract(ctx context.Context, kind, owner, localID str
 	if !s.Encrypted() {
 		return nil, nil, ErrContract
 	}
-	id, err := parseLocal(localID)
-	if err != nil || LocalID(kind, id) != localID {
+	parsedKind, id, err := ParseLocalID(localID)
+	if err != nil || parsedKind != kind {
 		return nil, nil, ErrNotFound
 	}
-	tx, err := s.pool.Begin(ctx)
+	sealed, err := withReadTxValue(ctx, s.pool, func(tx pgx.Tx) (sealedContract, error) {
+		if err := authorizeOwner(ctx, tx, owner); err != nil {
+			return sealedContract{}, err
+		}
+		r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sealedContract{}, ErrNotFound
+		}
+		if err != nil {
+			return sealedContract{}, err
+		}
+		if valid != nil && !valid(r) {
+			return sealedContract{}, ErrContract
+		}
+		payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
+		if err != nil || len(payload) == 0 || len(payload) > maxBytes {
+			return sealedContract{}, ErrContract
+		}
+		return sealedContract{resource: r, payload: payload}, nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	defer tx.Rollback(ctx)
-	if err := s.authorizeOwner(ctx, tx, owner); err != nil {
-		return nil, nil, err
-	}
-	r, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND kind=$2 AND api_key_id=$3 AND state<>$4 AND expires_at>now() FOR SHARE`, id, kind, owner, StateDeleted))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if valid != nil && !valid(r) {
-		return nil, nil, ErrContract
-	}
-	payload, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
-	if err != nil || len(payload) == 0 || len(payload) > maxBytes {
-		return nil, nil, ErrContract
-	}
-	return r, payload, nil
+	return sealed.resource, sealed.payload, nil
 }
 
 func (s *Store) FindSubmission(ctx context.Context, owner, submission string) (*Resource, []byte, error) {
@@ -292,7 +289,8 @@ func (s *Store) FindSubmission(ctx context.Context, owner, submission string) (*
 	}
 	return s.ReadContract(ctx, KindContinuation, owner, LocalID(KindContinuation, id))
 }
-func (s *Store) authorizeOwner(ctx context.Context, tx pgx.Tx, owner string) error {
+
+func authorizeOwner(ctx context.Context, tx pgx.Tx, owner string) error {
 	var valid bool
 	err := tx.QueryRow(ctx, `SELECT true FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) FOR SHARE`, owner).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -304,8 +302,6 @@ func (s *Store) authorizeOwner(ctx context.Context, tx pgx.Tx, owner string) err
 	return nil
 }
 
-// PutContract publishes a strict provider response mapping and its historical
-// contract atomically. No local response identifier may be delivered earlier.
 func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*Resource, error) {
 	if err := s.validateContract(r, payload); err != nil {
 		return nil, err
@@ -313,27 +309,21 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 	if r.Kind != KindStrictResponse || r.SubmissionID != nil || r.TargetID == "" {
 		return nil, ErrContract
 	}
-	tx, err := s.pool.Begin(ctx)
+	id, err := newUUIDv7()
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
-	if err = s.authorizeOwner(ctx, tx, r.APIKeyID); err != nil {
-		return nil, err
+	prepared := *r
+	prepared.UUID = id
+	if len(prepared.Metadata) == 0 {
+		prepared.Metadata = []byte(`{}`)
 	}
-	copy := *r
-	copy.UUID = uuid.Must(uuid.NewV7())
-	if len(copy.Metadata) == 0 {
-		copy.Metadata = []byte(`{}`)
-	}
-	out, err := s.insertSealedContract(ctx, tx, &copy, payload)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return withTxValue(ctx, s.pool, func(tx pgx.Tx) (*Resource, error) {
+		if err := authorizeOwner(ctx, tx, prepared.APIKeyID); err != nil {
+			return nil, err
+		}
+		return s.insertSealedContract(ctx, tx, &prepared, payload)
+	})
 }
 
 func (s *Store) insertSealedContract(ctx context.Context, tx pgx.Tx, r *Resource, payload []byte) (*Resource, error) {

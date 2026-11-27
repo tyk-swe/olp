@@ -28,6 +28,7 @@
   const crumbs = $derived(breadcrumbs(page.url.pathname));
   let paletteOpen = $state(false);
   let drawer = $state<HTMLDialogElement>();
+  let drawerOpen = $state(false);
 
   afterNavigate(() => drawer?.close());
 
@@ -62,7 +63,10 @@
         type="button"
         aria-label="Open navigation"
         aria-haspopup="dialog"
-        onclick={() => drawer?.showModal()}
+        onclick={() => {
+          drawerOpen = true;
+          drawer?.showModal();
+        }}
       >
         <NavIcon name="menu" />
       </button>
@@ -125,6 +129,7 @@
   class="drawer"
   aria-label="Navigation"
   bind:this={drawer}
+  onclose={() => (drawerOpen = false)}
   onclick={(event) => {
     if (event.target === drawer) drawer.close();
   }}
@@ -137,7 +142,7 @@
   >
     <NavIcon name="close" />
   </button>
-  {@render sidebar(() => drawer?.close())}
+  {#if drawerOpen}{@render sidebar(() => drawer?.close())}{/if}
 </dialog>
 
 {#if paletteOpen}
