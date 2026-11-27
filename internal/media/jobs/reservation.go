@@ -25,12 +25,12 @@ func (s *Store) Reserve(ctx context.Context, input Reservation) (Record, error) 
 	if err != nil {
 		return Record{}, storeError(err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(context.WithoutCancel(ctx))
 	if _, err = tx.Exec(ctx, "SELECT id FROM olp.providers WHERE id = $1 FOR SHARE", input.ProviderID); err != nil {
 		return Record{}, storeError(err)
 	}
-	var snapshot []byte
-	if err = tx.QueryRow(ctx, "SELECT snapshot FROM olp.runtime_releases WHERE id = $1", input.RuntimeGenerationID).Scan(&snapshot); err != nil {
+	snapshot, err := releaseSnapshot(ctx, tx, input.RuntimeGenerationID)
+	if err != nil {
 		return Record{}, storeError(err)
 	}
 	pin, err := routing.DecodeReleasePin(snapshot, routing.ReleasePinIdentity{ProviderID: input.ProviderID, ProviderRevisionID: input.ProviderRevisionID, RouteSlug: input.RouteSlug, Model: input.UpstreamModel, SlotID: input.SlotID, CredentialID: input.CredentialVersionID})

@@ -65,6 +65,13 @@ linters:
               desc: Resource persistence and workers must not depend on the management kit. Put HTTP handlers in internal/resources/manage.
             - pkg: github.com/tyk-swe/olp/internal/management/contract
               desc: Resource persistence and workers must not depend on management API contracts. Put HTTP handlers in internal/resources/manage.
+        media_isolation:
+          files: ["**/internal/media/**", "!**/internal/media/jobs/manage/**", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/access
+              desc: Media codecs, transport, persistence and workers must not depend on the management kit. Put HTTP handlers in internal/media/jobs/manage.
+            - pkg: github.com/tyk-swe/olp/internal/management/contract
+              desc: Media codecs, transport, persistence and workers must not depend on management API contracts. Put HTTP handlers in internal/media/jobs/manage.
         domain:
           files: ["**/internal/domain/**", "!$test"]
           list-mode: lax

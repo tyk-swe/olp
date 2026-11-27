@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -23,6 +25,24 @@ type Querier interface {
 type Store struct{ db Querier }
 
 func NewStore(db Querier) *Store { return &Store{db: db} }
+
+func (s *Store) Health() workerhealth.Execer { return s.db }
+
+func releaseSnapshot(ctx context.Context, q Querier, generationID string) ([]byte, error) {
+	var raw []byte
+	if err := q.QueryRow(ctx, "SELECT snapshot FROM olp.runtime_releases WHERE id = $1", generationID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (s *Store) ReleaseSnapshot(ctx context.Context, generationID string) ([]byte, error) {
+	raw, err := releaseSnapshot(ctx, s.db, generationID)
+	if err != nil {
+		return nil, storeError(err)
+	}
+	return raw, nil
+}
 
 const pollGateSeconds = 5
 
@@ -311,6 +331,45 @@ func (s *Store) ClaimOne(ctx context.Context, id string, now time.Time) (Claimed
 		return Claimed{}, false, storeError(err)
 	}
 	return claimed, true, nil
+}
+
+func (s *Store) ClaimForDelete(ctx context.Context, id, expectedETag string, now time.Time) (Claimed, bool, error) {
+	if _, err := uuid.Parse(expectedETag); err != nil {
+		return Claimed{}, false, errChanged
+	}
+	claimed, err := scanClaimed(s.db.QueryRow(ctx, returning(`UPDATE olp.media_jobs SET
+			lifecycle_state = CASE WHEN lifecycle_state = 'active' THEN 'delete_pending' ELSE lifecycle_state END,
+			reconciliation_error = CASE WHEN lifecycle_state = 'active' THEN NULL ELSE reconciliation_error END,
+			`+claimSet+`
+		WHERE id = $2
+		  AND etag = $3::uuid
+		  AND lifecycle_state NOT IN ('creating', 'deleted')
+		  AND `+ownedCredential+`
+		  AND (reconciliation_claimed_until IS NULL OR reconciliation_claimed_until <= $1)`),
+		now, id, expectedETag))
+	if err == nil {
+		return claimed, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Claimed{}, false, storeError(err)
+	}
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return Claimed{}, false, err
+	}
+	if current.ETag != expectedETag {
+		return Claimed{}, false, errChanged
+	}
+	switch {
+	case current.Lifecycle == Deleted:
+		return Claimed{Record: current}, false, nil
+	case current.Lifecycle == Creating:
+		return Claimed{}, false, busy("media job create is still in flight")
+	case current.CallerCredential:
+		return Claimed{}, false, errCallerCredential
+	default:
+		return Claimed{}, false, busy("media job is being reconciled by another worker")
+	}
 }
 
 func (s *Store) Extend(ctx context.Context, job Claimed, until time.Time) (bool, error) {

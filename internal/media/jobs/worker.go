@@ -28,7 +28,7 @@ func (c code) Error() string { return string(c) }
 func (s *Service) Run(ctx context.Context) {
 	workerhealth.Run(ctx, workerhealth.Loop{
 		Task: workerhealth.TaskMediaReconciliation, Interval: pollInterval, Budget: passBudget,
-		Health: s.store.db, Log: s.log, Pass: s.pass,
+		Health: s.store.Health(), Log: s.log, Pass: s.pass,
 	})
 }
 
@@ -82,8 +82,12 @@ func (s *Service) schedule(record Record, attempts int, err error) (time.Time, *
 	now := s.now()
 	if err != nil {
 		message := err.Error()
+		if message == "" {
+			message = "reconciliation_failed"
+		}
 		failure := message[:min(len(message), 120)]
-		return now.Add(time.Duration(min(5<<min(attempts, 6), maxBackoff)) * time.Second), &failure
+		delay := min(5<<min(max(attempts, 0), 6), maxBackoff)
+		return now.Add(time.Duration(delay) * time.Second), &failure
 	}
 	if record.Lifecycle == Active && record.State.Polling() {
 		return now.Add(pollInterval), nil
@@ -137,18 +141,20 @@ func (s *Service) step(ctx context.Context, job Claimed) (Record, error) {
 	fence := job.Fence()
 	switch job.Lifecycle {
 	case Creating:
-		if job.UpstreamJobID == nil {
+		upstreamID, ok := job.Upstream()
+		if !ok {
 			if _, err := s.store.MarkAmbiguous(ctx, job.ID, fence, "upstream_create_outcome_unknown_after_restart"); err != nil {
 				return Record{}, mutation(err)
 			}
 			return Record{}, code("upstream_create_outcome_unknown")
 		}
-		return s.cleanup(ctx, job, "stale_post_create_reservation")
+		return s.cleanup(ctx, job, upstreamID, "stale_post_create_reservation")
 	case CreateAmbiguous:
-		if job.UpstreamJobID == nil {
+		upstreamID, ok := job.Upstream()
+		if !ok {
 			return Record{}, code("upstream_create_outcome_unknown")
 		}
-		return s.cleanup(ctx, job, "ambiguous_create_has_cleanup_identity")
+		return s.cleanup(ctx, job, upstreamID, "ambiguous_create_has_cleanup_identity")
 	case Active:
 		if !s.retired(job.Record) {
 			return s.execute(ctx, job, job.Record)
@@ -162,8 +168,8 @@ func (s *Service) step(ctx context.Context, job Claimed) (Record, error) {
 	return s.settle(ctx, job, job.Record)
 }
 
-func (s *Service) cleanup(ctx context.Context, job Claimed, reason string) (Record, error) {
-	marked, err := s.store.MarkCleanup(ctx, job.ID, job.Fence(), *job.UpstreamJobID, reason)
+func (s *Service) cleanup(ctx context.Context, job Claimed, upstreamID, reason string) (Record, error) {
+	marked, err := s.store.MarkCleanup(ctx, job.ID, job.Fence(), upstreamID, reason)
 	if err != nil {
 		return Record{}, mutation(err)
 	}
@@ -226,7 +232,10 @@ func (s *Service) execute(ctx context.Context, job Claimed, record Record) (Reco
 	if record.StrictContract && !media.ValidStrictVideoJobSource(result.Source, upstream, record.UpstreamModel) {
 		return Record{}, code("provider_protocol_error")
 	}
-	video, _ := result.Payload.(transport.Video)
+	video, ok := result.Payload.(transport.Video)
+	if !ok {
+		return Record{}, code("provider_protocol_error")
+	}
 	update, ok := Observe(video.VideoJobResult, s.now())
 	if !ok {
 		return Record{}, code("provider_protocol_error")

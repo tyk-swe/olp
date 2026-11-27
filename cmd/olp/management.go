@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/surface/playground"
 	"github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/media/jobs"
+	jobsmanage "github.com/tyk-swe/olp/internal/media/jobs/manage"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/usage/completeness"
@@ -217,7 +218,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
 	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
 	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
-	(&jobs.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
+	(&jobsmanage.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
 	codesessions.NewManagement(m.Access).Register(mux)
 	resourcesmanage.New(m.Access).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
