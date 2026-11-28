@@ -1,18 +1,16 @@
 package release
 
 import (
+	"context"
 	"encoding/json"
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/ids"
-	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -88,20 +86,15 @@ type delegationPairBudget struct {
 	Usage   *PairBudget                `db:"usage"`
 }
 
-func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	page, pageErr := httpkit.Page(r)
-	if pageErr != nil {
-		return httpkit.Reply{}, pageErr
-	}
-	project, projectErr := p.ProjectFilter(r)
-	if projectErr != nil {
-		return httpkit.Reply{}, projectErr
-	}
-	delegation := r.URL.Query().Get("delegation_id")
-	if delegation != "" && !ids.Canonical(delegation) {
-		return httpkit.Reply{}, problem.Invalid("delegation_id", "Use a canonical delegation UUID.")
-	}
-	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
+type delegationFilter struct {
+	principal  authz.Principal
+	page       database.Pagination
+	project    string
+	delegation string
+}
+
+func delegationRecords(ctx context.Context, q database.Queryer, auth *secrets.AuthKey, filter delegationFilter) ([]delegationPairRecord, error) {
+	rows, queryErr := q.Query(ctx, `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
  d.agent_id::text AS agent_id,d.consenting_user_id::text AS member_id,(d.consent_digest IS NOT NULL) AS consent_pending,
  d.expires_at,d.consumed_at,d.revoked_at,k.revoked_at AS api_key_revoked_at,a.revoked_at AS agent_revoked_at,
  u.active AS member_active,u.oidc_authorized AS member_oidc_authorized,u.role AS member_role,u.access_scope AS member_scope,m.role AS project_role
@@ -109,31 +102,31 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
  LEFT JOIN olp.users u ON u.id=d.consenting_user_id LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=d.project_id
  WHERE d.id<$1 AND ($2 OR d.project_id=ANY($3::uuid[])) AND ($4='' OR d.project_id=NULLIF($4,'')::uuid)
  AND ($6='' OR d.id=NULLIF($6,'')::uuid)
- ORDER BY d.id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1, delegation)
+ ORDER BY d.id DESC LIMIT $5`, filter.page.Before, filter.principal.AllProjects, filter.principal.ProjectIDs(), filter.project, filter.page.Limit+1, filter.delegation)
 	if queryErr != nil {
-		return httpkit.Reply{}, queryErr
+		return nil, queryErr
 	}
-	records, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (delegationPairRecord, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (delegationPairRecord, error) {
 		data, dataErr := pgx.RowToStructByName[delegationRow](row)
 		if dataErr != nil {
 			return delegationPairRecord{}, dataErr
 		}
 		return delegationPairRecord{
 			Record: data.record(), ProjectID: data.ProjectID,
-			Digest: secrets.DelegationPair(s.Access.Auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
+			Digest: secrets.DelegationPair(auth, data.ProjectID, data.APIKeyID, data.AgentID, data.MemberID),
 		}, nil
 	})
-	if collectErr != nil {
-		return httpkit.Reply{}, collectErr
-	}
+}
+
+func delegationViews(ctx context.Context, q database.Queryer, records []delegationPairRecord, limit int) ([]DelegationView, error) {
 	if len(records) == 0 {
-		return httpkit.ListReplyBy([]DelegationView{}, page, func(item DelegationView) string { return item.ID }), nil
+		return []DelegationView{}, nil
 	}
 	pairInput, marshalErr := json.Marshal(records)
 	if marshalErr != nil {
-		return httpkit.Reply{}, marshalErr
+		return nil, marshalErr
 	}
-	budgetRows, budgetQueryErr := s.Access.Pool.Query(r.Context(), `WITH entries AS MATERIALIZED (
+	rows, queryErr := q.Query(ctx, `WITH entries AS MATERIALIZED (
  SELECT ordinality::int AS ordinal,(value->>'project_id')::uuid AS project_id,value->>'digest' AS digest
  FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY
 ), pairs AS MATERIALIZED (
@@ -144,25 +137,84 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 )
  SELECT entries.ordinal,budgets.policy,budgets.usage
  FROM entries LEFT JOIN budgets ON budgets.project_id=entries.project_id AND budgets.digest=entries.digest
- ORDER BY entries.ordinal`, pairInput, page.Limit)
-	if budgetQueryErr != nil {
-		return httpkit.Reply{}, budgetQueryErr
+ ORDER BY entries.ordinal`, pairInput, limit)
+	if queryErr != nil {
+		return nil, queryErr
 	}
-	items, budgetCollectErr := pgx.CollectRows(budgetRows, func(row pgx.CollectableRow) (DelegationView, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (DelegationView, error) {
 		budget, dataErr := pgx.RowToStructByName[delegationPairBudget](row)
 		if dataErr != nil {
 			return DelegationView{}, dataErr
 		}
 		if budget.Usage == nil {
-			if budget.Ordinal <= page.Limit {
+			if budget.Ordinal <= limit {
 				return DelegationView{}, pgx.ErrNoRows
 			}
 			return DelegationView{DelegationRecord: records[budget.Ordinal-1].Record}, nil
 		}
 		return DelegationView{DelegationRecord: records[budget.Ordinal-1].Record, BudgetPolicy: budget.Policy, Budget: *budget.Usage}, nil
 	})
-	if budgetCollectErr != nil {
-		return httpkit.Reply{}, budgetCollectErr
+}
+
+func delegatingKeyProject(ctx context.Context, tx pgx.Tx, keyID string) (*string, error) {
+	var projectID *string
+	err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID)
+	return projectID, database.NotFoundOr(err)
+}
+
+type delegatableResources struct {
+	routes   []string
+	toolsets []string
+	agents   []string
+}
+
+func loadDelegatableResources(ctx context.Context, tx pgx.Tx, projectID string) (delegatableResources, error) {
+	routes, routesErr := collectStrings(ctx, tx, "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", projectID)
+	if routesErr != nil {
+		return delegatableResources{}, routesErr
 	}
-	return httpkit.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
+	toolsets, toolsetsErr := collectStrings(ctx, tx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", projectID)
+	if toolsetsErr != nil {
+		return delegatableResources{}, toolsetsErr
+	}
+	agents, agentsErr := collectStrings(ctx, tx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", projectID)
+	if agentsErr != nil {
+		return delegatableResources{}, agentsErr
+	}
+	return delegatableResources{routes: routes, toolsets: toolsets, agents: agents}, nil
+}
+
+func collectStrings(ctx context.Context, tx pgx.Tx, query, projectID string) ([]string, error) {
+	rows, err := tx.Query(ctx, query, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func installationAuthority(ctx context.Context, tx pgx.Tx) (string, error) {
+	var authorityID string
+	err := tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&authorityID)
+	return authorityID, err
+}
+
+type pendingConsent struct {
+	tokenDigest    []byte
+	consentDigest  []byte
+	memberID       string
+	projectID      string
+	keyID          string
+	agentID        string
+	issuerRevision string
+	bounds         DelegationBounds
+	expiresAt      time.Time
+}
+
+func insertConsent(ctx context.Context, tx pgx.Tx, consent pendingConsent) error {
+	_, err := tx.Exec(ctx, `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, consent.tokenDigest, consent.consentDigest, consent.memberID, consent.projectID, consent.keyID, consent.agentID, consent.issuerRevision, consent.bounds.Scopes, consent.bounds.AllowedRoutes, consent.bounds.AllowedToolsets, consent.expiresAt, consent.bounds.AllowedAgents)
+	return err
+}
+
+func runtimeGenerations(ctx context.Context, q database.Queryer, page database.Pagination) ([]map[string]any, error) {
+	return database.QueryJSON(ctx, q, "SELECT jsonb_build_object('id',g.id,'sequence',g.sequence,'sha256',g.sha256,'created_by',g.created_by,'created_by_email',u.email,'created_at',g.created_at) FROM olp.runtime_releases g JOIN olp.users u ON u.id=g.created_by WHERE g.id<$1 ORDER BY g.id DESC LIMIT $2", page.Before, page.Limit+1)
 }

@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -180,5 +181,79 @@ func TestPausedWorkloadAgentCannotReceiveMemberConsent(t *testing.T) {
 	}
 	if delegationResourcesAllowed(resolved, key, nil, nil, []string{resource}, now) {
 		t.Fatal("paused workload agent was allowed to receive member consent")
+	}
+}
+
+func TestMemberConsentOffersOnlySharedResourcesUnderCurrentAuthority(t *testing.T) {
+	project, otherProject, issuerID := "project", "other", "issuer"
+	registered := func(id, owner string) keyauthority.Authority {
+		return keyauthority.Authority{ID: id, ProjectID: &owner, AgentPrincipal: true, WorkloadIssuerID: &issuerID, WorkloadMapping: id}
+	}
+	mapping := func(name, owner string) workload.Mapping {
+		return workload.Mapping{Name: name, ProjectID: owner, AgentPrincipal: true}
+	}
+	binding := func(owner string, policy keyauthority.KeyPolicy) keyauthority.Authority {
+		return keyauthority.Authority{ProjectID: &owner, AgentPrincipal: true, Policy: policy}
+	}
+	manager := &Manager{authority: authorityState{
+		loaded: true, readAt: time.Now(), id: "current",
+		agentPrincipals: map[string]keyauthority.Authority{
+			"delegating": {ID: "delegating", ProjectID: &project, Policy: keyauthority.KeyPolicy{
+				Scopes: []string{"delegate", "inference", "tools", "agents"}, AllowedRoutes: []string{"alpha", "beta"},
+				AllowedToolsets: []string{"toolset"}, AllowedAgents: []string{"target"},
+			}},
+			"plain": {ID: "plain", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"alpha"}}},
+		},
+		workloadPrincipals: map[string]keyauthority.Authority{
+			"tooling": registered("tooling", project),
+			"router":  registered("router", project),
+			"idle":    registered("idle", project),
+			"foreign": registered("foreign", otherProject),
+		},
+		workloadIssuers: map[string]workloadIssuer{issuerID: {
+			ID: issuerID, Revision: "rev",
+			Config: workload.Config{Enabled: true, Mappings: []workload.Mapping{
+				mapping("tooling", project), mapping("router", project), mapping("idle", project), mapping("foreign", otherProject),
+			}},
+			bindings: map[string]keyauthority.Authority{
+				"tooling": binding(project, keyauthority.KeyPolicy{Scopes: []string{"tools", "agents"}, AllowedToolsets: []string{"toolset", "unshared"}, AllowedAgents: []string{"target"}}),
+				"router":  binding(project, keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"beta", "gamma"}}),
+				"idle":    binding(project, keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"gamma"}}),
+				"foreign": binding(otherProject, keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"alpha"}}),
+			},
+		}},
+	}}
+	resources := delegatableResources{routes: []string{"alpha", "beta", "gamma"}, toolsets: []string{"toolset", "unshared"}, agents: []string{"target"}}
+	options, err := manager.memberConsentOptions("current", project, "delegating", resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"id":"router","allowed_routes":["beta"],"allowed_toolsets":[],"allowed_agents":[]},{"id":"tooling","allowed_routes":[],"allowed_toolsets":["toolset"],"allowed_agents":["target"]}]`
+	if string(encoded) != want {
+		t.Fatalf("consent options = %s, want %s", encoded, want)
+	}
+	for _, test := range []struct {
+		name      string
+		authority string
+		key       string
+		code      string
+	}{
+		{name: "replaced authority", authority: "replaced", key: "delegating", code: "authority_unavailable"},
+		{name: "key without delegate scope", authority: "current", key: "plain", code: "permission_denied"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			options, err := manager.memberConsentOptions(test.authority, project, test.key, resources)
+			var refusal *problem.Problem
+			if options != nil || !errors.As(err, &refusal) || refusal.Code != test.code {
+				t.Fatalf("consent options = %v and error %v, want %s", options, err, test.code)
+			}
+		})
+	}
+	if target, err := manager.memberConsentTarget("replaced", "router", "delegating"); err == nil {
+		t.Fatalf("replaced authority resolved a consent target: %+v", target)
 	}
 }

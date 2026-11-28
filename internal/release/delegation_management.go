@@ -2,26 +2,13 @@ package release
 
 import (
 	"cmp"
-	"context"
-	"errors"
 	"net/http"
 	"slices"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
-	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
-
-type DelegationManagement struct {
-	Access  *access.Server
-	Manager *Manager
-}
 
 type delegationOption struct {
 	ID              string   `json:"id"`
@@ -30,122 +17,37 @@ type delegationOption struct {
 	AllowedAgents   []string `json:"allowed_agents"`
 }
 
-type delegationConsentRequest struct {
-	AgentID         string   `json:"agent_id"`
-	APIKeyID        string   `json:"api_key_id"`
-	Scopes          []string `json:"scopes,omitempty"`
-	AllowedRoutes   []string `json:"allowed_routes"`
-	AllowedToolsets []string `json:"allowed_toolsets,omitempty"`
-	AllowedAgents   []string `json:"allowed_agents,omitempty"`
-	TTLSeconds      int64    `json:"ttl_seconds,omitempty"`
-}
-
-func (s *DelegationManagement) Register(mux *http.ServeMux) {
-	s.Access.Route(mux, "GET /api/v1/agent-delegations", s.listDelegations)
-	s.Access.Route(mux, "POST /api/v1/delegation-consents", s.create)
-	s.Access.Route(mux, "GET /api/v1/delegation-options", s.options)
-}
-
-func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	keyID, err := ids.Parse(r.URL.Query().Get("api_key_id"))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		options, err := s.delegationOptions(r.Context(), tx, principal, keyID)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		return httpkit.OK(struct {
-			Agents []delegationOption `json:"agents"`
-		}{Agents: options}), access.Event{}, nil
-	})
-}
-
-func (s *DelegationManagement) delegationOptions(ctx context.Context, tx pgx.Tx, principal authz.Principal, keyID string) ([]delegationOption, error) {
-	var projectID *string
-	if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
-		}
+func (m *Manager) memberConsentOptions(authorityID, projectID, keyID string, resources delegatableResources) ([]delegationOption, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	state := m.authority
+	if err := state.consentable(authorityID); err != nil {
 		return nil, err
-	}
-	if projectID == nil {
-		return nil, problem.Forbidden()
-	}
-	if err := principal.Project(projectID, authz.Change); err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
-	if err != nil {
-		return nil, err
-	}
-	routes, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, err
-	}
-	toolsetRows, err := tx.Query(ctx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
-	if err != nil {
-		return nil, err
-	}
-	toolsets, err := pgx.CollectRows(toolsetRows, pgx.RowTo[string])
-	if err != nil {
-		return nil, err
-	}
-	agentRows, err := tx.Query(ctx, "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
-	if err != nil {
-		return nil, err
-	}
-	agents, err := pgx.CollectRows(agentRows, pgx.RowTo[string])
-	if err != nil {
-		return nil, err
-	}
-	var current string
-	if err := tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
-		return nil, err
-	}
-	s.Manager.mu.RLock()
-	defer s.Manager.mu.RUnlock()
-	state := s.Manager.authority
-	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return nil, problem.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
-	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
+	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
 		return nil, problem.Forbidden()
 	}
 	now := time.Now()
 	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
 		for _, registered := range state.workloadPrincipals {
-			if registered.ProjectID == nil || *registered.ProjectID != *projectID {
+			if registered.ProjectID == nil || *registered.ProjectID != projectID {
 				continue
 			}
 			agent, _, ok := state.memberConsentAgent(registered)
 			if !ok {
 				continue
 			}
-			allowed := slices.Collect(func(yieldRoute func(string) bool) {
-				for _, route := range routes {
-					if delegationResourcesAllowed(agent, key, []string{route}, nil, nil, now) && !yieldRoute(route) {
-						return
-					}
-				}
+			routes := permitted(resources.routes, func(route string) bool {
+				return delegationResourcesAllowed(agent, key, []string{route}, nil, nil, now)
 			})
-			allowedToolsets := slices.Collect(func(yieldToolset func(string) bool) {
-				for _, toolset := range toolsets {
-					if delegationResourcesAllowed(agent, key, nil, []string{toolset}, nil, now) && !yieldToolset(toolset) {
-						return
-					}
-				}
+			toolsets := permitted(resources.toolsets, func(toolset string) bool {
+				return delegationResourcesAllowed(agent, key, nil, []string{toolset}, nil, now)
 			})
-			allowedAgents := slices.Collect(func(yieldAgent func(string) bool) {
-				for _, target := range agents {
-					if delegationResourcesAllowed(agent, key, nil, nil, []string{target}, now) && !yieldAgent(target) {
-						return
-					}
-				}
+			agents := permitted(resources.agents, func(target string) bool {
+				return delegationResourcesAllowed(agent, key, nil, nil, []string{target}, now)
 			})
-			if (len(allowed) != 0 || len(allowedToolsets) != 0 || len(allowedAgents) != 0) && !yield(delegationOption{ID: registered.ID, AllowedRoutes: append([]string{}, allowed...), AllowedToolsets: append([]string{}, allowedToolsets...), AllowedAgents: append([]string{}, allowedAgents...)}) {
+			if (len(routes) != 0 || len(toolsets) != 0 || len(agents) != 0) && !yield(delegationOption{ID: registered.ID, AllowedRoutes: routes, AllowedToolsets: toolsets, AllowedAgents: agents}) {
 				return
 			}
 		}
@@ -153,44 +55,13 @@ func (s *DelegationManagement) delegationOptions(ctx context.Context, tx pgx.Tx,
 	return append([]delegationOption{}, options...), nil
 }
 
-func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	var input delegationConsentRequest
-	if err := httpkit.Decode(r, &input); err != nil {
-		return httpkit.Reply{}, err
-	}
-	keyID, err := ids.Parse(input.APIKeyID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	agentID, err := ids.Parse(input.AgentID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
-		if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
+func permitted(resources []string, allows func(string) bool) []string {
+	return slices.AppendSeq([]string{}, func(yield func(string) bool) {
+		for _, resource := range resources {
+			if allows(resource) && !yield(resource) {
+				return
+			}
 		}
-		bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, AllowedAgents: input.AllowedAgents, TTLSeconds: input.TTLSeconds}
-		if !validDelegationBounds(bounds) {
-			return httpkit.Reply{}, access.Event{}, problem.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
-		}
-		target, err := s.Manager.memberConsentTarget(r.Context(), tx, agentID, keyID)
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if err := principal.Project(target.key.ProjectID, authz.Change); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
-			return httpkit.Reply{}, access.Event{}, problem.Forbidden()
-		}
-		code := "olpc_" + secrets.Token()
-		expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
-		if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires, bounds.AllowedAgents); err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
-		return httpkit.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}}, access.Event{Action: "agent_delegation.consent", Resource: "api_key", ID: keyID}, nil
 	})
 }
 
@@ -207,20 +78,16 @@ type memberConsentTarget struct {
 	revision string
 }
 
-func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, keyID string) (memberConsentTarget, error) {
-	var current string
-	if err := tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
-		return memberConsentTarget{}, err
-	}
+func (m *Manager) memberConsentTarget(authorityID, agentID, keyID string) (memberConsentTarget, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	state := m.authority
-	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return memberConsentTarget{}, problem.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+	if err := state.consentable(authorityID); err != nil {
+		return memberConsentTarget{}, err
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil {
-		return memberConsentTarget{}, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		return memberConsentTarget{}, problem.NotFound
 	}
 	for _, principal := range state.workloadPrincipals {
 		if principal.ID != agentID {
@@ -231,7 +98,14 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 			return memberConsentTarget{agent: agent, key: key, revision: revision}, nil
 		}
 	}
-	return memberConsentTarget{}, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+	return memberConsentTarget{}, problem.NotFound
+}
+
+func (state authorityState) consentable(authorityID string) error {
+	if !state.loaded || state.id != authorityID || time.Since(state.readAt) > AuthorityStaleAfter {
+		return problem.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+	}
+	return nil
 }
 
 func (state authorityState) memberConsentAgent(principal keyauthority.Authority) (keyauthority.Authority, string, bool) {

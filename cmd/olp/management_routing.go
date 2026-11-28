@@ -14,8 +14,7 @@ import (
 )
 
 func (m Management) registerRouting(mux *http.ServeMux) *routes.Server {
-	(&release.DelegationManagement{Access: m.Access, Manager: m.core.rt}).Register(mux)
-	release.RegisterGenerations(m.Access, mux)
+	release.NewAPI(m.Access, m.core.rt).Register(mux)
 	cacheadmin.NewAPI(m.Access, m.core.responseCache).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.core.rt, AuthenticateKey: m.catalogAuthority, Origin: m.Access.Origin}).Register(mux)
 	routeServer := &routes.Server{
