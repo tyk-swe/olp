@@ -323,6 +323,7 @@ func TestGeminiLiveModalitySharesSettle(t *testing.T) {
 func TestGeminiLiveUsageAccumulatesAcrossTurns(t *testing.T) {
 	t.Parallel()
 	surface := sessionSurfaces()[1]
+	surface.final = `{"serverContent":{"turnComplete":true}}`
 	surface.upstream = []sessionStep{
 		{read: true}, {write: `{"setupComplete":{}}`},
 		{write: `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":10,"responseTokenCount":5,"toolUsePromptTokenCount":3,"thoughtsTokenCount":2,"cachedContentTokenCount":4,"totalTokenCount":12,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":6}],"cacheTokensDetails":[{"modality":"IMAGE","tokenCount":2}],"responseTokensDetails":[{"modality":"AUDIO","tokenCount":1}]}}`},
