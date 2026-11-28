@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState } from '#test/mount.js';
+import { clickButton, findButton, mountWithState } from '#test/mount.js';
 import MembersPanel from './MembersPanel.svelte';
 
 const member = {
@@ -79,4 +79,33 @@ it('changes a member role only after the change is confirmed', async () => {
   write.resolve(json({ ...member, role: 'operator', etag: 'saved' }));
   await eventually(() => expect(button('Deactivate')?.disabled).toBe(false));
   expect(button('Reactivate')?.disabled).toBe(false);
+});
+
+it('can return to the previous member page when the next page is empty', async () => {
+  serve(
+    (request) => {
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v1/users' && !url.searchParams.has('cursor')) {
+        return json({ items: [member], next_cursor: 'next-page' });
+      }
+      return json({ items: [], next_cursor: null });
+    },
+    ['access_read']
+  );
+  const { target } = mountWithState(MembersPanel);
+
+  await eventually(() =>
+    expect(target.textContent).toContain(member.display_name)
+  );
+  clickButton(target, 'Next');
+  await eventually(() => {
+    expect(target.textContent).not.toContain(member.display_name);
+    expect(findButton(target, 'Previous')?.disabled).toBe(false);
+  });
+
+  clickButton(target, 'Previous');
+  await eventually(() =>
+    expect(target.textContent).toContain(member.display_name)
+  );
+  expect(findButton(target, 'Previous')?.disabled).toBe(true);
 });

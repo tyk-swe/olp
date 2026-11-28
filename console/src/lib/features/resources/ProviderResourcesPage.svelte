@@ -174,7 +174,7 @@
   query={resources}
   loading="Loading provider resources…"
   failure={errorMessage(resources.error, 'Provider resources are unavailable.')}
-  emptyWhen={resources.data?.items.length === 0}
+  emptyWhen={resources.data?.items.length === 0 && paging.history.length === 0}
 >
   {#snippet empty()}
     <EmptyState title="No provider resources found">

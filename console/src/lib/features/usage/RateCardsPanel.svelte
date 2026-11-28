@@ -228,7 +228,7 @@
     loading="Loading rate cards…"
     failure={errorMessage(cards.error)}
     retryLabel="Try again"
-    emptyWhen={(cards.data?.items ?? []).length === 0}
+    emptyWhen={!cards.data?.items.length && pagination.history.length === 0}
   >
     {#snippet empty()}
       <EmptyState title="No rate cards yet">
