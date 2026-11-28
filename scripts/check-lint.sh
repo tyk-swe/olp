@@ -17,6 +17,13 @@ fi
 
 "$lint_bin" run --show-stats=false ./...
 
+base=${LINT_BASE:-origin/main}
+if ! git merge-base "$base" HEAD >/dev/null; then
+  echo "check-lint: cannot find where this branch left $base, fetch it or set LINT_BASE" >&2
+  exit 1
+fi
+"$lint_bin" run --show-stats=false --enable-only errcheck,forcetypeassert --new-from-merge-base "$base" ./...
+
 gateway=github.com/tyk-swe/olp/internal/gateway
 declare -A gateway_imports=(
   [fault]="" [events]="" [traceingest]="" [guardstream]="" [generationrefs]=""
