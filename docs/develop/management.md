@@ -141,3 +141,24 @@ management transaction and read the replay record are unexported, so only
 their returned `access.Event` through `access.AuditForProject`. Call
 `access.Audit` or `access.AuditForProject` directly only to record an extra
 audit row in the same change or inside `access.Serialize`.
+
+## Problem values
+
+A refusal the caller can act on is a `*problem.Problem` from
+`internal/domain/problem`. It carries a status, a stable code, a detail
+sentence and, for a validation failure, the field at fault. Handlers, stores,
+workers and validators return it as an ordinary error.
+
+Build one with `problem.Fail`, `problem.Invalid` or `problem.Forbidden`, or
+return `problem.NotFound`. Some helpers cover the common cases.
+`database.NotFoundOr` turns `pgx.ErrNoRows` into `problem.NotFound`,
+`textfield.Validate` requires text within a length limit, the parsers in
+`internal/domain/ids` reject a malformed identifier, and `problem.FromContract`
+reports an obligation that a strict route target cannot meet.
+
+`internal/access/httpkit` owns the HTTP side. `httpkit.ProblemFor` maps an error
+to a problem, including database and routing errors that are not problem values
+themselves, and turns an error it does not recognize into a 503.
+`httpkit.WriteProblem` writes the result as `application/problem+json`. The
+`store_worker_validation` [structure rule](code-structure.md#structure-rules)
+keeps httpkit out of store, worker and validation files.

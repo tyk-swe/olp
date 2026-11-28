@@ -10,7 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 const (
@@ -22,11 +22,11 @@ type apiKey string
 
 func parseAPIKey(key string) (apiKey, error) {
 	if n := len(key); n < 20 || n > 512 {
-		return "", httpkit.Invalid("credential", "credential must be 20 to 512 bytes")
+		return "", problem.Invalid("credential", "credential must be 20 to 512 bytes")
 	}
 	for _, r := range key {
 		if r < 0x21 || r > 0x7e {
-			return "", httpkit.Invalid("credential", "credential must be printable ASCII without whitespace")
+			return "", problem.Invalid("credential", "credential must be printable ASCII without whitespace")
 		}
 	}
 	return apiKey(key), nil
@@ -38,19 +38,19 @@ func parseIDScope[S any](raw json.RawMessage) (S, error) {
 		return scope, nil
 	}
 	if err := decodeStrict(raw, &scope); errors.Is(err, errTrailingData) {
-		return scope, httpkit.Invalid("scope", "scope must be a single JSON document")
+		return scope, problem.Invalid("scope", "scope must be a single JSON document")
 	} else if err != nil {
-		return scope, httpkit.Invalid("scope", "scope must be a JSON object with only the source's keys")
+		return scope, problem.Invalid("scope", "scope must be a JSON object with only the source's keys")
 	}
 	return scope, nil
 }
 
 func validIDs(field string, ids []string, pattern *regexp.Regexp, message string) error {
 	if len(ids) > 100 {
-		return httpkit.Invalid("scope."+field, "at most 100 "+field)
+		return problem.Invalid("scope."+field, "at most 100 "+field)
 	}
 	if slices.ContainsFunc(ids, func(id string) bool { return !pattern.MatchString(id) }) {
-		return httpkit.Invalid("scope."+field, message)
+		return problem.Invalid("scope."+field, message)
 	}
 	return nil
 }

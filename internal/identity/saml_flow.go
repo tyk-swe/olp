@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -100,7 +102,7 @@ func (s *samlService) prepareSAMLBegin(r *http.Request, kind string) (preparedSA
 		return preparedSAMLBegin{}, err
 	}
 	if !c.Enabled {
-		return preparedSAMLBegin{}, httpkit.Fail(403, "saml_disabled", "SAML sign-in is disabled.")
+		return preparedSAMLBegin{}, problem.Fail(403, "saml_disabled", "SAML sign-in is disabled.")
 	}
 	sp, m, err := s.samlProvider(r, s.access.Pool, c)
 	if err != nil {
@@ -110,12 +112,12 @@ func (s *samlService) prepareSAMLBegin(r *http.Request, kind string) (preparedSA
 	sp.ForceAuthn = &force
 	request, err := sp.MakeAuthenticationRequest(m.RedirectURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
 	if err != nil {
-		return preparedSAMLBegin{}, httpkit.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
+		return preparedSAMLBegin{}, problem.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
 	}
 	state, browser := secrets.Token(), secrets.Token()
 	destination, err := request.Redirect(state, sp)
 	if err != nil {
-		return preparedSAMLBegin{}, httpkit.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
+		return preparedSAMLBegin{}, problem.Fail(503, "saml_unavailable", "SAML sign-in could not be started.")
 	}
 	return preparedSAMLBegin{
 		kind:        kind,
@@ -134,7 +136,7 @@ func (s *samlService) storeSAMLFlow(r *http.Request, tx pgx.Tx, prep preparedSAM
 		return httpkit.Reply{}, err
 	}
 	if current.ETag != prep.config.ETag || !current.Enabled {
-		return httpkit.Reply{}, httpkit.Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
+		return httpkit.Reply{}, problem.Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
 	}
 	flow := samlFlow{
 		ID:        ids.New(),
@@ -180,11 +182,11 @@ func (s *samlService) readSAMLFlow(r *http.Request, q database.Queryer, state st
 	var digest []byte
 	var received *time.Time
 	if state == "" || len(state) > 256 {
-		return f, nil, nil, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+		return f, nil, nil, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
 	err := q.QueryRow(r.Context(), "SELECT id::text,cookie_digest,received_at FROM olp.saml_flows WHERE state_digest=$1 AND expires_at>clock_timestamp()", s.access.Auth.Digest(secrets.SAMLStateDigest, state)).Scan(&f.ID, &digest, &received)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return f, nil, nil, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+		return f, nil, nil, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
 	if err != nil {
 		return f, nil, nil, err
@@ -203,7 +205,7 @@ func (s *samlService) samlACS(r *http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if r.URL.RawQuery != "" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") || r.ParseForm() != nil || len(r.PostForm) != 2 || len(r.PostForm["SAMLResponse"]) != 1 || len(r.PostForm["RelayState"]) != 1 {
-		return httpkit.Reply{}, httpkit.Fail(400, "saml_response_invalid", "Use the configured SAML POST response binding.")
+		return httpkit.Reply{}, problem.Fail(400, "saml_response_invalid", "Use the configured SAML POST response binding.")
 	}
 	state := r.PostForm.Get("RelayState")
 	flow, _, received, err := s.readSAMLFlow(r, s.access.Pool, state)
@@ -211,14 +213,14 @@ func (s *samlService) samlACS(r *http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if received != nil {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "This SAML response was already received.")
+		return httpkit.Reply{}, problem.Fail(403, "saml_flow_invalid", "This SAML response was already received.")
 	}
 	c, err := loadSAML(r.Context(), s.access.Pool)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if !c.Enabled || c.ETag != flow.ETag {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
+		return httpkit.Reply{}, problem.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 	}
 	assertion, verifiedFlow, err := s.verifySAMLResponse(r, c, flow)
 	if err != nil {
@@ -234,30 +236,30 @@ func (s *samlService) verifySAMLResponse(r *http.Request, c samlConfiguration, f
 	}
 	raw, err := base64.StdEncoding.DecodeString(r.PostForm.Get("SAMLResponse"))
 	if err != nil {
-		return nil, samlFlow{}, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
+		return nil, samlFlow{}, problem.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
 	assertion, err := samlidentity.Verify(sp, m, raw, flow.RequestID, time.Now())
 	clear(raw)
 	if err != nil {
-		return nil, samlFlow{}, httpkit.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
+		return nil, samlFlow{}, problem.Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
 	if flow.Kind != "login" && (assertion.AuthnStatements[0].AuthnInstant.Before(flow.Expires.Add(-samlFlowTTL-samlidentity.Skew)) || assertion.AuthnStatements[0].AuthnInstant.After(time.Now().Add(samlidentity.Skew))) {
-		return nil, samlFlow{}, httpkit.Fail(403, "saml_authentication_not_recent", "Authenticate again at the identity provider.")
+		return nil, samlFlow{}, problem.Fail(403, "saml_authentication_not_recent", "Authenticate again at the identity provider.")
 	}
 	attrs, err := samlidentity.Attributes(assertion)
 	if err != nil || len(attrs[c.EmailAttribute]) != 1 {
-		return nil, samlFlow{}, httpkit.Fail(403, "saml_claims_invalid", "The SAML identity lacks the configured email attribute.")
+		return nil, samlFlow{}, problem.Fail(403, "saml_claims_invalid", "The SAML identity lacks the configured email attribute.")
 	}
 	address, err := email(attrs[c.EmailAttribute][0])
 	if err != nil {
-		return nil, samlFlow{}, httpkit.Fail(403, "saml_claims_invalid", "The SAML email attribute is invalid.")
+		return nil, samlFlow{}, problem.Fail(403, "saml_claims_invalid", "The SAML email attribute is invalid.")
 	}
 	groups := attrs[c.GroupsAttribute]
 	if groups == nil {
 		groups = []string{}
 	}
 	name := address
-	if names := attrs[c.NameAttribute]; len(names) == 1 && httpkit.ValidText("display_name", names[0], 100) == nil {
+	if names := attrs[c.NameAttribute]; len(names) == 1 && textfield.Validate("display_name", names[0], 100) == nil {
 		name = names[0]
 	}
 	verifiedFlow := flow
@@ -287,7 +289,7 @@ func (s *samlService) recordSAMLAssertion(r *http.Request, c samlConfiguration, 
 			return httpkit.Reply{}, false, err
 		}
 		if !current.Enabled || current.ETag != flow.ETag {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.saml_assertion_replays WHERE digest IN (SELECT digest FROM olp.saml_assertion_replays WHERE expires_at<=now() LIMIT $1)", expiredCleanupLimit); err != nil {
 			return httpkit.Reply{}, false, err
@@ -301,7 +303,7 @@ func (s *samlService) recordSAMLAssertion(r *http.Request, c samlConfiguration, 
 			return httpkit.Reply{}, false, err
 		}
 		if result.RowsAffected() != 1 {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_assertion_replayed", "Start SAML sign-in again.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_assertion_replayed", "Start SAML sign-in again.")
 		}
 		updated := flow
 		updated.Expires = clampSAMLExpiry(flow.Expires, assertion)
@@ -310,7 +312,7 @@ func (s *samlService) recordSAMLAssertion(r *http.Request, c samlConfiguration, 
 			return httpkit.Reply{}, false, err
 		}
 		if result.RowsAffected() != 1 {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 		}
 		data, err := json.Marshal(updated)
 		if err != nil {
@@ -326,7 +328,7 @@ func (s *samlService) recordSAMLAssertion(r *http.Request, c samlConfiguration, 
 
 func (s *samlService) completeSAML(r *http.Request) (httpkit.Reply, error) {
 	if len(r.URL.Query()["state"]) != 1 {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+		return httpkit.Reply{}, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
 	return access.Serialize(s.access, r, func(tx pgx.Tx) (httpkit.Reply, bool, error) {
 		flow, digest, received, err := s.readSAMLFlow(r, tx, r.URL.Query().Get("state"))
@@ -334,25 +336,25 @@ func (s *samlService) completeSAML(r *http.Request) (httpkit.Reply, error) {
 			return httpkit.Reply{}, false, err
 		}
 		if received == nil || flow.Facts == nil || !hmac.Equal(digest, s.access.Auth.Digest(secrets.SAMLCookieDigest, access.CookieValue(r, "__Host-olp_saml_"+flow.ID))) {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "Use the browser that started SAML sign-in.")
 		}
 		c, err := loadSAML(r.Context(), tx)
 		if err != nil {
 			return httpkit.Reply{}, false, err
 		}
 		if !c.Enabled || c.ETag != flow.ETag {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 		}
 		consumed, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID)
 		if err != nil {
 			return httpkit.Reply{}, false, err
 		}
 		if consumed.RowsAffected() != 1 {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
+			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 		}
 		response, err := s.acceptSAML(r, tx, c, flow)
 		if err != nil {
-			var problem *httpkit.Problem
+			var problem *problem.Problem
 			commitDeauth := errors.As(err, &problem) && problem.Code == "saml_provisioning_denied"
 			return httpkit.Reply{}, commitDeauth, err
 		}
@@ -371,17 +373,17 @@ func (s *samlService) acceptSAML(r *http.Request, tx pgx.Tx, c samlConfiguration
 		return httpkit.Reply{}, err
 	}
 	if !allowed {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
+		return httpkit.Reply{}, problem.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
 	}
 	if changed && flow.Kind == "reauthenticate" {
-		return httpkit.Reply{}, httpkit.Fail(403, "saml_provisioning_denied", "Your access changed; sign in again.")
+		return httpkit.Reply{}, problem.Fail(403, "saml_provisioning_denied", "Your access changed; sign in again.")
 	}
 	var active bool
 	if err = tx.QueryRow(r.Context(), "SELECT active AND oidc_authorized FROM olp.users WHERE id=$1", userID).Scan(&active); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if !active {
-		return httpkit.Reply{}, httpkit.Fail(403, "account_disabled", "This account is disabled.")
+		return httpkit.Reply{}, problem.Fail(403, "account_disabled", "This account is disabled.")
 	}
 	response, err := s.finishSAMLOutcome(r, tx, flow, p, userID)
 	if err != nil {
@@ -399,14 +401,14 @@ func provisionSAMLUser(ctx context.Context, tx pgx.Tx, c samlConfiguration, flow
 		return "", err
 	}
 	if !complete {
-		return "", httpkit.Fail(403, "setup_required", "Complete owner setup before SAML sign-in.")
+		return "", problem.Fail(403, "setup_required", "Complete owner setup before SAML sign-in.")
 	}
 	if existing {
-		return "", httpkit.Fail(409, "saml_link_required", "Sign in to the existing account and explicitly link this identity.")
+		return "", problem.Fail(409, "saml_link_required", "Sign in to the existing account and explicitly link this identity.")
 	}
 	role := samlMappedRole(c, flow.Facts.Email, flow.Facts.Groups)
 	if role == "" {
-		return "", httpkit.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
+		return "", problem.Fail(403, "saml_provisioning_denied", "No role mapping authorizes this identity.")
 	}
 	userID := ids.New()
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'saml')", userID, flow.Facts.Email, flow.Name, role, ids.New()); err != nil {
@@ -446,12 +448,12 @@ func (s *samlService) resolveSAMLIdentity(r *http.Request, tx pgx.Tx, c samlConf
 			return "", "", authz.Principal{}, err
 		}
 		if flow.Kind == "reauthenticate" && p.ID != userID {
-			return "", "", authz.Principal{}, httpkit.Fail(403, "saml_identity_mismatch", "Use an identity linked to your current account.")
+			return "", "", authz.Principal{}, problem.Fail(403, "saml_identity_mismatch", "Use an identity linked to your current account.")
 		}
 	}
 	if flow.Kind == "link" {
 		if identityID != "" {
-			return "", "", authz.Principal{}, httpkit.Fail(409, "saml_identity_linked", "The SAML identity is already linked.")
+			return "", "", authz.Principal{}, problem.Fail(409, "saml_identity_linked", "The SAML identity is already linked.")
 		}
 		userID = p.ID
 	}

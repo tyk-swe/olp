@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/surface"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/observability"
@@ -297,7 +298,7 @@ func warnEgressExceptions(log *slog.Logger, c Config) {
 // document the console's handlers produce.
 func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
 	if surface == "management" {
-		problem := httpkit.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
+		problem := problem.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
 		if strings.HasPrefix(r.URL.Path, "/scim/") {
 			identity.WriteSCIMError(w, problem)
 		} else {

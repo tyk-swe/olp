@@ -7,11 +7,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode/codeplans"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -45,26 +47,26 @@ type Granted struct {
 }
 
 func (s Settings) Validate() error {
-	if err := httpkit.ValidText("name", s.Name, 100); err != nil {
+	if err := textfield.Validate("name", s.Name, 100); err != nil {
 		return err
 	}
 	if err := codemode.ValidateModels(s.Models); err != nil {
-		return httpkit.Invalid("models", err.Error())
+		return problem.Invalid("models", err.Error())
 	}
 	if s.MaxConcurrency != nil && *s.MaxConcurrency < 1 {
-		return httpkit.Invalid("max_concurrency", "Set a positive generation limit or leave it unset.")
+		return problem.Invalid("max_concurrency", "Set a positive generation limit or leave it unset.")
 	}
 	if s.CycleAnchor == nil {
 		return nil
 	}
 	if _, ok := codemode.ParseCycleAnchor(*s.CycleAnchor); !ok {
-		return httpkit.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
+		return problem.Invalid("cycle_anchor", "Use a calendar date as the subscription cycle anchor.")
 	}
 	return nil
 }
 
 func (in Input) validated() (Input, error) {
-	ids, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
+	ids, err := ids.ParseAll([]string{in.ProjectID, in.ProviderID, in.CredentialID})
 	if err != nil {
 		return Input{}, err
 	}
@@ -168,13 +170,13 @@ func save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, in
 		return nil, err
 	}
 	if principal == "" {
-		return nil, httpkit.Invalid("credential_id", "Enrollment must establish an upstream principal.")
+		return nil, problem.Invalid("credential_id", "Enrollment must establish an upstream principal.")
 	}
 	if in.ExtraUsageEnabled != nil && (adapter == nil || *adapter != string(codemode.AdapterKimiCode)) {
-		return nil, httpkit.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
+		return nil, problem.Invalid("extra_usage_enabled", "Extra Usage applies only to Kimi Code accounts.")
 	}
 	if in.CycleAnchor != nil && (profileID == nil || *profileID != codeplans.QwenTokenPlanProfile && *profileID != codeplans.QwenTokenPlanCNProfile) {
-		return nil, httpkit.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
+		return nil, problem.Invalid("cycle_anchor", "A cycle anchor applies only to Qwen Token Plan accounts.")
 	}
 	if existing {
 		var oldPrincipal, oldProvider string
@@ -182,7 +184,7 @@ func save(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string, in
 			return nil, err
 		}
 		if oldPrincipal != principal || oldProvider != in.ProviderID {
-			return nil, httpkit.Invalid("credential_id", "Account identity cannot change during credential rotation.")
+			return nil, problem.Invalid("credential_id", "Account identity cannot change during credential rotation.")
 		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,extra_usage_enabled,etag,created_by,cycle_anchor,max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)

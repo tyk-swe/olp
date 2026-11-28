@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -28,7 +29,7 @@ func (a *API) lookupEndUser(r *http.Request, p authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	if !keyauthority.ValidEndUserIdentifier(input.Identifier) {
-		return httpkit.Reply{}, httpkit.Invalid("identifier", "Provide an end-user machine token of 1–128 characters.")
+		return httpkit.Reply{}, problem.Invalid("identifier", "Provide an end-user machine token of 1–128 characters.")
 	}
 	// Deliberately no mutation replay, audit payload, or raw-identifier query.
 	return httpkit.OK(map[string]string{"end_user_digest": secrets.DigestEndUser(a.server.Auth, projectID, input.Identifier)}), nil

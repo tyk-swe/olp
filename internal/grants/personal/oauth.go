@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -83,7 +83,7 @@ func (s *Store) verificationURL(bound Binding, raw string) error {
 
 func oauthProblem(err error) error {
 	if errors.Is(err, errOAuth) {
-		return httpkit.Fail(422, "grant_authorization_failed", "Personal authorization failed. Start a new enrollment.")
+		return problem.Fail(422, "grant_authorization_failed", "Personal authorization failed. Start a new enrollment.")
 	}
 	return grantProblem(err)
 }

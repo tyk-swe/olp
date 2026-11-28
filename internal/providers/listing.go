@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -168,7 +169,7 @@ func visibleListingRoutes(p authz.Principal, rows []listingRouteRow) map[string]
 }
 
 func errListingUnsupported() error {
-	return httpkit.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
+	return problem.Fail(422, "listing_comparison_unsupported", "Listing comparison supports a native anthropic provider with one enabled, stored API-key credential slot.")
 }
 
 type listingSnapshot struct {
@@ -189,7 +190,7 @@ func (s *modelService) publishedListingTarget(ctx context.Context, p authz.Princ
 			return listingSnapshot{}, err
 		}
 		if current.State != stateActive || current.ActiveRevisionID == nil {
-			return listingSnapshot{}, httpkit.Fail(422, "no_active_revision", "Activate a revision before comparing its published inventory with the upstream listing.")
+			return listingSnapshot{}, problem.Fail(422, "no_active_revision", "Activate a revision before comparing its published inventory with the upstream listing.")
 		}
 		revision, err := loadRevision(ctx, tx, current.ID, *current.ActiveRevisionID)
 		if err != nil {
@@ -216,10 +217,10 @@ func (s *modelService) publishedListingTarget(ctx context.Context, p authz.Princ
 			return listingSnapshot{}, err
 		}
 		if revoked {
-			return listingSnapshot{}, httpkit.Fail(422, "credential_revoked", "The published credential version was revoked, so its listing cannot be compared.")
+			return listingSnapshot{}, problem.Fail(422, "credential_revoked", "The published credential version was revoked, so its listing cannot be compared.")
 		}
 		if version != *slot.CredentialVersion {
-			return listingSnapshot{}, httpkit.Fail(422, "credential_mismatch", "The published credential version no longer matches the stored credential.")
+			return listingSnapshot{}, problem.Fail(422, "credential_mismatch", "The published credential version no longer matches the stored credential.")
 		}
 		local, ref, err := s.credentials.readLocalOrRef(ctx, tx, *slot.CredentialID)
 		if err != nil {

@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -45,7 +47,7 @@ func (s *DelegationManagement) Register(mux *http.ServeMux) {
 }
 
 func (s *DelegationManagement) options(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	keyID, err := httpkit.ParseUUID(r.URL.Query().Get("api_key_id"))
+	keyID, err := ids.Parse(r.URL.Query().Get("api_key_id"))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -64,12 +66,12 @@ func (s *DelegationManagement) delegationOptions(ctx context.Context, tx pgx.Tx,
 	var projectID *string
 	if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+			return nil, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 		}
 		return nil, err
 	}
 	if projectID == nil {
-		return nil, httpkit.Forbidden()
+		return nil, problem.Forbidden()
 	}
 	if err := principal.Project(projectID, authz.Change); err != nil {
 		return nil, err
@@ -106,11 +108,11 @@ func (s *DelegationManagement) delegationOptions(ctx context.Context, tx pgx.Tx,
 	defer s.Manager.mu.RUnlock()
 	state := s.Manager.authority
 	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return nil, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+		return nil, problem.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
-		return nil, httpkit.Forbidden()
+		return nil, problem.Forbidden()
 	}
 	now := time.Now()
 	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
@@ -156,11 +158,11 @@ func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpk
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	keyID, err := httpkit.ParseUUID(input.APIKeyID)
+	keyID, err := ids.Parse(input.APIKeyID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	agentID, err := httpkit.ParseUUID(input.AgentID)
+	agentID, err := ids.Parse(input.AgentID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -170,7 +172,7 @@ func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpk
 		}
 		bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, AllowedAgents: input.AllowedAgents, TTLSeconds: input.TTLSeconds}
 		if !validDelegationBounds(bounds) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
 		}
 		target, err := s.Manager.memberConsentTarget(r.Context(), tx, agentID, keyID)
 		if err != nil {
@@ -180,7 +182,7 @@ func (s *DelegationManagement) create(r *http.Request, _ authz.Principal) (httpk
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Forbidden()
+			return httpkit.Reply{}, access.Event{}, problem.Forbidden()
 		}
 		code := "olpc_" + secrets.Token()
 		expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
@@ -214,11 +216,11 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 	defer m.mu.RUnlock()
 	state := m.authority
 	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
-		return memberConsentTarget{}, httpkit.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+		return memberConsentTarget{}, problem.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil {
-		return memberConsentTarget{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		return memberConsentTarget{}, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	for _, principal := range state.workloadPrincipals {
 		if principal.ID != agentID {
@@ -229,7 +231,7 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 			return memberConsentTarget{agent: agent, key: key, revision: revision}, nil
 		}
 	}
-	return memberConsentTarget{}, httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+	return memberConsentTarget{}, problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 }
 
 func (state authorityState) memberConsentAgent(principal keyauthority.Authority) (keyauthority.Authority, string, bool) {

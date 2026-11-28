@@ -75,6 +75,11 @@ linters:
               desc: Media codecs, transport, persistence and workers must not depend on the management kit. Put HTTP handlers in internal/media/jobs/manage.
             - pkg: github.com/tyk-swe/olp/internal/management/contract
               desc: Media codecs, transport, persistence and workers must not depend on management API contracts. Put HTTP handlers in internal/media/jobs/manage.
+        store_worker_validation:
+          files: ["**/*store.go", "**/*stores.go", "**/*worker.go", "**/*workers.go", "**/*validation.go", "**/*validate.go", "!$test"]
+          deny:
+            - pkg: github.com/tyk-swe/olp/internal/access/httpkit
+              desc: Store, worker and validation code does not speak HTTP. Return a problem from internal/domain/problem and let the handler write the reply.
         domain:
           files: ["**/internal/domain/**", "!$test"]
           list-mode: lax

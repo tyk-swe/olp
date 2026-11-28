@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -26,7 +27,7 @@ type replayClaim struct {
 func (s *Server) replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any) (replayClaim, *httpkit.Reply, error) {
 	c := replayClaim{Key: r.Header.Get("Idempotency-Key"), Actor: p.ID}
 	if len(c.Key) < 1 || len(c.Key) > 200 {
-		return c, nil, httpkit.Fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")
+		return c, nil, problem.Fail(400, "idempotency_key_required", "Send an Idempotency-Key of 1–200 characters.")
 	}
 	data, err := json.Marshal([]any{r.Method, r.URL.Path, r.Header.Get("If-Match"), input})
 	if err != nil {
@@ -46,7 +47,7 @@ func (s *Server) replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any
 		return c, nil, err
 	}
 	if !hmac.Equal(stored, c.Fingerprint) {
-		return c, nil, httpkit.Fail(409, "idempotency_conflict", "This Idempotency-Key belongs to a different request.")
+		return c, nil, problem.Fail(409, "idempotency_conflict", "This Idempotency-Key belongs to a different request.")
 	}
 	data, err = s.Keys.Read(r.Context(), tx, s.Installation, id, secrets.MutationReplay)
 	if err != nil {

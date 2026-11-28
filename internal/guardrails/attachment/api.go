@@ -9,6 +9,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
@@ -80,9 +82,9 @@ func (a *API) replace(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	if err := httpkit.DecodeUnique(r, &in, 65536); err != nil {
 		return httpkit.Reply{}, err
 	}
-	revisionID, err := httpkit.ParseUUID(in.PolicyRevisionID)
+	revisionID, err := ids.Parse(in.PolicyRevisionID)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("policy_revision_id", "Choose a policy revision.")
+		return httpkit.Reply{}, problem.Invalid("policy_revision_id", "Choose a policy revision.")
 	}
 	ctx := r.Context()
 	type locked struct {
@@ -146,7 +148,7 @@ func (a *API) detach(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 
 func (a *API) republish(r *http.Request, tx pgx.Tx, p authz.Principal, incompatible string) error {
 	if err := a.publish(r.Context(), tx, p.UserID()); err != nil {
-		return httpkit.Invalid("attachment", incompatible)
+		return problem.Invalid("attachment", incompatible)
 	}
 	return nil
 }

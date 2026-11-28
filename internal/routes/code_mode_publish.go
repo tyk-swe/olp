@@ -6,10 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -17,13 +17,13 @@ import (
 
 func validateCodePublicationRoute(ctx context.Context, tx pgx.Tx, route codemode.Route) error {
 	if err := route.ValidateAliases(); err != nil {
-		return httpkit.Invalid("aliases", err.Error())
+		return problem.Invalid("aliases", err.Error())
 	}
 	if err := route.ValidateModelPools(); err != nil {
-		return httpkit.Invalid("model_pools", err.Error())
+		return problem.Invalid("model_pools", err.Error())
 	}
 	if err := route.Tools.Validate(); err != nil {
-		return httpkit.Invalid("tools", err.Error())
+		return problem.Invalid("tools", err.Error())
 	}
 	if route.Tools != nil {
 		if _, err := codesessions.ResearchAccount(ctx, tx, route); err != nil {
@@ -44,7 +44,7 @@ func validateCodePublicationRoute(ctx context.Context, tx pgx.Tx, route codemode
 			return err
 		}
 		if !available {
-			return httpkit.Invalid("models", "Every model needs an enrolled pool account.")
+			return problem.Invalid("models", "Every model needs an enrolled pool account.")
 		}
 	}
 	return nil
@@ -57,11 +57,11 @@ func resolvePublishedPaidConnections(ctx context.Context, tx pgx.Tx, route codem
 	}
 	if frozenPaid != nil {
 		if len(frozenPaid) != len(paidProviders) {
-			return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+			return nil, problem.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
 		}
 		for id := range frozenPaid {
 			if _, ok := paidProviders[id]; !ok {
-				return nil, httpkit.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+				return nil, problem.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
 			}
 		}
 		if err := ValidateCodePaidProviders(route, frozenPaid); err != nil {
@@ -85,14 +85,14 @@ func resolvePublishedPoolConnections(ctx context.Context, tx pgx.Tx, poolID stri
 		return nil, nil, err
 	}
 	if len(current) != len(frozen) {
-		return nil, nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
+		return nil, nil, problem.Invalid("connections", "Frozen providers must match the publication pool.")
 	}
 	for provider, cfg := range frozen {
 		if _, ok := current[provider]; !ok {
-			return nil, nil, httpkit.Invalid("connections", "Frozen providers must match the publication pool.")
+			return nil, nil, problem.Invalid("connections", "Frozen providers must match the publication pool.")
 		}
 		if _, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID); !ok {
-			return nil, nil, httpkit.Invalid("connections", "Frozen connections must support a coding adapter.")
+			return nil, nil, problem.Invalid("connections", "Frozen connections must support a coding adapter.")
 		}
 	}
 	encoded, err := json.Marshal(frozen)

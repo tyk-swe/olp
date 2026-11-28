@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -41,13 +42,13 @@ func (s *Server) prepareWrite(r *http.Request, id string, retire bool) (Input, e
 func (s *Server) certificationCredential(ctx context.Context, in Input, previous *Definition) ([]byte, error) {
 	if len(in.Credential) == 0 && previous != nil && previous.CredentialID != nil {
 		if in.Endpoint != previous.Endpoint {
-			return nil, httpkit.Invalid("credential", "Supply a replacement credential or null when changing the MCP endpoint.")
+			return nil, problem.Invalid("credential", "Supply a replacement credential or null when changing the MCP endpoint.")
 		}
 		return s.storedCredential(ctx, previous)
 	}
 	material, err := secrets.ParseBearer(in.Credential)
 	if err != nil {
-		return nil, httpkit.Invalid("credential", err.Error())
+		return nil, problem.Invalid("credential", err.Error())
 	}
 	return material, nil
 }
@@ -66,7 +67,7 @@ func (s *Server) certifyChange(ctx context.Context, in Input, previous *Definiti
 	catalog, err := upstream.CertifyOptions(ctx, s.egress, in.Endpoint, material, upstream.TransportOptions{Transport: definitionTransport(in, previous), Stdio: definitionStdio(in, previous), Executables: s.executables})
 	if err != nil {
 		clear(material)
-		return nil, nil, httpkit.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
+		return nil, nil, problem.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
 	}
 	return material, catalog, nil
 }
@@ -149,7 +150,7 @@ func (s *Server) saveChange(ctx context.Context, tx pgx.Tx, actor string, in Inp
 	if err != nil {
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" {
-			return registrationChange{}, httpkit.Fail(409, "mcp_server_exists", "Choose an unused MCP name in this project.")
+			return registrationChange{}, problem.Fail(409, "mcp_server_exists", "Choose an unused MCP name in this project.")
 		}
 		return registrationChange{}, err
 	}

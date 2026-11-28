@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
@@ -98,7 +99,7 @@ func (s *DelegationManagement) listDelegations(r *http.Request, p authz.Principa
 	}
 	delegation := r.URL.Query().Get("delegation_id")
 	if delegation != "" && !ids.Canonical(delegation) {
-		return httpkit.Reply{}, httpkit.Invalid("delegation_id", "Use a canonical delegation UUID.")
+		return httpkit.Reply{}, problem.Invalid("delegation_id", "Use a canonical delegation UUID.")
 	}
 	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
  d.agent_id::text AS agent_id,d.consenting_user_id::text AS member_id,(d.consent_digest IS NOT NULL) AS consent_pending,

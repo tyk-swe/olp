@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func decodeJSONValue(t *testing.T, raw []byte) any {
@@ -43,7 +43,7 @@ func TestDefaultSlotRequiresDefault(t *testing.T) {
 		if slot != nil {
 			t.Fatalf("slot = %+v, want nil", slot)
 		}
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "credential_required" {
 			t.Fatalf("err = %#v, want 422 credential_required", err)
 		}
@@ -55,7 +55,7 @@ func TestDefaultSlotRequiresDefault(t *testing.T) {
 		if slot != nil {
 			t.Fatalf("slot = %+v, want nil", slot)
 		}
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "credential_required" {
 			t.Fatalf("err = %#v, want 422 credential_required", err)
 		}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -48,7 +48,7 @@ func parseOwner(kind string, id *string) (Owner, error) {
 		if id == nil {
 			return Owner{}, invalid("owner.id", "Name the "+kind+".")
 		}
-		parsed, err := httpkit.ParseUUID(*id)
+		parsed, err := ids.Parse(*id)
 		if err != nil {
 			return Owner{}, invalid("owner.id", "Use a valid identifier.")
 		}

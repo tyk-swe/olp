@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
@@ -60,7 +61,7 @@ func (s *Server) list(res resource) access.Handler {
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		items, err := httpkit.QueryJSON(r.Context(), s.access.Pool,
+		items, err := database.QueryJSON(r.Context(), s.access.Pool,
 			"SELECT document FROM ("+res.documentsSQL+") documents WHERE id<$1::uuid AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4",
 			page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 		return httpkit.ListReply(items, page), err
@@ -96,7 +97,7 @@ func create[T any](s *Server, r *http.Request, res resource, c creation[T]) (htt
 		if err := p.Authorize(notificationOperation(c.projectID)); err != nil {
 			return nil, err
 		}
-		projectID, err := httpkit.ParseOptionalUUID(c.projectID)
+		projectID, err := ids.ParseOptional(c.projectID)
 		if err != nil {
 			return nil, err
 		}
@@ -177,11 +178,11 @@ func decodePatch[V any](r *http.Request, subject, unknownField string, known map
 		return nil, err
 	}
 	if len(patch) == 0 {
-		return nil, httpkit.Invalid(subject, "Send at least one field to update.")
+		return nil, problem.Invalid(subject, "Send at least one field to update.")
 	}
 	for field := range patch {
 		if _, ok := known[field]; !ok {
-			return nil, httpkit.Invalid(field, unknownField)
+			return nil, problem.Invalid(field, unknownField)
 		}
 	}
 	return patch, nil
@@ -190,7 +191,7 @@ func decodePatch[V any](r *http.Request, subject, unknownField string, known map
 func removalError(kind string, err error) error {
 	var constraint *pgconn.PgError
 	if errors.As(err, &constraint) && constraint.Code == "23503" {
-		return httpkit.Fail(http.StatusConflict, kind+"_in_use", "The resource still has dependent resources or retained history.")
+		return problem.Fail(http.StatusConflict, kind+"_in_use", "The resource still has dependent resources or retained history.")
 	}
 	return err
 }

@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -59,7 +59,7 @@ func guardrailsHTTPError(err error) error {
 		return err
 	}
 	if failure.Code == "guardrails_unavailable" || failure.Code == fault.Overloaded.Code {
-		return httpkit.Fail(failure.Status, failure.Code, failure.Message)
+		return problem.Fail(failure.Status, failure.Code, failure.Message)
 	}
-	return httpkit.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
+	return problem.Fail(failure.Status, failure.Code, "The guardrail could not be evaluated.")
 }

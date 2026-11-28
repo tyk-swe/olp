@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -50,7 +51,7 @@ func (k storedKey) live(r *http.Request, revoked string) error {
 		return err
 	}
 	if k.revoked != nil {
-		return httpkit.Fail(409, "api_key_revoked", revoked)
+		return problem.Fail(409, "api_key_revoked", revoked)
 	}
 	return nil
 }
@@ -62,7 +63,7 @@ func (k storedKey) regrouped(ctx context.Context, q database.Queryer, patch map[
 	}
 	var group *string
 	if err := json.Unmarshal(raw, &group); err != nil {
-		return nil, httpkit.Invalid("budget_group_id", "Use a budget group UUID or null.")
+		return nil, problem.Invalid("budget_group_id", "Use a budget group UUID or null.")
 	}
 	return budgetGroup(ctx, q, group, k.project)
 }
@@ -71,7 +72,7 @@ func budgetGroup(ctx context.Context, q database.Queryer, group, project *string
 	if group == nil {
 		return nil, checkBudgetGroup(ctx, q, nil, project)
 	}
-	parsed, err := httpkit.ParseUUID(*group)
+	parsed, err := ids.Parse(*group)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +101,7 @@ func (a *API) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	project, err := httpkit.ParseProjectID(input.ProjectID)
+	project, err := ids.ParseProject(input.ProjectID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -149,14 +150,14 @@ func decodeKeyPatch(r *http.Request) (map[string]json.RawMessage, error) {
 		return nil, err
 	}
 	if patch == nil {
-		return nil, httpkit.Invalid("policy", "Send a policy object.")
+		return nil, problem.Invalid("policy", "Send a policy object.")
 	}
 	for field, value := range patch {
 		if !slices.Contains(keyPatchFields, field) {
-			return nil, httpkit.Invalid(field, "Unknown policy field.")
+			return nil, problem.Invalid(field, "Unknown policy field.")
 		}
 		if string(value) == "null" && (field == "name" || field == "scopes" || field == "allowed_routes") {
-			return nil, httpkit.Invalid(field, "This field cannot be null.")
+			return nil, problem.Invalid(field, "This field cannot be null.")
 		}
 	}
 	return patch, nil
@@ -177,7 +178,7 @@ func (a *API) updateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 			return storedKey{}, err
 		}
 		if key.managed {
-			return storedKey{}, httpkit.Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
+			return storedKey{}, problem.Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
 		}
 		return key, key.live(r, "A revoked key cannot be edited.")
 	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, access.Event, error) {
@@ -201,7 +202,7 @@ func (k storedKey) patched(patch map[string]json.RawMessage) (keyInput, keyautho
 	}
 	var input keyInput
 	if err := json.Unmarshal(document, &input); err != nil {
-		return keyInput{}, keyauthority.KeyPolicy{}, httpkit.Invalid("policy", "Invalid policy value.")
+		return keyInput{}, keyauthority.KeyPolicy{}, problem.Invalid("policy", "Invalid policy value.")
 	}
 	_, expirationChanged := patch["expires_at"]
 	return input, previous, validateAndNormalizeKey(input, expirationChanged)
@@ -267,7 +268,7 @@ func decodeRotation(r *http.Request) (map[string]json.RawMessage, int, error) {
 	}
 	for field := range input {
 		if !slices.Contains(keyRotationFields, field) {
-			return nil, 0, httpkit.Invalid(field, "Only cost budgets and overlap_seconds may accompany rotation.")
+			return nil, 0, problem.Invalid(field, "Only cost budgets and overlap_seconds may accompany rotation.")
 		}
 	}
 	raw, ok := input["overlap_seconds"]
@@ -276,7 +277,7 @@ func decodeRotation(r *http.Request) (map[string]json.RawMessage, int, error) {
 	}
 	var overlap int
 	if string(raw) == "null" || json.Unmarshal(raw, &overlap) != nil || overlap < 0 || overlap > 86400 {
-		return nil, 0, httpkit.Invalid("overlap_seconds", "Use 0–86400 seconds of overlap.")
+		return nil, 0, problem.Invalid("overlap_seconds", "Use 0–86400 seconds of overlap.")
 	}
 	return input, overlap, nil
 }
@@ -293,7 +294,7 @@ func (a *API) rotateAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (storedKey, error) {
 		key, err := lockKey(r, tx, p, id)
 		if err == nil && key.managed {
-			return storedKey{}, httpkit.Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
+			return storedKey{}, problem.Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
 		}
 		return key, err
 	}, func(tx pgx.Tx, _ authz.Principal, key storedKey) (httpkit.Reply, access.Event, error) {
@@ -342,7 +343,7 @@ func overlapPreviousSecret(ctx context.Context, tx pgx.Tx, id string, seconds in
 		return nil, err
 	}
 	if count >= 8 {
-		return nil, httpkit.Fail(409, "key_overlap_limit", "Eight previous secrets are still active. Wait for an overlap to end, or rotate with zero overlap.")
+		return nil, problem.Fail(409, "key_overlap_limit", "Eight previous secrets are still active. Wait for an overlap to end, or rotate with zero overlap.")
 	}
 	var until *time.Time
 	err := tx.QueryRow(ctx, `INSERT INTO olp.api_key_overlaps(lookup_id,api_key_id,digest,expires_at)
@@ -366,7 +367,7 @@ func (k storedKey) rebudgeted(input map[string]json.RawMessage) ([]byte, error) 
 	}
 	var normalized keyauthority.KeyPolicy
 	if err := json.Unmarshal(merged, &normalized); err != nil {
-		return nil, httpkit.Invalid("policy", "Invalid cost budget.")
+		return nil, problem.Invalid("policy", "Invalid cost budget.")
 	}
 	if err := validateAndNormalizeKey(keyInput{Name: k.name, KeyPolicy: normalized}, false); err != nil {
 		return nil, err

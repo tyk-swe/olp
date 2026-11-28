@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
@@ -43,7 +43,7 @@ func TestEnrollmentStatusReplyCarriesOnlyWhatItsStatusNeeds(t *testing.T) {
 func TestEnrollmentStandingReplyAndAuditEvent(t *testing.T) {
 	t.Parallel()
 	current := &record{ID: "provider-1", ETag: "etag-1"}
-	terminal := httpkit.Fail(422, "grant_enrollment_failed", "upstream rejected device code")
+	terminal := problem.Fail(422, "grant_enrollment_failed", "upstream rejected device code")
 	wantFailedEvent := access.Event{Action: grantEnrollAction, Resource: "provider", ID: "provider-1", Failed: true}
 
 	t.Run("terminal Standing.Failure returns error and audits failure", func(t *testing.T) {

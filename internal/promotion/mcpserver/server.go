@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
@@ -52,7 +52,7 @@ type key [2]string
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Server, error) {
 	entries := ptr.Value(document.McpServers)
 	if len(entries) > maxServers {
-		return nil, httpkit.Invalid("mcp_servers", "Declare at most 128 MCP servers.")
+		return nil, problem.Invalid("mcp_servers", "Declare at most 128 MCP servers.")
 	}
 	servers, err := promotion.TryMapIndex(entries, func(index int, entry contract.ConfigurationMCPServer) (Server, error) {
 		return parseEntry(entry, entries[:index], policy)
@@ -68,7 +68,7 @@ func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.Configur
 	if !promotion.ValidLabel(strings.TrimSpace(entry.Project)) ||
 		slices.ContainsFunc(prior, func(other contract.ConfigurationMCPServer) bool { return keyOf(other.Project, other.Name) == identity }) ||
 		!routing.MCPTransport(entry.Transport).Valid() || !certifiedDigest(entry.CatalogDigest) {
-		return Server{}, httpkit.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
+		return Server{}, problem.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
 	}
 	prepared, err := registration.Prepare(registration.Input{
 		Delegation: delegationOf(entry.Delegation), OAuth: oauthOf(entry.Oauth), Stdio: stdioOf(entry.Stdio),
@@ -81,11 +81,11 @@ func parseEntry(entry contract.ConfigurationMCPServer, prior []contract.Configur
 		return Server{}, err
 	}
 	if prepared.Stdio != nil && entry.CredentialRef != nil {
-		return Server{}, httpkit.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
+		return Server{}, problem.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
 	}
 	ref := refOf(identity)
 	if entry.CredentialRef != nil && promotion.Ref(*entry.CredentialRef) != ref {
-		return Server{}, httpkit.Invalid("mcp_servers.credential_ref", "Use the deterministic exported MCP credential reference.")
+		return Server{}, problem.Invalid("mcp_servers.credential_ref", "Use the deterministic exported MCP credential reference.")
 	}
 	return Server{
 		Project: strings.TrimSpace(entry.Project), Name: prepared.Name, Enabled: entry.Enabled, CatalogDigest: entry.CatalogDigest,

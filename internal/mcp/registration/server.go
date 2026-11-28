@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -238,7 +239,7 @@ func (s *Server) retire(r *http.Request, p authz.Principal) (httpkit.Reply, erro
 func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *httpkit.Reply, error) {
 	d, replayed, err := access.Preflight(s.access, r, in, func(tx pgx.Tx, p authz.Principal) (*Definition, error) {
 		if id == "" && (in.ProjectID == nil || !routing.MCPTransport(in.Transport).Valid()) {
-			return nil, httpkit.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
+			return nil, problem.Invalid("project_id", "Choose an owning project and a supported MCP transport.")
 		}
 		return s.loadForWrite(r.Context(), tx, p, in, id)
 	})
@@ -249,13 +250,13 @@ func (s *Server) preflight(r *http.Request, in Input, id string) (*Definition, *
 		return nil, nil, err
 	}
 	if d.RetiredAt != nil {
-		return nil, nil, httpkit.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
+		return nil, nil, problem.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 	}
 	if in.Present("stdio") {
-		return nil, nil, httpkit.Invalid("stdio", "The executable binding is immutable.")
+		return nil, nil, problem.Invalid("stdio", "The executable binding is immutable.")
 	}
 	if in.ProjectID != nil || in.Transport != "" {
-		return nil, nil, httpkit.Invalid("project_id", "Project and transport are immutable.")
+		return nil, nil, problem.Invalid("project_id", "Project and transport are immutable.")
 	}
 	return d, nil, nil
 }
@@ -351,7 +352,7 @@ func (s *Server) write(r *http.Request, _ authz.Principal, id string, retire boo
 		return *replayed, nil
 	}
 	if !retire && definitionTransport(in, previous) == routing.MCPStdio && (in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 || !definitionStdio(in, previous).Valid()) {
-		return httpkit.Reply{}, httpkit.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
+		return httpkit.Reply{}, problem.Invalid("stdio", "Use only the immutable approved executable binding for stdio.")
 	}
 	limitsOnly := !retire && limitsOnlyUpdate(in, previous)
 	material, catalog, err := s.certifyChange(r.Context(), in, previous, retire, limitsOnly)
@@ -367,7 +368,7 @@ func (s *Server) write(r *http.Request, _ authz.Principal, id string, retire boo
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if current.ETag != previous.ETag {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(412, "etag_mismatch", "The MCP registration changed during certification.")
 			}
 		}
 		change, err := s.saveChange(r.Context(), tx, principal.UserID(), in, current, catalog, material, retire, limitsOnly)

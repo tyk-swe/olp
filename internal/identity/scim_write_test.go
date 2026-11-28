@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
@@ -320,9 +320,9 @@ func TestSCIMFailureForAndRender(t *testing.T) {
 		wantKnown  bool
 	}{
 		{"scim error", scim.Fail(409, "mutability", "managed locally"), 409, "mutability", true},
-		{"problem 422 maps to 400 invalidValue", httpkit.Invalid("field", "bad"), 400, "invalidValue", true},
-		{"problem 412 maps to invalidVers", httpkit.Fail(412, "etag_mismatch", "stale"), 412, "invalidVers", true},
-		{"problem 401 preserves status", httpkit.Fail(401, "unauthorized", "auth needed"), 401, "", true},
+		{"problem 422 maps to 400 invalidValue", problem.Invalid("field", "bad"), 400, "invalidValue", true},
+		{"problem 412 maps to invalidVers", problem.Fail(412, "etag_mismatch", "stale"), 412, "invalidVers", true},
+		{"problem 401 preserves status", problem.Fail(401, "unauthorized", "auth needed"), 401, "", true},
 		{"pgx no rows maps to 404", pgx.ErrNoRows, 404, "", true},
 		{"pg unique violation maps to 409 uniqueness", &pgconn.PgError{Code: "23505"}, 409, "uniqueness", true},
 		{"other pg error maps to 503 unknown", &pgconn.PgError{Code: "40001"}, 503, "", false},
@@ -336,7 +336,7 @@ func TestSCIMFailureForAndRender(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	WriteSCIMError(rec, httpkit.Fail(401, "unauthorized", "Token required."))
+	WriteSCIMError(rec, problem.Fail(401, "unauthorized", "Token required."))
 	if rec.Code != 401 {
 		t.Fatalf("got status %d, want 401", rec.Code)
 	}

@@ -13,6 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -53,42 +55,42 @@ func validManagementToken(input managementTokenInput) ([]string, error) {
 }
 
 func validManagementTokenAt(input managementTokenInput, now time.Time) ([]string, error) {
-	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err := textfield.Validate("name", input.Name, 100); err != nil {
 		return nil, err
 	}
 	delegable := authz.TokenScopes()
 	if len(input.Scopes) < 1 || len(input.Scopes) > len(delegable) {
-		return nil, httpkit.Invalid("scopes", fmt.Sprintf("Select 1–%d unique scopes.", len(delegable)))
+		return nil, problem.Invalid("scopes", fmt.Sprintf("Select 1–%d unique scopes.", len(delegable)))
 	}
 	seenScopes := make(map[string]bool, len(input.Scopes))
 	for _, scope := range input.Scopes {
 		op, ok := authz.ParseOperation(scope)
 		if seenScopes[scope] || !ok || !slices.Contains(delegable, op) {
-			return nil, httpkit.Invalid("scopes", "Use unique management operation scopes.")
+			return nil, problem.Invalid("scopes", "Use unique management operation scopes.")
 		}
 		seenScopes[scope] = true
 	}
 	projectIDs := []string{}
 	if input.ProjectIDs != nil {
 		if len(*input.ProjectIDs) < 1 || len(*input.ProjectIDs) > 100 {
-			return nil, httpkit.Invalid("project_ids", "Select 1–100 unique projects, or omit the field for all projects.")
+			return nil, problem.Invalid("project_ids", "Select 1–100 unique projects, or omit the field for all projects.")
 		}
 		seenProjects := make(map[string]bool, len(*input.ProjectIDs))
 		projectIDs = make([]string, 0, len(*input.ProjectIDs))
 		for _, id := range *input.ProjectIDs {
-			parsed, err := httpkit.ParseUUID(id)
+			parsed, err := ids.Parse(id)
 			if err != nil || seenProjects[parsed] {
-				return nil, httpkit.Invalid("project_ids", "Use unique project identifiers.")
+				return nil, problem.Invalid("project_ids", "Use unique project identifiers.")
 			}
 			projectIDs = append(projectIDs, parsed)
 			seenProjects[parsed] = true
 		}
 	}
 	if input.ExpiresAt == nil {
-		return nil, httpkit.Invalid("expires_at", "Choose an expiry.")
+		return nil, problem.Invalid("expires_at", "Choose an expiry.")
 	}
 	if !input.ExpiresAt.After(now) || input.ExpiresAt.After(now.Add(366*24*time.Hour)) {
-		return nil, httpkit.Invalid("expires_at", "Choose a future expiry no more than 366 days ahead.")
+		return nil, problem.Invalid("expires_at", "Choose a future expiry no more than 366 days ahead.")
 	}
 	return projectIDs, nil
 }
@@ -181,7 +183,7 @@ func (s *accountService) createManagementToken(r *http.Request, _ authz.Principa
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if int(known) != len(projectIDs) {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_ids", "Every project must exist.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("project_ids", "Every project must exist.")
 			}
 		}
 		id, lookup, etag := ids.New(), secrets.Token(), ids.New()
@@ -236,7 +238,7 @@ func (s *accountService) revokeManagementToken(r *http.Request, _ authz.Principa
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if revoked != nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "management_token_revoked", "This token is already revoked.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "management_token_revoked", "This token is already revoked.")
 		}
 		nextETag := ids.New()
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.management_tokens SET revoked_at=now(),etag=$1 WHERE id=$2", nextETag, id); err != nil {

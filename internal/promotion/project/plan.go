@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -49,7 +49,7 @@ func checkOrganizations(ctx context.Context, q database.Queryer, desired []Proje
 			return err
 		}
 		if !exists {
-			return httpkit.Invalid("organization", "Reference an organization in the document or destination.")
+			return problem.Invalid("organization", "Reference an organization in the document or destination.")
 		}
 	}
 	return nil
@@ -124,9 +124,9 @@ func (p Project) imported(id string) projects.PolicyImport {
 }
 
 func foreignRoutes() error {
-	return httpkit.Invalid("route_groups", "Group routes must belong to their project.")
+	return problem.Invalid("route_groups", "Group routes must belong to their project.")
 }
 
 func organizationImmutable() error {
-	return httpkit.Fail(http.StatusConflict, "project_organization_immutable", "A project cannot move between organizations.")
+	return problem.Fail(http.StatusConflict, "project_organization_immutable", "A project cannot move between organizations.")
 }

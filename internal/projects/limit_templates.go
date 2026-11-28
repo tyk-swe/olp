@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -29,7 +30,7 @@ func ValidateTemplateReferences(ctx context.Context, q database.Queryer, project
 	}
 	for _, name := range names {
 		if _, ok := t[name]; !ok {
-			return httpkit.Fail(409, "template_in_use", "A referenced template cannot be removed; detach its members first.")
+			return problem.Fail(409, "template_in_use", "A referenced template cannot be removed; detach its members first.")
 		}
 	}
 	return nil
@@ -63,7 +64,7 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ authz.Principal) (h
 		return httpkit.Reply{}, err
 	}
 	if input.Templates == nil {
-		return httpkit.Reply{}, httpkit.Invalid("templates", "Provide the template map, including an empty object to clear unused templates.")
+		return httpkit.Reply{}, problem.Invalid("templates", "Provide the template map, including an empty object to clear unused templates.")
 	}
 	if err = input.Templates.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err

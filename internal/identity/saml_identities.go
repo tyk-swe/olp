@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -142,7 +143,7 @@ func (s *samlService) ensureRemainingSAMLSignIn(r *http.Request, tx pgx.Tx, p au
 		return err
 	}
 	if len(usableSAML) == 0 {
-		return httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
+		return problem.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 	}
 	return nil
 }
@@ -161,7 +162,7 @@ func (s *samlService) unlinkSAML(r *http.Request, _ authz.Principal) (httpkit.Re
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if result.RowsAffected() != 1 {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The linked identity was not found.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found", "The linked identity was not found.")
 		}
 		if err := s.ensureRemainingSAMLSignIn(r, tx, p); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

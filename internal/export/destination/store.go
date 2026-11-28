@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -89,7 +88,7 @@ type listed struct {
 	body json.RawMessage
 }
 
-func listSinks(ctx context.Context, q database.Queryer, page httpkit.Pagination, p authz.Principal) ([]listed, error) {
+func listSinks(ctx context.Context, q database.Queryer, page database.Pagination, p authz.Principal) ([]listed, error) {
 	rows, err := q.Query(ctx, listSinksSQL, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err
@@ -111,7 +110,7 @@ func readSink(ctx context.Context, q database.Queryer, id string) (json.RawMessa
 	var etag string
 	var projectID *string
 	if err := q.QueryRow(ctx, getSinkSQL, id).Scan(&body, &etag, &projectID); err != nil {
-		return nil, "", nil, httpkit.NotFoundOr(err)
+		return nil, "", nil, database.NotFoundOr(err)
 	}
 	return body, etag, projectID, nil
 }
@@ -119,17 +118,17 @@ func readSink(ctx context.Context, q database.Queryer, id string) (json.RawMessa
 func SinkProject(ctx context.Context, q database.Queryer, id string) (*string, error) {
 	var projectID *string
 	err := q.QueryRow(ctx, sinkProjectSQL, id).Scan(&projectID)
-	return projectID, httpkit.NotFoundOr(err)
+	return projectID, database.NotFoundOr(err)
 }
 
 func lockSink(ctx context.Context, q database.Queryer, id string) (stored, error) {
 	var sink stored
 	err := q.QueryRow(ctx, lockSinkSQL, id).Scan(&sink.ID, &sink.Name, &sink.ProjectID, &sink.Type, &sink.Destination,
 		&sink.Streams, &sink.Format, &sink.Filter, &sink.Settings, &sink.Enabled, &sink.ETag, &sink.CredentialID)
-	return sink, httpkit.NotFoundOr(err)
+	return sink, database.NotFoundOr(err)
 }
 
-func listGaps(ctx context.Context, q database.Queryer, sinkID string, page httpkit.Pagination, p authz.Principal) ([]Gap, error) {
+func listGaps(ctx context.Context, q database.Queryer, sinkID string, page database.Pagination, p authz.Principal) ([]Gap, error) {
 	rows, err := q.Query(ctx, listGapsSQL, sinkID, page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return nil, err

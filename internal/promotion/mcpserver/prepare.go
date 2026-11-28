@@ -5,7 +5,7 @@ import (
 	"maps"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -76,7 +76,7 @@ func prepare(ctx context.Context, pool database.Queryer, p authz.Principal, bind
 		}
 	}
 	if unretainedEntra(flatten(server.Transport), existing) {
-		return certification{}, httpkit.Invalid("mcp_servers", entraDetail)
+		return certification{}, problem.Invalid("mcp_servers", entraDetail)
 	}
 	if existing == nil {
 		catalog, err := certify(ctx, pool, bindings, deps, existing, server)
@@ -108,7 +108,7 @@ func certify(ctx context.Context, pool database.Queryer, bindings promotion.Bind
 		Transport: flat.transport, Stdio: flat.stdio, Executables: registration.NewExecutables(deps.Unconfined, pool),
 	})
 	if err != nil || catalog.Digest != server.CatalogDigest {
-		return nil, httpkit.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
+		return nil, problem.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
 	}
 	return catalog, nil
 }
@@ -121,10 +121,10 @@ func materialOf(ctx context.Context, pool database.Queryer, bindings promotion.B
 		return []byte(sealed.Secret), nil
 	}
 	if existing == nil || existing.CredentialID == nil {
-		return nil, httpkit.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
+		return nil, problem.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 	}
 	if flat.endpoint != existing.Endpoint {
-		return nil, httpkit.Invalid("secret_bindings", "Supply a new MCP bearer binding or remove credential_ref when changing the endpoint.")
+		return nil, problem.Invalid("secret_bindings", "Supply a new MCP bearer binding or remove credential_ref when changing the endpoint.")
 	}
 	return keys.read(ctx, pool, *existing.CredentialID)
 }

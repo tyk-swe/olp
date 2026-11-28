@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -24,7 +25,7 @@ const permitPurpose = "plugin_permit"
 // every unconfined plugin path answers where the deployment enables none.
 func (s *Management) unconfinedTier() (*Unconfined, error) {
 	if s.Unconfined == nil {
-		return nil, httpkit.Fail(http.StatusNotFound, "unconfined_plugins_disabled", "This deployment does not enable unconfined plugins. Only a deployment setting enables them.")
+		return nil, problem.Fail(http.StatusNotFound, "unconfined_plugins_disabled", "This deployment does not enable unconfined plugins. Only a deployment setting enables them.")
 	}
 	return s.Unconfined, nil
 }
@@ -38,7 +39,7 @@ func (s *Management) executables(r *http.Request, _ authz.Principal) (httpkit.Re
 	}
 	files, err := tier.Executables()
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusServiceUnavailable, "unconfined_plugin_dir_unreadable", "OLP can't read the configured unconfined plugin directory.")
+		return httpkit.Reply{}, problem.Fail(http.StatusServiceUnavailable, "unconfined_plugin_dir_unreadable", "OLP can't read the configured unconfined plugin directory.")
 	}
 	items := make([]contract.UnconfinedExecutable, 0, len(files))
 	for _, file := range files {
@@ -59,7 +60,7 @@ func (s *Management) review(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	file, manifest, err := tier.Inspect(r.Context(), r.PathValue("executable"))
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, pluginProblem(err)
 	}
 	permitted, err := isPermitted(r.Context(), s.Access.Pool, file.Digest)
 	if err != nil {
@@ -86,17 +87,17 @@ func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	if !pluginidentity.ValidDigest(input.Digest) {
-		return httpkit.Reply{}, httpkit.Invalid("digest", "Name the executable by the lowercase hexadecimal SHA-256 digest you reviewed.")
+		return httpkit.Reply{}, problem.Invalid("digest", "Name the executable by the lowercase hexadecimal SHA-256 digest you reviewed.")
 	}
 	if !input.AcknowledgeRisk {
-		return httpkit.Reply{}, httpkit.Invalid("acknowledge_risk", "Acknowledge that an unconfined plugin runs with the privileges of OLP's processes, outside every confinement.")
+		return httpkit.Reply{}, problem.Invalid("acknowledge_risk", "Acknowledge that an unconfined plugin runs with the privileges of OLP's processes, outside every confinement.")
 	}
 	file, manifest, err := tier.Inspect(r.Context(), r.PathValue("executable"))
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, pluginProblem(err)
 	}
 	if file.Digest != input.Digest {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, CodeExecutableChanged, "The executable changed since you reviewed it. Review it again.")
+		return httpkit.Reply{}, problem.Fail(http.StatusConflict, CodeExecutableChanged, "The executable changed since you reviewed it. Review it again.")
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -111,10 +112,10 @@ func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if installed > 0 {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "plugin_permitted", "An owner already permitted this build of the executable.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "plugin_permitted", "An owner already permitted this build of the executable.")
 		}
 		if count >= maxInstalled {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 		}
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,executable,size_bytes,etag,installed_by,approved_by,approved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$7,now())",
 			file.Digest, abi.Version, data, file.Name, file.Size, ids.New(), p.ID); err != nil {

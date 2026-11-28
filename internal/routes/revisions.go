@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -64,9 +65,9 @@ func loadRevision(ctx context.Context, q database.Queryer, routeID, ref string) 
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.revision=$2", routeID, n))
 	}
-	id, err := httpkit.ParseUUID(ref)
+	id, err := ids.Parse(ref)
 	if err != nil {
-		return nil, httpkit.Fail(404, "not_found", "Unknown revision.")
+		return nil, problem.Fail(404, "not_found", "Unknown revision.")
 	}
 	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.route_revisions v WHERE v.route_id=$1 AND v.id=$2", routeID, id))
 }

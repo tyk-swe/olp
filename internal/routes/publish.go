@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
@@ -22,11 +23,11 @@ import (
 func PassthroughAccessError(err error) error {
 	var refusal *routing.Refusal
 	if errors.As(err, &refusal) {
-		return httpkit.Fail(422, refusal.Code, refusal.Message)
+		return problem.Fail(422, refusal.Code, refusal.Message)
 	}
 	var validation *routing.ValidationError
 	if errors.As(err, &validation) {
-		return httpkit.Invalid(validation.Field, validation.Message)
+		return problem.Invalid(validation.Field, validation.Message)
 	}
 	return err
 }
@@ -34,7 +35,7 @@ func PassthroughAccessError(err error) error {
 func draftRoute(d *draft) (routing.Route, error) {
 	fidelity, err := routing.DecodeFidelity(d.Fidelity)
 	if err != nil {
-		return routing.Route{}, httpkit.Invalid("fidelity", err.Error())
+		return routing.Route{}, problem.Invalid("fidelity", err.Error())
 	}
 	route := simulationRoute(d.ID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
@@ -62,11 +63,11 @@ func check(d *draft, live map[string]*resolved) error {
 		label := t.ProviderName + "/" + t.ProviderModel
 		switch {
 		case !ok:
-			return httpkit.Fail(422, "target_unknown", "Target "+label+" no longer exists.")
+			return problem.Fail(422, "target_unknown", "Target "+label+" no longer exists.")
 		case r.ProviderState != "active":
-			return httpkit.Fail(422, "provider_not_active", "Target "+label+" belongs to a connection that is not active.")
+			return problem.Fail(422, "provider_not_active", "Target "+label+" belongs to a connection that is not active.")
 		case !r.Published:
-			return httpkit.Fail(422, "model_not_published", "Target "+label+" is not part of the connection's activated revision.")
+			return problem.Fail(422, "model_not_published", "Target "+label+" is not part of the connection's activated revision.")
 		}
 		for _, op := range d.Operations {
 			if route.IsPassthrough() && op == routing.PassthroughOperation {
@@ -77,7 +78,7 @@ func check(d *draft, live map[string]*resolved) error {
 				certified = certified || len(key) > len(op) && key[:len(op)+1] == op+"/"
 			}
 			if !certified {
-				return httpkit.Fail(422, "capability_not_certified", "Target "+label+" has no certified "+op+" capability.")
+				return problem.Fail(422, "capability_not_certified", "Target "+label+" has no certified "+op+" capability.")
 			}
 		}
 	}
@@ -101,7 +102,7 @@ func checkReferences(ctx context.Context, q database.Queryer, d *draft) error {
 			return err
 		}
 		if !active {
-			return httpkit.Fail(422, "route_reference_unknown", "Route "+slug+" is not an active route.")
+			return problem.Fail(422, "route_reference_unknown", "Route "+slug+" is not an active route.")
 		}
 	}
 	for _, selector := range behavior.Selectors {
@@ -111,7 +112,7 @@ func checkReferences(ctx context.Context, q database.Queryer, d *draft) error {
 				return err
 			}
 			if !usable {
-				return httpkit.Fail(422, "route_plugin_unavailable", "Selector "+selector.ID+" names a plugin that is not an approved confined plugin.")
+				return problem.Fail(422, "route_plugin_unavailable", "Selector "+selector.ID+" names a plugin that is not an approved confined plugin.")
 			}
 		}
 	}
@@ -252,7 +253,7 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	case err != nil:
 		return promotion{}, err
 	case !sameProject(routeProject, current.ProjectID):
-		return promotion{}, httpkit.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
+		return promotion{}, problem.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
 	default:
 		revision++
 	}
@@ -315,7 +316,7 @@ func (s *Server) retireRoute(r *http.Request, _ authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if state == "retired" {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "route_retired", "This route is already retired.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "route_retired", "This route is already retired.")
 		}
 		etag := ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET state='retired',retired_at=now(),retired_by=$2,etag=$3 WHERE id=$1", id, p.UserID(), etag); err != nil {

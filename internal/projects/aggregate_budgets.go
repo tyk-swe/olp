@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
@@ -82,13 +83,13 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ authz.Principal, projec
 		return httpkit.Reply{}, err
 	}
 	if len(body.Policy) == 0 {
-		return httpkit.Reply{}, httpkit.Invalid("policy", "A policy or explicit null is required.")
+		return httpkit.Reply{}, problem.Invalid("policy", "A policy or explicit null is required.")
 	}
 	var policy *keyauthority.BudgetPolicy
 	d := json.NewDecoder(bytes.NewReader(body.Policy))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&policy); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("policy", "The budget policy is invalid.")
+		return httpkit.Reply{}, problem.Invalid("policy", "The budget policy is invalid.")
 	}
 	if err := policy.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err

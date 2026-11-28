@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -54,7 +54,7 @@ func parseSilence(ctx context.Context, tx pgx.Tx, target ruleTarget, raw json.Ra
 		return silenceWindow{}, nil
 	}
 	if target.event != contract.NotificationEventRouteLatency || target.projectID == nil {
-		return silenceWindow{}, httpkit.Invalid("silence", "Only project-scoped route latency webhook rules support silences.")
+		return silenceWindow{}, problem.Invalid("silence", "Only project-scoped route latency webhook rules support silences.")
 	}
 	if string(raw) == "null" {
 		return silenceWindow{}, nil
@@ -66,7 +66,7 @@ func parseSilence(ctx context.Context, tx pgx.Tx, target ruleTarget, raw json.Ra
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || input.StartsAt.IsZero() || input.EndsAt.IsZero() {
-		return silenceWindow{}, httpkit.Invalid("silence", "Send both start and end as RFC 3339 timestamps.")
+		return silenceWindow{}, problem.Invalid("silence", "Send both start and end as RFC 3339 timestamps.")
 	}
 	start, end := input.StartsAt.UTC().Truncate(time.Microsecond), input.EndsAt.UTC().Truncate(time.Microsecond)
 	var channel contract.NotificationDestinationType
@@ -75,10 +75,10 @@ func parseSilence(ctx context.Context, tx pgx.Tx, target ruleTarget, raw json.Ra
 		return silenceWindow{}, err
 	}
 	if channel != contract.NotificationDestinationTypeWebhook {
-		return silenceWindow{}, httpkit.Invalid("silence", "Only webhook destinations support silences.")
+		return silenceWindow{}, problem.Invalid("silence", "Only webhook destinations support silences.")
 	}
 	if !end.After(start) || !end.After(now) || start.Year() < 1 || end.Year() > 9999 {
-		return silenceWindow{}, httpkit.Invalid("silence", "End must be after the start and in the future.")
+		return silenceWindow{}, problem.Invalid("silence", "End must be after the start and in the future.")
 	}
 	return silenceWindow{startsAt: &start, endsAt: &end}, nil
 }

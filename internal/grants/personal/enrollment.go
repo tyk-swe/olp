@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -155,7 +155,7 @@ func (s *Store) ResolveAgentTask(ctx context.Context, digest, publicationID, pro
 
 func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) (Handoff, error) {
 	if expected.OAuth.EntraOBO != nil {
-		return Handoff{}, httpkit.Invalid("oauth", "Entra on-behalf-of grants require a verified user request, not browser enrollment.")
+		return Handoff{}, problem.Invalid("oauth", "Entra on-behalf-of grants require a verified user request, not browser enrollment.")
 	}
 	if _, err := liveBinding(ctx, s.pool, expected); err != nil {
 		return Handoff{}, err
@@ -182,13 +182,13 @@ func (s *Store) Claim(ctx context.Context, id, token, memberID string) (Enrollme
 	}
 	provided := s.auth.Digest(secrets.MCPEnrollmentDigest, token)
 	if subtle.ConstantTimeCompare(provided, digest) != 1 || (e.StartedBy != nil && *e.StartedBy != memberID) {
-		return Enrollment{}, httpkit.Fail(404, "not_found", "The enrollment was not found.")
+		return Enrollment{}, problem.Fail(404, "not_found", "The enrollment was not found.")
 	}
 	if e.ClaimedAt != nil {
-		return Enrollment{}, httpkit.Fail(409, "enrollment_used", "Start a new enrollment. This link has already been used.")
+		return Enrollment{}, problem.Fail(409, "enrollment_used", "Start a new enrollment. This link has already been used.")
 	}
 	if !time.Now().Before(e.ExpiresAt) {
-		return Enrollment{}, httpkit.Fail(410, "enrollment_expired", "Start a new enrollment. This link has expired.")
+		return Enrollment{}, problem.Fail(410, "enrollment_expired", "Start a new enrollment. This link has expired.")
 	}
 	if _, err := liveBinding(ctx, tx, e.Binding); err != nil {
 		return Enrollment{}, err

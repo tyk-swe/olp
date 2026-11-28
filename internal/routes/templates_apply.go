@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -294,7 +294,7 @@ func (s *Server) promoteGenerated(ctx context.Context, tx pgx.Tx, draftID, actor
 
 // refusalCode names the problem a validation refused with.
 func refusalCode(err error) (string, bool) {
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if !errors.As(err, &problem) {
 		return "", false
 	}

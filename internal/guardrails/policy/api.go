@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
@@ -105,7 +106,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	ctx := r.Context()
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		if in.ProjectID == "" {
-			return struct{}{}, httpkit.Invalid("project_id", "Choose a project.")
+			return struct{}{}, problem.Invalid("project_id", "Choose a project.")
 		}
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, &in.ProjectID)
 	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -133,7 +134,7 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if in.ProjectID != "" && in.ProjectID != current.ProjectID {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The owning project is immutable.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("project_id", "The owning project is immutable.")
 		}
 		value, err := a.save(r, tx, p, &current, current.ProjectID, in)
 		if err != nil {
@@ -166,13 +167,13 @@ func (a *API) apply(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if !in.Phase.Valid() {
-		return httpkit.Reply{}, httpkit.Invalid("phase", "Choose a supported evaluation phase.")
+		return httpkit.Reply{}, problem.Invalid("phase", "Choose a supported evaluation phase.")
 	}
 	if err := guardrails.ValidateSegments(in.Segments); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("segments", "Supply bounded UTF-8 segments with unique identifiers.")
+		return httpkit.Reply{}, problem.Invalid("segments", "Supply bounded UTF-8 segments with unique identifiers.")
 	}
 	if uuid.Validate(in.PolicyRevisionID) != nil {
-		return httpkit.Reply{}, httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
+		return httpkit.Reply{}, problem.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
 	pinned, err := a.pinnedRevision(r, p, in.PolicyRevisionID)
 	if err != nil {
@@ -209,7 +210,7 @@ func changeable(r *http.Request, current Policy) error {
 		return err
 	}
 	if current.RetiredAt != nil {
-		return httpkit.Fail(http.StatusConflict, "guardrail_policy_retired", "Create a new policy.")
+		return problem.Fail(http.StatusConflict, "guardrail_policy_retired", "Create a new policy.")
 	}
 	return nil
 }

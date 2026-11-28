@@ -15,6 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
 )
@@ -80,7 +82,7 @@ func (s *oidcService) prepareOIDCBegin(r *http.Request, kind string) (preparedOI
 		return preparedOIDCBegin{}, err
 	}
 	if !c.Enabled {
-		return preparedOIDCBegin{}, httpkit.Fail(403, "oidc_disabled", "OIDC sign-in is disabled.")
+		return preparedOIDCBegin{}, problem.Fail(403, "oidc_disabled", "OIDC sign-in is disabled.")
 	}
 	_, oauth, _, err := s.discover(r.Context(), c)
 	if err != nil {
@@ -101,7 +103,7 @@ func (s *oidcService) validateOIDCFlowPrincipal(r *http.Request, tx pgx.Tx, p au
 		return err
 	}
 	if !linked {
-		return httpkit.Fail(403, "oidc_identity_required", "Link an identity before using OIDC reauthentication.")
+		return problem.Fail(403, "oidc_identity_required", "Link an identity before using OIDC reauthentication.")
 	}
 	return nil
 }
@@ -112,7 +114,7 @@ func (s *oidcService) storeOIDCFlow(r *http.Request, tx pgx.Tx, prep preparedOID
 		return httpkit.Reply{}, err
 	}
 	if current.ETag != prep.config.ETag {
-		return httpkit.Reply{}, httpkit.Fail(409, "oidc_configuration_changed", "The OIDC configuration changed. Try again.")
+		return httpkit.Reply{}, problem.Fail(409, "oidc_configuration_changed", "The OIDC configuration changed. Try again.")
 	}
 	flow := oidcFlow{
 		Kind:       prep.kind,
@@ -172,13 +174,13 @@ func (s *oidcService) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration,
 		var digest []byte
 		err := tx.QueryRow(r.Context(), "SELECT id::text,configuration_etag::text,cookie_digest FROM olp.oidc_flows WHERE state_digest=$1 AND expires_at>now()", s.access.Auth.Digest(secrets.OIDCStateDigest, state)).Scan(&id, &etag, &digest)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "oidc_flow_invalid", "This sign-in request expired or was already used.")
+			return httpkit.Reply{}, false, problem.Fail(403, "oidc_flow_invalid", "This sign-in request expired or was already used.")
 		}
 		if err != nil {
 			return httpkit.Reply{}, false, err
 		}
 		if !hmac.Equal(digest, s.access.Auth.Digest(secrets.OIDCCookieDigest, access.CookieValue(r, "__Host-olp_oidc_login_"+id))) {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
+			return httpkit.Reply{}, false, problem.Fail(403, "oidc_flow_invalid", "The sign-in request belongs to a different browser.")
 		}
 		data, err := s.access.Keys.Read(r.Context(), tx, s.access.Installation, id, secrets.OIDCFlow)
 		if err != nil {
@@ -193,7 +195,7 @@ func (s *oidcService) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration,
 			return httpkit.Reply{}, false, err
 		}
 		if config.ETag != etag || !config.Enabled {
-			return httpkit.Reply{}, false, httpkit.Fail(403, "oidc_flow_invalid", "OIDC configuration changed during sign-in.")
+			return httpkit.Reply{}, false, problem.Fail(403, "oidc_flow_invalid", "OIDC configuration changed during sign-in.")
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", id); err != nil {
 			return httpkit.Reply{}, false, err
@@ -213,26 +215,26 @@ type verifiedOIDCIdentity struct {
 
 func decodeOIDCVerifiedClaims(claims map[string]json.RawMessage, subject, kind string, c oidcConfiguration, now time.Time) (verifiedOIDCIdentity, error) {
 	if len(subject) < 1 || len(subject) > 255 {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_claims_invalid", "A bounded identity subject is required.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_claims_invalid", "A bounded identity subject is required.")
 	}
 	var address string
 	var emailVerified bool
 	if raw := claims[c.EmailClaim]; len(raw) == 0 || json.Unmarshal(raw, &address) != nil {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_email_unverified", "A verified email address is required.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_email_unverified", "A verified email address is required.")
 	}
 	if raw := claims["email_verified"]; len(raw) == 0 || json.Unmarshal(raw, &emailVerified) != nil {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_email_unverified", "A verified email address is required.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_email_unverified", "A verified email address is required.")
 	}
 	normalizedEmail, err := email(address)
 	if err != nil || !emailVerified {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_email_unverified", "A verified email address is required.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_email_unverified", "A verified email address is required.")
 	}
 	var groups []string
 	if raw := claims[c.GroupsClaim]; raw != nil && json.Unmarshal(raw, &groups) != nil {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_claims_invalid", "The groups claim must be an array of strings.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_claims_invalid", "The groups claim must be an array of strings.")
 	}
 	if len(groups) > 500 {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_claims_invalid", "The groups claim is too large.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_claims_invalid", "The groups claim is too large.")
 	}
 	roleClaims, err := json.Marshal(oidcRoleClaims{ClientID: c.ClientID, Scopes: c.Scopes, EmailClaim: c.EmailClaim, GroupsClaim: c.GroupsClaim, Email: normalizedEmail, Groups: groups})
 	if err != nil {
@@ -249,10 +251,10 @@ func decodeOIDCVerifiedClaims(claims map[string]json.RawMessage, subject, kind s
 func verifyOIDCAuthTime(claims map[string]json.RawMessage, now time.Time) error {
 	var authTime int64
 	if raw := claims["auth_time"]; len(raw) == 0 || json.Unmarshal(raw, &authTime) != nil {
-		return httpkit.Fail(403, "oidc_recent_auth_required", "The provider must confirm a recent authentication.")
+		return problem.Fail(403, "oidc_recent_auth_required", "The provider must confirm a recent authentication.")
 	}
 	if authTime < now.Add(-5*time.Minute).Unix() || authTime > now.Add(time.Minute).Unix() {
-		return httpkit.Fail(403, "oidc_recent_auth_required", "The provider must confirm a recent authentication.")
+		return problem.Fail(403, "oidc_recent_auth_required", "The provider must confirm a recent authentication.")
 	}
 	return nil
 }
@@ -273,19 +275,19 @@ func (s *oidcService) exchangeOIDCIdentity(r *http.Request, flow oidcFlow, c oid
 	ctx := oidc.ClientContext(r.Context(), s.access.IdentityClient())
 	token, err := oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(flow.Verifier))
 	if err != nil {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_token_invalid", "The identity provider token could not be verified.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_token_invalid", "The identity provider token could not be verified.")
 	}
 	raw, ok := token.Extra("id_token").(string)
 	if !ok || len(raw) > 65536 {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_token_invalid", "The identity provider did not supply a valid identity token.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_token_invalid", "The identity provider did not supply a valid identity token.")
 	}
 	verified, err := provider.Verifier(&oidc.Config{ClientID: c.ClientID, SupportedSigningAlgs: []string{oidc.RS256, oidc.ES256, oidc.EdDSA}}).Verify(ctx, raw)
 	if err != nil || !hmac.Equal([]byte(verified.Nonce), []byte(flow.Nonce)) {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_token_invalid", "The identity token signature, issuer, audience, expiry, or nonce is invalid.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_token_invalid", "The identity token signature, issuer, audience, expiry, or nonce is invalid.")
 	}
 	var claims map[string]json.RawMessage
 	if verified.Claims(&claims) != nil {
-		return verifiedOIDCIdentity{}, httpkit.Fail(403, "oidc_claims_invalid", "The identity claims are invalid.")
+		return verifiedOIDCIdentity{}, problem.Fail(403, "oidc_claims_invalid", "The identity claims are invalid.")
 	}
 	return decodeOIDCVerifiedClaims(claims, verified.Subject, flow.Kind, c, time.Now())
 }
@@ -307,7 +309,7 @@ func (s *oidcService) oidcCallback(r *http.Request) (reply httpkit.Reply, callba
 		return httpkit.Reply{}, err
 	}
 	if r.URL.Query().Get("error") != "" || r.URL.Query().Get("code") == "" {
-		return httpkit.Reply{}, httpkit.Fail(403, "oidc_authorization_denied", "The identity provider did not authorize sign-in.")
+		return httpkit.Reply{}, problem.Fail(403, "oidc_authorization_denied", "The identity provider did not authorize sign-in.")
 	}
 	verified, err := s.exchangeOIDCIdentity(r, flow, c)
 	if err != nil {
@@ -324,7 +326,7 @@ func verifyOIDCCallbackConfig(ctx context.Context, tx pgx.Tx, expectedETag strin
 		return err
 	}
 	if current.ETag != expectedETag || !current.Enabled {
-		return httpkit.Fail(403, "oidc_flow_invalid", "The OIDC configuration changed during sign-in.")
+		return problem.Fail(403, "oidc_flow_invalid", "The OIDC configuration changed during sign-in.")
 	}
 	return nil
 }
@@ -347,7 +349,7 @@ func (s *oidcService) authorizeOIDCCallback(r *http.Request, tx pgx.Tx, flow oid
 		return authz.Principal{}, err
 	}
 	if flow.Kind == "reauthenticate" && linkedUserID != p.ID {
-		return authz.Principal{}, httpkit.Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
+		return authz.Principal{}, problem.Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
 	}
 	return p, nil
 }
@@ -367,10 +369,10 @@ func syncOIDCCallbackIdentity(r *http.Request, tx pgx.Tx, flow oidcFlow, c oidcC
 		return false, err
 	}
 	if !allowed {
-		return true, httpkit.Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
+		return true, problem.Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
 	}
 	if changed && flow.Kind == "reauthenticate" {
-		return true, httpkit.Fail(403, "oidc_session_changed", "Your access changed. Sign in again before verifying your identity.")
+		return true, problem.Fail(403, "oidc_session_changed", "Your access changed. Sign in again before verifying your identity.")
 	}
 	return false, nil
 }
@@ -415,7 +417,7 @@ func (s *oidcService) dispatchOIDCOutcome(r *http.Request, tx pgx.Tx, flow oidcF
 
 func (s *oidcService) completeOIDCLink(r *http.Request, tx pgx.Tx, flow oidcFlow, c oidcConfiguration, p authz.Principal, existingUserID string, verified verifiedOIDCIdentity) (oidcOutcome, error) {
 	if existingUserID != "" {
-		return oidcOutcome{}, httpkit.Fail(409, "oidc_identity_linked", "This identity is already linked.")
+		return oidcOutcome{}, problem.Fail(409, "oidc_identity_linked", "This identity is already linked.")
 	}
 	identityID := ids.New()
 	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, p.ID, c.Issuer, verified.subject, verified.email, verified.roleClaims); err != nil {
@@ -434,7 +436,7 @@ func (s *oidcService) completeOIDCLink(r *http.Request, tx pgx.Tx, flow oidcFlow
 
 func (s *oidcService) completeOIDCReauth(r *http.Request, tx pgx.Tx, flow oidcFlow, p authz.Principal, userID, identityID string) (oidcOutcome, error) {
 	if userID != p.ID {
-		return oidcOutcome{}, httpkit.Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
+		return oidcOutcome{}, problem.Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
 	}
 	grant, err := s.sessions.grantRecent(r, tx, p, flow.Purpose, flow.ResourceID, false)
 	if err != nil {
@@ -453,23 +455,23 @@ func provisionOIDCUser(ctx context.Context, tx pgx.Tx, c oidcConfiguration, veri
 		return "", "", err
 	}
 	if existing {
-		return "", "", httpkit.Fail(409, "oidc_link_required", "Sign in to your existing account and link this identity from your profile.")
+		return "", "", problem.Fail(409, "oidc_link_required", "Sign in to your existing account and link this identity from your profile.")
 	}
 	role := mappedRole(c, verified.email, verified.groups)
 	if role == "" {
-		return "", "", httpkit.Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
+		return "", "", problem.Fail(403, "oidc_provisioning_denied", "No role mapping authorizes this identity.")
 	}
 	var complete bool
 	if err := tx.QueryRow(ctx, "SELECT setup_complete FROM olp.installation WHERE singleton").Scan(&complete); err != nil {
 		return "", "", err
 	}
 	if !complete {
-		return "", "", httpkit.Fail(403, "setup_required", "Complete owner setup before OIDC sign-in.")
+		return "", "", problem.Fail(403, "setup_required", "Complete owner setup before OIDC sign-in.")
 	}
 	userID := ids.New()
 	identityID := ids.New()
 	var name string
-	if raw := verified.claims["name"]; len(raw) == 0 || json.Unmarshal(raw, &name) != nil || httpkit.ValidText("display_name", name, 100) != nil {
+	if raw := verified.claims["name"]; len(raw) == 0 || json.Unmarshal(raw, &name) != nil || textfield.Validate("display_name", name, 100) != nil {
 		name = verified.email
 	}
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.users(id,email,display_name,role,etag,role_management) VALUES($1,$2,$3,$4,$5,'oidc')", userID, verified.email, name, role, ids.New()); err != nil {
@@ -495,7 +497,7 @@ func (s *oidcService) completeOIDCLogin(r *http.Request, tx pgx.Tx, flow oidcFlo
 		return oidcOutcome{}, err
 	}
 	if !active {
-		return oidcOutcome{}, httpkit.Fail(403, "account_disabled", "This account is disabled.")
+		return oidcOutcome{}, problem.Fail(403, "account_disabled", "This account is disabled.")
 	}
 	session, err := s.sessions.newSession(r, tx, userID, sessionAuth{Method: "oidc"})
 	if err != nil {

@@ -17,7 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -76,7 +76,7 @@ func TestCursorRoundTripAndMalformed(t *testing.T) {
 	}
 	for _, raw := range malformed {
 		_, err := decodeCursor(raw)
-		p, ok := errors.AsType[*httpkit.Problem](err)
+		p, ok := errors.AsType[*problem.Problem](err)
 		if !ok || p.Status != http.StatusBadRequest || p.Code != "invalid_cursor" {
 			t.Errorf("decodeCursor(%q) = %v, want 400 invalid_cursor", raw, err)
 		}
@@ -118,7 +118,7 @@ func TestParseListQueryAndValidation(t *testing.T) {
 	for _, tc := range invalidCases {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/media-jobs?"+tc.params.Encode(), nil)
 		_, err := parseListQuery(req, scopedPrincipal)
-		p, ok := errors.AsType[*httpkit.Problem](err)
+		p, ok := errors.AsType[*problem.Problem](err)
 		if !ok || p.Status != tc.wantStatus || p.Code != tc.wantCode || p.Field != tc.wantField {
 			t.Errorf("%s: got %v, want status=%d code=%q field=%q", tc.name, err, tc.wantStatus, tc.wantCode, tc.wantField)
 		}
@@ -226,20 +226,20 @@ func TestProblemMapping(t *testing.T) {
 		{jobs.KindCallerCredential, http.StatusConflict, "media_job_caller_credential"},
 	}
 	for _, tc := range cases {
-		mapped := problem(&jobs.Error{Kind: tc.kind, Message: "detail"})
-		p, ok := errors.AsType[*httpkit.Problem](mapped)
+		mapped := jobProblem(&jobs.Error{Kind: tc.kind, Message: "detail"})
+		p, ok := errors.AsType[*problem.Problem](mapped)
 		if !ok || p.Status != tc.wantStatus || p.Code != tc.wantCode {
-			t.Errorf("problem(%v) = %v, want status=%d code=%q", tc.kind, mapped, tc.wantStatus, tc.wantCode)
+			t.Errorf("jobProblem(%v) = %v, want status=%d code=%q", tc.kind, mapped, tc.wantStatus, tc.wantCode)
 		}
 	}
 
 	unknown := errors.New("boom")
-	if got := problem(unknown); !errors.Is(got, unknown) {
-		t.Fatalf("problem(unknown) = %v, want %v", got, unknown)
+	if got := jobProblem(unknown); !errors.Is(got, unknown) {
+		t.Fatalf("jobProblem(unknown) = %v, want %v", got, unknown)
 	}
 	dbErr := &jobs.Error{Kind: jobs.KindDatabase, Message: "db down"}
-	if got := problem(dbErr); !errors.Is(got, dbErr) {
-		t.Fatalf("problem(KindDatabase) = %v, want passthrough", got)
+	if got := jobProblem(dbErr); !errors.Is(got, dbErr) {
+		t.Fatalf("jobProblem(KindDatabase) = %v, want passthrough", got)
 	}
 }
 
@@ -417,14 +417,14 @@ func TestHandlersGetListContentAndDelete(t *testing.T) {
 	badContent := httptest.NewRequest(http.MethodGet, "/api/v1/media-jobs/"+rec.ID+"/content?variant=nope", nil)
 	badContent.SetPathValue("job_id", rec.ID)
 	err = api.content(httptest.NewRecorder(), badContent, owner)
-	if p, ok := errors.AsType[*httpkit.Problem](err); !ok || p.Status != http.StatusBadRequest {
+	if p, ok := errors.AsType[*problem.Problem](err); !ok || p.Status != http.StatusBadRequest {
 		t.Fatalf("content(bad variant) = %v, want 400", err)
 	}
 
 	noContent := httptest.NewRequest(http.MethodGet, "/api/v1/media-jobs/"+rec.ID+"/content?variant=video", nil)
 	noContent.SetPathValue("job_id", rec.ID)
 	err = api.content(httptest.NewRecorder(), noContent, owner)
-	if p, ok := errors.AsType[*httpkit.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_content_unavailable" {
+	if p, ok := errors.AsType[*problem.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_content_unavailable" {
 		t.Fatalf("content(running job) = %v, want 409 media_content_unavailable", err)
 	}
 
@@ -460,7 +460,7 @@ func TestClaimDeleteTxPreconditionsAndTOCTOU(t *testing.T) {
 		t.Parallel()
 		rec := sampleRecord(projectID, jobs.Succeeded, jobs.Active)
 		_, _, err := claimDeleteTx(makeReq(rec.ID, ""), jobs.NewStore(&fakeQuerier{record: &rec}), owner, now)
-		p, ok := errors.AsType[*httpkit.Problem](err)
+		p, ok := errors.AsType[*problem.Problem](err)
 		if !ok || p.Status != http.StatusPreconditionRequired {
 			t.Fatalf("got %v, want 428", err)
 		}
@@ -470,7 +470,7 @@ func TestClaimDeleteTxPreconditionsAndTOCTOU(t *testing.T) {
 		t.Parallel()
 		rec := sampleRecord(projectID, jobs.Succeeded, jobs.Active)
 		_, _, err := claimDeleteTx(makeReq(rec.ID, `"`+uuid.NewString()+`"`), jobs.NewStore(&fakeQuerier{record: &rec}), owner, now)
-		p, ok := errors.AsType[*httpkit.Problem](err)
+		p, ok := errors.AsType[*problem.Problem](err)
 		if !ok || p.Status != http.StatusPreconditionFailed || p.Code != "etag_mismatch" {
 			t.Fatalf("got %v, want 412 etag_mismatch", err)
 		}
@@ -481,7 +481,7 @@ func TestClaimDeleteTxPreconditionsAndTOCTOU(t *testing.T) {
 		rec := sampleRecord(projectID, jobs.Succeeded, jobs.Active)
 		q := &fakeQuerier{record: &rec, driftOnClaim: true}
 		_, _, err := claimDeleteTx(makeReq(rec.ID, `"`+rec.ETag+`"`), jobs.NewStore(q), owner, now)
-		p, ok := errors.AsType[*httpkit.Problem](err)
+		p, ok := errors.AsType[*problem.Problem](err)
 		if !ok || p.Status != http.StatusPreconditionFailed || p.Code != "etag_mismatch" {
 			t.Fatalf("got %v, want 412 etag_mismatch", err)
 		}
@@ -491,13 +491,13 @@ func TestClaimDeleteTxPreconditionsAndTOCTOU(t *testing.T) {
 		t.Parallel()
 		creating := sampleRecord(projectID, jobs.Queued, jobs.Creating)
 		_, _, err := claimDeleteTx(makeReq(creating.ID, `"`+creating.ETag+`"`), jobs.NewStore(&fakeQuerier{record: &creating}), owner, now)
-		if p, ok := errors.AsType[*httpkit.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_busy" {
+		if p, ok := errors.AsType[*problem.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_busy" {
 			t.Fatalf("creating got %v, want 409 media_job_busy", err)
 		}
 
 		active := sampleRecord(projectID, jobs.Succeeded, jobs.Active)
 		_, _, err = claimDeleteTx(makeReq(active.ID, `"`+active.ETag+`"`), jobs.NewStore(&fakeQuerier{record: &active, leased: true}), owner, now)
-		if p, ok := errors.AsType[*httpkit.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_busy" {
+		if p, ok := errors.AsType[*problem.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_busy" {
 			t.Fatalf("leased got %v, want 409 media_job_busy", err)
 		}
 	})
@@ -507,7 +507,7 @@ func TestClaimDeleteTxPreconditionsAndTOCTOU(t *testing.T) {
 		rec := sampleRecord(projectID, jobs.Succeeded, jobs.Active)
 		rec.CallerCredential = true
 		_, _, err := claimDeleteTx(makeReq(rec.ID, `"`+rec.ETag+`"`), jobs.NewStore(&fakeQuerier{record: &rec}), owner, now)
-		if p, ok := errors.AsType[*httpkit.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_caller_credential" {
+		if p, ok := errors.AsType[*problem.Problem](err); !ok || p.Status != http.StatusConflict || p.Code != "media_job_caller_credential" {
 			t.Fatalf("caller credential got %v, want 409 media_job_caller_credential", err)
 		}
 	})

@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/projects"
@@ -101,9 +101,9 @@ func ownerDeclared(owner Owner, names promotion.Names, at destination) error {
 }
 
 func undeclaredOrganization() error {
-	return httpkit.Invalid("rate_cards.owner.organization", "The card names an organization neither the document nor this installation declares.")
+	return problem.Invalid("rate_cards.owner.organization", "The card names an organization neither the document nor this installation declares.")
 }
 
 func undeclaredProject() error {
-	return httpkit.Invalid("rate_cards.owner.project", "The card names a project neither the document nor this installation declares.")
+	return problem.Invalid("rate_cards.owner.project", "The card names a project neither the document nor this installation declares.")
 }

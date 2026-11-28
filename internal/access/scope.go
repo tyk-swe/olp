@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -16,7 +16,7 @@ func (s *Server) RequireProject(ctx context.Context, q database.Queryer, p authz
 		if p.AllProjects {
 			return nil
 		}
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	if err := p.Project(projectID, authz.View); err != nil {
 		return err
@@ -26,7 +26,7 @@ func (s *Server) RequireProject(ctx context.Context, q database.Queryer, p authz
 		return err
 	}
 	if !exists {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	return p.Project(projectID, authz.Change)
 }

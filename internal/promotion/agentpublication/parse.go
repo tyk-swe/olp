@@ -4,8 +4,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -15,7 +15,7 @@ import (
 func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Publication, error) {
 	entries := ptr.Value(document.AgentPublications)
 	if len(entries) > maxPublications {
-		return nil, httpkit.Invalid("agent_publications", "Declare at most 512 publications.")
+		return nil, problem.Invalid("agent_publications", "Declare at most 512 publications.")
 	}
 	first := promotion.FirstIndex(entries, entryKey)
 	publications, err := promotion.TryMapIndex(entries, func(index int, entry contract.ConfigurationAgentPublication) (Publication, error) {
@@ -30,7 +30,7 @@ func Parse(document contract.ConfigurationDocument, policy *egress.Policy) ([]Pu
 func parseEntry(entry contract.ConfigurationAgentPublication, duplicate bool, policy *egress.Policy) (Publication, error) {
 	key := entryKey(entry)
 	if !promotion.ValidLabel(entry.Project) || duplicate {
-		return Publication{}, httpkit.Invalid("agent_publications", "Use unique owning project/kind/name identities.")
+		return Publication{}, problem.Invalid("agent_publications", "Use unique owning project/kind/name identities.")
 	}
 	draft, err := promotion.Convert[agentcontract.Draft](entry.Draft)
 	if err != nil {
@@ -59,16 +59,16 @@ func parseEntry(entry contract.ConfigurationAgentPublication, duplicate bool, po
 func refuseShape(entry contract.ConfigurationAgentPublication, ref promotion.Ref, draft agentcontract.Draft, published *agentcontract.Draft, labels map[string]agentcontract.Draft) error {
 	agent := entry.Kind == contract.ConfigurationAgentPublicationKindAgent
 	if entry.Kind != contract.ConfigurationAgentPublicationKindPrompt && len(labels) != 0 {
-		return httpkit.Invalid("agent_publications.labels", "Only prompts have labels.")
+		return problem.Invalid("agent_publications.labels", "Only prompts have labels.")
 	}
 	if slices.ContainsFunc(slices.Collect(maps.Keys(labels)), func(label string) bool { return !slices.Contains(labelNames, label) }) {
-		return httpkit.Invalid("agent_publications.labels", "Use production or staging.")
+		return problem.Invalid("agent_publications.labels", "Use production or staging.")
 	}
 	if entry.CredentialRef != nil && (!agent || promotion.Ref(*entry.CredentialRef) != ref) {
-		return httpkit.Invalid("agent_publications.credential_ref", "Use the deterministic exported agent credential reference.")
+		return problem.Invalid("agent_publications.credential_ref", "Use the deterministic exported agent credential reference.")
 	}
 	if entry.PublishedCredentialRef != nil && (!agent || published == nil || !publishedRefValid(promotion.Ref(*entry.PublishedCredentialRef), ref, entry.CredentialRef != nil, draft, *published)) {
-		return httpkit.Invalid("agent_publications.published_credential_ref", "Bind published credentials independently; sharing requires the same approved endpoint.")
+		return problem.Invalid("agent_publications.published_credential_ref", "Bind published credentials independently; sharing requires the same approved endpoint.")
 	}
 	return nil
 }
@@ -82,20 +82,20 @@ func publishedRefValid(published, derived promotion.Ref, drafted bool, draft, de
 
 func validateDefinition(definition agentcontract.Draft, kindName string, policy *egress.Policy) error {
 	if err := placed(definition, placeholderProject).Validate(kindName); err != nil {
-		return httpkit.Invalid("agent_publications", err.Error())
+		return problem.Invalid("agent_publications", err.Error())
 	}
 	if definition.Agent == nil {
 		return nil
 	}
 	if definition.Agent.CredentialID != nil {
-		return httpkit.Invalid("agent_publications", "Export credential references, never destination secret UUIDs.")
+		return problem.Invalid("agent_publications", "Export credential references, never destination secret UUIDs.")
 	}
 	if policy == nil {
-		return httpkit.Invalid("agent_publications.endpoint", "Egress policy is unavailable.")
+		return problem.Invalid("agent_publications.endpoint", "Egress policy is unavailable.")
 	}
 	endpoint, err := policy.ValidateEndpoint(definition.Agent.Endpoint)
 	if err != nil || endpoint == nil || endpoint.String() != definition.Agent.Endpoint {
-		return httpkit.Invalid("agent_publications.endpoint", "Use a canonical approved endpoint.")
+		return problem.Invalid("agent_publications.endpoint", "Use a canonical approved endpoint.")
 	}
 	return nil
 }

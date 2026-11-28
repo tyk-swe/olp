@@ -7,10 +7,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -65,13 +66,13 @@ func (r Route) validPaid() error {
 	for _, target := range publication.Policy.paidTargets() {
 		connection, frozen := publication.PaidConnections[target.Provider]
 		if !frozen {
-			return httpkit.Invalid("code.paid_connections", "Freeze every published paid provider.")
+			return problem.Invalid("code.paid_connections", "Freeze every published paid provider.")
 		}
 		if !slices.ContainsFunc(connection.Provider.Slots, func(slot provider.Slot) bool {
 			ref, referenced := connection.slotRef(slot)
 			return slot.Name == target.Slot && referenced && ref == target.CredentialRef && slot.Enabled
 		}) {
-			return httpkit.Invalid("code.paid_connections", "Freeze the enabled target slot with its explicit credential reference.")
+			return problem.Invalid("code.paid_connections", "Freeze the enabled target slot with its explicit credential reference.")
 		}
 	}
 	return nil
@@ -80,14 +81,14 @@ func (r Route) validPaid() error {
 func (c PaidConnection) valid(name, project string, policy Policy) error {
 	entry := c.Provider
 	if name != entry.Name || entry.Project == nil || !strings.EqualFold(*entry.Project, project) || entry.Billing != nil || !policy.targets(name) {
-		return httpkit.Invalid("code.paid_connections", "Frozen providers must name the published paid targets in the same project.")
+		return problem.Invalid("code.paid_connections", "Frozen providers must name the published paid targets in the same project.")
 	}
 	for _, slot := range slices.Sorted(maps.Keys(c.SlotKeyRefs)) {
 		if !slices.ContainsFunc(entry.Slots, func(s provider.Slot) bool { return s.Name == slot }) {
-			return httpkit.Invalid("code.paid_connections.slot_key_refs", "Key restrictions must name a frozen slot.")
+			return problem.Invalid("code.paid_connections.slot_key_refs", "Key restrictions must name a frozen slot.")
 		}
-		if slices.ContainsFunc(c.SlotKeyRefs[slot], func(ref string) bool { return httpkit.ValidText("code", ref, 300) != nil }) {
-			return httpkit.Invalid("code.paid_connections.slot_key_refs", "Name explicit destination key references.")
+		if slices.ContainsFunc(c.SlotKeyRefs[slot], func(ref string) bool { return textfield.Validate("code", ref, 300) != nil }) {
+			return problem.Invalid("code.paid_connections.slot_key_refs", "Name explicit destination key references.")
 		}
 	}
 	return nil
@@ -120,7 +121,7 @@ func resolvePaid(ctx context.Context, q database.Queryer, connections map[string
 			slots := byProvider[target.ProviderID].Slots
 			at := slices.IndexFunc(slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
 			if at < 0 {
-				return nil, httpkit.Invalid("code.paid_connections.slots", "Resolve every frozen paid target slot before checking its destination limits.")
+				return nil, problem.Invalid("code.paid_connections.slots", "Resolve every frozen paid target slot before checking its destination limits.")
 			}
 			if err := validLimits(ctx, q, byProvider[target.ProviderID], slots[at], policy.ProjectID); err != nil {
 				return nil, err
@@ -128,7 +129,7 @@ func resolvePaid(ctx context.Context, q database.Queryer, connections map[string
 		}
 	}
 	if len(byProvider) != len(connections) {
-		return nil, httpkit.Invalid("code.paid_connections", "Frozen paid provider identities must be distinct.")
+		return nil, problem.Invalid("code.paid_connections", "Frozen paid provider identities must be distinct.")
 	}
 	return byProvider, nil
 }
@@ -140,7 +141,7 @@ func (c PaidConnection) resolve(ctx context.Context, q database.Queryer, project
 		return routing.Provider{}, err
 	}
 	if !found {
-		return routing.Provider{}, httpkit.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
+		return routing.Provider{}, problem.Invalid("code.paid_connections", "Prepare the published destination metered provider first.")
 	}
 	var currentModels []routing.RevisionModel
 	if err := json.Unmarshal(current.Models, &currentModels); err != nil {
@@ -171,7 +172,7 @@ func (c PaidConnection) resolve(ctx context.Context, q database.Queryer, project
 		return routing.Provider{}, err
 	}
 	if prepared.Kind != currentConfiguration.Kind || prepared.AuthMode != currentConfiguration.AuthMode || prepared.ProfileID != currentConfiguration.ProfileID {
-		return routing.Provider{}, httpkit.Invalid("code.paid_connections", "Frozen paid providers must retain the destination provider kind, authentication and profile.")
+		return routing.Provider{}, problem.Invalid("code.paid_connections", "Frozen paid providers must retain the destination provider kind, authentication and profile.")
 	}
 	configuration, err := networked(prepared, currentConfiguration, entry.Network)
 	if err != nil {
@@ -214,7 +215,7 @@ func decoded(current routing.ProviderRevision, configuration connection.Configur
 func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (routing.RevisionModel, error) {
 	at := slices.IndexFunc(current, func(m routing.RevisionModel) bool { return m.UpstreamModel == model.UpstreamModel })
 	if at < 0 || !model.Enabled {
-		return routing.RevisionModel{}, httpkit.Invalid("code.paid_connections.models", "Frozen models must remain enabled in the destination publication.")
+		return routing.RevisionModel{}, problem.Invalid("code.paid_connections.models", "Frozen models must remain enabled in the destination publication.")
 	}
 	destination := current[at]
 	capabilities, err := promotion.TryMapIndex(model.Capabilities, func(_ int, capability connection.Capability) (routing.RevisionCapability, error) {
@@ -222,7 +223,7 @@ func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (r
 			return c.Operation == capability.Operation && c.Surface == capability.Surface && c.Mode == capability.Mode && c.Source == "certified"
 		})
 		if found < 0 {
-			return routing.RevisionCapability{}, httpkit.Invalid("code.paid_connections.models", "Certify each frozen model capability on the destination provider first.")
+			return routing.RevisionCapability{}, problem.Invalid("code.paid_connections.models", "Certify each frozen model capability on the destination provider first.")
 		}
 		return destination.Capabilities[found], nil
 	})
@@ -232,7 +233,7 @@ func frozenModel(model providers.DraftModel, current []routing.RevisionModel) (r
 func (c PaidConnection) frozenSlot(ctx context.Context, q database.Queryer, slot provider.Slot, providerID string, current []routing.RevisionSlot, project string, values bindings) (routing.RevisionSlot, error) {
 	at := slices.IndexFunc(current, func(s routing.RevisionSlot) bool { return s.Name == slot.Name })
 	if at < 0 {
-		return routing.RevisionSlot{}, httpkit.Invalid("code.paid_connections.slots", "Every frozen slot needs its published destination slot.")
+		return routing.RevisionSlot{}, problem.Invalid("code.paid_connections.slots", "Every frozen slot needs its published destination slot.")
 	}
 	live := current[at]
 	credential, err := c.slotCredential(ctx, q, slot, live, providerID, values.credentials)
@@ -264,7 +265,7 @@ func (c PaidConnection) slotCredential(ctx context.Context, q database.Queryer, 
 		return nil, err
 	}
 	if !allowed || live.CredentialID == nil || *live.CredentialID != id || slot.Enabled && !live.Enabled {
-		return nil, httpkit.Invalid("code_bindings.credentials", "Bind the enabled destination slot's current published credential.")
+		return nil, problem.Invalid("code_bindings.credentials", "Bind the enabled destination slot's current published credential.")
 	}
 	return &id, nil
 }

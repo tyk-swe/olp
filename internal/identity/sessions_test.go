@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func TestValidatePurpose(t *testing.T) {
@@ -89,7 +89,7 @@ func TestProvisioningID(t *testing.T) {
 	}
 
 	_, scimErr := provisioningID(reqWith("source", "scim"), "source", "source", 100)
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if !errors.As(scimErr, &problem) || problem.Status != http.StatusConflict || problem.Code != "managed_provisioning_source" {
 		t.Fatalf("scim source err = %v, want 409 managed_provisioning_source", scimErr)
 	}

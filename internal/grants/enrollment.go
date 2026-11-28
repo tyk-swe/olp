@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -200,11 +200,11 @@ func unavailable(ctx context.Context, q database.Queryer, providerID, id, princi
 	case err != nil:
 		return err
 	case continued:
-		return httpkit.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
+		return problem.Fail(409, "grant_enrollment_used", "This grant enrollment was already continued, and a grant enrollment is continued once. Start another.")
 	case polled:
 		return pgx.ErrNoRows
 	}
-	return httpkit.Fail(410, "grant_enrollment_expired", "This grant enrollment expired. Start another, and paste back what the upstream returns within 10 minutes.")
+	return problem.Fail(410, "grant_enrollment_expired", "This grant enrollment expired. Start another, and paste back what the upstream returns within 10 minutes.")
 }
 
 // Complete records the credential version an enrollment's grant created, in
@@ -281,17 +281,17 @@ func step(ctx context.Context, host *plugins.Host, e Enrollment, options map[str
 func failure(err error) error {
 	if reported, ok := errors.AsType[*abi.Error](err); ok {
 		if reported.Code == abi.CodeStateMismatch {
-			return httpkit.Fail(422, "grant_state_mismatch", "What was pasted back answers another sign-in than this grant enrollment's: "+reported.Message)
+			return problem.Fail(422, "grant_state_mismatch", "What was pasted back answers another sign-in than this grant enrollment's: "+reported.Message)
 		}
-		return httpkit.Fail(422, "grant_enrollment_failed", "The plugin could not enroll a grant ("+reported.Code+"): "+reported.Message)
+		return problem.Fail(422, "grant_enrollment_failed", "The plugin could not enroll a grant ("+reported.Code+"): "+reported.Message)
 	}
 	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
-		return httpkit.Fail(422, refusal.Code, refusal.Message)
+		return problem.Fail(422, refusal.Code, refusal.Message)
 	}
 	return err
 }
 
 // refused is the problem for a plugin step whose result OLP can't use.
 func refused(reason string) error {
-	return httpkit.Fail(422, "grant_enrollment_failed", "The plugin's grant enrollment returned something OLP can't use: "+reason+".")
+	return problem.Fail(422, "grant_enrollment_failed", "The plugin's grant enrollment returned something OLP can't use: "+reason+".")
 }

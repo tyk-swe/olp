@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 const maxLogoBytes = 64 << 10
@@ -52,18 +53,18 @@ func validateLogo(raw string) (string, error) {
 	}
 	mime, encoded, ok := strings.Cut(raw, ";base64,")
 	if !ok || (mime != "data:image/png" && mime != "data:image/jpeg") || len(encoded) > base64.StdEncoding.EncodedLen(maxLogoBytes) {
-		return "", httpkit.Invalid("logo", "Use a PNG or JPEG logo of at most 64 KiB.")
+		return "", problem.Invalid("logo", "Use a PNG or JPEG logo of at most 64 KiB.")
 	}
 	data, err := base64.StdEncoding.Strict().DecodeString(encoded)
 	if err != nil || len(data) > maxLogoBytes {
-		return "", httpkit.Invalid("logo", "Use a valid base64-encoded PNG or JPEG logo.")
+		return "", problem.Invalid("logo", "Use a valid base64-encoded PNG or JPEG logo.")
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || mime != "data:image/"+format || config.Width < 1 || config.Height < 1 || config.Width > 512 || config.Height > 512 {
-		return "", httpkit.Invalid("logo", "Use a valid PNG or JPEG logo up to 512 × 512 pixels.")
+		return "", problem.Invalid("logo", "Use a valid PNG or JPEG logo up to 512 × 512 pixels.")
 	}
 	if _, _, err = image.Decode(bytes.NewReader(data)); err != nil {
-		return "", httpkit.Invalid("logo", "Use a complete PNG or JPEG image.")
+		return "", problem.Invalid("logo", "Use a complete PNG or JPEG image.")
 	}
 	return mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
@@ -79,17 +80,17 @@ func (a *API) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if !utf8.ValidString(input.Name) || utf8.RuneCountInString(input.Name) < 1 || utf8.RuneCountInString(input.Name) > 100 || strings.ContainsFunc(input.Name, unicode.IsControl) {
-		return httpkit.Reply{}, httpkit.Invalid("name", "Use an installation name of 1–100 characters without control characters.")
+		return httpkit.Reply{}, problem.Invalid("name", "Use an installation name of 1–100 characters without control characters.")
 	}
 	if input.Logo == nil {
-		return httpkit.Reply{}, httpkit.Invalid("logo", "Include a logo, or an empty string to use the default brand mark.")
+		return httpkit.Reply{}, problem.Invalid("logo", "Include a logo, or an empty string to use the default brand mark.")
 	}
 	logo, err := validateLogo(*input.Logo)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if input.Accent == nil {
-		return httpkit.Reply{}, httpkit.Invalid("accent", "Include a brand color, or an empty string to use the default accent.")
+		return httpkit.Reply{}, problem.Invalid("accent", "Include a brand color, or an empty string to use the default accent.")
 	}
 	accent, err := normalizeAccent(*input.Accent)
 	if err != nil {

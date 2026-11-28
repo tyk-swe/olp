@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/toolidentity"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
@@ -61,10 +62,10 @@ type catalogApproval struct {
 
 func (a catalogApproval) validate() error {
 	if a.ProtocolVersion == "" {
-		return httpkit.Invalid("protocol_version", "Supply the protocol version from the reviewed catalog preview.")
+		return problem.Invalid("protocol_version", "Supply the protocol version from the reviewed catalog preview.")
 	}
 	if !toolidentity.ValidCatalogDigest(a.Digest) {
-		return httpkit.Invalid("digest", "Supply the catalog digest from the reviewed catalog preview.")
+		return problem.Invalid("digest", "Supply the catalog digest from the reviewed catalog preview.")
 	}
 	return nil
 }
@@ -146,17 +147,17 @@ func (s *Server) storedCredential(ctx context.Context, saved *Definition) ([]byt
 	}
 	material, err := s.access.Keys.Read(ctx, s.access.Pool, s.access.Installation, *saved.CredentialID, secrets.MCPCredential)
 	if err != nil {
-		return nil, httpkit.Fail(422, "mcp_credential_unavailable", "The registered credential is unavailable.")
+		return nil, problem.Fail(422, "mcp_credential_unavailable", "The registered credential is unavailable.")
 	}
 	return material, nil
 }
 
 func (s *Server) discoverSaved(ctx context.Context, saved *Definition) (*upstream.Catalog, error) {
 	if routing.MCPTransport(saved.Transport) == routing.MCPStdio {
-		return nil, httpkit.Invalid("transport", "Catalog review is available for remote MCP registrations.")
+		return nil, problem.Invalid("transport", "Catalog review is available for remote MCP registrations.")
 	}
 	if s.egress == nil {
-		return nil, httpkit.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
+		return nil, problem.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
 	}
 	material, err := s.storedCredential(ctx, saved)
 	if err != nil {
@@ -165,7 +166,7 @@ func (s *Server) discoverSaved(ctx context.Context, saved *Definition) (*upstrea
 	defer clear(material)
 	catalog, err := upstream.CertifyOptions(ctx, s.egress, saved.Endpoint, material, upstream.TransportOptions{Transport: routing.MCPTransport(saved.Transport), Stdio: saved.Stdio.Clone(), Executables: s.executables})
 	if err != nil {
-		return nil, httpkit.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
+		return nil, problem.Fail(422, "mcp_certification_failed", "The bounded MCP handshake or tool-schema certification failed.")
 	}
 	return catalog, nil
 }
@@ -211,7 +212,7 @@ func pinnedTools(definition agentcontract.Draft, serverID string) []string {
 }
 
 func retired() error {
-	return httpkit.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
+	return problem.Fail(409, "mcp_server_retired", "Create a new registration instead of changing retained history.")
 }
 
 func (s *Server) previewCatalog(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -300,10 +301,10 @@ func (s *Server) approveCatalog(r *http.Request, _ authz.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	if catalog.Protocol != in.ProtocolVersion || catalog.Digest != in.Digest {
-		return httpkit.Reply{}, httpkit.Fail(409, "mcp_catalog_changed", "The live MCP catalog changed since it was reviewed. Preview it again before approving.")
+		return httpkit.Reply{}, problem.Fail(409, "mcp_catalog_changed", "The live MCP catalog changed since it was reviewed. Preview it again before approving.")
 	}
 	if catalog.Protocol == previous.Catalog.Protocol && catalog.Digest == previous.Catalog.Digest {
-		return httpkit.Reply{}, httpkit.Fail(409, "mcp_catalog_current", "The live MCP catalog already matches the certified catalog.")
+		return httpkit.Reply{}, problem.Fail(409, "mcp_catalog_current", "The live MCP catalog already matches the certified catalog.")
 	}
 	return access.Mutate(s.access, r, in, func(tx pgx.Tx, principal authz.Principal) (*Definition, error) {
 		return s.loadForWrite(r.Context(), tx, principal, Input{}, id)

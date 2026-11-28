@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"golang.org/x/oauth2"
 )
@@ -48,7 +48,7 @@ func TestGrantProblemMapping(t *testing.T) {
 		{ErrRequired, 409, "grant_binding_changed"},
 	}
 	for _, tc := range cases {
-		var problem *httpkit.Problem
+		var problem *problem.Problem
 		if got := grantProblem(tc.err); !errors.As(got, &problem) || problem.Status != tc.status || problem.Code != tc.code {
 			t.Errorf("grantProblem(%v) = %v, want status %d code %q", tc.err, got, tc.status, tc.code)
 		}
@@ -56,7 +56,7 @@ func TestGrantProblemMapping(t *testing.T) {
 	if got := grantProblem(other); got != other {
 		t.Errorf("grantProblem rewrote an unrelated error: %v", got)
 	}
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if got := oauthProblem(errOAuth); !errors.As(got, &problem) || problem.Status != 422 || problem.Code != "grant_authorization_failed" {
 		t.Errorf("oauthProblem(errOAuth) = %v", got)
 	}

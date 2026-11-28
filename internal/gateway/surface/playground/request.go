@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -106,51 +106,51 @@ func (in *request) validate(streaming bool) error {
 	switch in.operation() {
 	case "generation", "token_count", "embeddings", "moderation", "rerank":
 	default:
-		return httpkit.Invalid("operation", "operation must be generation, token_count, embeddings, moderation, or rerank")
+		return problem.Invalid("operation", "operation must be generation, token_count, embeddings, moderation, or rerank")
 	}
 	switch {
 	case strings.TrimSpace(in.Model) == "":
-		return httpkit.Invalid("model", "model is required")
+		return problem.Invalid("model", "model is required")
 	case in.Surface != nil && !slices.Contains([]string{"openai", "anthropic", "gemini"}, *in.Surface):
-		return httpkit.Invalid("surface", "surface must be openai, anthropic, or gemini")
+		return problem.Invalid("surface", "surface must be openai, anthropic, or gemini")
 	case in.Temperature != nil && (*in.Temperature < 0 || *in.Temperature > 2):
-		return httpkit.Invalid("temperature", "temperature must be between 0 and 2")
+		return problem.Invalid("temperature", "temperature must be between 0 and 2")
 	case in.MaxOutputTokens != nil && (*in.MaxOutputTokens < 1 || *in.MaxOutputTokens > 1<<20):
-		return httpkit.Invalid("max_output_tokens", "max_output_tokens must be between 1 and 1048576")
+		return problem.Invalid("max_output_tokens", "max_output_tokens must be between 1 and 1048576")
 	case len(in.Tools) > 128:
-		return httpkit.Invalid("tools", "at most 128 tools are allowed")
+		return problem.Invalid("tools", "at most 128 tools are allowed")
 	}
 	if in.Request != nil {
 		if in.Input != "" || len(in.Tools) > 0 || in.ResponseFormat != nil || in.Temperature != nil || in.MaxOutputTokens != nil {
-			return httpkit.Invalid("request", "request cannot be combined with input, tools, response_format, temperature, or max_output_tokens")
+			return problem.Invalid("request", "request cannot be combined with input, tools, response_format, temperature, or max_output_tokens")
 		}
 	} else {
 		if in.Input == "" {
-			return httpkit.Invalid("input", "input is required")
+			return problem.Invalid("input", "input is required")
 		}
 		if in.operation() != "generation" {
-			return httpkit.Invalid("operation", "non-generation operations require a raw request document")
+			return problem.Invalid("operation", "non-generation operations require a raw request document")
 		}
 	}
 	if streaming {
 		if in.Stream == nil || !*in.Stream {
-			return httpkit.Invalid("stream", "stream must be true for the streaming playground")
+			return problem.Invalid("stream", "stream must be true for the streaming playground")
 		}
 		if in.operation() != "generation" {
-			return httpkit.Invalid("operation", "streaming supports generation only")
+			return problem.Invalid("operation", "streaming supports generation only")
 		}
 	} else if in.Stream != nil && *in.Stream {
-		return httpkit.Invalid("stream", "streaming requests use the streaming playground endpoint")
+		return problem.Invalid("stream", "streaming requests use the streaming playground endpoint")
 	}
 	if in.operation() != "generation" && in.operation() != "token_count" && in.surface() != "openai" {
-		return httpkit.Invalid("surface", "this operation is available on the openai surface only")
+		return problem.Invalid("surface", "this operation is available on the openai surface only")
 	}
 	if err := in.Routing.Validate("routing"); err != nil {
 		return err
 	}
 	for i, tool := range in.Tools {
 		if strings.TrimSpace(tool.Name) == "" || len(tool.InputSchema) == 0 {
-			return httpkit.Invalid("tools", "tool "+string(rune('0'+min(i, 9)))+" needs a name and an input_schema")
+			return problem.Invalid("tools", "tool "+string(rune('0'+min(i, 9)))+" needs a name and an input_schema")
 		}
 	}
 	if f := in.ResponseFormat; f != nil {
@@ -158,10 +158,10 @@ func (in *request) validate(streaming bool) error {
 		case "text", "json_object":
 		case "json_schema":
 			if strings.TrimSpace(f.Name) == "" || len(f.Schema) == 0 {
-				return httpkit.Invalid("response_format", "json_schema formats need a name and a schema")
+				return problem.Invalid("response_format", "json_schema formats need a name and a schema")
 			}
 		default:
-			return httpkit.Invalid("response_format", "unsupported response_format type")
+			return problem.Invalid("response_format", "unsupported response_format type")
 		}
 	}
 	return nil
@@ -176,7 +176,7 @@ func (in *request) parse(operation, mode string, run *kernel.MemberGeneration) (
 		doc, err := protocols.ParseSource(family, in.Request)
 		if err != nil {
 			e := kernel.RequestError(err)
-			return kernel.ParsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
+			return kernel.ParsedRequest{}, problem.Fail(e.Status, e.Code, e.Message)
 		}
 		if operation == "generation" {
 			if family == wire.Chat {
@@ -204,14 +204,14 @@ func (in *request) parse(operation, mode string, run *kernel.MemberGeneration) (
 				}
 				parsed, e := run.ExpandPrompt(family, doc, in.Model, bindings)
 				if e != nil {
-					return kernel.ParsedRequest{}, httpkit.Fail(e.Status, e.Code, e.Message)
+					return kernel.ParsedRequest{}, problem.Fail(e.Status, e.Code, e.Message)
 				}
 				return parsed, nil
 			}
 		}
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
-			return kernel.ParsedRequest{}, httpkit.Invalid("request", "request must be a JSON object")
+			return kernel.ParsedRequest{}, problem.Invalid("request", "request must be a JSON object")
 		}
 		if in.surface() == "gemini" {
 			delete(fields, "model")
@@ -223,17 +223,17 @@ func (in *request) parse(operation, mode string, run *kernel.MemberGeneration) (
 		data, _ := json.Marshal(fields)
 		parsed, err := protocols.SimulationRequest(data, operation, in.surface(), mode, in.Model)
 		if err != nil {
-			return kernel.ParsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+			return kernel.ParsedRequest{}, problem.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		}
 		return kernel.ParsedRequest{Request: parsed, Decoded: int64(len(data))}, nil
 	}
 	body, err := in.chatBody()
 	if err != nil {
-		return kernel.ParsedRequest{}, httpkit.Invalid("input", "the request could not be encoded")
+		return kernel.ParsedRequest{}, problem.Invalid("input", "the request could not be encoded")
 	}
 	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
-		return kernel.ParsedRequest{}, httpkit.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return kernel.ParsedRequest{}, problem.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
 	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
 		kind := *in.Surface
@@ -245,11 +245,11 @@ func (in *request) parse(operation, mode string, run *kernel.MemberGeneration) (
 		}
 		encoded, encodedWire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
 		if e != nil {
-			return kernel.ParsedRequest{}, httpkit.Invalid("input", e.Error())
+			return kernel.ParsedRequest{}, problem.Invalid("input", e.Error())
 		}
 		parsed, e = protocols.Parse(encodedWire, encoded, in.Model)
 		if e != nil {
-			return kernel.ParsedRequest{}, httpkit.Invalid("input", e.Error())
+			return kernel.ParsedRequest{}, problem.Invalid("input", e.Error())
 		}
 	}
 	return kernel.ParsedRequest{Request: parsed}, nil

@@ -18,13 +18,14 @@ import (
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
 var (
-	errProviderMissing = httpkit.Fail(http.StatusNotFound, "not_found", "The provider does not exist.")
-	errImportMissing   = httpkit.Fail(http.StatusNotFound, "not_found", "The provider has no billing import.")
-	errImportDisabled  = httpkit.Fail(http.StatusConflict, "billing_import_disabled", "Enable the billing import before scheduling a run.")
+	errProviderMissing = problem.Fail(http.StatusNotFound, "not_found", "The provider does not exist.")
+	errImportMissing   = problem.Fail(http.StatusNotFound, "not_found", "The provider has no billing import.")
+	errImportDisabled  = problem.Fail(http.StatusConflict, "billing_import_disabled", "Enable the billing import before scheduling a run.")
 )
 
 type API struct {
@@ -82,7 +83,7 @@ func (a *API) put(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if bytes.Equal(bytes.TrimSpace(input.Credential), []byte("null")) {
-		return httpkit.Reply{}, httpkit.Invalid("credential", "credential cannot be null; delete the billing import instead")
+		return httpkit.Reply{}, problem.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	}
 	return access.Mutate(a.server, r, input, a.changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, owner provider) (httpkit.Reply, access.Event, error) {
 		existing, found, err := lockRecord(r.Context(), tx, id)
@@ -146,9 +147,9 @@ func cmpBytes(values ...json.RawMessage) json.RawMessage {
 func credentialInvalid(err error) error {
 	switch {
 	case errors.Is(err, ErrCredentialRequired):
-		return httpkit.Invalid("credential", "credential is required to create a billing import")
+		return problem.Invalid("credential", "credential is required to create a billing import")
 	case errors.Is(err, ErrCredentialIncompatible):
-		return httpkit.Invalid("credential", "supply a credential compatible with the billing source")
+		return problem.Invalid("credential", "supply a credential compatible with the billing source")
 	}
 	return err
 }

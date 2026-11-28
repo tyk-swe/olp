@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -31,9 +32,9 @@ func UUID(query url.Values, name string) (*string, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	id, err := httpkit.ParseUUID(*raw)
+	id, err := ids.Parse(*raw)
 	if err != nil {
-		return nil, httpkit.Fail(400, "invalid_filter", "Use a valid identifier for "+name+".")
+		return nil, problem.Fail(400, "invalid_filter", "Use a valid identifier for "+name+".")
 	}
 	return &id, nil
 }
@@ -44,7 +45,7 @@ func RequiredTime(query url.Values, name string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	if value == nil {
-		return time.Time{}, httpkit.Fail(400, "invalid_range",
+		return time.Time{}, problem.Fail(400, "invalid_range",
 			"Give an RFC 3339 "+name+" for the reporting range.")
 	}
 	return *value, nil
@@ -57,7 +58,7 @@ func Time(query url.Values, name string) (*time.Time, error) {
 	}
 	value, err := time.Parse(time.RFC3339, *raw)
 	if err != nil {
-		return nil, httpkit.Fail(400, "invalid_range", "Use an RFC 3339 timestamp for "+name+".")
+		return nil, problem.Fail(400, "invalid_range", "Use an RFC 3339 timestamp for "+name+".")
 	}
 	utc := value.UTC()
 	return &utc, nil
@@ -72,7 +73,7 @@ func Status(query url.Values) (*int, error) {
 	}
 	status, err := strconv.Atoi(*raw)
 	if err != nil || status < 100 || status > 599 {
-		return nil, httpkit.Fail(400, "invalid_filter", "Use an HTTP status code from 100 to 599.")
+		return nil, problem.Fail(400, "invalid_filter", "Use an HTTP status code from 100 to 599.")
 	}
 	return &status, nil
 }
@@ -84,7 +85,7 @@ func Limit(query url.Values) (int, error) {
 	}
 	limit, err := strconv.Atoi(*raw)
 	if err != nil || limit < 1 || limit > 200 {
-		return 0, httpkit.Fail(400, "invalid_limit", "Use a page size from 1 to 200.")
+		return 0, problem.Fail(400, "invalid_limit", "Use a page size from 1 to 200.")
 	}
 	return limit, nil
 }
@@ -96,7 +97,7 @@ func Cursor(query url.Values) (*usage.Cursor, error) {
 	}
 	at, id, err := usage.DecodeCursor(*raw)
 	if err != nil {
-		return nil, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
+		return nil, problem.Fail(400, "invalid_cursor", "The cursor is invalid.")
 	}
 	return &usage.Cursor{At: at, ID: id}, nil
 }
@@ -108,7 +109,7 @@ func RevisionCursor(query url.Values) (*int, error) {
 	}
 	revision, err := strconv.Atoi(*raw)
 	if err != nil || revision < 1 {
-		return nil, httpkit.Fail(400, "invalid_cursor", "The cursor is invalid.")
+		return nil, problem.Fail(400, "invalid_cursor", "The cursor is invalid.")
 	}
 	return &revision, nil
 }

@@ -13,8 +13,10 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const increaseJSON = `to_jsonb(i)||jsonb_build_object('amount',i.amount::text)`
@@ -24,7 +26,7 @@ func (a *API) increases(r *http.Request, p authz.Principal) (httpkit.Reply, erro
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+increaseJSON+" FROM olp.budget_increases i WHERE i.id<$1 AND ($2 OR i.project_id=ANY($3::uuid[]) OR i.organization_id=ANY($5::uuid[])) ORDER BY i.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1, p.OrganizationIDs())
+	items, err := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+increaseJSON+" FROM olp.budget_increases i WHERE i.id<$1 AND ($2 OR i.project_id=ANY($3::uuid[]) OR i.organization_id=ANY($5::uuid[])) ORDER BY i.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1, p.OrganizationIDs())
 	return httpkit.ListReply(items, page), err
 }
 
@@ -53,7 +55,7 @@ func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	}, func(tx pgx.Tx, p authz.Principal, target increaseTarget) (httpkit.Reply, access.Event, error) {
 		cap := capForWindow(target.policy, in.Window)
 		if cap == nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("window", "This boundary has no permanent cap for the selected window.")
 		}
 		var now, end time.Time
 		var window int64
@@ -66,7 +68,7 @@ func (a *API) createIncrease(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		}
 		expires = expires.Truncate(time.Millisecond)
 		if !expires.After(now) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("expires_at", "Expiry must be in the future, within the current budget window.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("expires_at", "Expiry must be in the future, within the current budget window.")
 		}
 		if err := lockBudgetWindow(r.Context(), tx, target.owner, in.Window); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -149,13 +151,13 @@ func (a *API) increase(r *http.Request, p authz.Principal) (httpkit.Reply, error
 
 func validateIncreaseTerms(window, amount, reason string) error {
 	if !limits.ValidCostLimit(amount) {
-		return httpkit.Invalid("amount", "Use a positive USD decimal with at most 12 integer and 12 fractional digits.")
+		return problem.Invalid("amount", "Use a positive USD decimal with at most 12 integer and 12 fractional digits.")
 	}
 	if reason == "" || utf8.RuneCountInString(reason) > 256 || strings.ContainsAny(reason, "\x00\r\n") {
-		return httpkit.Invalid("reason", "Give a single-line reason of 1–256 characters.")
+		return problem.Invalid("reason", "Give a single-line reason of 1–256 characters.")
 	}
 	if window != "day" && window != "week" && window != "month" {
-		return httpkit.Invalid("window", "Choose day, week or month.")
+		return problem.Invalid("window", "Choose day, week or month.")
 	}
 	return nil
 }
@@ -186,7 +188,7 @@ func checkActiveIncreaseLimit(ctx context.Context, tx pgx.Tx, owner, window stri
 		return err
 	}
 	if count >= 8 {
-		return httpkit.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
+		return problem.Fail(409, "budget_increase_limit", "At most eight active increases may apply to one budget window.")
 	}
 	return nil
 }

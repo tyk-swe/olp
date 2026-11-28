@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -38,7 +38,7 @@ func ParseBindings(request contract.ConfigurationPromotionRequest) (Bindings, er
 	sealed := ptr.Value(request.SecretBindings)
 	external := ptr.Value(request.ExternalCredentialBindings)
 	if slices.ContainsFunc(slices.Collect(maps.Keys(external)), func(ref string) bool { _, ok := sealed[ref]; return ok }) {
-		return nil, httpkit.Invalid("external_credential_bindings", "A reference cannot also have a plaintext binding.")
+		return nil, problem.Invalid("external_credential_bindings", "A reference cannot also have a plaintext binding.")
 	}
 	return maps.Collect(func(yield func(Ref, Credential) bool) {
 		for ref, secret := range sealed {
@@ -85,7 +85,7 @@ func accept(ref Ref, credential Credential, checks []func(Credential) error) err
 		if _, external := credential.(External); external {
 			return externalRefused()
 		}
-		return httpkit.Invalid("secret_bindings", "Secret binding "+string(ref)+" is not referenced by the document.")
+		return problem.Invalid("secret_bindings", "Secret binding "+string(ref)+" is not referenced by the document.")
 	}
 	for _, check := range checks {
 		if err := check(credential); err != nil {
@@ -96,7 +96,7 @@ func accept(ref Ref, credential Credential, checks []func(Credential) error) err
 }
 
 func externalRefused() error {
-	return httpkit.Invalid("external_credential_bindings", "Use a document reference and an immutable store version.")
+	return problem.Invalid("external_credential_bindings", "Use a document reference and an immutable store version.")
 }
 
 func ValidateExternal(reference secretstore.Reference) error {
@@ -113,7 +113,7 @@ func AcceptBearer(credential Credential) error {
 			return err
 		}
 		if _, err := secrets.ParseBearer(encoded); err != nil {
-			return httpkit.Invalid("credential", err.Error())
+			return problem.Invalid("credential", err.Error())
 		}
 		return nil
 	})(credential)
@@ -123,7 +123,7 @@ func SealedOnly(refusal string, validate func(secret string) error) func(Credent
 	return func(credential Credential) error {
 		sealed, ok := credential.(Sealed)
 		if !ok {
-			return httpkit.Invalid("external_credential_bindings", refusal)
+			return problem.Invalid("external_credential_bindings", refusal)
 		}
 		return validate(sealed.Secret)
 	}

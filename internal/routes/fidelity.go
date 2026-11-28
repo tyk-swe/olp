@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -18,14 +18,14 @@ import (
 func normalizedFidelity(raw json.RawMessage) (json.RawMessage, error) {
 	f, err := routing.DecodeFidelity(raw)
 	if err != nil {
-		return nil, httpkit.Invalid("fidelity", err.Error())
+		return nil, problem.Invalid("fidelity", err.Error())
 	}
 	return json.Marshal(f)
 }
 
 func ValidateFidelity(fidelity json.RawMessage) error {
 	if _, err := routing.DecodeFidelity(fidelity); err != nil {
-		return httpkit.Invalid("fidelity", err.Error())
+		return problem.Invalid("fidelity", err.Error())
 	}
 	return nil
 }
@@ -59,7 +59,7 @@ func compileDraftExecution(ctx context.Context, tx pgx.Tx, d *draft) error {
 		return err
 	}
 	if err = snapshot.ValidateRouteContracts(route); err != nil {
-		if refusal := httpkit.ContractProblem(err); refusal != nil {
+		if refusal := problem.FromContract(err); refusal != nil {
 			return refusal
 		}
 		return err

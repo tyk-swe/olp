@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -39,7 +39,7 @@ func NewDraft(ctx context.Context, q database.Queryer, project, name string, ent
 func shape(name string, entries []guardrails.Entry) (string, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" || len(trimmed) > 100 || len(entries) > guardrailpolicy.MaxEntries {
-		return "", httpkit.Invalid("policy", "Supply a name and at most 128 entries.")
+		return "", problem.Invalid("policy", "Supply a name and at most 128 entries.")
 	}
 	if slices.ContainsFunc(entries, func(e guardrails.Entry) bool { return uuid.Validate(e.RevisionID) != nil }) {
 		return "", unpinnable()
@@ -61,7 +61,7 @@ func pinnable(ctx context.Context, q database.Queryer, project string, entries [
 		return unpinnable()
 	}
 	if _, err := guardrails.Compile(entries, definitions); err != nil {
-		return httpkit.Invalid("entries", "Supply valid phases, actions and pinned revisions.")
+		return problem.Invalid("entries", "Supply valid phases, actions and pinned revisions.")
 	}
 	return nil
 }
@@ -84,5 +84,5 @@ func owned(definitions map[string]guardrails.Revision, ids []string, project str
 }
 
 func unpinnable() error {
-	return httpkit.Invalid("entries", "Choose existing guardrail revisions in this project.")
+	return problem.Invalid("entries", "Choose existing guardrail revisions in this project.")
 }

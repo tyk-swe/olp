@@ -6,7 +6,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const listDeliveriesSQL = `SELECT jsonb_build_object('api_key_id',v.api_key_id,'api_key_name',v.payload->'api_key_name','due_at',v.due_at,'reason',v.reason,'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'event',COALESCE(v.event,r.event),'dedup_key',v.dedup_key,'resolved',v.resolved,'evidence',v.payload,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'provider_id',v.payload->'provider_id','provider_name',v.payload->'provider_name','credential_version_id',v.credential_id,'credential_version',v.payload->'credential_version','status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at)
@@ -36,7 +39,7 @@ func (s *Server) notificationDeliveries(r *http.Request, p authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, listDeliveriesSQL,
+	items, err := database.QueryJSON(r.Context(), s.access.Pool, listDeliveriesSQL,
 		page.Before, p.AllProjects, p.ProjectIDs(), ruleID, status, page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
@@ -45,9 +48,9 @@ func deliveryRule(raw string) (*string, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	id, err := httpkit.ParseUUID(raw)
+	id, err := ids.Parse(raw)
 	if err != nil {
-		return nil, httpkit.Invalid("rule_id", "Use a valid rule identifier.")
+		return nil, problem.Invalid("rule_id", "Use a valid rule identifier.")
 	}
 	return &id, nil
 }
@@ -57,7 +60,7 @@ func deliveryStatus(raw contract.NotificationDeliveryStatus) (*contract.Notifica
 		return nil, nil
 	}
 	if !listableStatuses[raw] {
-		return nil, httpkit.Invalid("status", "Use pending, delivered, or failed.")
+		return nil, problem.Invalid("status", "Use pending, delivered, or failed.")
 	}
 	return &raw, nil
 }

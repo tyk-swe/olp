@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
@@ -71,20 +71,20 @@ func WithFieldPrefix(err error, prefix string) error {
 	if validation, ok := errors.AsType[*keyauthority.ValidationError](err); ok {
 		return &keyauthority.ValidationError{Field: prefix + "." + validation.Field, Detail: validation.Detail}
 	}
-	if problem, ok := errors.AsType[*httpkit.Problem](err); ok && problem.Field != "" {
-		return &httpkit.Problem{Status: problem.Status, Code: problem.Code, Detail: problem.Detail, Field: prefix + "." + problem.Field}
+	if known, ok := errors.AsType[*problem.Problem](err); ok && known.Field != "" {
+		return &problem.Problem{Status: known.Status, Code: known.Code, Detail: known.Detail, Field: prefix + "." + known.Field}
 	}
 	return err
 }
 
 func UnknownProject(name string) error {
-	return httpkit.Fail(http.StatusConflict, "project_unknown", "Project "+name+" is not in the destination.")
+	return problem.Fail(http.StatusConflict, "project_unknown", "Project "+name+" is not in the destination.")
 }
 
 func UnknownOrganization(name string) error {
-	return httpkit.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
+	return problem.Fail(http.StatusConflict, "organization_unknown", "Organization "+name+" is not in the destination.")
 }
 
 func UnknownProvider(name string) error {
-	return httpkit.Fail(http.StatusConflict, "provider_unknown", "Provider "+name+" is not in the destination.")
+	return problem.Fail(http.StatusConflict, "provider_unknown", "Provider "+name+" is not in the destination.")
 }

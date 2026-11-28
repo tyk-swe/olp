@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -102,14 +104,14 @@ func parseSetupInput(r *http.Request) (setupInput, error) {
 	if err := password(raw.Password); err != nil {
 		return setupInput{}, err
 	}
-	if err := httpkit.ValidText("display_name", raw.DisplayName, 100); err != nil {
+	if err := textfield.Validate("display_name", raw.DisplayName, 100); err != nil {
 		return setupInput{}, err
 	}
 	installationName := raw.Name
 	if installationName == "" {
 		installationName = "OpenLLMProxy"
 	}
-	if err := httpkit.ValidText("installation_name", installationName, 100); err != nil {
+	if err := textfield.Validate("installation_name", installationName, 100); err != nil {
 		return setupInput{}, err
 	}
 	return setupInput{
@@ -126,7 +128,7 @@ func (s *accountService) setup(r *http.Request) (httpkit.Reply, error) {
 	}
 	token, configured := s.bootstrap()
 	if !configured || !hmac.Equal([]byte(token), []byte(r.Header.Get("X-OLP-Setup-Token"))) {
-		return httpkit.Reply{}, httpkit.Fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
+		return httpkit.Reply{}, problem.Fail(403, "setup_token_invalid", "The bootstrap token is invalid.")
 	}
 	input, err := parseSetupInput(r)
 	if err != nil {
@@ -148,7 +150,7 @@ func (s *accountService) completeSetup(r *http.Request, tx pgx.Tx, input setupIn
 		return httpkit.Reply{}, err
 	}
 	if complete {
-		return httpkit.Reply{}, httpkit.Fail(409, "setup_complete", "This installation already has an owner.")
+		return httpkit.Reply{}, problem.Fail(409, "setup_complete", "This installation already has an owner.")
 	}
 	id := ids.New()
 	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, input.email, input.displayName, hash, ids.New()); err != nil {
@@ -207,13 +209,13 @@ func parseUpdateUserInput(r *http.Request) (updateUserInput, error) {
 		return updateUserInput{}, err
 	}
 	if input.Role == nil && input.Active == nil && input.AccessScope == nil {
-		return updateUserInput{}, httpkit.Invalid("user", "Provide a role or active status.")
+		return updateUserInput{}, problem.Invalid("user", "Provide a role or active status.")
 	}
 	if input.Role != nil && !authz.ValidRole(*input.Role) {
-		return updateUserInput{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
+		return updateUserInput{}, problem.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	if input.AccessScope != nil && *input.AccessScope != "global" && *input.AccessScope != "assigned" {
-		return updateUserInput{}, httpkit.Invalid("access_scope", "Use global or assigned.")
+		return updateUserInput{}, problem.Invalid("access_scope", "Use global or assigned.")
 	}
 	return input, nil
 }
@@ -268,7 +270,7 @@ func (s *accountService) applyUserChange(r *http.Request, tx pgx.Tx, p authz.Pri
 	}
 	next := nextUserState(current, input)
 	if id == p.ID && (!next.Active || next.Role != p.Role || next.AccessScope != p.AccessScope) {
-		return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
+		return httpkit.Reply{}, access.Event{}, problem.Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
 	}
 	// Taking over a provisioned user ends the project grants their SCIM groups
 	// gave them, which must not leave a project without a manager.
@@ -316,7 +318,7 @@ func EnsureUsableOwner(ctx context.Context, tx pgx.Tx, localLoginDisabled bool) 
 	if usable, err := usableOIDCOwner(ctx, tx); err != nil || usable {
 		return err
 	}
-	return httpkit.Fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
+	return problem.Fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
 }
 
 func usableOIDCOwner(ctx context.Context, tx pgx.Tx) (bool, error) {
@@ -384,7 +386,7 @@ func (s *accountService) completeLogin(r *http.Request, tx pgx.Tx, userID, encod
 		if err := access.Audit(r.Context(), tx, r, authz.System, "session.login", "session", "", "failure"); err != nil {
 			return httpkit.Reply{}, false, err
 		}
-		return httpkit.Reply{}, true, httpkit.Fail(401, "invalid_credentials", "Email or password is invalid, or local sign-in is unavailable.")
+		return httpkit.Reply{}, true, problem.Fail(401, "invalid_credentials", "Email or password is invalid, or local sign-in is unavailable.")
 	}
 	response, err := s.mfa.localSession(r, tx, userID)
 	if err != nil {
@@ -402,7 +404,7 @@ func (s *accountService) completeLogin(r *http.Request, tx pgx.Tx, userID, encod
 
 func (s *accountService) login(r *http.Request) (httpkit.Reply, error) {
 	if s.access.LocalLoginDisabled() {
-		return httpkit.Reply{}, httpkit.Fail(404, "local_login_disabled", "Password-based local sign-in is disabled for this installation.")
+		return httpkit.Reply{}, problem.Fail(404, "local_login_disabled", "Password-based local sign-in is disabled for this installation.")
 	}
 	var input struct {
 		Email    string `json:"email"`
@@ -430,14 +432,14 @@ func (s *accountService) verifyReauthPassword(r *http.Request, userID, secret st
 		return "", err
 	}
 	if hash == nil {
-		return "", httpkit.Fail(403, "local_password_unavailable", "Use your linked identity to authenticate.")
+		return "", problem.Fail(403, "local_password_unavailable", "Use your linked identity to authenticate.")
 	}
 	var valid bool
 	if err := s.passwords.run(r, func() { valid = secrets.VerifyPassword(secret, *hash) }); err != nil {
 		return "", err
 	}
 	if !valid {
-		return "", httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
+		return "", problem.Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
 	return *hash, nil
 }
@@ -467,7 +469,7 @@ func (s *accountService) reauthenticate(r *http.Request, p authz.Principal) (htt
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !current {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(403, "current_password_invalid", "Authenticate again with the current password.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(403, "current_password_invalid", "Authenticate again with the current password.")
 		}
 		configured, err := mfaConfigured(r.Context(), tx, p.ID)
 		if err != nil {

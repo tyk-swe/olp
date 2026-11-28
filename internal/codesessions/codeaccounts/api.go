@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type API struct {
@@ -60,7 +61,7 @@ func (a API) setDrain(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 		return httpkit.Reply{}, err
 	}
 	if input.Draining == nil {
-		return httpkit.Reply{}, httpkit.Invalid("draining", "Set draining to true or false.")
+		return httpkit.Reply{}, problem.Invalid("draining", "Set draining to true or false.")
 	}
 	ctx := r.Context()
 	return access.Transact(a.access, r, func(tx pgx.Tx, p authz.Principal) (string, error) {
@@ -113,7 +114,7 @@ func (a API) requestAllowanceRead(r *http.Request, _ authz.Principal) (httpkit.R
 	}, func(tx pgx.Tx, p authz.Principal, profile connectionProfile) (httpkit.Reply, access.Event, error) {
 		signal, known := codeadapter.AllowanceSignalForProfile(profile.kind, profile.authMode, profile.id)
 		if !known || !signal.ActiveQualified {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 		}
 		if _, err := tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

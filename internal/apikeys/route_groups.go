@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -17,7 +17,7 @@ func checkRouteGroupNames(ctx context.Context, q database.Queryer, names []strin
 		return nil
 	}
 	if projectID == nil {
-		return httpkit.Invalid("allowed_route_groups", "Route groups require a project-scoped key.")
+		return problem.Invalid("allowed_route_groups", "Route groups require a project-scoped key.")
 	}
 	var groups keyauthority.RouteGroups
 	if err := q.QueryRow(ctx, "SELECT route_groups FROM olp.projects WHERE id=$1", *projectID).Scan(&groups); err != nil {
@@ -25,7 +25,7 @@ func checkRouteGroupNames(ctx context.Context, q database.Queryer, names []strin
 	}
 	for _, name := range names {
 		if _, ok := groups[name]; !ok {
-			return httpkit.Invalid("allowed_route_groups", "Every referenced group must exist in the key's project.")
+			return problem.Invalid("allowed_route_groups", "Every referenced group must exist in the key's project.")
 		}
 	}
 	return nil

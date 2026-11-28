@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 	"github.com/tyk-swe/olp/internal/usage/routinginputs"
@@ -142,7 +142,7 @@ func (s *Server) leg(m *simulation, slug string, via usage.LegVia) (simulatedLeg
 	workflow := input.Operation == "generation" && named.ToolExecution == "gateway"
 	inspectionRequest, err := workflowInspectionRequest(parsed, workflow)
 	if err != nil {
-		return simulatedLeg{}, routing.Plan{}, false, httpkit.Invalid("request", "The workflow controls could not be processed.")
+		return simulatedLeg{}, routing.Plan{}, false, problem.Invalid("request", "The workflow controls could not be processed.")
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
 	prepare, inspections := buildLegPrepare(m, named, route, key, eligibility, input, semantic, inspectionRequest, unary, mediaRequest, counted, workflow, workflowCapability)

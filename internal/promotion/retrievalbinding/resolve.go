@@ -5,8 +5,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/promotion/project"
@@ -44,7 +44,7 @@ func resolve(ctx context.Context, q database.Queryer, lookup installed, binding 
 		return retrieval.Input{}, err
 	}
 	if len(targets) != 1 {
-		return retrieval.Input{}, httpkit.Invalid("retrieval_bindings.target_provider", "The destination route must contain exactly one matching provider/resource target.")
+		return retrieval.Input{}, problem.Invalid("retrieval_bindings.target_provider", "The destination route must contain exactly one matching provider/resource target.")
 	}
 	keys, err := keyIDs(ctx, q, projectID, binding.KeyGrants)
 	if err != nil {
@@ -78,7 +78,7 @@ func keyIDs(ctx context.Context, q database.Queryer, projectID string, names []s
 			return "", err
 		}
 		if len(ids) != 1 {
-			return "", httpkit.Invalid("retrieval_bindings.key_grants", "Each destination grant must resolve to exactly one active API key with the exact project-local name.")
+			return "", problem.Invalid("retrieval_bindings.key_grants", "Each destination grant must resolve to exactly one active API key with the exact project-local name.")
 		}
 		return ids[0].ID, nil
 	})

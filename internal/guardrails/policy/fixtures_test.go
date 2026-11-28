@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -129,7 +129,7 @@ func TestRunFixtureSuiteRefusesFailedClosedEvaluation(t *testing.T) {
 	pinned := fixturePinned("policy-rev-base", "a", "secret-[0-9]+")
 	overflow := []guardrailFixture{{ID: "overflow-case", Phase: guardrailpolicy.Input, Text: new(strings.Repeat("a", guardrails.MaxFindings+1)), Expected: outcomeBlock}}
 	_, err := api.runFixtureSuite(request, authz.Principal{}, pinned, pinned, overflow)
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if !errors.As(err, &problem) || problem.Code != fixtureUnevaluableCode {
 		t.Fatalf("err = %v", err)
 	}

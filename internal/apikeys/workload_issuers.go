@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/workload"
@@ -22,7 +23,7 @@ func (a *API) workloadIssuers(r *http.Request, _ authz.Principal) (httpkit.Reply
 	if e != nil {
 		return httpkit.Reply{}, e
 	}
-	items, e := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
+	items, e := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
 	return httpkit.ListReply(items, page), e
 }
 func (a *API) workloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -48,7 +49,7 @@ func decodeWorkloadIssuer(r *http.Request) (workload.Config, error) {
 // a JWKS outage.
 func (a *API) fetchWorkloadKeys(r *http.Request, input workload.Config) error {
 	if _, err := workload.Fetch(r.Context(), a.server.IdentityClient(), input.JWKSURL); err != nil {
-		return httpkit.Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
+		return problem.Fail(422, "workload_keys_unavailable", "The public signing keys are unavailable or outside identity egress policy.")
 	}
 	return nil
 }
@@ -111,7 +112,7 @@ func (a *API) putWorkloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Rep
 			return struct{}{}, err
 		}
 		if issuer != input.Issuer {
-			return struct{}{}, httpkit.Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
+			return struct{}{}, problem.Invalid("issuer", "An issuer URL is immutable; disable it and register a new issuer.")
 		}
 		return struct{}{}, nil
 	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -134,11 +135,11 @@ func (a *API) writeWorkloadIssuer(r *http.Request, tx pgx.Tx, p authz.Principal,
 // ValidateWorkloadConfig checks declared identity URLs without fetching them.
 func ValidateWorkloadConfig(input workload.Config) error {
 	if input.Validate() != nil {
-		return httpkit.Invalid("issuer", "Supply a bounded issuer, audiences, signature algorithms and explicit claim mappings.")
+		return problem.Invalid("issuer", "Supply a bounded issuer, audiences, signature algorithms and explicit claim mappings.")
 	}
 	for _, raw := range []string{input.Issuer, input.JWKSURL} {
 		if access.CheckIdentityURL(raw) != nil {
-			return httpkit.Invalid("issuer", "Use secure identity endpoint URLs.")
+			return problem.Invalid("issuer", "Use secure identity endpoint URLs.")
 		}
 	}
 
@@ -161,7 +162,7 @@ func StoreWorkloadIssuer(ctx context.Context, server *access.Server, tx pgx.Tx, 
 			return "", err
 		}
 		if issuer != input.Issuer {
-			return "", httpkit.Invalid("issuer", "The issuer URL is immutable.")
+			return "", problem.Invalid("issuer", "The issuer URL is immutable.")
 		}
 	}
 	var e error
@@ -213,7 +214,7 @@ func StoreWorkloadIssuer(ctx context.Context, server *access.Server, tx pgx.Tx, 
 			return "", e
 		}
 		if count >= 64 {
-			return "", httpkit.Invalid("issuer", "At most 64 workload issuers can be registered.")
+			return "", problem.Invalid("issuer", "At most 64 workload issuers can be registered.")
 		}
 		_, e = tx.Exec(ctx, "INSERT INTO olp.workload_issuers(id,issuer,document,created_by,etag) VALUES($1,$2,$3,$4,$5)", id, input.Issuer, data, p.UserID(), etag)
 	} else {
@@ -256,7 +257,7 @@ func ValidateWorkloadBindings(ctx context.Context, q database.Queryer, id string
 			}
 		}
 		if !found {
-			return httpkit.Fail(409, "workload_mapping_in_use", "A registered principal's mapping and project cannot be removed or reassigned; disable the issuer to stop access.")
+			return problem.Fail(409, "workload_mapping_in_use", "A registered principal's mapping and project cannot be removed or reassigned; disable the issuer to stop access.")
 		}
 	}
 	return nil

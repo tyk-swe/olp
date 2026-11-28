@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -29,11 +29,11 @@ func validateEndpoint(d agentcontract.Draft, policy *egress.Policy) error {
 		return nil
 	}
 	if policy == nil {
-		return httpkit.Fail(503, "egress_policy_unavailable", "Agent registration requires an egress policy.")
+		return problem.Fail(503, "egress_policy_unavailable", "Agent registration requires an egress policy.")
 	}
 	u, err := policy.ValidateEndpoint(d.Agent.Endpoint)
 	if err != nil || u.String() != d.Agent.Endpoint {
-		return httpkit.Invalid("endpoint", "Use a canonical endpoint permitted by provider egress policy.")
+		return problem.Invalid("endpoint", "Use a canonical endpoint permitted by provider egress policy.")
 	}
 	return nil
 }
@@ -41,7 +41,7 @@ func validateEndpoint(d agentcontract.Draft, policy *egress.Policy) error {
 func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontract.Publication, kind string, input agentcontract.Draft, policy *egress.Policy) (agentcontract.Publication, error) {
 	draft := agentcontract.NormalizeDraft(input)
 	if err := draft.Validate(kind); err != nil {
-		return agentcontract.Publication{}, httpkit.Invalid("draft", err.Error())
+		return agentcontract.Publication{}, problem.Invalid("draft", err.Error())
 	}
 	if err := validateEndpoint(draft, policy); err != nil {
 		return agentcontract.Publication{}, err
@@ -52,22 +52,22 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontr
 			return agentcontract.Publication{}, err
 		}
 		if count >= 256 {
-			return agentcontract.Publication{}, httpkit.Invalid("name", "This project has reached its publication limit.")
+			return agentcontract.Publication{}, problem.Invalid("name", "This project has reached its publication limit.")
 		}
 		next := agentcontract.Publication{ID: ids.New(), ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: ids.New()}
 		_, err := tx.Exec(ctx, `INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`, next.ID, next.ProjectID, next.Kind, next.Name, next.Draft, next.ETag, actor)
 		return next, err
 	}
 	if current.ProjectID != draft.ProjectID || current.Kind != kind || current.Retired {
-		return agentcontract.Publication{}, httpkit.Fail(409, "publication_immutable", "Ownership and retired history cannot be changed.")
+		return agentcontract.Publication{}, problem.Fail(409, "publication_immutable", "Ownership and retired history cannot be changed.")
 	}
 	if current.Draft.Agent != nil && draft.Agent != nil && current.Draft.Agent.Endpoint != draft.Agent.Endpoint {
 		before, after := current.Draft.Agent, draft.Agent
 		if before.CredentialID != nil && after.CredentialID != nil && *before.CredentialID == *after.CredentialID {
-			return agentcontract.Publication{}, httpkit.Invalid("credential_id", "Replace or remove the credential when changing the endpoint.")
+			return agentcontract.Publication{}, problem.Invalid("credential_id", "Replace or remove the credential when changing the endpoint.")
 		}
 		if before.OAuth != nil && after.OAuth != nil {
-			return agentcontract.Publication{}, httpkit.Invalid("oauth", "Remove the OAuth credential before changing the endpoint, then enroll a new grant.")
+			return agentcontract.Publication{}, problem.Invalid("oauth", "Remove the OAuth credential before changing the endpoint, then enroll a new grant.")
 		}
 	}
 	next := agentcontract.Publication{ID: current.ID, ProjectID: draft.ProjectID, Kind: kind, Name: draft.Name, Draft: draft, ETag: ids.New(), RevisionID: current.RevisionID}
@@ -79,7 +79,7 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *agentcontr
 // inside the publication transaction. It never contacts a provider or MCP peer.
 func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d agentcontract.Draft) error {
 	if err := d.Validate(kind); err != nil {
-		return httpkit.Invalid("draft", err.Error())
+		return problem.Invalid("draft", err.Error())
 	}
 	if d.Toolset != nil {
 		for _, tool := range d.Toolset.Tools {
@@ -87,7 +87,7 @@ func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d
 			var digest string
 			err := tx.QueryRow(ctx, `SELECT v.tools,v.digest FROM olp.mcp_server_revisions v JOIN olp.mcp_servers s ON s.id=v.server_id WHERE v.id=$1 AND s.id=$2 AND s.project_id=$3 AND s.enabled AND s.retired_at IS NULL AND s.latest_revision_id=v.id FOR SHARE OF s`, tool.RevisionID, tool.ServerID, d.ProjectID).Scan(&tools, &digest)
 			if err != nil || digest != tool.CatalogDigest {
-				return httpkit.Invalid("toolset", "A pinned server revision is unavailable in this project.")
+				return problem.Invalid("toolset", "A pinned server revision is unavailable in this project.")
 			}
 			found := false
 			for _, t := range tools {
@@ -97,7 +97,7 @@ func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d
 				}
 			}
 			if !found {
-				return httpkit.Invalid("toolset", "A selected tool is not in its pinned catalog.")
+				return problem.Invalid("toolset", "A selected tool is not in its pinned catalog.")
 			}
 		}
 	}
@@ -108,7 +108,7 @@ func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d
 				return err
 			}
 			if !ok {
-				return httpkit.Invalid("toolset_revisions", "Use published toolsets in this project.")
+				return problem.Invalid("toolset_revisions", "Use published toolsets in this project.")
 			}
 		}
 		for _, id := range d.Agent.RouteRevisions {
@@ -117,7 +117,7 @@ func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d
 				return err
 			}
 			if !ok {
-				return httpkit.Invalid("route_revisions", "Use published route revisions in this project.")
+				return problem.Invalid("route_revisions", "Use published route revisions in this project.")
 			}
 		}
 		var exists bool
@@ -125,14 +125,14 @@ func ValidateReferences(ctx context.Context, tx database.Queryer, kind string, d
 			return err
 		}
 		if !exists {
-			return httpkit.Invalid("pricing_revision_id", "Use an installed immutable pricing revision.")
+			return problem.Invalid("pricing_revision_id", "Use an installed immutable pricing revision.")
 		}
 		if d.Agent.CredentialID != nil {
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.secrets s JOIN olp.agent_credentials c ON c.id=s.id WHERE s.id=$1 AND s.purpose=$2 AND c.project_id=$3 AND c.entra_client=$4)`, *d.Agent.CredentialID, secrets.AgentCredential, d.ProjectID, d.Agent.OAuth != nil && d.Agent.OAuth.EntraOBO != nil).Scan(&exists); err != nil {
 				return err
 			}
 			if !exists {
-				return httpkit.Invalid("credential_id", "The agent credential is unavailable.")
+				return problem.Invalid("credential_id", "The agent credential is unavailable.")
 			}
 		}
 	}
@@ -156,7 +156,7 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, publication agentcont
 func EnsureRetainedRevision(ctx context.Context, tx pgx.Tx, actor string, publication agentcontract.Publication) (agentcontract.Publication, error) {
 	draft := agentcontract.NormalizeDraft(publication.Draft)
 	if publication.Retired {
-		return agentcontract.Publication{}, httpkit.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
+		return agentcontract.Publication{}, problem.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
 	}
 	existing, found, err := RevisionIDByDigest(ctx, tx, publication.ID, agentcontract.DraftDigest(draft))
 	if err != nil {
@@ -181,10 +181,10 @@ func selectedRevision(publication agentcontract.Publication, draft agentcontract
 
 func validatePublication(ctx context.Context, tx pgx.Tx, publication agentcontract.Publication, draft agentcontract.Draft) error {
 	if publication.Retired {
-		return httpkit.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
+		return problem.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
 	}
 	if draft.Agent != nil && draft.Agent.OAuth != nil && draft.Agent.OAuth.EntraOBO != nil && draft.Agent.CredentialID == nil {
-		return httpkit.Invalid("entra_client_secret", "Supply the Entra client secret before publishing.")
+		return problem.Invalid("entra_client_secret", "Supply the Entra client secret before publishing.")
 	}
 	return ValidateReferences(ctx, tx, publication.Kind, draft)
 }
@@ -205,7 +205,7 @@ func insertRevision(ctx context.Context, tx pgx.Tx, actor string, p agentcontrac
 		return "", err
 	}
 	if count >= 32 {
-		return "", httpkit.Invalid("revision", "This publication has reached its immutable revision limit.")
+		return "", problem.Invalid("revision", "This publication has reached its immutable revision limit.")
 	}
 	var created string
 	insertErr := tx.QueryRow(ctx, `INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(publication_id,digest) DO NOTHING RETURNING id::text`, ids.New(), p.ID, p.ProjectID, p.Kind, draft, digest, actor).Scan(&created)
@@ -225,10 +225,10 @@ func LoadRevision(ctx context.Context, q database.Queryer, publication, id strin
 
 func SetLabel(ctx context.Context, tx pgx.Tx, p agentcontract.Publication, label, revision, etag string) error {
 	if p.Kind != "prompt" || p.Retired || (label != "staging" && label != "production") {
-		return httpkit.Invalid("label", "Use production or staging on an active prompt.")
+		return problem.Invalid("label", "Use production or staging on an active prompt.")
 	}
 	if _, err := LoadRevision(ctx, tx, p.ID, revision); err != nil {
-		return httpkit.Invalid("revision_id", "Use a revision of this prompt.")
+		return problem.Invalid("revision_id", "Use a revision of this prompt.")
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.prompt_labels(publication_id,label,revision_id,etag) VALUES($1,$2,$3,$4) ON CONFLICT(publication_id,label) DO UPDATE SET revision_id=EXCLUDED.revision_id,etag=EXCLUDED.etag`, p.ID, label, revision, etag)
 	return err
@@ -263,7 +263,7 @@ func SetLatestRevision(ctx context.Context, tx pgx.Tx, publication string, revis
 
 func mapConflict(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Fail(404, "not_found", "The requested resource was not found.")
+		return problem.Fail(404, "not_found", "The requested resource was not found.")
 	}
 	return err
 }

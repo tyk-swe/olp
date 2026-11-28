@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -131,10 +132,10 @@ func (s *Server) checkBrowser(r *http.Request, policy browserPolicy) error {
 		return err
 	}
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
-		return httpkit.Fail(403, "origin_denied", "Use the configured console origin.")
+		return problem.Fail(403, "origin_denied", "Use the configured console origin.")
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && policy != crossSiteNavigation {
-		return httpkit.Fail(403, "origin_denied", "Cross-site access is not allowed.")
+		return problem.Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
 	return nil
 }
@@ -242,7 +243,7 @@ func checkCookies(r *http.Request) error {
 	for _, c := range r.Cookies() {
 		if strings.HasPrefix(c.Name, "__Host-olp_") {
 			if value, ok := seen[c.Name]; ok && value != c.Value {
-				return httpkit.Fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
+				return problem.Fail(400, "conflicting_cookie_values", "Conflicting authentication cookies were supplied.")
 			}
 			seen[c.Name] = c.Value
 		}

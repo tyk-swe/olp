@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -70,7 +70,7 @@ func admitAuth(s *access.Server, r *http.Request, action, target string) error {
 		return err
 	}
 	if !admitted {
-		return httpkit.Fail(429, "authentication_rate_limited", "Too many attempts. Try again in a minute.")
+		return problem.Fail(429, "authentication_rate_limited", "Too many attempts. Try again in a minute.")
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func scimOrphansProject(ctx context.Context, tx pgx.Tx, projects []string) (bool
 func keepSCIMManagers(ctx context.Context, tx pgx.Tx, projects []string) error {
 	orphaned, err := scimOrphansProject(ctx, tx, projects)
 	if err == nil && orphaned {
-		err = httpkit.Fail(409, "last_project_manager", "Keep at least one project manager.")
+		err = problem.Fail(409, "last_project_manager", "Keep at least one project manager.")
 	}
 	return err
 }

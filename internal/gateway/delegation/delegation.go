@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/consumerauth"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/keyauthority"
@@ -113,7 +114,7 @@ func writeGrant(w http.ResponseWriter, grant release.DelegationGrant, err error)
 		fault.WriteError(w, fault.AuthenticationError("invalid_api_key", "The member consent is invalid or expired."))
 		return
 	}
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if errors.As(err, &problem) && problem.Status == http.StatusForbidden {
 		fault.WriteError(w, fault.PermissionError("permission_denied", "The principals cannot delegate the requested rights."))
 		return

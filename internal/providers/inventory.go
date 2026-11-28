@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -37,7 +38,7 @@ func (s *inventoryService) kinds(r *http.Request, _ authz.Principal) (httpkit.Re
 func (s *inventoryService) kindCapabilities(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	kind := connectors.Kind(r.PathValue("provider_kind"))
 	if _, ok := connection.LookupKind(kind); !ok {
-		return httpkit.Reply{}, httpkit.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
+		return httpkit.Reply{}, problem.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
 	return httpkit.OK(kindCapabilitiesReply{ProviderKind: kind, Capabilities: probe.OptionsForKind(kind)}), nil
 }
@@ -54,19 +55,19 @@ func (s *inventoryService) inventory(r *http.Request, principal authz.Principal)
 	query := r.URL.Query()
 	search := strings.TrimSpace(query.Get("search"))
 	if len(search) > 100 {
-		return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "Use at most 100 search characters.")
+		return httpkit.Reply{}, problem.Fail(400, "invalid_query", "Use at most 100 search characters.")
 	}
 	surface := query.Get("surface")
 	switch surface {
 	case "", "openai", "anthropic", "gemini", "bedrock", "native":
 	default:
-		return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "Unknown surface.")
+		return httpkit.Reply{}, problem.Fail(400, "invalid_query", "Unknown surface.")
 	}
 	var enabled *bool
 	if raw := query.Get("enabled"); raw != "" {
 		v, err := strconv.ParseBool(raw)
 		if err != nil {
-			return httpkit.Reply{}, httpkit.Fail(400, "invalid_query", "enabled must be true or false.")
+			return httpkit.Reply{}, problem.Fail(400, "invalid_query", "enabled must be true or false.")
 		}
 		enabled = &v
 	}

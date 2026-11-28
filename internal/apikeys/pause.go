@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type pauseChange struct {
@@ -44,23 +45,23 @@ type pauseRolloutReply struct {
 
 func pauseDecision(key storedKey, _ time.Time) error {
 	if key.revoked != nil {
-		return httpkit.Fail(409, "api_key_revoked", "A revoked key cannot be paused.")
+		return problem.Fail(409, "api_key_revoked", "A revoked key cannot be paused.")
 	}
 	if key.paused != nil {
-		return httpkit.Fail(409, "api_key_paused", "This key is already paused.")
+		return problem.Fail(409, "api_key_paused", "This key is already paused.")
 	}
 	return nil
 }
 
 func resumeDecision(key storedKey, now time.Time) error {
 	if key.revoked != nil {
-		return httpkit.Fail(409, "api_key_revoked", "A revoked key cannot be resumed.")
+		return problem.Fail(409, "api_key_revoked", "A revoked key cannot be resumed.")
 	}
 	if key.expires != nil && !key.expires.After(now) {
-		return httpkit.Fail(409, "api_key_expired", "An expired key cannot be resumed.")
+		return problem.Fail(409, "api_key_expired", "An expired key cannot be resumed.")
 	}
 	if key.paused == nil {
-		return httpkit.Fail(409, "api_key_not_paused", "This key is not paused.")
+		return problem.Fail(409, "api_key_not_paused", "This key is not paused.")
 	}
 	return nil
 }

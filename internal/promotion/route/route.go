@@ -6,9 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -62,7 +63,7 @@ type provider struct {
 
 func Parse(document contract.ConfigurationDocument) (Desired, error) {
 	if len(document.Routes) > maxRoutes {
-		return Desired{}, httpkit.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
+		return Desired{}, problem.Invalid("routes", "Declare at most "+strconv.Itoa(maxRoutes)+" routes.")
 	}
 	for _, entry := range document.Routes {
 		if policy, ok := promotion.Present(entry.RoutingPolicy); ok {
@@ -113,22 +114,22 @@ func validate(i int, r Route, first map[string]int, providers map[string]provide
 	prefix := "routes." + strconv.Itoa(i)
 	fidelity, err := routing.DecodeFidelity(r.Fidelity)
 	if err != nil {
-		return httpkit.Invalid(prefix+".fidelity", err.Error())
+		return problem.Invalid(prefix+".fidelity", err.Error())
 	}
 	if err := (routing.Route{Fidelity: fidelity, Behavior: r.Behavior}).ValidateCaching(); err != nil {
-		return httpkit.Invalid(prefix+".cache", err.Error())
+		return problem.Invalid(prefix+".cache", err.Error())
 	}
 	if first[r.Slug] != i {
-		return httpkit.Invalid(prefix+".slug", "Route slugs must be unique.")
+		return problem.Invalid(prefix+".slug", "Route slugs must be unique.")
 	}
 	if !routeidentity.ValidSlug(r.Slug) {
-		return httpkit.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
+		return problem.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
 	if len(r.Targets) > maxTargets {
-		return httpkit.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
+		return problem.Invalid(prefix+".targets", "Declare at most "+strconv.Itoa(maxTargets)+" targets per route.")
 	}
 	if r.Project != nil {
-		if err := httpkit.ValidText(prefix+".project", *r.Project, 100); err != nil {
+		if err := textfield.Validate(prefix+".project", *r.Project, 100); err != nil {
 			return err
 		}
 	}
@@ -166,13 +167,13 @@ func validateTarget(prefix string, j int, t Target, project *string, providers m
 	field, index := prefix+".targets."+strconv.Itoa(j), strconv.Itoa(j)
 	declared, ok := providers[strings.ToLower(t.Provider)]
 	if !ok {
-		return httpkit.Invalid(field+".provider", "Target "+index+" names a provider the document does not declare.")
+		return problem.Invalid(field+".provider", "Target "+index+" names a provider the document does not declare.")
 	}
 	if !slices.Contains(declared.models, t.ProviderModel) {
-		return httpkit.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
+		return problem.Invalid(field+".provider_model", "Target "+index+" names a model the provider does not declare.")
 	}
 	if !strings.EqualFold(ptr.Value(project), ptr.Value(declared.project)) {
-		return httpkit.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
+		return problem.Fail(422, "target_project_mismatch", "Target "+index+" belongs to a different project than the route.")
 	}
 	return nil
 }

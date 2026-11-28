@@ -3,7 +3,7 @@ package access
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -19,7 +19,7 @@ func CheckLimitTemplates(ctx context.Context, q database.Queryer, project *strin
 		return nil
 	}
 	if project == nil {
-		return httpkit.Invalid("limit_template", "Templates require a project.")
+		return problem.Invalid("limit_template", "Templates require a project.")
 	}
 	var templates keyauthority.LimitTemplates
 	if err := q.QueryRow(ctx, "SELECT limit_templates FROM olp.projects WHERE id=$1", *project).Scan(&templates); err != nil {

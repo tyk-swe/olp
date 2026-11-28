@@ -3,9 +3,9 @@ package code
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -43,7 +43,7 @@ func resolveTarget(ctx context.Context, q database.Queryer, t PaidTarget, projec
 		return codemode.PaidTarget{}, err
 	}
 	if !found {
-		return codemode.PaidTarget{}, httpkit.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
+		return codemode.PaidTarget{}, problem.Invalid("code.paid_targets", "Bind the current credential of an enabled published destination provider slot.")
 	}
 	return target, nil
 }
@@ -54,7 +54,7 @@ func validLimits(ctx context.Context, q database.Queryer, frozen routing.Provide
 		return err
 	}
 	if !routing.CodePaidLimitsMatch(live.Configuration.Options.Limits, frozen.Limits, live.Slot, slot) {
-		return httpkit.Invalid("code.paid_connections.limits", "Frozen paid provider and slot limits must match the destination's live serving policy.")
+		return problem.Invalid("code.paid_connections.limits", "Frozen paid provider and slot limits must match the destination's live serving policy.")
 	}
 	return nil
 }
@@ -75,7 +75,7 @@ func portableTargets(targets map[string]codemode.PaidTarget, names map[string]Pa
 	return promotion.TryMapValues(targets, func(_ string, t codemode.PaidTarget) (PaidTarget, error) {
 		target, ok := names[slotKey(t.ProviderID, t.SlotID)]
 		if !ok {
-			return PaidTarget{}, httpkit.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")
+			return PaidTarget{}, problem.Invalid("code.paid_targets", "A paid target no longer has a portable provider and slot reference.")
 		}
 		return target, nil
 	})

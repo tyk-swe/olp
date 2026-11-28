@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -137,7 +138,7 @@ func (s *credentialService) rotate(r *http.Request, _ authz.Principal) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	if source == nil {
-		return httpkit.Reply{}, httpkit.Invalid("credential", "Supply a credential or external reference.")
+		return httpkit.Reply{}, problem.Invalid("credential", "Supply a credential or external reference.")
 	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served. The upstream probe then runs
@@ -154,10 +155,10 @@ func (s *credentialService) rotate(r *http.Request, _ authz.Principal) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	if !current.Connection.Document().CredentialRequired() {
-		return httpkit.Reply{}, httpkit.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+		return httpkit.Reply{}, problem.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 	}
 	if current.Connection.Document().Grant() {
-		return httpkit.Reply{}, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+		return httpkit.Reply{}, problem.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
 	slot, err := defaultSlot(draft.slots)
 	if err != nil {
@@ -174,7 +175,7 @@ func (s *credentialService) rotate(r *http.Request, _ authz.Principal) (httpkit.
 	defer clear(credential)
 	target := current.target(credential, declared...)
 	if _, err = s.prober.ListModels(r.Context(), target); err != nil {
-		return httpkit.Reply{}, httpkit.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+probe.Classify(err).Detail)
+		return httpkit.Reply{}, problem.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+probe.Classify(err).Detail)
 	}
 	var validatedAt *time.Time
 	fingerprint, err := slot.validationFingerprint(current.Connection.Document(), models)
@@ -183,13 +184,13 @@ func (s *credentialService) rotate(r *http.Request, _ authz.Principal) (httpkit.
 	}
 	if fingerprint != "" {
 		if err = validateModelAccess(r.Context(), s.prober, target, *slot, models); err != nil {
-			return httpkit.Reply{}, httpkit.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+probe.Classify(err).Detail)
+			return httpkit.Reply{}, problem.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+probe.Classify(err).Detail)
 		}
 		validatedAt = new(time.Now().UTC())
 	}
 	return access.Mutate(a, r, input, referencing(r.Context(), id, source), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if locked.ETag != current.ETag {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 		}
 		rotated, err := s.rotateCredential(r.Context(), tx, current, models, *slot, validatedAt, source)
 		if err != nil {
@@ -293,7 +294,7 @@ func (s *credentialService) revokeCredential(ctx context.Context, tx pgx.Tx, cur
 		if !exists {
 			return revokedCredential{}, pgx.ErrNoRows
 		}
-		return revokedCredential{}, httpkit.Fail(409, "already_revoked", "This credential version is already revoked.")
+		return revokedCredential{}, problem.Fail(409, "already_revoked", "This credential version is already revoked.")
 	}
 	if err != nil {
 		return revokedCredential{}, err
@@ -320,7 +321,7 @@ const maxCredentialBytes = 65536
 
 func ValidCredential(value string) error {
 	if len(value) == 0 || len(value) > maxCredentialBytes || strings.ContainsRune(value, 0) || strings.ContainsAny(value, "\r\n") && !json.Valid([]byte(value)) {
-		return httpkit.Invalid("credential", "Use a credential of 1–65536 bytes; multiline credentials must be JSON.")
+		return problem.Invalid("credential", "Use a credential of 1–65536 bytes; multiline credentials must be JSON.")
 	}
 	return nil
 }
@@ -336,7 +337,7 @@ func (s *credentialService) storePlainCredential(ctx context.Context, tx pgx.Tx,
 func (s *credentialService) resolveReference(ctx context.Context, reference secretstore.Reference) ([]byte, error) {
 	value, err := s.external.Resolve(ctx, reference)
 	if err != nil {
-		return nil, httpkit.Fail(422, "external_secret_unavailable", "The external credential store could not resolve the pinned version.")
+		return nil, problem.Fail(422, "external_secret_unavailable", "The external credential store could not resolve the pinned version.")
 	}
 	if err = ValidCredential(string(value)); err != nil {
 		clear(value)

@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/metric"
 )
 
@@ -71,10 +72,10 @@ func (h *Handler) serveMetrics(w http.ResponseWriter, r *http.Request) {
 // cannot vouch for anything it reports.
 func readyHealth(snapshot snapshot[*Health], now time.Time) (*Health, error) {
 	if !snapshot.current(now) {
-		return nil, httpkit.Fail(http.StatusServiceUnavailable, "observability_snapshot_stale", "The readiness snapshot is stale.")
+		return nil, problem.Fail(http.StatusServiceUnavailable, "observability_snapshot_stale", "The readiness snapshot is stale.")
 	}
 	if snapshot.Value == nil {
-		return nil, httpkit.Fail(http.StatusServiceUnavailable, "observability_snapshot_unavailable", "No readiness snapshot has been collected.")
+		return nil, problem.Fail(http.StatusServiceUnavailable, "observability_snapshot_unavailable", "No readiness snapshot has been collected.")
 	}
 	return snapshot.Value, nil
 }

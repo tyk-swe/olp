@@ -17,6 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -112,21 +113,21 @@ func parseListQuery(r *http.Request, p authz.Principal) (listQuery, error) {
 	filters := listFilters{allProjects: p.AllProjects, projects: p.ProjectIDs()}
 	if raw := query.Get("kind"); raw != "" {
 		if !contract.ListProviderResourcesParamsKind(raw).Valid() {
-			return listQuery{}, httpkit.Invalid("kind", "Use a resource kind from the provider resource contract catalogue.")
+			return listQuery{}, problem.Invalid("kind", "Use a resource kind from the provider resource contract catalogue.")
 		}
 		filters.kind = &raw
 	}
 	if raw := query.Get("api_key_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			return listQuery{}, httpkit.Invalid("api_key_id", "Use an API key identifier.")
+			return listQuery{}, problem.Invalid("api_key_id", "Use an API key identifier.")
 		}
 		filters.apiKeyID = &parsed
 	}
 	if raw := query.Get("provider_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			return listQuery{}, httpkit.Invalid("provider_id", "Use a provider identifier.")
+			return listQuery{}, problem.Invalid("provider_id", "Use a provider identifier.")
 		}
 		filters.providerID = &parsed
 	}
@@ -140,7 +141,7 @@ func parseListQuery(r *http.Request, p authz.Principal) (listQuery, error) {
 	if raw := query.Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 200 {
-			return listQuery{}, httpkit.Invalid("limit", "Page size must be between 1 and 200.")
+			return listQuery{}, problem.Invalid("limit", "Page size must be between 1 and 200.")
 		}
 		limit = parsed
 	}
@@ -148,7 +149,7 @@ func parseListQuery(r *http.Request, p authz.Principal) (listQuery, error) {
 	if raw := query.Get("cursor"); raw != "" {
 		decoded, err := decodeListCursor(raw)
 		if err != nil {
-			return listQuery{}, httpkit.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
+			return listQuery{}, problem.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
 		}
 		cursor = decoded
 	}

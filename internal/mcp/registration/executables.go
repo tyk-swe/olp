@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -37,7 +38,7 @@ type executablePermitInput struct {
 
 func (e *Executables) available() error {
 	if e == nil || e.tier == nil {
-		return httpkit.Fail(http.StatusNotFound, "unconfined_plugins_disabled", "This deployment does not enable unconfined executables.")
+		return problem.Fail(http.StatusNotFound, "unconfined_plugins_disabled", "This deployment does not enable unconfined executables.")
 	}
 	return nil
 }
@@ -54,7 +55,7 @@ func (e *Executables) describe(ctx context.Context, name string) (executablePerm
 	}
 	file, err := e.tier.Describe(name)
 	if err != nil {
-		return executablePermission{}, httpkit.Fail(http.StatusNotFound, "mcp_executable_unavailable", "The installed executable is unavailable.")
+		return executablePermission{}, problem.Fail(http.StatusNotFound, "mcp_executable_unavailable", "The installed executable is unavailable.")
 	}
 	permitted, err := e.permitted(ctx, file.Name, file.Digest)
 	return executablePermission{ExecutableFile: file, Permitted: permitted}, err
@@ -94,17 +95,17 @@ func (s *Server) permitExecutable(r *http.Request, _ authz.Principal) (httpkit.R
 		return httpkit.Reply{}, err
 	}
 	if !pluginidentity.ValidDigest(input.Digest) {
-		return httpkit.Reply{}, httpkit.Invalid("digest", "Use the reviewed executable digest.")
+		return httpkit.Reply{}, problem.Invalid("digest", "Use the reviewed executable digest.")
 	}
 	if !input.AcknowledgeRisk {
-		return httpkit.Reply{}, httpkit.Invalid("acknowledge_risk", "Acknowledge that this executable runs with the process's native privileges outside confinement.")
+		return httpkit.Reply{}, problem.Invalid("acknowledge_risk", "Acknowledge that this executable runs with the process's native privileges outside confinement.")
 	}
 	file, err := s.executables.describe(r.Context(), r.PathValue("executable"))
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if file.Digest != input.Digest {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, "executable_changed", "The executable changed. Review the installed build again.")
+		return httpkit.Reply{}, problem.Fail(http.StatusConflict, "executable_changed", "The executable changed. Review the installed build again.")
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		if err := s.access.ConsumeRecent(r, tx, principal, "plugin_permit", ""); err != nil {

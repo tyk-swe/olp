@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/usage/param"
 )
 
@@ -40,13 +41,13 @@ func (s *API) Register(mux *http.ServeMux) {
 func (s *API) route(mux *http.ServeMux, pattern string, handler access.Handler) {
 	s.Access.Route(mux, pattern, func(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 		reply, err := handler(r, principal)
-		return reply, problem(err)
+		return reply, reportProblem(err)
 	})
 }
 
 func (s *API) stream(mux *http.ServeMux, pattern string, handler access.StreamHandler) {
 	s.Access.Stream(mux, pattern, func(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
-		return problem(handler(w, r, principal))
+		return reportProblem(handler(w, r, principal))
 	})
 }
 
@@ -193,7 +194,7 @@ func (s *API) getRequest(r *http.Request, p authz.Principal) (httpkit.Reply, err
 		}
 	}
 	if p.Project(keyProject, authz.View) != nil {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The request does not exist.")
+		return httpkit.Reply{}, problem.Fail(404, "not_found", "The request does not exist.")
 	}
 	return httpkit.OK(detail), nil
 }
@@ -213,7 +214,7 @@ func sessionAttribution(query url.Values, key, value *string) (*string, *string,
 		return key, value, nil
 	}
 	if key != nil && *key != "session" || value != nil && *value != *session {
-		return nil, nil, httpkit.Fail(422, "invalid_filter", "session_id conflicts with the attribution filters.")
+		return nil, nil, problem.Fail(422, "invalid_filter", "session_id conflicts with the attribution filters.")
 	}
 	sessionKey := "session"
 	return &sessionKey, session, nil

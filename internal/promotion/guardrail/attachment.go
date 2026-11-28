@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	policystore "github.com/tyk-swe/olp/internal/guardrails/policy"
@@ -102,7 +102,7 @@ func parseAttachments(entries []contract.ConfigurationGuardrailAttachment, polic
 		scope, valid := parseScope(a.Scope, ptr.Value(a.Name), ptr.Value(a.Project))
 		_, declared := policies.engines[keyOf(a.PolicyProject, a.Policy)]
 		if !valid || !declared || a.Order < 0 {
-			return Attachment{}, httpkit.Invalid("guardrail_attachments", invalidAttachment)
+			return Attachment{}, problem.Invalid("guardrail_attachments", invalidAttachment)
 		}
 		return Attachment{Scope: scope, Policy: PolicyRef{a.PolicyProject, a.Policy}, Order: a.Order}, nil
 	})
@@ -202,14 +202,14 @@ func applyAttachment(ctx context.Context, tx pgx.Tx, p authz.Principal, director
 		}
 		return guardrailattachment.Place(ctx, tx, p.UserID(), placed)
 	}
-	return httpkit.Invalid("guardrail_attachments", invalidAttachment)
+	return problem.Invalid("guardrail_attachments", invalidAttachment)
 }
 
 func resolveScope(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotion.Directory, scope Scope, project *string) (destination, error) {
 	switch s := scope.(type) {
 	case Installation:
 		if !p.AllProjects {
-			return nil, httpkit.Forbidden()
+			return nil, problem.Forbidden()
 		}
 		return published{}, nil
 	case Organization:
@@ -231,7 +231,7 @@ func resolveScope(ctx context.Context, tx pgx.Tx, p authz.Principal, directory p
 	case APIKey:
 		return resolveKey(ctx, tx, directory, s, project)
 	}
-	return nil, httpkit.Invalid("guardrail_attachments", invalidAttachment)
+	return nil, problem.Invalid("guardrail_attachments", invalidAttachment)
 }
 
 func resolveRoute(ctx context.Context, tx pgx.Tx, slug string, project *string) (destination, error) {
@@ -247,7 +247,7 @@ func resolveRoute(ctx context.Context, tx pgx.Tx, slug string, project *string) 
 		return nil, err
 	}
 	if !sameProject(route.ProjectID, project) {
-		return nil, httpkit.Invalid("guardrail_attachments", "Route and policy must belong to the same project.")
+		return nil, problem.Invalid("guardrail_attachments", "Route and policy must belong to the same project.")
 	}
 	return published{&route.RouteID}, nil
 }
@@ -262,7 +262,7 @@ func resolveKey(ctx context.Context, tx pgx.Tx, directory promotion.Directory, k
 		return nil, err
 	}
 	if len(keys) != 1 || !sameProject(owner, project) {
-		return nil, httpkit.Invalid("guardrail_attachments", "API key name must resolve uniquely in the policy project.")
+		return nil, problem.Invalid("guardrail_attachments", "API key name must resolve uniquely in the policy project.")
 	}
 	return published{&keys[0].ID}, nil
 }
@@ -289,7 +289,7 @@ func resolveToolset(ctx context.Context, tx pgx.Tx, name string, project *string
 }
 
 func toolsetOutsideProject() error {
-	return httpkit.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
+	return problem.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
 }
 
 func activeRevision(ctx context.Context, q database.Queryer, project *string, name string) (string, error) {

@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -18,7 +18,7 @@ import (
 // ownership. Published definitions contain its UUID, never its bearer value.
 func StoreCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation, project string, material []byte) (string, error) {
 	if keys == nil {
-		return "", httpkit.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
+		return "", problem.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
 	}
 	id := ids.New()
 	if err := keys.Store(ctx, tx, installation, id, secrets.AgentCredential, material, nil); err != nil {
@@ -43,7 +43,7 @@ func StoreEntraCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing,
 // version. It never exposes material or compares credentials from another project.
 func CredentialMatches(ctx context.Context, q database.Queryer, keys *secrets.KeyRing, installation, project, id string, material []byte) (bool, error) {
 	if keys == nil {
-		return false, httpkit.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
+		return false, problem.Fail(503, "keys_unavailable", "Credential storage is unavailable.")
 	}
 	var owned bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_credentials WHERE id=$1 AND project_id=$2)`, id, project).Scan(&owned); err != nil {
@@ -63,17 +63,17 @@ func CredentialMatches(ctx context.Context, q database.Queryer, keys *secrets.Ke
 func (s *Server) credential(ctx context.Context, tx pgx.Tx, current *agentcontract.Publication, d agentcontract.Draft, raw json.RawMessage, entraSecret *string) (*string, error) {
 	if d.Agent == nil {
 		if len(raw) != 0 || entraSecret != nil {
-			return nil, httpkit.Invalid("credential", "Only agents accept credentials.")
+			return nil, problem.Invalid("credential", "Only agents accept credentials.")
 		}
 		return nil, nil
 	}
 	if d.Agent.OAuth != nil && d.Agent.OAuth.EntraOBO != nil {
 		if len(raw) != 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return nil, httpkit.Invalid("credential", "Entra authorization does not use a static bearer credential.")
+			return nil, problem.Invalid("credential", "Entra authorization does not use a static bearer credential.")
 		}
 		if entraSecret != nil {
 			if len(*entraSecret) == 0 || len(*entraSecret) > 16384 {
-				return nil, httpkit.Invalid("entra_client_secret", "Supply a nonempty bounded client secret.")
+				return nil, problem.Invalid("entra_client_secret", "Supply a nonempty bounded client secret.")
 			}
 			material := []byte(*entraSecret)
 			defer clear(material)
@@ -86,10 +86,10 @@ func (s *Server) credential(ctx context.Context, tx pgx.Tx, current *agentcontra
 		if current != nil && current.Draft.Agent != nil && current.Draft.Agent.OAuth != nil && current.Draft.Agent.OAuth.EntraOBO != nil && current.Draft.Agent.CredentialID != nil && current.Draft.Agent.OAuth.ClientID == d.Agent.OAuth.ClientID && current.Draft.Agent.OAuth.TokenEndpoint == d.Agent.OAuth.TokenEndpoint && current.Draft.Agent.OAuth.EntraOBO.Issuer == d.Agent.OAuth.EntraOBO.Issuer {
 			return current.Draft.Agent.CredentialID, nil
 		}
-		return nil, httpkit.Invalid("entra_client_secret", "Supply this client's secret when enabling Entra or changing its issuer, client, or token endpoint.")
+		return nil, problem.Invalid("entra_client_secret", "Supply this client's secret when enabling Entra or changing its issuer, client, or token endpoint.")
 	}
 	if entraSecret != nil {
-		return nil, httpkit.Invalid("entra_client_secret", "Configure Entra authorization before supplying a client secret.")
+		return nil, problem.Invalid("entra_client_secret", "Configure Entra authorization before supplying a client secret.")
 	}
 	if len(raw) == 0 {
 		if d.Agent.CredentialID == nil && current != nil && current.Draft.Agent != nil && (current.Draft.Agent.OAuth == nil || current.Draft.Agent.OAuth.EntraOBO == nil) {
@@ -102,7 +102,7 @@ func (s *Server) credential(ctx context.Context, tx pgx.Tx, current *agentcontra
 	}
 	material, err := secrets.ParseBearer(raw)
 	if err != nil {
-		return nil, httpkit.Invalid("credential", err.Error())
+		return nil, problem.Invalid("credential", err.Error())
 	}
 	defer clear(material)
 	id, err := StoreCredential(ctx, tx, s.access.Keys, s.access.Installation, d.ProjectID, material)

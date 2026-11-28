@@ -20,6 +20,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"golang.org/x/oauth2"
@@ -107,7 +109,7 @@ func (s *oidcService) oidcConfiguration(r *http.Request, _ authz.Principal) (htt
 
 func (s *oidcService) fetchOIDCMetadata(ctx context.Context, discoveryURL string) (oidcDiscoveryMetadata, error) {
 	if err := access.CheckIdentityURL(discoveryURL); err != nil {
-		return oidcDiscoveryMetadata{}, httpkit.Invalid("discovery_url", err.Error())
+		return oidcDiscoveryMetadata{}, problem.Invalid("discovery_url", err.Error())
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
 	if err != nil {
@@ -115,12 +117,12 @@ func (s *oidcService) fetchOIDCMetadata(ctx context.Context, discoveryURL string
 	}
 	response, err := s.access.IdentityClient().Do(request)
 	if err != nil {
-		return oidcDiscoveryMetadata{}, httpkit.Fail(422, "oidc_discovery_failed", "The OIDC discovery endpoint is unavailable or outside the identity egress policy.")
+		return oidcDiscoveryMetadata{}, problem.Fail(422, "oidc_discovery_failed", "The OIDC discovery endpoint is unavailable or outside the identity egress policy.")
 	}
 	defer response.Body.Close()
 	var metadata oidcDiscoveryMetadata
 	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&metadata) != nil {
-		return oidcDiscoveryMetadata{}, httpkit.Invalid("discovery_url", "Invalid OIDC discovery document.")
+		return oidcDiscoveryMetadata{}, problem.Invalid("discovery_url", "Invalid OIDC discovery document.")
 	}
 	return metadata, nil
 }
@@ -128,14 +130,14 @@ func (s *oidcService) fetchOIDCMetadata(ctx context.Context, discoveryURL string
 func validateOIDCEndpoints(ctx context.Context, metadata oidcDiscoveryMetadata) error {
 	for _, endpoint := range []string{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL} {
 		if access.CheckIdentityURL(endpoint) != nil {
-			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+			return problem.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 		parsed, err := url.Parse(endpoint)
 		if err != nil {
-			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+			return problem.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 		if _, err := access.IdentityAddresses(ctx, parsed.Hostname()); err != nil {
-			return httpkit.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
+			return problem.Invalid("discovery_url", "The issuer advertises an unsafe endpoint.")
 		}
 	}
 	return nil
@@ -149,7 +151,7 @@ func selectOIDCAuthStyle(authMethods []string) (oauth2.AuthStyle, error) {
 	case slices.Contains(authMethods, "client_secret_post"):
 		return oauth2.AuthStyleInParams, nil
 	default:
-		return 0, httpkit.Invalid("discovery_url", "The token endpoint must support client_secret_basic or client_secret_post.")
+		return 0, problem.Invalid("discovery_url", "The token endpoint must support client_secret_basic or client_secret_post.")
 	}
 }
 
@@ -179,7 +181,7 @@ func (s *oidcService) discover(ctx context.Context, c oidcConfiguration) (*oidc.
 		return nil, nil, "", err
 	}
 	if metadata.IssuerURL != c.Issuer {
-		return nil, nil, "", httpkit.Invalid("issuer", "The issuer must exactly match discovery.")
+		return nil, nil, "", problem.Invalid("issuer", "The issuer must exactly match discovery.")
 	}
 	if err := validateOIDCEndpoints(ctx, metadata); err != nil {
 		return nil, nil, "", err
@@ -193,7 +195,7 @@ func (s *oidcService) discover(ctx context.Context, c oidcConfiguration) (*oidc.
 		return nil, nil, "", err
 	}
 	if c.ID != "" && c.DiscoveryBinding != binding {
-		return nil, nil, "", httpkit.Fail(422, "oidc_discovery_changed", "OIDC discovery changed or is not bound. An owner must review and save the configuration again.")
+		return nil, nil, "", problem.Fail(422, "oidc_discovery_changed", "OIDC discovery changed or is not bound. An owner must review and save the configuration again.")
 	}
 	// Keep the verifier's refresh context independent of this request's
 	// cancellation; every fetch still uses the bounded identity HTTP client.
@@ -229,11 +231,11 @@ func normalizeOIDCScopes(raw []string) ([]string, error) {
 		scopes = []string{"openid", "email", "profile"}
 	}
 	if !slices.Contains(scopes, "openid") || len(scopes) > 20 {
-		return nil, httpkit.Invalid("scopes", "Include openid and at most 20 scopes.")
+		return nil, problem.Invalid("scopes", "Include openid and at most 20 scopes.")
 	}
 	for _, scope := range scopes {
-		if httpkit.ValidText("scopes", scope, 100) != nil || strings.ContainsAny(scope, " \t\r\n") {
-			return nil, httpkit.Invalid("scopes", "Use individual valid scope names.")
+		if textfield.Validate("scopes", scope, 100) != nil || strings.ContainsAny(scope, " \t\r\n") {
+			return nil, problem.Invalid("scopes", "Use individual valid scope names.")
 		}
 	}
 	return scopes, nil
@@ -253,18 +255,18 @@ func validateOIDCConfigFields(c oidcConfiguration, clientSecret *string) error {
 		{"groups_claim", c.GroupsClaim},
 	}
 	for _, item := range textFields {
-		if err := httpkit.ValidText(item.field, item.value, 255); err != nil {
+		if err := textfield.Validate(item.field, item.value, 255); err != nil {
 			return err
 		}
 	}
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
-		return httpkit.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
+		return problem.Invalid("default_role", "Use a valid role or leave automatic provisioning disabled.")
 	}
 	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "role_mappings", "role_mappings", "Use unique claim values and valid roles."); err != nil {
 		return err
 	}
 	if clientSecret != nil && len(*clientSecret) > 4096 {
-		return httpkit.Invalid("client_secret", "Use at most 4096 bytes.")
+		return problem.Invalid("client_secret", "Use at most 4096 bytes.")
 	}
 	return nil
 }
@@ -351,7 +353,7 @@ func (s *oidcService) putOIDCConfiguration(r *http.Request, _ authz.Principal) (
 			next.HasClientSecret = old.HasClientSecret
 		} else {
 			if r.Header.Get("If-Match") != "" {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(412, "etag_mismatch", "The OIDC configuration does not exist.")
 			}
 			next.ID = ids.New()
 		}

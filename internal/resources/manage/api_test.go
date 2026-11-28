@@ -14,7 +14,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
@@ -326,9 +326,9 @@ func TestListQueryValidation(t *testing.T) {
 	for _, tc := range invalidCases {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/provider-resources?"+tc.params.Encode(), nil)
 		_, err := api.list(req, principal)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok {
-			t.Fatalf("%s: err = %v, want *httpkit.Problem", tc.name, err)
+			t.Fatalf("%s: err = %v, want *problem.Problem", tc.name, err)
 		}
 		if problem.Status != tc.wantStatus || problem.Code != tc.wantCode || problem.Field != tc.wantField {
 			t.Errorf("%s: problem = %+v, want status=%d code=%q field=%q", tc.name, problem, tc.wantStatus, tc.wantCode, tc.wantField)
@@ -385,7 +385,7 @@ func TestResolveEvidenceModel(t *testing.T) {
 		{name: "unpinned model", templates: single, requested: "other-model"},
 	} {
 		_, err := resolveEvidenceModel(tc.templates, tc.requested)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != http.StatusUnprocessableEntity || problem.Field != "model" {
 			t.Errorf("%s: err = %v, want 422 model problem", tc.name, err)
 		}

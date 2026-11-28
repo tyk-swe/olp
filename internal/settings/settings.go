@@ -12,12 +12,14 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const settingJSON = `to_jsonb(s)||CASE WHEN s.key='budgets.time_zone' THEN jsonb_build_object('calendar',olp.budget_calendar_status(now())) ELSE '{}'::jsonb END`
 
 func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
+	items, err := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
 	return httpkit.OK(map[string]any{"items": items}), err
 }
 
@@ -41,27 +43,27 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	case "retention.requests_days", "retention.usage_days", "retention.audit_days":
 		n, err := strconv.Atoi(input.Value)
 		if err != nil || n < 1 || n > 3650 {
-			return httpkit.Reply{}, httpkit.Invalid("value", "Use an integer from 1 to 3650.")
+			return httpkit.Reply{}, problem.Invalid("value", "Use an integer from 1 to 3650.")
 		}
 	case "guardrails.stream_window_bytes":
 		n, err := strconv.Atoi(input.Value)
 		if err != nil || n < 256 || n > 1<<20 {
-			return httpkit.Reply{}, httpkit.Invalid("value", "Use a byte window between 256 and 1048576.")
+			return httpkit.Reply{}, problem.Invalid("value", "Use a byte window between 256 and 1048576.")
 		}
 	case "budgets.time_zone":
 		if err := access.ValidateBudgetTimeZone(input.Value); err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("value", "Use a supported IANA time zone.")
+			return httpkit.Reply{}, problem.Invalid("value", "Use a supported IANA time zone.")
 		}
 	case "limits.valkey_unavailable":
 		if input.Value != "fail_open" && input.Value != "fail_closed" {
-			return httpkit.Reply{}, httpkit.Invalid("value", "Use fail_open or fail_closed.")
+			return httpkit.Reply{}, problem.Invalid("value", "Use fail_open or fail_closed.")
 		}
 	case "auth.local_login_enabled", "auth.mfa_required":
 		if input.Value != "true" && input.Value != "false" {
-			return httpkit.Reply{}, httpkit.Invalid("value", "Use true or false.")
+			return httpkit.Reply{}, problem.Invalid("value", "Use true or false.")
 		}
 	default:
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "This setting does not exist.")
+		return httpkit.Reply{}, problem.Fail(404, "not_found", "This setting does not exist.")
 	}
 	return access.Transact(a.server, r, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		return struct{}{}, settingChangeable(r, tx, p, key)
@@ -102,7 +104,7 @@ func (a *API) store(r *http.Request, tx pgx.Tx, p authz.Principal, key, value st
 	}
 	if key == "guardrails.stream_window_bytes" && a.server.RuntimePublisher != nil {
 		if err := a.server.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("value", "The window is incompatible with published guardrails.")
+			return httpkit.Reply{}, problem.Invalid("value", "The window is incompatible with published guardrails.")
 		}
 	}
 	var data []byte

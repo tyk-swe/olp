@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -116,7 +116,7 @@ func safeInspectionError(err error) error {
 func inspectionContext(headers, query map[string]string, allowState bool) (interaction.Context, error) {
 	context := interaction.Context{Headers: http.Header{}, Query: url.Values{}, AllowProviderState: allowState}
 	if len(headers) > 16 || len(query) > 16 {
-		return context, httpkit.Invalid("semantic_headers", "Use at most 16 semantic headers and query settings.")
+		return context, problem.Invalid("semantic_headers", "Use at most 16 semantic headers and query settings.")
 	}
 	allowedHeaders, allowedQuery := map[string]bool{}, map[string]bool{}
 	for _, profile := range connectors.Profiles() {
@@ -131,13 +131,13 @@ func inspectionContext(headers, query map[string]string, allowState bool) (inter
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
 		_, duplicate := context.Headers[canonical]
 		if !allowedHeaders[canonical] || len(value) > 2048 || !httpguts.ValidHeaderFieldValue(value) || duplicate {
-			return context, httpkit.Invalid("semantic_headers", "Use distinct profile-owned semantic header names and bounded values; authentication headers are not accepted.")
+			return context, problem.Invalid("semantic_headers", "Use distinct profile-owned semantic header names and bounded values; authentication headers are not accepted.")
 		}
 		context.Headers[canonical] = []string{value}
 	}
 	for name, value := range query {
 		if !allowedQuery[name] || len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") {
-			return context, httpkit.Invalid("query_settings", "Use bounded profile-owned semantic query settings; credentials and transport overrides are not accepted.")
+			return context, problem.Invalid("query_settings", "Use bounded profile-owned semantic query settings; credentials and transport overrides are not accepted.")
 		}
 		context.Query[name] = []string{value}
 	}
@@ -150,12 +150,12 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil || fields == nil {
-		return nil, httpkit.Invalid("request", "Use a native request object.")
+		return nil, problem.Invalid("request", "Use a native request object.")
 	}
 	if model, present := fields["model"]; present {
 		var name string
 		if json.Unmarshal(model, &name) != nil || name != slug {
-			return nil, httpkit.Invalid("request.model", "The request must name the route being inspected.")
+			return nil, problem.Invalid("request.model", "The request must name the route being inspected.")
 		}
 	}
 	tupleOnly := len(fields) > 0
@@ -168,12 +168,12 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	if !strict && dialect == "" {
 		parsed, err := protocols.SimulationRequest(raw, operation, surface, mode, slug)
 		if err != nil {
-			return nil, httpkit.Invalid("request", "The request is not valid for the selected operation and surface.")
+			return nil, problem.Invalid("request", "The request is not valid for the selected operation and surface.")
 		}
 		return parsed, nil
 	}
 	if _, canonical := fields["route"]; canonical {
-		return nil, httpkit.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
+		return nil, problem.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
 	families := []wire.Format{wire.Chat, wire.Completions, wire.Responses, wire.Anthropic, wire.Gemini, wire.GeminiStream, wire.InputTokens, wire.AnthropicCount, wire.GeminiCount, wire.Embeddings, wire.Moderation, wire.Rerank, wire.MistralFIM, wire.CohereChat}
 	var family wire.Format
@@ -190,14 +190,14 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 		}
 	}
 	if family == "" {
-		return nil, httpkit.Invalid("dialect", "Choose a dialect belonging to this operation, surface and mode.")
+		return nil, problem.Invalid("dialect", "Choose a dialect belonging to this operation, surface and mode.")
 	}
 	parsed, err := protocols.Parse(family, raw, slug)
 	if err != nil {
-		return nil, httpkit.Invalid("request", "The request is not valid for the selected native dialect.")
+		return nil, problem.Invalid("request", "The request is not valid for the selected native dialect.")
 	}
 	if parsed.Route != slug || parsed.Stream != (mode == "streaming") {
-		return nil, httpkit.Invalid("request", "The native request must name the selected route and match the selected delivery mode.")
+		return nil, problem.Invalid("request", "The native request must name the selected route and match the selected delivery mode.")
 	}
 	return parsed, nil
 }
@@ -367,7 +367,7 @@ func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspe
 // reservation, creating a handle, or dispatching an inference request.
 func inspectionClientContract(version string, context *interaction.Context, encrypted bool) error {
 	if version != "" && version != interaction.ContinuationV1 {
-		return httpkit.Invalid("client_contract", "Use the tested chat-anthropic-tools-v1 client contract.")
+		return problem.Invalid("client_contract", "Use the tested chat-anthropic-tools-v1 client contract.")
 	}
 	context.ContinuationVersion = version
 	context.DurableContinuation = encrypted

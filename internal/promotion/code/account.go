@@ -9,10 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -27,8 +28,8 @@ type Account struct {
 }
 
 func parseAccount(e contract.ConfigurationCodeAccount) (Account, error) {
-	if httpkit.ValidText("code", e.Project, 100) != nil || httpkit.ValidText("code", e.Provider, 100) != nil || httpkit.ValidText("code", e.CredentialRef, 200) != nil {
-		return Account{}, httpkit.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
+	if textfield.Validate("code", e.Project, 100) != nil || textfield.Validate("code", e.Provider, 100) != nil || textfield.Validate("code", e.CredentialRef, 200) != nil {
+		return Account{}, problem.Invalid("code.accounts", "Name the project, provider and destination credential reference.")
 	}
 	account := Account{ID: e.Id.String(), Project: e.Project, Provider: e.Provider, CredentialRef: e.CredentialRef, Settings: codeaccounts.Settings{Name: e.Name, Enabled: e.Enabled, Models: ptr.NonNil(slices.Clone(e.Models)), ExtraUsageEnabled: promotion.Pointer(e.ExtraUsageEnabled), CycleAnchor: anchor(promotion.Pointer(e.CycleAnchor)), MaxConcurrency: promotion.Pointer(e.MaxConcurrency)}}
 	return account, account.Settings.Validate()
@@ -93,7 +94,7 @@ func resolveAccount(ctx context.Context, q database.Queryer, a Account, director
 		return resolved[codeaccounts.Input]{}, err
 	}
 	if !found {
-		return resolved[codeaccounts.Input]{}, httpkit.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
+		return resolved[codeaccounts.Input]{}, problem.Invalid("code_bindings.credentials", "Choose a current enrolled credential belonging to the destination provider and project.")
 	}
 	existing, err := codeaccounts.AccountIDs(ctx, q, projectID, granted.ProviderID, granted.Principal)
 	if err != nil {

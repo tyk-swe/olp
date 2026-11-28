@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/usage/param"
 )
 
@@ -50,7 +51,7 @@ func epochStateParam(query url.Values) (*EpochState, error) {
 	}
 	state, known := ParseEpochState(*raw)
 	if !known {
-		return nil, httpkit.Fail(400, "invalid_state", "Use open, gracefully_closed, unresolved, or acknowledged.")
+		return nil, problem.Fail(400, "invalid_state", "Use open, gracefully_closed, unresolved, or acknowledged.")
 	}
 	return &state, nil
 }
@@ -66,7 +67,7 @@ func (s *API) acknowledgeGatewayEpoch(r *http.Request, _ authz.Principal) (httpk
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if acknowledgement == nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found",
+			return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found",
 				"No unresolved gateway epoch with that identifier was found.")
 		}
 		// Acknowledging is an operator statement about loss they have seen, so each

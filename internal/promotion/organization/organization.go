@@ -6,7 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -26,7 +27,7 @@ func Parse(document contract.ConfigurationDocument) ([]Organization, error) {
 		return nil, nil
 	}
 	if len(*document.Organizations) > maxOrganizations {
-		return nil, httpkit.Invalid("organizations", "Use at most 1000 organizations.")
+		return nil, problem.Invalid("organizations", "Use at most 1000 organizations.")
 	}
 	declared, err := promotion.Convert[[]Organization](*document.Organizations)
 	if err != nil {
@@ -68,11 +69,11 @@ func validate(organizations []Organization) error {
 	})
 	for i, organization := range organizations {
 		name := strings.TrimSpace(organization.Name)
-		if err := httpkit.ValidText("organizations", name, 100); err != nil {
+		if err := textfield.Validate("organizations", name, 100); err != nil {
 			return err
 		}
 		if first[strings.ToLower(name)] != i {
-			return httpkit.Invalid("organizations", "Organization names must be unique.")
+			return problem.Invalid("organizations", "Organization names must be unique.")
 		}
 		if err := organization.Budget.ValidateAndNormalize(); err != nil {
 			return err

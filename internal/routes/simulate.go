@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -47,10 +48,10 @@ type simulationInput struct {
 
 func tokenDemand(estimated, output *int64) (*routing.TokenDemand, error) {
 	if estimated != nil && *estimated < 0 {
-		return nil, httpkit.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
+		return nil, problem.Invalid("estimated_input_tokens", "Use a non-negative token estimate.")
 	}
 	if output != nil && *output < 0 {
-		return nil, httpkit.Invalid("max_output_tokens", "Use a non-negative output bound.")
+		return nil, problem.Invalid("max_output_tokens", "Use a non-negative output bound.")
 	}
 	if estimated == nil && output == nil {
 		return nil, nil
@@ -176,13 +177,13 @@ func validTuple(operation, surface, mode string) error {
 		return nil
 	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {
-		return httpkit.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
+		return problem.Fail(422, "operation_unavailable", "The "+operation+" operation is not available in this release.")
 	}
 	if !slices.Contains([]string{"openai", "anthropic", "gemini"}, surface) {
-		return httpkit.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
+		return problem.Fail(422, "surface_unavailable", "Use the openai, anthropic, or gemini surface.")
 	}
 	if !connectors.Supports("openai", "openai", operation, surface, mode) {
-		return httpkit.Fail(422, "mode_unavailable", "This operation does not support the requested surface and mode.")
+		return problem.Fail(422, "mode_unavailable", "This operation does not support the requested surface and mode.")
 	}
 	return nil
 }
@@ -203,7 +204,7 @@ func (s *Server) simulateDraft(r *http.Request, p authz.Principal) (httpkit.Repl
 		return httpkit.Reply{}, err
 	}
 	if len(input.Seed) > 256 {
-		return httpkit.Reply{}, httpkit.Invalid("seed", "Use at most 256 characters.")
+		return httpkit.Reply{}, problem.Invalid("seed", "Use at most 256 characters.")
 	}
 	if err = validSimulationLabels(input); err != nil {
 		return httpkit.Reply{}, err
@@ -336,7 +337,7 @@ func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Re
 	operation := "generation"
 	if raw, ok := input.Operation["operation"]; ok {
 		if err := json.Unmarshal(raw, &operation); err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("operation.operation", "Use an operation name.")
+			return httpkit.Reply{}, problem.Invalid("operation.operation", "Use an operation name.")
 		}
 	}
 	if err := validTuple(operation, input.Surface, input.Mode); err != nil {
@@ -346,7 +347,7 @@ func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Re
 		return httpkit.Reply{}, err
 	}
 	if len(input.Seed) > 256 {
-		return httpkit.Reply{}, httpkit.Invalid("seed", "Use at most 256 characters.")
+		return httpkit.Reply{}, problem.Invalid("seed", "Use at most 256 characters.")
 	}
 	var request struct {
 		Route string `json:"route"`
@@ -354,13 +355,13 @@ func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Re
 	}
 	if raw, ok := input.Operation["request"]; ok {
 		if err := json.Unmarshal(raw, &request); err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("operation.request", "Use a request object.")
+			return httpkit.Reply{}, problem.Invalid("operation.request", "Use a request object.")
 		}
 	}
 	var slug string
 	if raw, present := input.Operation["route"]; present {
 		if json.Unmarshal(raw, &slug) != nil {
-			return httpkit.Reply{}, httpkit.Invalid("operation.route", "Name the route to simulate.")
+			return httpkit.Reply{}, problem.Invalid("operation.route", "Name the route to simulate.")
 		}
 	}
 	if slug == "" {
@@ -370,7 +371,7 @@ func (s *Server) simulateRouting(r *http.Request, p authz.Principal) (httpkit.Re
 		slug = request.Model
 	}
 	if !routeidentity.ValidSlug(slug) {
-		return httpkit.Reply{}, httpkit.Invalid("operation.request.route", "Name the route to simulate.")
+		return httpkit.Reply{}, problem.Invalid("operation.request.route", "Name the route to simulate.")
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())
 	if err != nil {
@@ -461,11 +462,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 func validSimulationLabels(input simulationInput) error {
 	for field, labels := range map[string]map[string]string{"attribution": input.Attribution, "classifier_labels": input.ClassifierLabels} {
 		if len(labels) > 16 {
-			return httpkit.Invalid(field, "Use at most 16 labels.")
+			return problem.Invalid(field, "Use at most 16 labels.")
 		}
 		for name, value := range labels {
 			if name == "" || len(name) > 64 || len(value) > 256 {
-				return httpkit.Invalid(field, "Use names of 1 to 64 characters and values of at most 256.")
+				return problem.Invalid(field, "Use names of 1 to 64 characters and values of at most 256.")
 			}
 		}
 	}

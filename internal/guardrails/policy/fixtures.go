@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -74,21 +75,21 @@ type fixtureReport struct {
 
 func (in fixtureRunInput) validate() error {
 	if uuid.Validate(in.BaselinePolicyRevisionID) != nil {
-		return httpkit.Invalid("baseline_policy_revision_id", "Choose an existing policy revision.")
+		return problem.Invalid("baseline_policy_revision_id", "Choose an existing policy revision.")
 	}
 	if uuid.Validate(in.CandidatePolicyRevisionID) != nil {
-		return httpkit.Invalid("candidate_policy_revision_id", "Choose an existing policy revision.")
+		return problem.Invalid("candidate_policy_revision_id", "Choose an existing policy revision.")
 	}
 	if !in.Synthetic {
-		return httpkit.Invalid("synthetic", "Confirm the file uses only synthetic examples.")
+		return problem.Invalid("synthetic", "Confirm the file uses only synthetic examples.")
 	}
 	if len(in.Fixtures) < 1 || len(in.Fixtures) > maxGuardrailFixtures {
-		return httpkit.Invalid("fixtures", "Use between 1 and 32 fixtures.")
+		return problem.Invalid("fixtures", "Use between 1 and 32 fixtures.")
 	}
 	for i, fixture := range in.Fixtures {
 		field := fmt.Sprintf("fixtures.%d", i)
 		if slices.ContainsFunc(in.Fixtures[:i], func(earlier guardrailFixture) bool { return earlier.ID == fixture.ID }) {
-			return httpkit.Invalid(field+".id", "Use a distinct fixture ID.")
+			return problem.Invalid(field+".id", "Use a distinct fixture ID.")
 		}
 		if err := fixture.validate(field); err != nil {
 			return err
@@ -99,19 +100,19 @@ func (in fixtureRunInput) validate() error {
 
 func (f guardrailFixture) validate(field string) error {
 	if !fixtureIDPattern.MatchString(f.ID) {
-		return httpkit.Invalid(field+".id", "Use a fixture ID of 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or digit.")
+		return problem.Invalid(field+".id", "Use a fixture ID of 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or digit.")
 	}
 	if f.Phase != guardrailpolicy.Input && f.Phase != guardrailpolicy.Output {
-		return httpkit.Invalid(field+".phase", "Choose the unary input or output phase.")
+		return problem.Invalid(field+".phase", "Choose the unary input or output phase.")
 	}
 	if f.Text == nil || !utf8.ValidString(*f.Text) || len(*f.Text) > maxFixtureTextBytes {
-		return httpkit.Invalid(field+".text", "Give the fixture text as UTF-8 of at most 8192 bytes. It may be empty.")
+		return problem.Invalid(field+".text", "Give the fixture text as UTF-8 of at most 8192 bytes. It may be empty.")
 	}
 	if f.Expected != outcomeAllow && f.Expected != outcomeBlock && f.Expected != outcomeRedact {
-		return httpkit.Invalid(field+".expected", "Choose allow, block or redact.")
+		return problem.Invalid(field+".expected", "Choose allow, block or redact.")
 	}
 	if f.ExpectedRedactedText != nil && (f.Expected != outcomeRedact || !utf8.ValidString(*f.ExpectedRedactedText) || len(*f.ExpectedRedactedText) > maxFixtureTextBytes) {
-		return httpkit.Invalid(field+".expected_redacted_text", "Give the expected redacted text only for a redact expectation, as UTF-8 text of at most 8192 bytes.")
+		return problem.Invalid(field+".expected_redacted_text", "Give the expected redacted text only for a redact expectation, as UTF-8 text of at most 8192 bytes.")
 	}
 	return nil
 }
@@ -136,11 +137,11 @@ func fixtureReady(pinned guardrails.Pinned) error {
 }
 
 func fixtureUnsupported() error {
-	return httpkit.Fail(http.StatusUnprocessableEntity, fixtureUnsupportedCode, "Fixture runs support only unary input and output entries with deterministic built-in evaluators.")
+	return problem.Fail(http.StatusUnprocessableEntity, fixtureUnsupportedCode, "Fixture runs support only unary input and output entries with deterministic built-in evaluators.")
 }
 
 func fixtureUnevaluable() error {
-	return httpkit.Fail(http.StatusUnprocessableEntity, fixtureUnevaluableCode, "A fixture could not be evaluated for both revisions.")
+	return problem.Fail(http.StatusUnprocessableEntity, fixtureUnevaluableCode, "A fixture could not be evaluated for both revisions.")
 }
 
 func (a *API) runFixtures(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -160,7 +161,7 @@ func (a *API) runFixtures(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		return httpkit.Reply{}, err
 	}
 	if baseline.Policy.PolicyID != candidate.Policy.PolicyID {
-		return httpkit.Reply{}, httpkit.Invalid("candidate_policy_revision_id", "Choose two revisions of the same policy.")
+		return httpkit.Reply{}, problem.Invalid("candidate_policy_revision_id", "Choose two revisions of the same policy.")
 	}
 	report, err := a.runFixtureSuite(r, p, baseline, candidate, in.Fixtures)
 	if err != nil {
@@ -184,7 +185,7 @@ func (a *API) pinnedRevision(r *http.Request, p authz.Principal, revisionID stri
 		return guardrails.Pinned{}, err
 	}
 	if !owned(definitions, ids, selected.ProjectID) {
-		return guardrails.Pinned{}, httpkit.Invalid("policy", "Policy references must stay in their project.")
+		return guardrails.Pinned{}, problem.Invalid("policy", "Policy references must stay in their project.")
 	}
 	return guardrails.Pinned{Policy: selected, Definitions: definitions}, nil
 }

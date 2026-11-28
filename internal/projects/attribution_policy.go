@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func (s *Server) projectAttributionPolicy(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
@@ -40,13 +41,13 @@ func (s *Server) putProjectAttributionPolicy(r *http.Request, _ authz.Principal)
 		return httpkit.Reply{}, err
 	}
 	if len(body.Policy) == 0 {
-		return httpkit.Reply{}, httpkit.Invalid("policy", "A policy or explicit null is required.")
+		return httpkit.Reply{}, problem.Invalid("policy", "A policy or explicit null is required.")
 	}
 	var input struct{ Policy *attribution.Policy }
 	decoder := json.NewDecoder(bytes.NewReader(body.Policy))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&input.Policy); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("policy", "The attribution policy is invalid.")
+		return httpkit.Reply{}, problem.Invalid("policy", "The attribution policy is invalid.")
 	}
 	if err = access.ValidateAttributionPolicy(input.Policy); err != nil {
 		return httpkit.Reply{}, err

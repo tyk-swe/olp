@@ -3,8 +3,8 @@ package main
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/cache/cacheadmin"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/release"
@@ -33,11 +33,11 @@ func (m Management) registerRouting(mux *http.ServeMux) *routes.Server {
 
 func (m Management) catalogAuthority(r *http.Request) (keyauthority.Authority, error) {
 	if m.Gateway == nil {
-		return keyauthority.Authority{}, httpkit.Fail(503, "authority_unavailable", "Key authority is unavailable.")
+		return keyauthority.Authority{}, problem.Fail(503, "authority_unavailable", "Key authority is unavailable.")
 	}
 	authority, failure := m.Gateway.Gate.Authenticate(r, "models_read")
 	if failure != nil {
-		return keyauthority.Authority{}, httpkit.Fail(failure.Status, failure.Code, failure.Message)
+		return keyauthority.Authority{}, problem.Fail(failure.Status, failure.Code, failure.Message)
 	}
 	return authority, nil
 }

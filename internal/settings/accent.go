@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type rgb [3]uint8
@@ -39,10 +39,10 @@ func normalizeAccent(raw string) (string, error) {
 func deriveAccent(accent string) (accentScale, error) {
 	base, ok := parseRGB(accent)
 	if !ok {
-		return accentScale{}, httpkit.Invalid("accent", "Use a brand color in #rrggbb form.")
+		return accentScale{}, problem.Invalid("accent", "Use a brand color in #rrggbb form.")
 	}
 	if contrast(white, base) < 4.5 {
-		return accentScale{}, httpkit.Invalid("accent", "Choose a darker brand color. White button text needs 4.5:1 contrast.")
+		return accentScale{}, problem.Invalid("accent", "Choose a darker brand color. White button text needs 4.5:1 contrast.")
 	}
 	return accentScale{
 		S300: firstPassing(base, white, 0, consoleVoid, 7).String(),

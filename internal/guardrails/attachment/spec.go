@@ -6,23 +6,24 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
-var invalidScope = httpkit.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
+var invalidScope = problem.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 
 func parsePlacement(in guardrails.Attachment) (guardrails.Attachment, error) {
 	if in.ID != "" || in.Order < 0 {
-		return guardrails.Attachment{}, httpkit.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
+		return guardrails.Attachment{}, problem.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
 	}
 	if !in.Scope.Valid() {
 		return guardrails.Attachment{}, invalidScope
 	}
-	revision, err := httpkit.ParseUUID(in.PolicyRevisionID)
+	revision, err := ids.Parse(in.PolicyRevisionID)
 	if err != nil {
-		return guardrails.Attachment{}, httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
+		return guardrails.Attachment{}, problem.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
 	scopeID, err := scopeIdentity(in.Scope, in.ScopeID)
 	if err != nil {
@@ -35,9 +36,9 @@ func scopeIdentity(scope guardrailpolicy.Scope, id string) (string, error) {
 	if scope == guardrailpolicy.InstallationScope {
 		return guardrails.InstallationProject, nil
 	}
-	parsed, err := httpkit.ParseUUID(id)
+	parsed, err := ids.Parse(id)
 	if err != nil {
-		return "", httpkit.Invalid("scope_id", "Choose an existing scope.")
+		return "", problem.Invalid("scope_id", "Choose an existing scope.")
 	}
 	return parsed, nil
 }
@@ -70,7 +71,7 @@ func authorize(p authz.Principal, t target, need authz.Need) error {
 	}
 	switch {
 	case t.Scope == guardrailpolicy.InstallationScope && !p.AllProjects:
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	case t.Scope == guardrailpolicy.InstallationScope:
 		return p.Project(nil, need)
 	case t.Scope == guardrailpolicy.OrganizationScope:

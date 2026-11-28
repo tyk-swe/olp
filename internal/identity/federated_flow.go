@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 )
 
 const (
@@ -52,14 +54,14 @@ func validateRoleMappings(emailMappings, groupMappings []roleMapping, emailField
 	}
 	for _, g := range groups {
 		if len(g.entries) > 500 {
-			return httpkit.Invalid(g.field, "Use at most 500 mappings.")
+			return problem.Invalid(g.field, "Use at most 500 mappings.")
 		}
 		for i, m := range g.entries {
 			duplicate := slices.ContainsFunc(g.entries[:i], func(prev roleMapping) bool {
 				return prev.ClaimValue == m.ClaimValue || (g.caseInsensitive && strings.EqualFold(prev.ClaimValue, m.ClaimValue))
 			})
-			if !authz.ValidRole(m.Role) || httpkit.ValidText(g.field, m.ClaimValue, 254) != nil || duplicate {
-				return httpkit.Invalid(g.field, invalidDetail)
+			if !authz.ValidRole(m.Role) || textfield.Validate(g.field, m.ClaimValue, 254) != nil || duplicate {
+				return problem.Invalid(g.field, invalidDetail)
 			}
 		}
 	}
@@ -98,7 +100,7 @@ func parseFederatedBeginInput(r *http.Request, kind string, allowQuery bool) (fe
 		}
 	}
 	if !safeReturn(input.ReturnTo) || len(input.ReturnTo) > maxFederatedReturnLen {
-		return federatedBeginInput{}, httpkit.Invalid("return_to", "Use a local console path.")
+		return federatedBeginInput{}, problem.Invalid("return_to", "Use a local console path.")
 	}
 	if input.ReturnTo == "" {
 		input.ReturnTo = "/"
@@ -111,7 +113,7 @@ func parseFederatedBeginInput(r *http.Request, kind string, allowQuery bool) (fe
 			return federatedBeginInput{}, err
 		}
 	} else if input.Purpose != "" || input.ResourceID != "" {
-		return federatedBeginInput{}, httpkit.Invalid("purpose", "This flow has no recent-authentication purpose.")
+		return federatedBeginInput{}, problem.Invalid("purpose", "This flow has no recent-authentication purpose.")
 	}
 	return input, nil
 }
@@ -148,7 +150,7 @@ func authenticateFlowSession(s *access.Server, r *http.Request, tx pgx.Tx, expec
 		return authz.Principal{}, err
 	}
 	if p.ID != expectedUserID || p.SessionID != expectedSessionID {
-		return authz.Principal{}, httpkit.Fail(403, mismatchCode, mismatchMsg)
+		return authz.Principal{}, problem.Fail(403, mismatchCode, mismatchMsg)
 	}
 	return p, nil
 }

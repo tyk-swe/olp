@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func usageFilterRange(t *testing.T, start, end string) Filters {
@@ -67,15 +67,15 @@ func TestOversizedExportIsUnprocessable(t *testing.T) {
 
 func TestInternalFailuresKeepTheirCause(t *testing.T) {
 	cause := errors.New("database went away")
-	if !errors.Is(problem(cause), cause) {
+	if !errors.Is(reportProblem(cause), cause) {
 		t.Fatal("an internal failure was rewritten as a report failure")
 	}
 }
 
-func usageProblem(t *testing.T, err error) *httpkit.Problem {
+func usageProblem(t *testing.T, err error) *problem.Problem {
 	t.Helper()
-	var mapped *httpkit.Problem
-	if !errors.As(problem(err), &mapped) {
+	var mapped *problem.Problem
+	if !errors.As(reportProblem(err), &mapped) {
 		t.Fatalf("error %v is not a management problem", err)
 	}
 	return mapped

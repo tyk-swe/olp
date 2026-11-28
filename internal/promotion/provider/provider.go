@@ -8,8 +8,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -69,13 +70,13 @@ func Parse(entry contract.ConfigurationProviderEntry, names promotion.Names, dep
 
 func ParseAll(entries []contract.ConfigurationProviderEntry, names promotion.Names, deps Deps) ([]Entry, error) {
 	if len(entries) > maxProviders {
-		return nil, httpkit.Invalid("providers", "Declare at most "+strconv.Itoa(maxProviders)+" providers.")
+		return nil, problem.Invalid("providers", "Declare at most "+strconv.Itoa(maxProviders)+" providers.")
 	}
 	first := promotion.FirstIndex(entries, func(entry contract.ConfigurationProviderEntry) string { return strings.ToLower(entry.Name) })
 	parsed, err := promotion.TryMapIndex(entries, func(i int, entry contract.ConfigurationProviderEntry) (Entry, error) {
 		at := path("providers").index(i)
 		if first[strings.ToLower(entry.Name)] != i {
-			return Entry{}, httpkit.Invalid(at.field("name"), "Provider names must be unique.")
+			return Entry{}, problem.Invalid(at.field("name"), "Provider names must be unique.")
 		}
 		return parse(entry, at, names, deps.Egress)
 	})
@@ -83,13 +84,13 @@ func ParseAll(entries []contract.ConfigurationProviderEntry, names promotion.Nam
 		return nil, err
 	}
 	if len(slices.Concat(promotion.Map(parsed, func(entry Entry) []providers.DraftModel { return entry.Models })...)) > maxModels {
-		return nil, httpkit.Invalid("providers.models", "Declare at most "+strconv.Itoa(maxModels)+" models in total.")
+		return nil, problem.Invalid("providers.models", "Declare at most "+strconv.Itoa(maxModels)+" models in total.")
 	}
 	return parsed, distinctRefs(parsed, path("providers").index)
 }
 
 func parse(entry contract.ConfigurationProviderEntry, at path, names promotion.Names, policy *egress.Policy) (Entry, error) {
-	if err := httpkit.ValidText(at.field("name"), entry.Name, 100); err != nil {
+	if err := textfield.Validate(at.field("name"), entry.Name, 100); err != nil {
 		return Entry{}, err
 	}
 	project, declared := promotion.Present(entry.Project)
@@ -136,7 +137,7 @@ func validProject(project string, declared bool, at path) error {
 	if !declared {
 		return nil
 	}
-	return httpkit.ValidText(at.field("project"), project, 100)
+	return textfield.Validate(at.field("project"), project, 100)
 }
 
 func parseModels(models []contract.ConfigurationModelEntry, at path) ([]providers.DraftModel, error) {
@@ -147,7 +148,7 @@ func parseModels(models []contract.ConfigurationModelEntry, at path) ([]provider
 			return providers.DraftModel{}, err
 		}
 		if first[model.UpstreamModel] != j {
-			return providers.DraftModel{}, httpkit.Invalid(field.field("upstream_model"), "Model names must be unique per provider.")
+			return providers.DraftModel{}, problem.Invalid(field.field("upstream_model"), "Model names must be unique per provider.")
 		}
 		display := cmp.Or(model.DisplayName, model.UpstreamModel)
 		if err := connection.ValidModelName(field.field("display_name"), display); err != nil {
@@ -183,7 +184,7 @@ func distinctRefs(entries []Entry, root func(int) path) error {
 	if !ok {
 		return nil
 	}
-	return httpkit.Invalid(repeated.field, repeated.message)
+	return problem.Invalid(repeated.field, repeated.message)
 }
 
 func Render(entries []Entry) ([]contract.ConfigurationProviderEntry, error) {

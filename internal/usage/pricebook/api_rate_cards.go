@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
@@ -163,7 +164,7 @@ func (s *API) createRateCardRevision(r *http.Request, _ authz.Principal) (httpki
 		return httpkit.Reply{}, err
 	}
 	if input.Markup == nil {
-		return httpkit.Reply{}, httpkit.Invalid("markup", "A rate card revision needs a markup.")
+		return httpkit.Reply{}, problem.Invalid("markup", "A rate card revision needs a markup.")
 	}
 	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		var exists bool
@@ -172,13 +173,13 @@ func (s *API) createRateCardRevision(r *http.Request, _ authz.Principal) (httpki
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !exists {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
 		}
 		effectiveAt := time.Now().UTC()
 		if input.EffectiveAt != nil {
 			effectiveAt = input.EffectiveAt.UTC()
 			if effectiveAt.Before(time.Now()) {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("effective_at",
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("effective_at",
 					"Choose an effective time now or in the future.")
 			}
 		}

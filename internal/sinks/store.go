@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -24,7 +24,7 @@ type Spec struct {
 
 func NormalizeSpec(spec Spec, policy *egress.Policy) (Spec, error) {
 	if spec.Type != "https" {
-		return Spec{}, httpkit.Invalid("type", "Use the HTTPS JSON sink type.")
+		return Spec{}, problem.Invalid("type", "Use the HTTPS JSON sink type.")
 	}
 	in := input{Name: spec.Name, Destination: spec.Destination, Streams: spec.Streams, Enabled: &spec.Enabled}
 	if err := validateAndNormalize(&in, policy, spec.ProjectID); err != nil {
@@ -44,9 +44,9 @@ func Update(ctx context.Context, tx pgx.Tx, id string, spec Spec, etag string) e
 }
 
 func nameTaken(err error) error {
-	var problem *pgconn.PgError
-	if errors.As(err, &problem) && problem.Code == "23505" {
-		return httpkit.Fail(409, "sink_name_exists", "Use a unique active sink name inside its scope.")
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
+		return problem.Fail(409, "sink_name_exists", "Use a unique active sink name inside its scope.")
 	}
 	return err
 }

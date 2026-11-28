@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
@@ -40,8 +41,8 @@ func (m *API) Register(mux *http.ServeMux) {
 }
 
 var (
-	errJobNotFound   = httpkit.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
-	errDeletePending = httpkit.Fail(http.StatusConflict, "media_job_delete_pending", "The media job delete was initiated but the provider has not confirmed; reconciliation continues.")
+	errJobNotFound   = problem.Fail(http.StatusNotFound, "not_found", "The media job does not exist.")
+	errDeletePending = problem.Fail(http.StatusConflict, "media_job_delete_pending", "The media job delete was initiated but the provider has not confirmed; reconciliation continues.")
 )
 
 func (m *API) logger() *slog.Logger {
@@ -58,7 +59,7 @@ func scoped(r *http.Request, store *jobs.Store, p authz.Principal, need authz.Ne
 	}
 	record, err := store.Get(r.Context(), id.String())
 	if err != nil {
-		return jobs.Record{}, problem(err)
+		return jobs.Record{}, jobProblem(err)
 	}
 	if err := p.Project(record.ProjectID, need); err != nil {
 		return jobs.Record{}, err
@@ -95,7 +96,7 @@ func (m *API) refresh(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	}
 	updated, err := m.Jobs.Refresh(r.Context(), record.ID)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	return access.Transact(m.Access, r, access.Unlocked, func(_ pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		reply, err := detail(updated)
@@ -113,19 +114,19 @@ func (m *API) content(w http.ResponseWriter, r *http.Request, p authz.Principal)
 	}
 	variant, failure := media.ValidateVideoContentQuery(r.URL.Query())
 	if failure != nil {
-		return httpkit.Fail(failure.Status, failure.Code, failure.Message)
+		return problem.Fail(failure.Status, failure.Code, failure.Message)
 	}
 	artifact, err := m.Jobs.Content(r.Context(), record, variant)
 	if errors.Is(err, jobs.ErrNoContent) {
-		return httpkit.Fail(http.StatusConflict, "media_content_unavailable", "The media job has no downloadable "+variant+" content.")
+		return problem.Fail(http.StatusConflict, "media_content_unavailable", "The media job has no downloadable "+variant+" content.")
 	}
 	if err != nil {
-		return httpkit.Fail(http.StatusServiceUnavailable, "media_content_unavailable", "The provider could not return the media job content; retry shortly.")
+		return problem.Fail(http.StatusServiceUnavailable, "media_content_unavailable", "The provider could not return the media job content; retry shortly.")
 	}
 	defer m.Spool.Remove(artifact.Handle)
 	opened, err := m.Spool.Open(artifact.Handle)
 	if err != nil {
-		return httpkit.Fail(http.StatusConflict, "media_content_unavailable", "The staged media could not be read.")
+		return problem.Fail(http.StatusConflict, "media_content_unavailable", "The staged media could not be read.")
 	}
 	defer opened.File.Close()
 	if _, err := access.Run(m.Access, r, func(_ pgx.Tx, _ authz.Principal) (struct{}, access.Event, error) {
@@ -134,7 +135,7 @@ func (m *API) content(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		return err
 	}
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2 * time.Minute)); err != nil {
-		return httpkit.Fail(http.StatusInternalServerError, "internal_error", "The media response could not be bounded.")
+		return problem.Fail(http.StatusInternalServerError, "internal_error", "The media response could not be bounded.")
 	}
 	w.Header().Set("Content-Type", artifact.ContentType)
 	if artifact.ContentLength > 0 {
@@ -163,7 +164,7 @@ func claimDeleteTx(r *http.Request, store *jobs.Store, p authz.Principal, now ti
 	}
 	claimed, needsReconcile, err := store.ClaimForDelete(r.Context(), record.ID, record.ETag, now)
 	if err != nil {
-		return deleteClaim{}, access.Event{}, problem(err)
+		return deleteClaim{}, access.Event{}, jobProblem(err)
 	}
 	if !needsReconcile {
 		return deleteClaim{}, auditEvent("media_job.delete", record), nil
@@ -186,7 +187,7 @@ func (m *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	}
 	updated, err := m.Jobs.ReconcileClaimed(r.Context(), plan.claimed)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	if updated.Lifecycle != jobs.Deleted {
 		if _, err := access.Run(m.Access, r, func(_ pgx.Tx, _ authz.Principal) (struct{}, access.Event, error) {
@@ -238,7 +239,7 @@ func optionalUUID(raw, field, message string) (*string, error) {
 	}
 	parsed, err := uuid.Parse(raw)
 	if err != nil {
-		return nil, httpkit.Invalid(field, message)
+		return nil, problem.Invalid(field, message)
 	}
 	canonical := parsed.String()
 	return &canonical, nil
@@ -250,7 +251,7 @@ func optionalTime(raw, field string) (*time.Time, error) {
 	}
 	at, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
-		return nil, httpkit.Invalid(field, "Use an RFC 3339 timestamp.")
+		return nil, problem.Invalid(field, "Use an RFC 3339 timestamp.")
 	}
 	return &at, nil
 }
@@ -261,7 +262,7 @@ func optionalEnum[T any](raw, field, message string, parse func(string) (T, bool
 	}
 	value, ok := parse(raw)
 	if !ok {
-		return nil, httpkit.Invalid(field, message)
+		return nil, problem.Invalid(field, message)
 	}
 	return &value, nil
 }
@@ -272,7 +273,7 @@ func pageLimit(raw string) (int, error) {
 	}
 	limit, err := strconv.Atoi(raw)
 	if err != nil || limit < 1 || limit > 200 {
-		return 0, httpkit.Invalid("limit", "Page size must be between 1 and 200.")
+		return 0, problem.Invalid("limit", "Page size must be between 1 and 200.")
 	}
 	return limit, nil
 }
@@ -289,7 +290,7 @@ func decodeCursor(raw string) (*jobs.Position, error) {
 	created, err := time.Parse(time.RFC3339Nano, at)
 	parsed, idErr := uuid.Parse(id)
 	if !ok || err != nil || idErr != nil {
-		return nil, httpkit.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
+		return nil, problem.Fail(http.StatusBadRequest, "invalid_cursor", "The page cursor is malformed; restart the listing.")
 	}
 	return &jobs.Position{CreatedAt: created, ID: parsed.String()}, nil
 }
@@ -308,7 +309,7 @@ func parseListQuery(r *http.Request, p authz.Principal) (jobs.Query, error) {
 		return jobs.Query{}, err
 	}
 	if after != nil && before != nil && !after.Before(*before) {
-		return jobs.Query{}, httpkit.Invalid("created_before", "created_before must be after created_after.")
+		return jobs.Query{}, problem.Invalid("created_before", "created_before must be after created_after.")
 	}
 	projects := jobs.Everything
 	if !p.AllProjects {
@@ -332,7 +333,7 @@ func (m *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	}
 	page, err := m.Jobs.Store().List(r.Context(), listing)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	items := make([]contract.MediaJobItem, len(page.Items))
 	for i, record := range page.Items {
@@ -398,7 +399,7 @@ func jobItem(record jobs.Record) (contract.MediaJobItem, error) {
 	}, nil
 }
 
-func problem(err error) error {
+func jobProblem(err error) error {
 	failure, ok := errors.AsType[*jobs.Error](err)
 	if !ok {
 		return err
@@ -407,15 +408,15 @@ func problem(err error) error {
 	case jobs.KindNotFound:
 		return errJobNotFound
 	case jobs.KindChanged:
-		return httpkit.Fail(http.StatusPreconditionFailed, "etag_mismatch", "The media job changed; refresh it and retry with the current ETag.")
+		return problem.Fail(http.StatusPreconditionFailed, "etag_mismatch", "The media job changed; refresh it and retry with the current ETag.")
 	case jobs.KindConflict:
-		return httpkit.Fail(http.StatusConflict, "media_job_upstream_identity_conflict", "The upstream media job is already bound to different metadata.")
+		return problem.Fail(http.StatusConflict, "media_job_upstream_identity_conflict", "The upstream media job is already bound to different metadata.")
 	case jobs.KindBusy:
-		return httpkit.Fail(http.StatusConflict, "media_job_busy", "The media job is being reconciled by another worker; retry shortly.")
+		return problem.Fail(http.StatusConflict, "media_job_busy", "The media job is being reconciled by another worker; retry shortly.")
 	case jobs.KindInvalid:
-		return httpkit.Invalid("media_job", failure.Message)
+		return problem.Invalid("media_job", failure.Message)
 	case jobs.KindCallerCredential:
-		return httpkit.Fail(http.StatusConflict, "media_job_caller_credential", "The media job runs on the caller's credential, so only the caller's own requests can refresh or delete it.")
+		return problem.Fail(http.StatusConflict, "media_job_caller_credential", "The media job runs on the caller's credential, so only the caller's own requests can refresh or delete it.")
 	}
 	return err
 }

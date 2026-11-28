@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -120,7 +122,7 @@ func (s *mfaService) mfaManageChallenge(r *http.Request, _ authz.Principal) (htt
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !enabled {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(428, "reauthentication_required", "Confirm your password or linked identity before enrolling your first factor.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(428, "reauthentication_required", "Confirm your password or linked identity before enrolling your first factor.")
 		}
 		reply, err := s.mfaChallenge(r, tx, p.ID, "manage", &p.SessionID, mfaFlowData{RecentPurpose: "mfa_manage"})
 		if err != nil {
@@ -132,9 +134,9 @@ func (s *mfaService) mfaManageChallenge(r *http.Request, _ authz.Principal) (htt
 
 func validateMFAEnrollInput(input mfaEnrollInput) error {
 	if input.Kind != "totp" && input.Kind != "webauthn" {
-		return httpkit.Invalid("kind", "Use totp or webauthn.")
+		return problem.Invalid("kind", "Use totp or webauthn.")
 	}
-	return httpkit.ValidText("name", input.Name, 100)
+	return textfield.Validate("name", input.Name, 100)
 }
 
 func decodeMFAEnrollInput(r *http.Request) (mfaEnrollInput, error) {
@@ -196,7 +198,7 @@ func (s *mfaService) consumeBootstrapChallenge(r *http.Request, tx pgx.Tx, chall
 		return "", err
 	}
 	if parent.Purpose != "bootstrap" || enabled {
-		return "", httpkit.Fail(401, "mfa_challenge_invalid", "Start sign-in again.")
+		return "", problem.Fail(401, "mfa_challenge_invalid", "Start sign-in again.")
 	}
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.mfa_challenges WHERE id=$1", parent.ID); err != nil {
 		return "", err
@@ -211,7 +213,7 @@ func (s *mfaService) startMFAEnrollment(r *http.Request, tx pgx.Tx, input mfaEnr
 		return httpkit.Reply{}, err
 	}
 	if count >= 10 || input.Kind == "totp" && hasTOTP {
-		return httpkit.Reply{}, httpkit.Fail(409, "mfa_factor_limit", "Remove an existing authenticator before replacing it; at most ten factors and one TOTP authenticator are allowed.")
+		return httpkit.Reply{}, problem.Fail(409, "mfa_factor_limit", "Remove an existing authenticator before replacing it; at most ten factors and one TOTP authenticator are allowed.")
 	}
 	u, err := s.mfaUser(r.Context(), tx, userID)
 	if err != nil {
@@ -283,7 +285,7 @@ func encodeTOTPQRCode(key *otp.Key) (string, error) {
 func (s *mfaService) buildWebAuthnEnrollment(u mfaUser, name string, sessionID *string) (mfaFlow, mfaEnrollmentResponse, error) {
 	w, err := s.webAuthn()
 	if err != nil {
-		return mfaFlow{}, mfaEnrollmentResponse{}, httpkit.Invalid("kind", "Security keys require an HTTPS DNS public origin, or localhost for development.")
+		return mfaFlow{}, mfaEnrollmentResponse{}, problem.Invalid("kind", "Security keys require an HTTPS DNS public origin, or localhost for development.")
 	}
 	exclude := make([]protocol.CredentialDescriptor, len(u.Credentials))
 	for i, credential := range u.Credentials {
@@ -333,7 +335,7 @@ func (s *mfaService) deleteMFAFactor(ctx context.Context, tx pgx.Tx, p authz.Pri
 		return err
 	}
 	if required && count <= 1 {
-		return httpkit.Fail(409, "mfa_required", "Enroll a replacement before removing your last required factor.")
+		return problem.Fail(409, "mfa_required", "Enroll a replacement before removing your last required factor.")
 	}
 	deleted, err := tx.Exec(ctx, "DELETE FROM olp.mfa_factors WHERE id=$1 AND user_id=$2", factorID, p.ID)
 	if err != nil {
@@ -386,7 +388,7 @@ func (s *mfaService) mfaRecovery(r *http.Request, _ authz.Principal) (httpkit.Re
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !configured {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "mfa_not_enrolled", "Enroll a factor before creating recovery codes.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "mfa_not_enrolled", "Enroll a factor before creating recovery codes.")
 		}
 		codes, err := s.replaceRecoveryCodes(r.Context(), tx, p.ID)
 		if err != nil {

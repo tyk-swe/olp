@@ -12,8 +12,11 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type budgetGroupInput struct {
@@ -30,7 +33,7 @@ type budgetGroupInput struct {
 }
 
 func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
-	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err := textfield.Validate("name", input.Name, 100); err != nil {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
@@ -52,7 +55,7 @@ func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
 		input.CostBasis = "cost"
 	}
 	if input.LimitTemplate == nil && input.RequestsPerMinute == nil && input.TokensPerMinute == nil && input.MaxConcurrency == nil && input.DailyCostLimit == nil && input.MonthlyCostLimit == nil && input.WeeklyCostLimit == nil {
-		return httpkit.Invalid("daily_cost_limit", "Set at least one limit or reference a template.")
+		return problem.Invalid("daily_cost_limit", "Set at least one limit or reference a template.")
 	}
 	return nil
 }
@@ -74,7 +77,7 @@ func (a *API) groups(r *http.Request, p authz.Principal) (httpkit.Reply, error) 
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+a.groupJSON()+budgetGroupFrom+" WHERE g.id<$1 AND ($2 OR g.project_id=ANY($3::uuid[])) ORDER BY g.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
+	items, err := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+a.groupJSON()+budgetGroupFrom+" WHERE g.id<$1 AND ($2 OR g.project_id=ANY($3::uuid[])) ORDER BY g.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
 
@@ -100,7 +103,7 @@ func (a *API) createGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, er
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	projectID, err := httpkit.ParseProjectID(input.ProjectID)
+	projectID, err := ids.ParseProject(input.ProjectID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -127,15 +130,15 @@ func (a *API) updateGroup(r *http.Request, _ authz.Principal) (httpkit.Reply, er
 		return httpkit.Reply{}, err
 	}
 	if patch == nil {
-		return httpkit.Reply{}, httpkit.Invalid("budget_group", "Send a budget group object.")
+		return httpkit.Reply{}, problem.Invalid("budget_group", "Send a budget group object.")
 	}
 	allowed := []string{"name", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "limit_template", "requests_per_minute", "tokens_per_minute", "max_concurrency"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
-			return httpkit.Reply{}, httpkit.Invalid(field, "Unknown budget group field.")
+			return httpkit.Reply{}, problem.Invalid(field, "Unknown budget group field.")
 		}
 		if string(value) == "null" && field == "name" {
-			return httpkit.Reply{}, httpkit.Invalid(field, "This field cannot be null.")
+			return httpkit.Reply{}, problem.Invalid(field, "This field cannot be null.")
 		}
 	}
 	id, err := httpkit.IDParam(r, "budget_group_id")
@@ -186,7 +189,7 @@ func (g budgetGroupState) patched(patch map[string]json.RawMessage) (budgetGroup
 	}
 	var input budgetGroupInput
 	if err := json.Unmarshal(data, &input); err != nil {
-		return budgetGroupInput{}, httpkit.Invalid("budget_group", "Invalid budget group value.")
+		return budgetGroupInput{}, problem.Invalid("budget_group", "Invalid budget group value.")
 	}
 	return input, validateAndNormalizeBudgetGroup(&input)
 }

@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agents/publications"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -91,7 +91,7 @@ func referencesBlocked(ctx context.Context, q database.Queryer, publication Publ
 			continue
 		}
 		err := publications.ValidateReferences(ctx, q, publication.Kind.name(), placed(definition, projectID))
-		if _, expected := errors.AsType[*httpkit.Problem](err); expected {
+		if _, expected := errors.AsType[*problem.Problem](err); expected {
 			return true, nil
 		}
 		if err != nil {

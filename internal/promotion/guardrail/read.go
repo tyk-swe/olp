@@ -11,9 +11,9 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	guardrailattachment "github.com/tyk-swe/olp/internal/guardrails/attachment"
 	"github.com/tyk-swe/olp/internal/platform/database"
 
@@ -221,7 +221,7 @@ func readDrafts(ctx context.Context, q database.Queryer, policies map[string]str
 	}
 	staged, err := promotion.TryMap(drafts, func(d guardrailattachment.Draft) (Attachment, error) {
 		if _, ok := policies[d.PolicyRevisionID]; !ok {
-			return Attachment{}, httpkit.Invalid("guardrails", "A staged policy is unavailable.")
+			return Attachment{}, problem.Invalid("guardrails", "A staged policy is unavailable.")
 		}
 		policy, err := reference(d.PolicyRevisionID)
 		return Attachment{Scope: Route{d.Slug}, Policy: policy, Order: d.Position}, err

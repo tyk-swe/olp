@@ -5,27 +5,27 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 func validateDelegation(in *Input) error {
 	if !in.Delegation.Valid() {
-		return httpkit.Invalid("delegation", "Supply an HTTPS issuer and bounded audience.")
+		return problem.Invalid("delegation", "Supply an HTTPS issuer and bounded audience.")
 	}
 	if in.Delegation != nil && in.OAuth == nil {
-		return httpkit.Invalid("delegation", "Delegation requires personal OAuth grants.")
+		return problem.Invalid("delegation", "Delegation requires personal OAuth grants.")
 	}
 	if in.DelegationPrivateKey == nil {
 		return nil
 	}
 	if in.Delegation == nil {
-		return httpkit.Invalid("delegation_private_key", "Configure delegation before supplying its signing key.")
+		return problem.Invalid("delegation_private_key", "Configure delegation before supplying its signing key.")
 	}
 	key, err := secrets.MCPPrivateKey([]byte(*in.DelegationPrivateKey))
 	if err != nil {
-		return httpkit.Invalid("delegation_private_key", "Supply a PKCS8 Ed25519 private key.")
+		return problem.Invalid("delegation_private_key", "Supply a PKCS8 Ed25519 private key.")
 	}
 	clear(key)
 	return nil
@@ -47,5 +47,5 @@ func (s *Server) saveDelegationKey(ctx context.Context, tx pgx.Tx, in Input, pre
 	if previous != nil && previous.DelegationKeyID != nil {
 		return previous.DelegationKeyID, nil
 	}
-	return nil, httpkit.Invalid("delegation_private_key", "Supply this installation's signing key before enabling delegation.")
+	return nil, problem.Invalid("delegation_private_key", "Supply this installation's signing key before enabling delegation.")
 }

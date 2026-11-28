@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/domain/oif"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 const nullablePackage = "github.com/oapi-codegen/nullable"
@@ -27,14 +28,14 @@ func DecodeUnique(r *http.Request, destination any, limit int64) error {
 	defer original.Close()
 	data, err := io.ReadAll(io.LimitReader(original, limit+1))
 	if err != nil || int64(len(data)) > limit {
-		return Fail(400, "invalid_json", "The request body exceeds this operation's bounded JSON contract.")
+		return problem.Fail(400, "invalid_json", "The request body exceeds this operation's bounded JSON contract.")
 	}
 	document, err := oif.ParseJSON(data, oif.Limits{MaxBytes: int(limit), MaxDepth: 128, MaxNodes: 1 << 20})
 	if err != nil {
-		return Fail(400, "invalid_json", "Configuration must contain one valid, unambiguous JSON document within its structural limits.")
+		return problem.Fail(400, "invalid_json", "Configuration must contain one valid, unambiguous JSON document within its structural limits.")
 	}
 	if err := canonicalMembers(document.Root(), reflect.TypeOf(destination), ""); err != nil {
-		return Fail(400, "invalid_json", "Configuration members must use their declared names and types; reset a default by removing it, not by replacing its definition with null.")
+		return problem.Fail(400, "invalid_json", "Configuration members must use their declared names and types; reset a default by removing it, not by replacing its definition with null.")
 	}
 	r.Body = io.NopCloser(bytes.NewReader(data))
 	return Decode(r, destination)

@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -107,7 +108,7 @@ func (s *Server) claimTest(ctx context.Context, tx pgx.Tx, key testKey, projectI
 	var expires time.Time
 	err = tx.QueryRow(ctx, insertTestSQL, id, key.destination, key.action, int(testClaimLifetime/time.Second), testsPerMinute).Scan(&expires)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return testClaim{}, httpkit.Fail(http.StatusTooManyRequests, "notification_test_rate_limit", "Wait a minute before starting another test on this destination.")
+		return testClaim{}, problem.Fail(http.StatusTooManyRequests, "notification_test_rate_limit", "Wait a minute before starting another test on this destination.")
 	}
 	if err != nil {
 		return testClaim{}, err
@@ -126,7 +127,7 @@ func (s *Server) testTarget(ctx context.Context, tx pgx.Tx, id string) (destinat
 		return destination{}, nil, err
 	}
 	if !enabled || (target.Type != contract.NotificationDestinationTypeWebhook && target.Type != contract.NotificationDestinationTypeEmail) {
-		return destination{}, nil, httpkit.Invalid("destination", "Only enabled webhook and email destinations can send a test.")
+		return destination{}, nil, problem.Invalid("destination", "Only enabled webhook and email destinations can send a test.")
 	}
 	if secretID == nil {
 		return target, nil, nil

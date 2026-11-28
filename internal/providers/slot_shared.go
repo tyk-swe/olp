@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -56,7 +56,7 @@ func findSlot(slots []slotRow, id string) *slotRow {
 func defaultSlot(slots []slotRow) (*slotRow, error) {
 	index := slices.IndexFunc(slots, func(row slotRow) bool { return row.Default })
 	if index < 0 {
-		return nil, httpkit.Fail(422, "credential_required", "This connection has no default credential slot.")
+		return nil, problem.Fail(422, "credential_required", "This connection has no default credential slot.")
 	}
 	return &slots[index], nil
 }
@@ -152,11 +152,11 @@ func (row slotRow) credentialFits(cfg connection.Configuration) error {
 	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
 		return nil
 	case !cfg.Grant():
-		return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
+		return problem.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
 	case row.CredentialPlugin == "":
-		return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
+		return problem.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
 	}
-	return httpkit.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build or profile of the plugin enrolled. A grant serves only its enrolling build and profile; re-enroll the slot's grant through this provider's profile.")
+	return problem.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build or profile of the plugin enrolled. A grant serves only its enrolling build and profile; re-enroll the slot's grant through this provider's profile.")
 }
 
 func selectProbeSlot(slots []slotRow, cfg connection.Configuration, model *storedModel) *slotRow {
@@ -184,16 +184,16 @@ func checkSlotCredential(cfg connection.Configuration, slot slotRow) error {
 		return nil
 	}
 	if slot.CredentialID == nil && cfg.Grant() {
-		return httpkit.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
+		return problem.Fail(422, "credential_required", "Enroll a grant before probing this connection.")
 	}
 	if slot.CredentialID == nil {
-		return httpkit.Fail(422, "credential_required", "Add a credential before probing this connection.")
+		return problem.Fail(422, "credential_required", "Add a credential before probing this connection.")
 	}
 	if slot.CredentialRevoked {
-		return httpkit.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
+		return problem.Fail(422, "credential_revoked", "The draft credential was revoked; rotate before probing.")
 	}
 	if slot.CredentialLapsed {
-		return httpkit.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
+		return problem.Fail(422, "credential_lapsed", "The draft credential's grant lapsed; re-enroll it before probing.")
 	}
 	return slot.credentialFits(cfg)
 }

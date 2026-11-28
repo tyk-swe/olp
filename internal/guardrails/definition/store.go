@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -78,7 +78,7 @@ func writeHead(ctx context.Context, tx pgx.Tx, actor string, current *Definition
 		return saved, 1, err
 	}
 	if current.ProjectID != d.project || current.Type != d.kind {
-		return Saved{}, 0, httpkit.Invalid("guardrail", "The owning boundary and type are immutable.")
+		return Saved{}, 0, problem.Invalid("guardrail", "The owning boundary and type are immutable.")
 	}
 	saved.ID = current.ID
 	_, err := tx.Exec(ctx, "UPDATE olp.guardrails SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", saved.ID, d.name, saved.RevisionID, ids.New())

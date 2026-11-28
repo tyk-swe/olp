@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	limitfleet "github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -55,7 +56,7 @@ func (m *Management) providerHealth(r *http.Request, p authz.Principal) (httpkit
 	if raw := query.Get("window_minutes"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 1440 {
-			return httpkit.Reply{}, httpkit.Invalid("window_minutes", "Use a whole number of minutes between 1 and 1440.")
+			return httpkit.Reply{}, problem.Invalid("window_minutes", "Use a whole number of minutes between 1 and 1440.")
 		}
 		window = parsed
 	}

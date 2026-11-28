@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
@@ -114,7 +115,7 @@ func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...Ro
 			}
 			p := authz.Principal{Kind: "key", KeyAuthority: &authority}
 			if req.Admits(p) != nil {
-				return httpkit.Reply{}, httpkit.Forbidden()
+				return httpkit.Reply{}, problem.Forbidden()
 			}
 			return h(r, p)
 		}

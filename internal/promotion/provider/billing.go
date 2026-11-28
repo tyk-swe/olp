@@ -7,10 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -29,11 +29,11 @@ func parseBilling(entry contract.ConfigurationProviderEntry, kind connectors.Kin
 	}
 	src, err := source.For(kind)
 	if err != nil {
-		return nil, httpkit.Invalid(at.field("billing_import"), err.Error())
+		return nil, problem.Invalid(at.field("billing_import"), err.Error())
 	}
 	ref := entry.BillingImport.CredentialRef
 	if promotion.Ref(ref) != billingRef(entry.Name) || len(ref) > maxRef {
-		return nil, httpkit.Invalid(at.field("billing_import.credential_ref"), "Use the provider name followed by /billing.")
+		return nil, problem.Invalid(at.field("billing_import.credential_ref"), "Use the provider name followed by /billing.")
 	}
 	raw, err := promotion.Convert[json.RawMessage](entry.BillingImport.Scope)
 	if err != nil {
@@ -119,7 +119,7 @@ func (a applying) applyBilling(ctx context.Context, tx pgx.Tx, entry Entry, targ
 	desired := imports.Desired{Enabled: entry.Billing.Enabled, Scope: entry.Billing.Scope, Credential: credential}
 	_, err = imports.Save(ctx, tx, vault(a.deps), target.id, desired, a.createdBy)
 	if errors.Is(err, imports.ErrCredentialRequired) || errors.Is(err, imports.ErrCredentialIncompatible) {
-		return httpkit.Invalid("secret_bindings", "Supply the provider's billing credential binding.")
+		return problem.Invalid("secret_bindings", "Supply the provider's billing credential binding.")
 	}
 	return err
 }

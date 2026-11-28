@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/tasks"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type Management struct {
@@ -28,16 +30,16 @@ func (m *Management) Register(mux *http.ServeMux) {
 }
 
 func taskID(r *http.Request) (string, error) {
-	id, err := httpkit.ParseUUID(r.PathValue("task_id"))
+	id, err := ids.Parse(r.PathValue("task_id"))
 	if err != nil {
-		return "", httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		return "", problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	return id, nil
 }
 
 func remoteLookupError(err error) error {
 	if errors.Is(err, tasks.ErrNotFound) {
-		return httpkit.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		return problem.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	return err
 }
@@ -69,11 +71,11 @@ func (m *Management) cancel(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	remote, remoteErr := m.operations.Cancel(r.Context(), task)
 	if remoteErr != nil {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusBadGateway, "agent_unavailable", "The remote agent is unavailable.")
+		return httpkit.Reply{}, problem.Fail(http.StatusBadGateway, "agent_unavailable", "The remote agent is unavailable.")
 	}
 	return access.Transact(m.access, r, load, func(_ pgx.Tx, _ authz.Principal, current tasks.Remote) (httpkit.Reply, access.Event, error) {
 		if current.UpstreamID != task.UpstreamID || current.RevisionID != task.RevisionID || current.Binding != task.Binding {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "a2a_task_changed", "The task changed while cancellation was in progress.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "a2a_task_changed", "The task changed while cancellation was in progress.")
 		}
 		return httpkit.OK(remote), access.Event{Action: "a2a_task.cancel", Resource: "a2a_task", ID: current.ID, Project: &current.ProjectID}, nil
 	})
@@ -93,7 +95,7 @@ func (m *Management) remote(r *http.Request, principal authz.Principal) (httpkit
 	}
 	remote, remoteErr := m.operations.Get(r.Context(), task)
 	if remoteErr != nil {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusBadGateway, "agent_unavailable", "The remote agent is unavailable.")
+		return httpkit.Reply{}, problem.Fail(http.StatusBadGateway, "agent_unavailable", "The remote agent is unavailable.")
 	}
 	return httpkit.OK(remote), nil
 }

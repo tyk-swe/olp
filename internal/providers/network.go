@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -17,10 +18,10 @@ import (
 // A table of its own keeps API credential slots from selecting TLS keys.
 func (s *credentialService) storeNetworkCredential(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error) {
 	if len(secret) > maxCredentialBytes {
-		return "", httpkit.Invalid("credential", "Network credentials must fit within 64 KiB.")
+		return "", problem.Invalid("credential", "Network credentials must fit within 64 KiB.")
 	}
 	if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
-		return "", httpkit.Invalid("credential", err.Error())
+		return "", problem.Invalid("credential", err.Error())
 	}
 	id := ids.New()
 	if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_network_credentials(id,provider_id,version) VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_network_credentials WHERE provider_id=$2))", id, providerID); err != nil {

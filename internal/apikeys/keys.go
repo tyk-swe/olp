@@ -10,10 +10,14 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/priority"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type keyInput struct {
@@ -27,15 +31,15 @@ const maxAttributionKeys = 8
 
 func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
-		return httpkit.Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
+		return problem.Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
 	}
 	if len(input.AllowedRouteGroups) > 64 {
-		return httpkit.Invalid("allowed_route_groups", "Use at most 64 route groups.")
+		return problem.Invalid("allowed_route_groups", "Use at most 64 route groups.")
 	}
 	groupNames := map[string]bool{}
 	for _, name := range input.AllowedRouteGroups {
 		if !routeidentity.ValidSlug(name) || groupNames[name] {
-			return httpkit.Invalid("allowed_route_groups", "Use unique valid group names.")
+			return problem.Invalid("allowed_route_groups", "Use unique valid group names.")
 		}
 		groupNames[name] = true
 	}
@@ -53,30 +57,30 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 		return err
 	}
 	if input.RunLimits != nil && !input.RunLimits.Valid() {
-		return httpkit.Invalid("run_limits", "Use valid workflow run limits.")
+		return problem.Invalid("run_limits", "Use valid workflow run limits.")
 	}
 	if err := validateKeyCIDRs(input.AllowedCIDRs); err != nil {
 		return err
 	}
 	if input.EndUserPolicy != nil && input.EndUserSource == nil {
-		return httpkit.Invalid("end_user_source", "An end-user policy requires an identifier source.")
+		return problem.Invalid("end_user_source", "An end-user policy requires an identifier source.")
 	}
 	if err := input.EndUserPolicy.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	if input.EndUserSource != nil && *input.EndUserSource != "header" && *input.EndUserSource != "native" {
-		return httpkit.Invalid("end_user_source", "Use header, native, or null to disable end-user identification.")
+		return problem.Invalid("end_user_source", "Use header, native, or null to disable end-user identification.")
 	}
-	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err := textfield.Validate("name", input.Name, 100); err != nil {
 		return err
 	}
 	if len(input.Scopes) < 1 || len(input.Scopes) > len(ConsumerScopes()) {
-		return httpkit.Invalid("scopes", "Select at least one unique scope.")
+		return problem.Invalid("scopes", "Select at least one unique scope.")
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
 		if !slices.Contains(ConsumerScopes(), scope) || seen[scope] {
-			return httpkit.Invalid("scopes", "Use unique supported consumer scopes.")
+			return problem.Invalid("scopes", "Use unique supported consumer scopes.")
 		}
 		seen[scope] = true
 	}
@@ -86,25 +90,25 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 		}
 	}
 	if input.AllowedRoutes == nil {
-		return httpkit.Invalid("allowed_routes", "This field cannot be null.")
+		return problem.Invalid("allowed_routes", "This field cannot be null.")
 	}
 	if len(input.AllowedRoutes) > 100 {
-		return httpkit.Invalid("allowed_routes", "Use at most 100 route slugs.")
+		return problem.Invalid("allowed_routes", "Use at most 100 route slugs.")
 	}
 	seen = map[string]bool{}
 	for _, route := range input.AllowedRoutes {
 		if !routeidentity.ValidSlug(route) || seen[route] {
-			return httpkit.Invalid("allowed_routes", "Use unique valid route slugs.")
+			return problem.Invalid("allowed_routes", "Use unique valid route slugs.")
 		}
 		seen[route] = true
 	}
 	if len(input.AllowedAttributionKeys) > maxAttributionKeys {
-		return httpkit.Invalid("allowed_attribution_keys", "Use at most 8 attribution keys.")
+		return problem.Invalid("allowed_attribution_keys", "Use at most 8 attribution keys.")
 	}
 	seen = map[string]bool{}
 	for _, key := range input.AllowedAttributionKeys {
 		if key == attribution.DelegationPairKey || !attribution.ValidKey(key) || seen[key] {
-			return httpkit.Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
+			return problem.Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
 		}
 		seen[key] = true
 	}
@@ -113,14 +117,14 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
 		if value != nil && priority.Rank(*value) < 0 {
-			return httpkit.Invalid(field, "Use critical, high, normal or low.")
+			return problem.Invalid(field, "Use critical, high, normal or low.")
 		}
 	}
 	if priority.Rank(input.DefaultPriority()) < priority.Rank(input.PriorityCeiling()) {
-		return httpkit.Invalid("priority", "The default priority cannot exceed max_priority.")
+		return problem.Invalid("priority", "The default priority cannot exceed max_priority.")
 	}
 	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
-		return httpkit.Invalid("expires_at", "Choose a future expiry.")
+		return problem.Invalid("expires_at", "Choose a future expiry.")
 	}
 	return nil
 }
@@ -169,12 +173,12 @@ func (a *API) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply
 	}
 	var issuer any
 	if raw := r.URL.Query().Get("created_by"); raw != "" {
-		issuer, err = httpkit.ParseUUID(raw)
+		issuer, err = ids.Parse(raw)
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
 	}
-	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+a.keyJSON("")+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
+	items, err := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+a.keyJSON("")+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
 	return httpkit.ListReply(items, p), err
 }
 func (a *API) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

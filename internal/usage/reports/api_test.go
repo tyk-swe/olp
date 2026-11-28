@@ -104,7 +104,7 @@ func TestUsageComparisonRequiresAProjectAndClosedUTCDays(t *testing.T) {
 	} {
 		t.Run(test.note, func(t *testing.T) {
 			_, err := api.usageComparison(usageRequest(t, test.query), test.principal)
-			if got := usageProblem(t, problem(err)); got.Status != test.status || got.Code != test.code {
+			if got := usageProblem(t, reportProblem(err)); got.Status != test.status || got.Code != test.code {
 				t.Fatalf("HTTP %d %s, want %d %s", got.Status, got.Code, test.status, test.code)
 			}
 		})

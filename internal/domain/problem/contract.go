@@ -1,14 +1,12 @@
-package httpkit
+package problem
 
-import (
-	"errors"
-)
+import "errors"
 
-// ContractProblem reports an obligation a strict route's target cannot meet as a
+// FromContract reports an obligation a strict route's target cannot meet as a
 // 422, or returns nil when err is not such an obligation. A refusal that exists
 // only because the target has no provider profile, its profile is not strict or
 // it needs translation tells the author to declare the route transformed.
-func ContractProblem(err error) *Problem {
+func FromContract(err error) *Problem {
 	var incompatible interface {
 		Incompatibility() (code, field, requirement, message string)
 	}
