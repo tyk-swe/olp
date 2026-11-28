@@ -4,8 +4,10 @@ run:
   build-tags: [integration, e2e, qualification, qualificationlive]
 linters:
   default: none
-  enable: [depguard, errorlint, funlen, ineffassign, paralleltest, revive, staticcheck, unconvert, unused, wastedassign]
+  enable: [bodyclose, depguard, errorlint, funlen, ineffassign, paralleltest, revive, rowserrcheck, sqlclosecheck, staticcheck, unconvert, unused, wastedassign]
   settings:
+    rowserrcheck:
+      packages: [github.com/jackc/pgx/v5]
     staticcheck:
       checks: [SA4006, SA4009, S1011, S1017, S1021, ST1012, ST1013, ST1019, ST1023]
     errorlint:
@@ -114,6 +116,9 @@ linters:
         linters: [errorlint]
       - path-except: ^tests/(integration|e2e)/
         linters: [paralleltest]
+      # websocket.Dial owns the handshake response body and its documentation says callers never close it.
+      - source: websocket\.Dial\(
+        linters: [bodyclose]
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

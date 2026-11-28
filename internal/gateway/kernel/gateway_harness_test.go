@@ -441,6 +441,9 @@ func (h *harness) do(ctx context.Context, method, path, key string, body []byte,
 	return resp
 }
 
+// chat reads and closes the body before it returns the response.
+//
+//bodyclose:handled
 func (h *harness) chat(key string, extra map[string]string, fields ...string) (*http.Response, map[string]any) {
 	h.t.Helper()
 	body := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]` + strings.Join(fields, "") + `}`

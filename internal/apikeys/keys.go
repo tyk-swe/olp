@@ -174,11 +174,7 @@ func (a *API) apiKeys(r *http.Request, principal authz.Principal) (httpkit.Reply
 			return httpkit.Reply{}, err
 		}
 	}
-	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+a.keyJSON("")+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+a.keyJSON("")+keyFrom+" WHERE k.id<$1 AND ($2::uuid IS NULL OR k.created_by=$2) AND ($3 OR k.project_id=ANY($4::uuid[])) ORDER BY k.id DESC LIMIT $5", p.Before, issuer, principal.AllProjects, principal.ProjectIDs(), p.Limit+1)
 	return httpkit.ListReply(items, p), err
 }
 func (a *API) apiKey(r *http.Request, p authz.Principal) (httpkit.Reply, error) {

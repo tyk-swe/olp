@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -598,5 +599,77 @@ func TestPersonalDeviceEnrollmentRetriesClientSetup(t *testing.T) {
 	}
 	if result, err := store.Poll(ctx, handoff.EnrollmentID, fixture.ownerID); err != nil || result.State != personal.Active || exchanges.Load() != 1 {
 		t.Fatalf("retry = %+v, error = %v, token exchanges = %d, want an active grant after one exchange", result, err, exchanges.Load())
+	}
+}
+
+func TestPluginUninstallRetiresOnlyItsUnrevokedGrants(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ownerID, providerID := uuid.NewString(), uuid.NewString()
+	exec(`INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1::uuid,$1::text||'@example.com','Owner','owner',$1::uuid)`, ownerID)
+	exec(`INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'uninstall-fixture','openai_compatible','draft',$2,$3,$3,$4)`,
+		providerID, providerEndpoint, uuid.NewString(), ownerID)
+	client := managementHTTPAs(t, pool, ownerID, func(mux *http.ServeMux, accessServer *access.Server) {
+		(&plugins.Management{Access: accessServer, Host: plugins.NewHost(nil, nil, pool)}).Register(mux)
+	})
+	removed, kept, unused := strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)
+	etag := uuid.NewString()
+	for _, digest := range []string{removed, kept, unused} {
+		exec(`INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by)
+			VALUES($1,1,'{"name":"grant-fixture","version":"0.1.0","origins":[],"profiles":[]}','\x00',1,$2,$3)`, digest, etag, ownerID)
+	}
+	grants := []struct {
+		name, digest                   string
+		revoked, refreshable, retiring bool
+	}{
+		{name: "refreshable", digest: removed, refreshable: true, retiring: true},
+		{name: "without a refresh token", digest: removed, retiring: true},
+		{name: "revoked", digest: removed, revoked: true, refreshable: true},
+		{name: "of another plugin", digest: kept, refreshable: true},
+	}
+	credentials, tokens := make([]string, len(grants)), make([]*string, len(grants))
+	for i, grant := range grants {
+		credentials[i] = uuid.NewString()
+		exec(`INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts,revoked_at)
+			VALUES($1,$2,$3,$4,$5,'{}',CASE WHEN $6 THEN now() END)`, credentials[i], providerID, i+1, grant.name, grant.digest, grant.revoked)
+		if grant.refreshable {
+			token := uuid.NewString()
+			tokens[i] = &token
+			exec(`INSERT INTO olp.secrets(id,purpose,key_version,ciphertext) VALUES($1,'provider_grant_refresh',1,'\x00')`, token)
+		}
+		exec(`INSERT INTO olp.provider_grants(credential_id,refresh_token_id) VALUES($1,$2)`, credentials[i], tokens[i])
+	}
+
+	for _, digest := range []string{removed, unused} {
+		res := client.call(t, http.MethodDelete, "/api/v1/plugins/"+digest, `"`+etag+`"`, "", uuid.NewString())
+		if res.status != http.StatusNoContent {
+			t.Fatalf("uninstall %s HTTP %d: %s", digest[:1], res.status, res.body)
+		}
+	}
+
+	for i, grant := range grants {
+		var lapsed, holdsToken, secretStored bool
+		var audits int
+		if err := pool.QueryRow(ctx, `SELECT lapsed_at IS NOT NULL,refresh_token_id IS NOT NULL,EXISTS(SELECT 1 FROM olp.secrets WHERE id=$2),
+			(SELECT count(*) FROM olp.audit WHERE action='provider.grant.retire' AND resource_id::text=$3)
+			FROM olp.provider_grants WHERE credential_id=$1`, credentials[i], tokens[i], credentials[i]).Scan(&lapsed, &holdsToken, &secretStored, &audits); err != nil {
+			t.Fatal(err)
+		}
+		keepsToken := grant.refreshable && !grant.retiring
+		wantAudits := 0
+		if grant.retiring {
+			wantAudits = 1
+		}
+		if lapsed != grant.retiring || holdsToken != keepsToken || secretStored != keepsToken || audits != wantAudits {
+			t.Errorf("grant %s: lapsed=%t holds token=%t secret stored=%t audits=%d, want %t/%t/%t/%d",
+				grant.name, lapsed, holdsToken, secretStored, audits, grant.retiring, keepsToken, keepsToken, wantAudits)
+		}
 	}
 }

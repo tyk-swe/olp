@@ -205,7 +205,7 @@ func (t *Transport) do(ctx context.Context, target Target, sensitive *egress.Sen
 	reading := poller{transport: t, ctx: ctx, client: client, target: signed}
 	payload, source, failure := t.decode(ctx, resp, call.Response, options.Strict, reading)
 	if _, events := payload.(Events); !events {
-		drainAndClose(resp.Body)
+		drainAndClose(resp)
 	}
 	if failure != nil {
 		dispatched := *failure
@@ -407,12 +407,12 @@ func (t *Transport) readPart(part staging.Part) ([]byte, *media.Error) {
 	return data, nil
 }
 
-func drainAndClose(body io.ReadCloser) {
-	if body == nil {
+func drainAndClose(response *http.Response) {
+	if response.Body == nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(body, errorBodyLimit))
-	_ = body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, errorBodyLimit))
+	_ = response.Body.Close()
 }
 
 func interrupted(ctx context.Context, err error) error {

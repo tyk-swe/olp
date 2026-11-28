@@ -2,6 +2,7 @@ package httpkit
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Problem struct {
@@ -277,23 +279,24 @@ func ListPage[T any](items []T, p Pagination, id func(T) string) ListBody[T] {
 	return ListBody[T]{Items: items}
 }
 
-func JSONRows(rows pgx.Rows) ([]map[string]any, error) {
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var b []byte
-		var item map[string]any
-		if err := rows.Scan(&b); err != nil {
-			return nil, err
-		}
-		decoder := json.NewDecoder(bytes.NewReader(b))
-		decoder.UseNumber()
-		if err := decoder.Decode(&item); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+func QueryJSON(ctx context.Context, db database.Queryer, sql string, args ...any) ([]map[string]any, error) {
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
 	}
-	return items, rows.Err()
+	return pgx.CollectRows(rows, jsonRow)
+}
+
+func jsonRow(row pgx.CollectableRow) (map[string]any, error) {
+	var document []byte
+	if err := row.Scan(&document); err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(document))
+	decoder.UseNumber()
+	var item map[string]any
+	err := decoder.Decode(&item)
+	return item, err
 }
 
 // ParseProjectID canonicalises an optional project_id, so project lookups,

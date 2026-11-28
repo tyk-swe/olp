@@ -80,7 +80,7 @@ func (run attemptRun) send(plan attemptPlan, fact events.AttemptFact) (attemptSe
 	if end != nil {
 		return announced, end
 	}
-	resp, err := exchange.do(client, req)
+	resp, err := exchange.do(client, req) //nolint:bodyclose // attemptSent.release closes the body
 	if err != nil {
 		return announced, ended(run.state.classify(err, false), nil)
 	}

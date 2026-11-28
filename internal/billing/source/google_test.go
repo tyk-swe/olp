@@ -35,7 +35,11 @@ func TestGoogleADCRefusesMetadataHostOutsideEgressPolicy(t *testing.T) {
 		credential: googleADC{},
 	}
 	request := httptest.NewRequest(http.MethodPost, googleBigQueryEndpoint+"/bigquery/v2/projects/p/queries", nil)
-	if _, err := transport.RoundTrip(request); !errors.Is(err, errGoogleAuthentication) {
+	response, err := transport.RoundTrip(request)
+	if response != nil {
+		defer func() { _ = response.Body.Close() }()
+	}
+	if !errors.Is(err, errGoogleAuthentication) {
 		t.Fatalf("got %v, want Google authentication failure", err)
 	}
 	if got := hits.Load(); got != 0 {

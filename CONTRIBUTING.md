@@ -111,6 +111,12 @@ spaces, single quotes, no trailing commas, `camelCase` helpers and
 `PascalCase.svelte` components. Keep Svelte route components thin and use the
 [console design system](console/README.md#design-system).
 
+`make lint` checks the whole tree for unclosed HTTP response bodies, discarded
+database rows and unchecked row iteration errors. `errcheck` and
+`forcetypeassert` apply only to lines changed since the branch left
+`origin/main`, so moving old code can surface its findings. Set `LINT_BASE` to
+compare against another ref.
+
 Place Go unit tests beside their feature as `*_test.go`, console unit tests
 as Vitest `*.test.ts` in the `unit` project, and reactive Svelte tests as
 `*.svelte.test.ts` in the `svelte` project. Tests that need PostgreSQL or

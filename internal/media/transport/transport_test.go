@@ -425,7 +425,10 @@ func TestFormOutboundPanicRecovery(t *testing.T) {
 	ob2 := tr.formOutbound(fields, panickingOpen)
 	target := Target{Config: connectors.Config{Endpoint: "http://127.0.0.1:8080", AuthMode: connectors.AuthNone}}
 	call := &media.UpstreamCall{Method: http.MethodPost, Endpoint: media.Path{Path: "upload"}, Response: media.VideoJobReply{}}
-	_, _, _, fail := tr.send(t.Context(), client, target, call, Options{}, "http://127.0.0.1:8080/upload", ob2)
+	response, _, _, fail := tr.send(t.Context(), client, target, call, Options{}, "http://127.0.0.1:8080/upload", ob2)
+	if response != nil {
+		_ = response.Body.Close()
+	}
 	if fail == nil || fail.Class != upstream.Connect {
 		t.Fatalf("send failure on panic = %+v, want Connect", fail)
 	}

@@ -124,10 +124,18 @@ func TestClientPinsDialsToPermittedAddressesAndRefusesRedirects(t *testing.T) {
 	if string(body) != "reached" {
 		t.Fatalf("permitted destination answered %q", body)
 	}
-	if _, err := (Policy{}).Client(time.Second).Get(target.URL); !errors.Is(err, ErrUnsafeDestination) {
+	unlisted, err := (Policy{}).Client(time.Second).Get(target.URL)
+	if unlisted != nil {
+		defer func() { _ = unlisted.Body.Close() }()
+	}
+	if !errors.Is(err, ErrUnsafeDestination) {
 		t.Errorf("a loopback dial without an exception: got %v, want %v", err, ErrUnsafeDestination)
 	}
-	if _, err := loopback.Client(time.Second).Get(redirecting.URL); !errors.Is(err, ErrRedirect) {
+	redirected, err := loopback.Client(time.Second).Get(redirecting.URL)
+	if redirected != nil {
+		defer func() { _ = redirected.Body.Close() }()
+	}
+	if !errors.Is(err, ErrRedirect) {
 		t.Errorf("a redirecting upstream: got %v, want %v", err, ErrRedirect)
 	}
 }

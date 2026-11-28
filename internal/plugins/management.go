@@ -253,22 +253,12 @@ func (s *Management) remove(r *http.Request, tx pgx.Tx, p authz.Principal, diges
 // reinstalled build, serves their credential versions only after a new grant
 // enrollment.
 func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, error) {
-	rows, err := tx.Query(ctx, `UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,updated_at=now()
-		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND c.plugin_digest=$1 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
-		RETURNING g.credential_id::text, old.refresh_token_id::text`, digest)
-	if err != nil {
-		return nil, err
-	}
 	var retired, refreshTokens []string
-	var credentialID string
-	var refreshToken *string
-	_, err = pgx.ForEachRow(rows, []any{&credentialID, &refreshToken}, func() error {
-		retired = append(retired, credentialID)
-		if refreshToken != nil {
-			refreshTokens = append(refreshTokens, *refreshToken)
-		}
-		return nil
-	})
+	err := tx.QueryRow(ctx, `WITH retired AS (
+		UPDATE olp.provider_grants g SET lapsed_at=now(),refresh_token_id=NULL,refresh_at=NULL,refresh_attempt_id=NULL,updated_at=now()
+		FROM olp.provider_credentials c WHERE c.id=g.credential_id AND c.plugin_digest=$1 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
+		RETURNING g.credential_id::text credential_id, old.refresh_token_id::text refresh_token_id
+		) SELECT array_agg(credential_id), array_remove(array_agg(refresh_token_id), NULL) FROM retired`, digest).Scan(&retired, &refreshTokens)
 	if err != nil || len(refreshTokens) == 0 {
 		return retired, err
 	}

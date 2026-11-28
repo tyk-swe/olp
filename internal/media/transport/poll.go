@@ -163,7 +163,7 @@ func (p poller) visit(visit media.Visit, domains []string) (fetched, *Failure) {
 		}
 		return fetched{}, stepFailure(upstream.Connect, "the vendor's next request failed")
 	}
-	defer drainAndClose(resp.Body)
+	defer drainAndClose(resp)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fetched{}, stepFailure(upstream.ServerError, "the vendor's next request was refused")
 	}

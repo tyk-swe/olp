@@ -152,6 +152,7 @@ jobs:
       - run: make check-go
         env:
           MIGRATIONS_BASE: HEAD^1
+          LINT_BASE: HEAD^1
   check-console:
     needs: changes
     if: needs.changes.outputs.console == 'true'

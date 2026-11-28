@@ -22,12 +22,7 @@ func (a *API) workloadIssuers(r *http.Request, _ authz.Principal) (httpkit.Reply
 	if e != nil {
 		return httpkit.Reply{}, e
 	}
-	rows, e := a.server.Pool.Query(r.Context(), "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
-	if e != nil {
-		return httpkit.Reply{}, e
-	}
-	defer rows.Close()
-	items, e := httpkit.JSONRows(rows)
+	items, e := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+workloadIssuerJSON+" FROM olp.workload_issuers i WHERE id<$1 ORDER BY id DESC LIMIT $2", page.Before, page.Limit+1)
 	return httpkit.ListReply(items, page), e
 }
 func (a *API) workloadIssuer(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
