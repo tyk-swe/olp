@@ -30,7 +30,7 @@
       enabled = result.data.enabled;
       pricesPublic = result.data.prices_public;
       etag = result.data.etag;
-      action.error = '';
+      action.reset();
     }
   }
   async function save(event: SubmitEvent) {
