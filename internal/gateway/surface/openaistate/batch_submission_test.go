@@ -1,4 +1,4 @@
-package kernel
+package openaistate
 
 import (
 	"strconv"
@@ -22,7 +22,7 @@ func TestBatchCompletionWindowAdmitsExactlyTheVendorRange(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, refusal := BatchCompletionWindow(source, contract.ID)
+				got, refusal := batchCompletionWindow(source, contract.ID)
 				if !admitted {
 					if refusal == nil {
 						t.Fatalf("window %s was admitted outside %+v", window, served)

@@ -6,31 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/domain/geminilifecycle"
-	"github.com/tyk-swe/olp/internal/domain/oif"
-	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/usage"
-	"github.com/tyk-swe/olp/internal/usage/ingest"
 )
-
-// Terminal observations belong to the original generation. The resource owner
-// serializes competing GETs, cancellations and resumed streams across replicas.
-func (s *Server) ObserveInteraction(ctx context.Context, owner, localID, status string, object oif.Value) (ingest.Persisted, error) {
-	evidence := usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}
-	if observed := geminiInteractionUsage(object); observed != nil {
-		evidence = events.ObservedUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
-	}
-	result, err := s.Deps.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.Now())
-	if err != nil {
-		return ingest.Persisted{}, err
-	}
-	if err := s.Deps.Admission.InstallSnapshots(ctx, result.CostSnapshots); err != nil {
-		s.Log.Warn("interaction cost snapshot application failed; reconciliation will repair it", "error_type", "cost_snapshot")
-	}
-	return result, nil
-}
 
 func (s *Server) StoreInteraction(ctx context.Context, exchange *PinnedExchange, p *Pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
 	x := exchange.request
@@ -63,79 +40,4 @@ func (s *Server) StoreInteraction(ctx context.Context, exchange *PinnedExchange,
 		exchange.recordEvidence()
 	}
 	return stored, err
-}
-
-func RecordInteractionUsage(exchange *PinnedExchange, object oif.Value) {
-	if exchange.request.actor == "api_key_resource" {
-		return
-	}
-	observed := geminiInteractionUsage(object)
-	if observed == nil {
-		return
-	}
-	fact := exchange.fact()
-	statusValue, _ := object.Lookup("status")
-	status, _ := statusValue.Text()
-	complete := geminilifecycle.InteractionTurnFinished(status)
-	fact.ObserveUsage(observed, complete)
-	exchange.recordEvidence()
-}
-
-func geminiInteractionUsage(object oif.Value) *wire.Usage {
-	usageValue, ok := object.Lookup("usage")
-	if !ok || usageValue.Kind() != oif.Object {
-		return nil
-	}
-	var native struct {
-		Input            *int64                            `json:"total_input_tokens"`
-		Output           *int64                            `json:"total_output_tokens"`
-		Cached           *int64                            `json:"total_cached_tokens"`
-		Thoughts         *int64                            `json:"total_thought_tokens"`
-		ToolUse          *int64                            `json:"total_tool_use_tokens"`
-		Total            *int64                            `json:"total_tokens"`
-		PromptDetails    []geminilifecycle.LiveUsageDetail `json:"prompt_tokens_details"`
-		CacheDetails     []geminilifecycle.LiveUsageDetail `json:"cache_tokens_details"`
-		CandidateDetails []geminilifecycle.LiveUsageDetail `json:"candidates_tokens_details"`
-		ResponseDetails  []geminilifecycle.LiveUsageDetail `json:"response_tokens_details"`
-	}
-	if json.Unmarshal(usageValue.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
-		return nil
-	}
-	usage := GeminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
-	if usage == nil {
-		return nil
-	}
-	if audio, image := GeminiUsageDetails(native.PromptDetails); audio > 0 || image > 0 {
-		if audio > 0 {
-			usage.AudioInputTokens = &audio
-		}
-		if image > 0 {
-			usage.ImageInputTokens = &image
-		}
-	}
-	if audio, image := GeminiUsageDetails(native.CacheDetails); audio > 0 || image > 0 {
-		if audio > 0 {
-			usage.CachedAudioInputTokens = &audio
-		}
-		if image > 0 {
-			usage.CachedImageInputTokens = &image
-		}
-	}
-	if audio, image := GeminiUsageDetails(native.CandidateDetails); audio > 0 || image > 0 {
-		if audio > 0 {
-			usage.AudioOutputTokens = &audio
-		}
-		if image > 0 {
-			usage.ImageOutputTokens = &image
-		}
-	}
-	if audio, image := GeminiUsageDetails(native.ResponseDetails); audio > 0 || image > 0 {
-		if audio > 0 {
-			usage.AudioOutputTokens = &audio
-		}
-		if image > 0 {
-			usage.ImageOutputTokens = &image
-		}
-	}
-	return usage
 }

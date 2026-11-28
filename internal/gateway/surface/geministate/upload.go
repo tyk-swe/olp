@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -267,7 +268,7 @@ func (u upload) report() {
 type chunk struct {
 	body     io.Reader
 	length   int64
-	manifest *kernel.BatchManifest
+	manifest *managedbatch.Manifest
 	handle   staging.Handle
 	file     *os.File
 }
@@ -305,7 +306,7 @@ func (u upload) stage(ctx context.Context) (chunk, *fault.Error) {
 	if u.state.offset != 0 || !u.command.finalize || artifact.ContentLength != u.state.expected {
 		return staged, nil
 	}
-	manifest, qualifyErr := qualifyJSONL(opened.File, u.route.Slug, u.kernel.BatchLineDigest)
+	manifest, qualifyErr := qualifyJSONL(opened.File, u.route.Slug, u.lineDigest)
 	if _, err := opened.File.Seek(0, io.SeekStart); err != nil {
 		return staged, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini file could not be read.")
 	}
@@ -359,7 +360,7 @@ func (u upload) advance(ctx context.Context, resp *kernel.PinnedResponse, offset
 	u.finishAck(u.w, u.x, resp.Exchange)
 }
 
-func (u upload) finalize(ctx context.Context, resp *kernel.PinnedResponse, offset int64, manifest *kernel.BatchManifest) {
+func (u upload) finalize(ctx context.Context, resp *kernel.PinnedResponse, offset int64, manifest *managedbatch.Manifest) {
 	reply, err := u.bind(ctx, resp, offset, manifest)
 	if err != nil {
 		u.kernel.Refuse(u.x, u.w, err)
@@ -370,7 +371,7 @@ func (u upload) finalize(ctx context.Context, resp *kernel.PinnedResponse, offse
 	u.kernel.WriteStateJSON(u.w, u.x, reply, resp.Exchange)
 }
 
-func (u upload) bind(ctx context.Context, resp *kernel.PinnedResponse, offset int64, manifest *kernel.BatchManifest) ([]byte, *fault.Error) {
+func (u upload) bind(ctx context.Context, resp *kernel.PinnedResponse, offset int64, manifest *managedbatch.Manifest) ([]byte, *fault.Error) {
 	body, readErr := resp.ReadBody(u.kernel.Config.MaxResponseBytes)
 	if readErr != nil {
 		u.fail()
@@ -434,7 +435,7 @@ func readFinalFile(body []byte, model string) (finalFile, *fault.Error) {
 	return finalFile{object: envelope.File, upstreamID: upstreamID, state: state, expires: expires, metadata: metadata}, nil
 }
 
-func withManifest(metadata json.RawMessage, manifest *kernel.BatchManifest) json.RawMessage {
+func withManifest(metadata json.RawMessage, manifest *managedbatch.Manifest) json.RawMessage {
 	if manifest == nil {
 		return metadata
 	}

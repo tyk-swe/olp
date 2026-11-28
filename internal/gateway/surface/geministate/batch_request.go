@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 )
 
 type batchInput struct {
@@ -199,56 +200,56 @@ func validateItem(request oif.Value, slug string) *fault.Error {
 	if _, err := protocols.Parse(wire.Gemini, []byte(request.Raw()), slug); err != nil {
 		return fault.InvalidRequest("invalid_request", "A batch request is not a valid Gemini GenerateContent request.", nil)
 	}
-	if kernel.GeminiBatchHasFileReference(request) {
+	if managedbatch.GeminiBatchHasFileReference(request) {
 		return fault.InvalidRequest("unsupported_parameter", "Gemini batches do not support unbound file or cached-content references.", nil)
 	}
 	return nil
 }
 
-func qualifyJSONL(input io.Reader, slug string, digest func(string) ([]byte, bool)) (kernel.BatchManifest, error) {
-	manifest := kernel.BatchManifest{Adapter: kernel.GeminiNativeManifest, LineOperation: wire.LineGeneration}
+func qualifyJSONL(input io.Reader, slug string, digest func(string) ([]byte, bool)) (managedbatch.Manifest, error) {
+	manifest := managedbatch.Manifest{Adapter: managedbatch.GeminiNativeManifest, LineOperation: wire.LineGeneration}
 	seen := map[[32]byte]struct{}{}
 	hash := sha256.New()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 64<<10), batches.MaxLineBytes+1)
 	for scanner.Scan() {
 		if manifest.LineCount >= 100000 {
-			return kernel.BatchManifest{}, errors.New("Gemini batch input exceeds its request limit")
+			return managedbatch.Manifest{}, errors.New("Gemini batch input exceeds its request limit")
 		}
 		document, err := oif.ParseJSON(scanner.Bytes(), oif.Limits{MaxBytes: batches.MaxLineBytes})
 		if err != nil || document.Root().Kind() != oif.Object || !onlyFields(document.Root(), "key", "request") {
-			return kernel.BatchManifest{}, errors.New("invalid Gemini batch JSONL item")
+			return managedbatch.Manifest{}, errors.New("invalid Gemini batch JSONL item")
 		}
 		keyValue, ok := document.Root().Lookup("key")
 		key, valid := keyValue.Text()
 		if !ok || !valid || key == "" || len(key) > 128 {
-			return kernel.BatchManifest{}, errors.New("invalid Gemini batch item key")
+			return managedbatch.Manifest{}, errors.New("invalid Gemini batch item key")
 		}
 		request, present := document.Root().Lookup("request")
 		if !present {
-			return kernel.BatchManifest{}, errors.New("Gemini batch item has no request")
+			return managedbatch.Manifest{}, errors.New("Gemini batch item has no request")
 		}
 		if err := validateItem(request, slug); err != nil {
-			return kernel.BatchManifest{}, err
+			return managedbatch.Manifest{}, err
 		}
 		identity, ok := digest(key)
 		if !ok || len(identity) != 32 {
-			return kernel.BatchManifest{}, errors.New("Gemini batch identity is unavailable")
+			return managedbatch.Manifest{}, errors.New("Gemini batch identity is unavailable")
 		}
 		var identityKey [32]byte
 		copy(identityKey[:], identity)
 		if _, duplicate := seen[identityKey]; duplicate {
-			return kernel.BatchManifest{}, errors.New("duplicate Gemini batch item key")
+			return managedbatch.Manifest{}, errors.New("duplicate Gemini batch item key")
 		}
 		seen[identityKey] = struct{}{}
 		hash.Write(identity)
 		manifest.LineCount++
 	}
 	if scanner.Err() != nil {
-		return kernel.BatchManifest{}, scanner.Err()
+		return managedbatch.Manifest{}, scanner.Err()
 	}
 	if manifest.LineCount == 0 {
-		return kernel.BatchManifest{}, errors.New("Gemini batch input is empty")
+		return managedbatch.Manifest{}, errors.New("Gemini batch input is empty")
 	}
 	manifest.ManifestDigest = hex.EncodeToString(hash.Sum(nil))
 	return manifest, nil
@@ -295,15 +296,15 @@ func readDisplayName(raw json.RawMessage, present bool) (*string, error) {
 func rewriteInputFile(body []byte, upstreamName string) ([]byte, error) {
 	var root map[string]json.RawMessage
 	if json.Unmarshal(body, &root) != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	var batch map[string]json.RawMessage
 	if json.Unmarshal(root["batch"], &batch) != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	var input map[string]json.RawMessage
 	if json.Unmarshal(batch["inputConfig"], &input) != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	input["fileName"] = kernel.MustJSON(upstreamName)
 	batch["inputConfig"] = kernel.MustJSON(input)

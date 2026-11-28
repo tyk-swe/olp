@@ -189,7 +189,7 @@ func (t turn) answerGeneration(ctx context.Context, pin *kernel.Pin, response *k
 		t.refuse(e)
 		return
 	}
-	kernel.RecordInteractionUsage(response.Exchange, result.Source.Root())
+	t.recordInteractionUsage(response.Exchange, result.Source.Root())
 	switch {
 	case result.Status == "failed":
 		response.Exchange.Complete(kernel.ClassUpstreamServer)

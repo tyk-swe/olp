@@ -14,13 +14,14 @@ import (
 const profile = "gemini-interactions"
 
 type surface struct {
-	kernel   *kernel.Server
-	store    *resources.Store
-	resolver *resources.Resolver
+	kernel    *kernel.Server
+	store     *resources.Store
+	resolver  *resources.Resolver
+	admission snapshotInstaller
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, resolver *resources.Resolver) {
-	s := surface{kernel: k, store: store, resolver: resolver}
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, resolver *resources.Resolver, admission snapshotInstaller) {
+	s := surface{kernel: k, store: store, resolver: resolver, admission: admission}
 	mux.HandleFunc("POST /gemini/v1beta/interactions", s.create)
 	mux.HandleFunc("GET /gemini/v1beta/interactions/{id}", s.resource)
 	mux.HandleFunc("DELETE /gemini/v1beta/interactions/{id}", s.resource)

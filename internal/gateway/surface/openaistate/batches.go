@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -75,7 +76,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 	// authorized or projected.
 	rows, err := s.store.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.kernel.Refuse(x, w, kernel.ResourceListError(err, "The batch list could not be read."))
+		s.kernel.Refuse(x, w, resourceListError(err, "The batch list could not be read."))
 		return
 	}
 	hasMore := len(rows) > limit
@@ -92,7 +93,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		obj, err := s.kernel.BatchObject(r.Context(), row)
+		obj, err := s.batchObject(r.Context(), row)
 		if err != nil {
 			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list could not be projected."))
 			return
@@ -100,7 +101,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 		items = append(items, obj)
 		ids = append(ids, row.ID)
 	}
-	s.kernel.WriteStateJSON(w, x, kernel.ListBody(items, ids, hasMore))
+	s.kernel.WriteStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s surface) getBatch(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +131,7 @@ func (s surface) cancelBatch(w http.ResponseWriter, r *http.Request) {
 			case wire.BatchTerminal:
 				return fault.ServerError(http.StatusConflict, "resource_transition", "This batch has already reached a terminal state.")
 			case wire.BatchCancelling:
-				out, err := s.kernel.BatchObject(ctx, res)
+				out, err := s.batchObject(ctx, res)
 				if err != nil {
 					return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted cancellation could not be projected.")
 				}
@@ -143,7 +144,7 @@ func (s surface) cancelBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func storedAdapter(res *resources.Resource) (connectors.BatchAdapter, *fault.Error) {
-	adapter, err := kernel.ResourceAdapter(res)
+	adapter, err := managedbatch.ResourceAdapter(res)
 	if err != nil {
 		return "", fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored provider mapping is malformed.")
 	}
@@ -196,7 +197,7 @@ func (s surface) batchRefresh(ctx context.Context, x *kernel.Call, res *resource
 		}
 		current.State, current.Metadata = refreshed.state, refreshed.metadata
 	}
-	out, err := s.kernel.BatchObject(ctx, &current)
+	out, err := s.batchObject(ctx, &current)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
 	}
@@ -227,7 +228,7 @@ func (s surface) fetchBatch(ctx context.Context, x *kernel.Call, p *kernel.Pin, 
 
 func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapter, result []byte, maxBytes int64) (refreshedBatch, *fault.Error) {
 	malformed := fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
-	record, err := kernel.DecodeBatchRecord(res)
+	record, err := decodeBatchRecord(res)
 	if err != nil {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored batch mapping is malformed.")
 	}
@@ -248,7 +249,7 @@ func refreshBatchMetadata(res *resources.Resource, adapter connectors.BatchAdapt
 		}
 		return refreshedBatch{state: adoption.State, metadata: adoption.Metadata}, nil
 	default:
-		if res.Kind != resources.KindStrictBatch && !kernel.RetainedIdentityMatches(result, res.UpstreamID, maxBytes) {
+		if res.Kind != resources.KindStrictBatch && !retainedIdentityMatches(result, res.UpstreamID, maxBytes) {
 			return refreshedBatch{}, malformed
 		}
 		adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, kernel.ResourceModel(res), record.LocalInputFileID, nil)
@@ -264,12 +265,12 @@ func refreshGeminiManagedBatch(res *resources.Resource, result []byte) (refreshe
 	if err != nil || batch.ID != res.UpstreamID {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a mismatched Gemini batch identity.")
 	}
-	base, err := kernel.DecodeGeminiManagedRecord(res.Metadata)
+	base, err := managedbatch.DecodeGeminiRecord(res.Metadata)
 	if err != nil {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The stored Gemini batch could not be projected.")
 	}
-	managed, err := kernel.GeminiManagedBatchMetadata(result, kernel.ResourceModel(res), base)
-	if errors.Is(err, kernel.ErrGeminiManagedBatchState) {
+	managed, err := managedbatch.GeminiBatchMetadata(result, kernel.ResourceModel(res), base)
+	if errors.Is(err, managedbatch.ErrGeminiManagedBatchState) {
 		return refreshedBatch{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unknown Gemini batch status.")
 	}
 	if err != nil {
@@ -279,7 +280,7 @@ func refreshGeminiManagedBatch(res *resources.Resource, result []byte) (refreshe
 }
 
 func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchange *kernel.PinnedExchange, res *resources.Resource, state string, result []byte) *fault.Error {
-	validated, _, err := kernel.StrictBatchResult(result, res.UpstreamID)
+	validated, _, err := strictBatchResult(result, res.UpstreamID)
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result.")
 	}
@@ -288,7 +289,7 @@ func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 		exchange.Interrupt(kernel.ClassProtocol, true)
 		return kernel.DurableError(err)
 	}
-	if !kernel.StrictBatchInputMatches(validated, contract.Effective) {
+	if !strictBatchInputMatches(validated, contract.Effective) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider changed the batch input file identity.")
 	}
 	exchange.Complete(kernel.ClassSuccess)

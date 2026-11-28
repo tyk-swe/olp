@@ -18,7 +18,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
-	"github.com/tyk-swe/olp/internal/keyauthority"
 	limitadmission "github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/limits/scripts"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -164,35 +163,36 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 	}
 }
 
-func TestGeminiManagedFileRejectsOversizedProviderLine(t *testing.T) {
+func TestInterruptedPinnedExchangeSettlesProbeByAttribution(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, Config{MaxResponseBytes: 4 << 20})
-	spool, err := staging.NewSpool(t.TempDir(), staging.MinCapacityBytes, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = spool.Close() })
-	h.gateway.Deps.Staging = spool
-	h.mock.set("download", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"key":"huge","error":{"message":"`+strings.Repeat("a", managedBatchLineLimit+2)+`"}}`+"\n")
-	})
-	p := testPinnedTarget(h, 0)
-	probed, granted := openTestProbe(t, h, p.Provider.ID)
-	if !probed || !granted {
-		t.Fatal("could not claim half-open probe")
-	}
-	p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
-	res := &resources.Resource{UpstreamID: "files/result", RouteSlug: routeSlug, Metadata: json.RawMessage(`{"role":"error"}`)}
-	recorder := httptest.NewRecorder()
-	failure := h.gateway.GeminiManagedFileContent(t.Context(), recorder, x, res, p)
-	if failure == nil || failure.Code != "fidelity_protocol_violation" {
-		t.Fatalf("unexpected download result: %+v", failure)
-	}
-	h.gateway.Refuse(x, recorder, failure)
-	h.gateway.SettlePinnedHold(t.Context(), p.Hold)
-	if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed || granted {
-		t.Fatalf("oversized native line left circuit available, probe=%v granted=%v", probed, granted)
+	for _, tc := range []struct {
+		name  string
+		local bool
+	}{
+		{"provider protocol failure keeps the circuit open", false},
+		{"local refusal releases the probe", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, Config{})
+			p := testPinnedTarget(h, 0)
+			probed, granted := openTestProbe(t, h, p.Provider.ID)
+			if !probed || !granted {
+				t.Fatal("could not claim half-open probe")
+			}
+			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/files/file-native", nil, "")
+			if failure != nil {
+				t.Fatalf("pinned request failed: %+v", failure)
+			}
+			defer func() { _ = response.Body.Close() }()
+			response.Exchange.Interrupt(ClassProtocol, tc.local)
+			h.gateway.SettlePinnedHold(t.Context(), p.Hold)
+			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed != tc.local || granted != tc.local {
+				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
+			}
+		})
 	}
 }
 
@@ -466,48 +466,6 @@ func TestCompactionBindingFailurePreservesProviderUsage(t *testing.T) {
 	if attempt.Class != ClassProtocol || !attempt.LocalRefusal || !attempt.UsageObserved || !attempt.UsageComplete || attempt.BillingUncertain ||
 		attempt.Usage == nil || attempt.Usage.InputTokens != 10 || attempt.Usage.OutputTokens != 5 || attempt.Usage.TotalTokens != 15 {
 		t.Fatalf("compaction accounting after binding failure = %+v, usage = %+v", attempt, attempt.Usage)
-	}
-}
-
-func TestManagedFileRefreshAttributesMetadataFailure(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name, storedMetadata, providerBody string
-		local                              bool
-	}{
-		{"provider byte count", `{"adapter":"mistral"}`, `{"id":"file-native","bytes":-1}`, false},
-		{"stored byte count", `{"adapter":"mistral","provider_file":{"bytes":-1}}`, `{"id":"file-native","bytes":10}`, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			h := newHarness(t, Config{})
-			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = io.WriteString(w, tc.providerBody)
-			})
-			p := testPinnedTarget(h, 0)
-			probed, granted := openTestProbe(t, h, p.Provider.ID)
-			if !granted || !probed {
-				t.Fatal("could not claim half-open probe")
-			}
-			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
-			id := uuid.New()
-			res := &resources.Resource{UUID: id, ID: resources.LocalID(resources.KindFile, id), Kind: resources.KindFile, UpstreamID: "file-native", Metadata: json.RawMessage(tc.storedMetadata)}
-			w := httptest.NewRecorder()
-			failure := h.gateway.GetPinnedFile(t.Context(), w, x, keyauthority.Authority{ID: h.keyID}, res, p)
-			if failure == nil || failure.Status != http.StatusBadGateway || failure.Code != "fidelity_protocol_violation" {
-				t.Fatalf("unexpected file refresh failure: %+v", failure)
-			}
-			h.gateway.Refuse(x, w, failure)
-			h.gateway.SettlePinnedHold(t.Context(), p.Hold)
-			env := h.sink.last(t)
-			if len(env.Attempts) != 1 || env.Attempts[0].Class != ClassProtocol || env.Attempts[0].LocalRefusal != tc.local {
-				t.Fatalf("unexpected attempt evidence: %+v", env.Attempts)
-			}
-			if probed, granted := h.gateway.health.Claim(p.Provider.ID); probed != tc.local || granted != tc.local {
-				t.Fatalf("after settlement, probe=%v granted=%v", probed, granted)
-			}
-		})
 	}
 }
 

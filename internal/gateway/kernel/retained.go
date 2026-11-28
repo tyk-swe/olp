@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -205,11 +206,11 @@ func (x *Call) retainedContentGate(resource *resources.Resource, route *routing.
 		case resources.KindAnthropicFile, resources.KindAnthropicBatch, resources.KindGeminiFile, resources.KindGeminiBatch:
 			return x.GuardrailSurfaceGate(route)
 		case resources.KindFile:
-			if adapter, err := ResourceAdapter(resource); err != nil || RetainedFileOperation(resource) != "batch" || adapter.Managed() {
+			if adapter, err := managedbatch.ResourceAdapter(resource); err != nil || RetainedFileOperation(resource) != "batch" || adapter.Managed() {
 				return x.GuardrailSurfaceGate(route)
 			}
 		case resources.KindBatch:
-			if adapter, err := ResourceAdapter(resource); err != nil || adapter.Managed() {
+			if adapter, err := managedbatch.ResourceAdapter(resource); err != nil || adapter.Managed() {
 				return x.GuardrailSurfaceGate(route)
 			}
 		}
