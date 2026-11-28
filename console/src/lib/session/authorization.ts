@@ -3,13 +3,10 @@ import {
   type ManagementOperation,
   type ManagementRoute
 } from '#lib/management/requirements.js';
+import { FIXED_ROLES } from '#lib/management/enums.js';
+import type { components } from '#lib/management/schema.js';
 
-export const FIXED_ROLES = [
-  'owner',
-  'operator',
-  'developer',
-  'viewer'
-] as const;
+export { FIXED_ROLES };
 export type FixedRole = (typeof FIXED_ROLES)[number];
 
 const FIXED_ROLE_SET = new Set<string>(FIXED_ROLES);
@@ -25,7 +22,7 @@ export function isFixedRole(value: unknown): value is FixedRole {
  */
 export type Grant = {
   readonly operations: readonly ManagementOperation[];
-  readonly access_scope: 'global' | 'assigned';
+  readonly access_scope: components['schemas']['UserResponse']['access_scope'];
 };
 
 /**

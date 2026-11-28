@@ -24,6 +24,16 @@
   } = $props();
   let copied = $state('');
 
+  const platformLabels: Record<CodeClientPlatform, string> = {
+    linux: 'Linux',
+    macos: 'macOS',
+    windows: 'Windows (PowerShell)'
+  };
+  const platforms = Object.entries(platformLabels).map(([value, label]) => ({
+    value,
+    label
+  }));
+
   let chosen = $state<{ revisionId: string; selection: CodeClientSelection }>();
   const selection = $derived<CodeClientSelection>(
     chosen?.revisionId === route.revision_id ? chosen.selection : {}
@@ -93,11 +103,7 @@
         label="Platform"
         name={ids.platform}
         value={pickerConfig.platform}
-        items={[
-          { value: 'linux', label: 'Linux' },
-          { value: 'macos', label: 'macOS' },
-          { value: 'windows', label: 'Windows (PowerShell)' }
-        ]}
+        items={platforms}
         onChange={(platform) =>
           select({ platform: platform as CodeClientPlatform })}
       />

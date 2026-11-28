@@ -2,6 +2,18 @@
   import Advanced from '#lib/components/Advanced.svelte';
   import { parseJsonObject } from '#lib/editing/json.js';
   import { parseManualModelNames } from '#lib/features/providers/index.js';
+  import type { components } from '#lib/management/schema.js';
+  const strategyLabels: Record<
+    components['schemas']['RoutingStrategy'],
+    string
+  > = {
+    weighted: 'Weighted',
+    price: 'Price',
+    latency: 'Latency',
+    throughput: 'Throughput',
+    capacity: 'Capacity headroom',
+    bounded_cost: 'Bounded cost'
+  };
   let {
     value = $bindable('{}'),
     id = 'routing-preferences',
@@ -197,15 +209,10 @@
       value={String(current.strategy ?? '')}
       onchange={(e) => set('strategy', e.currentTarget.value || undefined)}
     >
-      <option value="">Use configured default</option><option value="weighted">
-        Weighted
-      </option><option value="price">Price</option><option value="latency">
-        Latency
-      </option><option value="throughput">Throughput</option><option
-        value="capacity"
-      >
-        Capacity headroom
-      </option><option value="bounded_cost">Bounded cost</option>
+      <option value="">Use configured default</option>
+      {#each Object.entries(strategyLabels) as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
     </select>
   {/if}
   {#if !constraintsOnly}

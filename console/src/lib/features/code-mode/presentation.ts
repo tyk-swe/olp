@@ -9,6 +9,7 @@ import type {
   CodeAllowanceWindow,
   CodeAttempt,
   CodeBudget,
+  CodeClientConfiguration,
   CodeDecision,
   CodePool,
   CodeRoute
@@ -34,7 +35,7 @@ const adapterLabels: Record<string, string> = {
   minimax_plan: 'MiniMax M Plan',
   kimi_code: 'Kimi Code',
   qwen_token_plan: 'Qwen Token Plan'
-};
+} satisfies Partial<Record<CodeRoute['adapters'][number], string>>;
 
 export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
@@ -114,7 +115,7 @@ const clientLabels: Record<string, string> = {
   codex: 'Codex CLI',
   'claude-code': 'Claude Code',
   opencode: 'OpenCode'
-};
+} satisfies Record<CodeClientConfiguration['client'], string>;
 
 export function clientLabel(client: string): string {
   return clientLabels[client] ?? client;

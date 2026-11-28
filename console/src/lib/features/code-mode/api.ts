@@ -14,6 +14,9 @@ export type CodeAccount = Schemas['CodeAccount'];
 export type CodeAllowanceWindow = Schemas['CodeAllowanceWindow'];
 export type CodeAccountWrite = Schemas['CodeAccountWrite'];
 export type CodePool = Schemas['CodePool'];
+export type CodeResearchService = NonNullable<
+  Schemas['CodeResearchTools']
+>['services'][number];
 export type CodePoolWrite = Schemas['CodePoolWrite'];
 export type CodeRoute = Schemas['CodeRoute'];
 export type CodeRouteWrite = Schemas['CodeRouteWrite'];

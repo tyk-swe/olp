@@ -443,7 +443,7 @@ export class RouteDraftEditorState {
       const surfaces = this.surfaces;
       if (!surfaces.includes(this.simulationSurface))
         this.simulationSurface = surfaces[0] ?? 'openai';
-      const modes = modesFor(this.simulationOperation);
+      const modes: string[] = modesFor(this.simulationOperation);
       if (!modes.includes(this.simulationMode))
         this.simulationMode = modes[0] ?? 'unary';
       if (

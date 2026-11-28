@@ -2,6 +2,7 @@
   import AttachmentControls from './AttachmentControls.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
+  import { GUARDRAIL_ATTACHMENT_SCOPES } from '#lib/management/enums.js';
   import type { useAction } from '#lib/editing/action.svelte.js';
   import type { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { attachPolicy as attachPolicyAPI, type Policy } from './api';
@@ -96,9 +97,7 @@
       </label>
       <label class="form-field">
         Scope<select bind:value={scope}>
-          {#each ['installation', 'organization', 'project', 'route', 'toolset', 'api-key'] as value (value)}<option
-              {value}
-            >
+          {#each GUARDRAIL_ATTACHMENT_SCOPES as value (value)}<option {value}>
               {value}
             </option>{/each}
         </select>

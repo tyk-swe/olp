@@ -1,5 +1,10 @@
 import { parseJsonObject } from '#lib/editing/json.js';
 import { validated, type FieldErrors } from '#lib/editing/validation.js';
+import type {
+  AWS_BILLING_AUTH_MODES,
+  AZURE_BILLING_AUTH_MODES,
+  GOOGLE_BILLING_AUTH_MODES
+} from '#lib/management/enums.js';
 import type { BillingImport, PutBillingImportInput } from './billing.js';
 
 export type BillingImportFormValues = {
@@ -9,7 +14,7 @@ export type BillingImportFormValues = {
   reportPrefix: string;
   region: string;
   linkedAccounts: string;
-  awsAuthMode: 'static' | 'workload';
+  awsAuthMode: (typeof AWS_BILLING_AUTH_MODES)[number];
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken: string;
@@ -20,7 +25,7 @@ export type BillingImportFormValues = {
   storageAccount: string;
   container: string;
   prefix: string;
-  authMode: '' | 'azure_default' | 'azure_client_secret';
+  authMode: '' | (typeof AZURE_BILLING_AUTH_MODES)[number];
   tenantId: string;
   clientId: string;
   clientSecret: string;
@@ -28,7 +33,7 @@ export type BillingImportFormValues = {
   bigQueryProjectID: string;
   datasetID: string;
   tableID: string;
-  googleAuthMode: 'keep' | 'service_account' | 'adc';
+  googleAuthMode: 'keep' | (typeof GOOGLE_BILLING_AUTH_MODES)[number];
   enabled: boolean;
 };
 

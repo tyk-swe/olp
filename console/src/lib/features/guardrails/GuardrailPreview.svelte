@@ -7,6 +7,7 @@
   import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
   import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
+  import type { components } from '#lib/management/schema.js';
   import {
     getGuardrailPreview,
     type PreviewEntry,
@@ -32,14 +33,18 @@
     realtime: ['openai-realtime', 'gemini-live', 'native-duplex'],
     passthrough: ['native']
   };
-  const transformed = [
+  const transformed: readonly string[] = [
     'openai-embeddings',
     'openai-moderation',
     'rerank',
     'openai-input-tokens',
     'anthropic-count-tokens',
     'gemini-count-tokens'
-  ];
+  ] satisfies components['schemas']['SimulationDialect'][];
+  const deliveryLabels: Record<
+    NonNullable<PreviewSelection['mode']>,
+    string
+  > = { unary: 'Buffered', streaming: 'Streaming' };
   const partialNotice =
     'This preview shows only guardrails you can view. Full-policy compatibility is not shown.';
   const notes: Record<PreviewEntry['notes'][number], string> = {
@@ -231,8 +236,9 @@
           <label class="form-field">
             Delivery mode
             <select bind:value={delivery}>
-              <option value="unary">Buffered</option>
-              <option value="streaming">Streaming</option>
+              {#each Object.entries(deliveryLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </label>
         {/if}

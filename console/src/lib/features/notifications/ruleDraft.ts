@@ -3,6 +3,7 @@ import {
   type FieldErrors,
   type Validation
 } from '#lib/editing/validation.js';
+import type { components } from '#lib/management/schema.js';
 import type { CreateNotificationRuleInput, NotificationEvent } from './api';
 
 type FieldKey =
@@ -192,9 +193,9 @@ export type RuleDraft = {
     RuleIdentity &
     (Event extends 'budget.threshold'
       ? {
-          subjectKind: 'api_key' | 'budget_group';
+          subjectKind: components['schemas']['BudgetSubjectKind'];
           subjectId: string;
-          window: 'day' | 'week' | 'month';
+          window: components['schemas']['BudgetWindowKind'];
           threshold: string;
         }
       : Event extends 'key.expiring'

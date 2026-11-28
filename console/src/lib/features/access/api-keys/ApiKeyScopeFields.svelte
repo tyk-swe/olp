@@ -3,9 +3,10 @@
   import { NamedLimitFields } from '#lib/features/budgets/index.js';
   import AttributionFields from '../attribution/AttributionFields.svelte';
   import PolicyFields from '../end-users/PolicyFields.svelte';
-  import type { ApiKeyFormState } from './apiKeyPolicy.js';
+  import type { ApiKeyFormState, EndUserSource } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import type { ActiveRoute } from '#lib/domain/routes/api.js';
+  import type { components } from '#lib/management/schema.js';
 
   let {
     form,
@@ -34,6 +35,23 @@
     toggle: (list: string[], value: string, checked: boolean) => string[];
     touch: () => void;
   } = $props();
+
+  const scopeLabels: Record<
+    components['schemas']['WorkloadMapping']['scopes'][number],
+    string
+  > = {
+    inference: 'Inference requests',
+    models_read: 'Model listing',
+    guardrails: 'Guardrail evaluation',
+    tools: 'Toolset access',
+    agents: 'Agent access',
+    traces_write: 'Trace ingestion',
+    delegate: 'Delegation consent'
+  };
+  const endUserSourceLabels: Record<EndUserSource, string> = {
+    header: 'X-OLP-End-User header',
+    native: 'Native JSON field'
+  };
 </script>
 
 <section aria-labelledby="scope-heading">
@@ -41,7 +59,7 @@
   <fieldset class="checks">
     <legend>
       Scopes
-    </legend>{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation'], ['tools', 'Toolset access'], ['agents', 'Agent access'], ['traces_write', 'Trace ingestion'], ['delegate', 'Delegation consent']] as scope (scope[0])}<label>
+    </legend>{#each Object.entries(scopeLabels) as scope (scope[0])}<label>
         <input
           type="checkbox"
           checked={form.scopes.includes(scope[0])}
@@ -188,8 +206,9 @@
             aria-describedby="key-end-user-help"
           >
             <option value="">Not required</option>
-            <option value="header">X-OLP-End-User header</option>
-            <option value="native">Native JSON field</option>
+            {#each Object.entries(endUserSourceLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
           <small id="key-end-user-help">
             Requires a machine token of up to 128 characters. Native fields are

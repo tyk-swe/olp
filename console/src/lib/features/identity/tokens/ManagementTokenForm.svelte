@@ -3,10 +3,7 @@
   import { focusFormError } from '#lib/editing/focusError.js';
   import type { FieldErrors } from '#lib/editing/validation.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import {
-    MANAGEMENT_TOKEN_SCOPES,
-    type ManagementTokenScope
-  } from '#lib/features/identity/tokens/api.js';
+  import type { ManagementTokenScope } from '#lib/features/identity/tokens/api.js';
   import type { Project } from '#lib/domain/projects/api.js';
   import {
     newTokenDraft,
@@ -42,18 +39,19 @@
     // day of headroom for client clock skew.
     { days: 365, label: '365 days' }
   ];
-  const scopeLabels: Record<string, string> = {
+  const scopeLabels: Record<ManagementTokenScope, string> = {
     read: 'Read management state',
     access_read: 'Read members and sessions',
     access: 'Manage members and provisioning',
     settings: 'Manage settings and pricing',
     configure: 'Manage providers and routes',
     keys: 'Manage API keys',
-    manage_projects: 'Manage installation projects',
     manage_organization: 'Manage organizations',
+    manage_projects: 'Manage installation projects',
     playground: 'Use the playground',
     usage: 'Read usage and request history'
   };
+  const scopes = Object.keys(scopeLabels) as ManagementTokenScope[];
 
   const id = $props.id();
   let draft = $state(newTokenDraft());
@@ -112,14 +110,14 @@
   </FormField>
   <fieldset>
     <legend>Scopes</legend>
-    {#each MANAGEMENT_TOKEN_SCOPES as scope (scope)}
+    {#each scopes as scope (scope)}
       <label class="scope-option">
         <input
           type="checkbox"
           checked={draft.scopes.includes(scope)}
           onchange={() => toggle(scope)}
           {...reported('scopes')}
-        />{scopeLabels[scope] ?? scope}<code>{scope}</code>
+        />{scopeLabels[scope]}<code>{scope}</code>
       </label>
     {/each}
     {@render problemAt('scopes')}

@@ -16,7 +16,9 @@
     manageMFA,
     removeMFA,
     recoveryMFA,
-    type MFAFactor
+    mfaKindLabels,
+    type MFAFactor,
+    type MFAKind
   } from './api';
   import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
   let {
@@ -30,7 +32,11 @@
   }));
   let password = $state('');
   let name = $state('My authenticator');
-  let kind = $state<'totp' | 'webauthn'>('totp');
+  let kind = $state<MFAKind>('totp');
+  const unavailableKinds = $derived<Record<MFAKind, boolean>>({
+    totp: !!status.data?.factors.some((f) => f.kind === 'totp'),
+    webauthn: status.data?.webauthn_available === false
+  });
   const mfa = useAction();
   let notice = $state('');
   let codes = $state<string[] | null>(null);
@@ -246,17 +252,11 @@
               id="profile-mfa-kind"
               bind:value={kind}
             >
-              <option
-                value="totp"
-                disabled={status.data.factors.some((f) => f.kind === 'totp')}
-              >
-                Authenticator app
-              </option><option
-                value="webauthn"
-                disabled={status.data?.webauthn_available === false}
-              >
-                Security key or passkey
-              </option>
+              {#each Object.entries(mfaKindLabels) as [value, label] (value)}
+                <option {value} disabled={unavailableKinds[value as MFAKind]}>
+                  {label}
+                </option>
+              {/each}
             </select>
           </div>
           <div class="form-field">

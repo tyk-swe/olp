@@ -25,6 +25,11 @@
     type RetrievalBindingField
   } from './retrievalBindingDraft';
 
+  const backendLabels: Record<RetrievalBindingInput['backend'], string> = {
+    bedrock_knowledge_base: 'Bedrock Knowledge Bases',
+    vertex_rag: 'Vertex RAG Engine',
+    azure_ai_search: 'Azure AI Search'
+  };
   const access = useRole();
   const client = useQueryClient();
   const queryKey = resourceKeys.retrievalBindings();
@@ -248,13 +253,9 @@
           <FormField label="Backend" error={undefined}>
             {#snippet control(attributes)}
               <select {...attributes} bind:value={backend}>
-                <option value="bedrock_knowledge_base">
-                  Bedrock Knowledge Bases
-                </option><option value="vertex_rag">
-                  Vertex RAG Engine
-                </option><option value="azure_ai_search">
-                  Azure AI Search
-                </option>
+                {#each Object.entries(backendLabels) as [value, label] (value)}
+                  <option {value}>{label}</option>
+                {/each}
               </select>
             {/snippet}
           </FormField>

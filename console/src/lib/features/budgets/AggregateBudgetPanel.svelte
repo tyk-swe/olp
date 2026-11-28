@@ -21,6 +21,7 @@
     type AggregateBudgetField
   } from './aggregateBudgetDraft';
   import { aggregateBudgetKeys } from './aggregateBudgetKeys';
+  import { costBasisLabels } from './limitForm';
 
   let {
     projectId,
@@ -114,8 +115,9 @@
         <div class="form-field">
           <label for={basisId}>Budget basis</label>
           <select id={basisId} bind:value={draft.cost_basis}>
-            <option value="cost">Provider cost</option>
-            <option value="charge">Consumer charge</option>
+            {#each Object.entries(costBasisLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
           <small>
             {#if (query.data?.usage as { cost_basis?: string }).cost_basis === 'charge'}

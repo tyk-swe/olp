@@ -17,11 +17,18 @@
     editable: boolean;
     busy: boolean;
     onRemove: (member: ProjectMember) => void;
-    onAdd: (userId: string, role: 'manager' | 'viewer') => Promise<boolean>;
+    onAdd: (
+      userId: string,
+      role: ProjectMember['project_role']
+    ) => Promise<boolean>;
   } = $props();
 
   let projectUser = $state('');
-  let projectRole = $state<'manager' | 'viewer'>('viewer');
+  let projectRole = $state<ProjectMember['project_role']>('viewer');
+  const roleLabels: Record<ProjectMember['project_role'], string> = {
+    viewer: 'Viewer',
+    manager: 'Manager'
+  };
 
   async function add(event: SubmitEvent) {
     event.preventDefault();
@@ -55,9 +62,9 @@
       />
     </label><label class="form-field">
       Role<select bind:value={projectRole} disabled={busy}>
-        <option value="viewer">Viewer</option><option value="manager">
-          Manager
-        </option>
+        {#each Object.entries(roleLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     </label><button class="button button-primary" disabled={busy}>
       Add to project

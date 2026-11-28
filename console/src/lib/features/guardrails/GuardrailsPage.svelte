@@ -24,18 +24,21 @@
     listAttachments,
     type Policy,
     type Entry,
-    type Result
+    type Result,
+    type Attachment
   } from './api';
+  import { GUARDRAIL_PHASES } from '#lib/management/enums.js';
   import { type Definition } from '#lib/domain/guardrails/api.js';
   import { guardrailKeys } from '#lib/domain/guardrails/guardrailKeys.js';
   import { guardrailQueries } from '#lib/domain/guardrails/queries.js';
 
-  const phases = [
-    'input',
-    'input_parallel',
-    'output',
-    'output_stream'
-  ] as const satisfies readonly Entry['phase'][];
+  const internalTypes: readonly Definition['type'][] = [
+    'model',
+    'semantic_guard',
+    'decision_model',
+    'typesafe',
+    'plugin'
+  ];
   const access = useRole();
   const client = useQueryClient();
   const definitions = createQuery(guardrailQueries.definitions);
@@ -88,21 +91,14 @@
   let type = $state<Definition['type']>('builtin.keywords');
   let configuration = $state('{"words":["restricted"]}');
   let timeout = $state(1000);
-  let onError = $state<'fail_closed' | 'fail_open'>('fail_closed');
+  let onError = $state<NonNullable<Definition['on_error']>>('fail_closed');
   let egress = $state(false);
   let policyEditor = $state(0);
   let selectedPolicy = $state<Policy | null>(null);
   let policyName = $state('');
   let entries = $state<Entry[]>([]);
   let attachPolicy = $state('');
-  let scope = $state<
-    | 'installation'
-    | 'organization'
-    | 'project'
-    | 'route'
-    | 'toolset'
-    | 'api-key'
-  >('project');
+  let scope = $state<Attachment['scope']>('project');
   let scopeID = $state('');
   let order = $state(0);
   let evaluatePolicy = $state('');
@@ -111,14 +107,7 @@
   let text = $state('');
   let result = $state<Result | null>(null);
   const external = $derived(
-    !type.startsWith('builtin.') &&
-      ![
-        'model',
-        'semantic_guard',
-        'decision_model',
-        'typesafe',
-        'plugin'
-      ].includes(type)
+    !type.startsWith('builtin.') && !internalTypes.includes(type)
   );
   const canEdit = $derived(access.allows('POST /api/v1/guardrails'));
   async function refresh(current: () => boolean) {
@@ -264,7 +253,7 @@
   {#if policyOpen}
     <GuardrailPolicyDialog
       {busy}
-      {phases}
+      phases={GUARDRAIL_PHASES}
       definitions={definitions.data ?? []}
       projects={projects.data ?? []}
       bind:policyName
@@ -303,7 +292,7 @@
 {:else}
   <GuardrailEvaluation
     policies={policies.data?.items ?? []}
-    {phases}
+    phases={GUARDRAIL_PHASES}
     {busy}
     canEvaluate={access.allows('POST /api/v1/guardrails/evaluate')}
     bind:evaluatePolicy

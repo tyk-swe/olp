@@ -2,6 +2,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { RunLimits } from '#lib/features/budgets/index.js';
   import type { RouteDraftEditorState } from './routeDraftEditor.svelte';
+  import type { RouteBehavior } from './routeBehavior';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();
 
@@ -20,6 +21,11 @@
   const unavailable = $derived(
     selected.filter((id) => !available.some((toolset) => toolset.id === id))
   );
+
+  const executionLabels: Record<
+    NonNullable<RouteBehavior['tool_execution']>,
+    string
+  > = { '': 'Client', gateway: 'Gateway' };
 
   function setExecution(value: string) {
     editor.behavior = {
@@ -55,8 +61,9 @@
       onchange={(event) => setExecution(event.currentTarget.value)}
       disabled={!editor.canManage || Boolean(editor.busy)}
     >
-      <option value="">Client</option>
-      <option value="gateway">Gateway</option>
+      {#each Object.entries(executionLabels) as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
     </select>
     <small>
       Gateway execution uses published read-only tools on transformed inference

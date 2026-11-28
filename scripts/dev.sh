@@ -10,7 +10,7 @@ docker compose version >/dev/null || { echo 'Install Docker Compose, then rerun 
 for executable in .local/bin/air console/node_modules/.bin/vite; do
   test -x "$executable" || { echo 'Development dependencies are missing. Run make setup' >&2; exit 1; }
 done
-for generated in console/src/lib/management/schema.d.ts console/src/lib/management/requirements.ts; do
+for generated in console/src/lib/management/schema.d.ts console/src/lib/management/requirements.ts console/src/lib/management/enums.ts; do
   test -f "$generated" || { echo 'Console types are missing. Run make setup' >&2; exit 1; }
 done
 # shellcheck source=scripts/dev-env.sh

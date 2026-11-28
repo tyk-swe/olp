@@ -1,3 +1,8 @@
+import type { components } from '#lib/management/schema.js';
+
+type Surface = components['schemas']['Surface'];
+type TransportMode = components['schemas']['TransportMode'];
+
 export const operationOptions = [
   ['generation', 'Text generation'],
   ['decision', 'Decisions'],
@@ -35,7 +40,7 @@ export const operationOptions = [
   ['passthrough', 'Governed pass-through (uncertified)']
 ] as const;
 
-export function surfacesFor(operation: string): string[] {
+export function surfacesFor(operation: string): Surface[] {
   if (operation === 'passthrough') return ['native'];
   if (operation === 'agent_resource') return ['gemini'];
   if (operation === 'bedrock_invoke') return ['bedrock'];
@@ -47,7 +52,7 @@ export function surfacesFor(operation: string): string[] {
   return ['openai'];
 }
 
-export function modesFor(operation: string): string[] {
+export function modesFor(operation: string): TransportMode[] {
   if (operation === 'video_create') return ['async'];
   if (operation === 'realtime') return ['realtime', 'webrtc'];
   if (

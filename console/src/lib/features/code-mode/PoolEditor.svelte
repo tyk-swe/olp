@@ -31,7 +31,11 @@
   const access = useRole();
   const initial = untrack(() => current);
   let name = $state(initial?.name ?? '');
-  let kind = $state<'personal' | 'shared'>(initial?.kind ?? 'personal');
+  let kind = $state<CodePool['kind']>(initial?.kind ?? 'personal');
+  const kindLabels: Record<CodePool['kind'], string> = {
+    personal: 'Personal',
+    shared: 'Shared'
+  };
   let owner = $state(
     initial?.owner_user_id ?? untrack(() => access.user?.id) ?? ''
   );
@@ -111,8 +115,9 @@
   />
   <label for="code-kind">Pool kind</label>
   <select id="code-kind" bind:value={kind} disabled={!!current}>
-    <option value="personal">Personal</option>
-    <option value="shared">Shared</option>
+    {#each Object.entries(kindLabels) as [value, label] (value)}
+      <option {value}>{label}</option>
+    {/each}
   </select>
 
   {#if kind === 'personal'}

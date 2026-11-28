@@ -6,6 +6,7 @@
   import { listProviderProfiles } from './providerProfiles';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
+  import type { components } from '#lib/management/schema.js';
   import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
   import type { ProviderEditValues } from './providerEditor';
   import {
@@ -37,6 +38,20 @@
     errors?: FieldErrors<ConnectionField>;
     onChange?: () => void;
   } = $props();
+  const credentialSourceLabels: Record<
+    NonNullable<
+      components['schemas']['ProviderConfiguration']['credential_source']
+    >,
+    string
+  > = {
+    operator: 'Operator-held credentials',
+    caller: 'Caller supplies each request'
+  };
+  const callerAuthModes: readonly string[] = [
+    'api_key',
+    'headers',
+    'static'
+  ] satisfies components['schemas']['ProviderAuthMode'][];
   const profiles = createQuery(() => ({
     queryKey: providerKeys.profiles(),
     queryFn: ({ signal }) => listProviderProfiles(signal),
@@ -144,14 +159,16 @@
       onChange?.();
     }}
   >
-    <option value="operator">Operator-held credentials</option>
-    <option
-      value="caller"
-      disabled={spec.kind === 'plugin' ||
-        !['api_key', 'headers', 'static'].includes(values.authMode)}
-    >
-      Caller supplies each request
-    </option>
+    {#each Object.entries(credentialSourceLabels) as [value, label] (value)}
+      <option
+        {value}
+        disabled={value === 'caller' &&
+          (spec.kind === 'plugin' ||
+            !callerAuthModes.includes(values.authMode))}
+      >
+        {label}
+      </option>
+    {/each}
   </select>
   <small>
     Caller mode requires X-OLP-Provider-Credential and keeps the endpoint and

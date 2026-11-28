@@ -13,7 +13,7 @@ import {
   type AttributionForm
 } from '../attribution/policy';
 import { keyCIDRs } from './keyNetwork';
-import { validateApiKey, type admissionPriorities } from './keyValidation';
+import { validateApiKey } from './keyValidation';
 import {
   policyForm,
   policyInput,
@@ -53,7 +53,7 @@ export type ApiKeyFormState = {
   allowProviderState: boolean;
   responseMetadata: boolean;
   forbidResponseCache: boolean;
-  endUserSource: '' | 'header' | 'native';
+  endUserSource: '' | EndUserSource;
   endUserPolicy: PolicyForm;
   routeLimits: NamedLimitRow[];
   limitTemplate: string;
@@ -64,7 +64,8 @@ export type ApiKeyFormState = {
   maxPriority: string;
 };
 
-type AdmissionPriority = (typeof admissionPriorities)[number];
+type AdmissionPriority = components['schemas']['AdmissionPriority'];
+export type EndUserSource = NonNullable<CreateApiKeyInput['end_user_source']>;
 
 export function createApiKeyFormState(
   editing: ApiKey | null = null
@@ -163,7 +164,7 @@ export function buildApiKeyPolicyInput(
     daily_cost_limit: optionalDecimal(state.dailyCostLimit),
     monthly_cost_limit: optionalDecimal(state.monthlyCostLimit),
     weekly_cost_limit: optionalDecimal(state.weeklyCostLimit),
-    cost_basis: (state.costBasis || 'cost') as 'cost' | 'charge',
+    cost_basis: (state.costBasis || 'cost') as CreateApiKeyInput['cost_basis'],
     expires_at: state.expiresAt
       ? new Date(state.expiresAt).toISOString()
       : null,

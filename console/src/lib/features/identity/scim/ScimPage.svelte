@@ -11,8 +11,26 @@
   import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listGroups, saveMapping, type Group } from './api';
-  import { validateMapping, type MappingDraft } from './mappingDraft';
+  import {
+    validateMapping,
+    type MappingDraft,
+    type Membership
+  } from './mappingDraft';
   import { scimKeys } from './scimKeys';
+  const roleLabels: Record<Exclude<MappingDraft['role'], ''>, string> = {
+    viewer: 'Viewer',
+    developer: 'Developer',
+    operator: 'Operator',
+    owner: 'Owner'
+  };
+  const scopeLabels: Record<MappingDraft['scope'], string> = {
+    assigned: 'Assigned projects',
+    global: 'All projects'
+  };
+  const projectRoleLabels: Record<Membership['role'], string> = {
+    viewer: 'Viewer',
+    manager: 'Manager'
+  };
   const access = useRole();
   const client = useQueryClient();
   const groups = createQuery(() => ({
@@ -132,13 +150,10 @@
           id="scim-role"
           bind:value={role}
         >
-          <option value="">No additional role</option><option value="viewer">
-            Viewer
-          </option><option value="developer">Developer</option><option
-            value="operator"
-          >
-            Operator
-          </option><option value="owner">Owner</option>
+          <option value="">No additional role</option>
+          {#each Object.entries(roleLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </div>
       <div class="form-field">
@@ -146,11 +161,9 @@
           id="scim-scope"
           bind:value={scope}
         >
-          <option value="assigned">Assigned projects</option><option
-            value="global"
-          >
-            All projects
-          </option>
+          {#each Object.entries(scopeLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select><small>
           Installation operations still require their existing role. Global
           scope broadens access to all projects.
@@ -176,8 +189,9 @@
               id={`scim-project-role-${member.id}`}
               bind:value={member.role}
             >
-              <option value="viewer">Viewer</option>
-              <option value="manager">Manager</option>
+              {#each Object.entries(projectRoleLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </div>
           <button

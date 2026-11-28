@@ -19,7 +19,7 @@ export async function listRateCards(
 
 export async function createRateCard(
   owner: {
-    kind: 'installation' | 'organization' | 'project';
+    kind: components['schemas']['RateCardOwner']['kind'];
     id?: string | null;
   },
   requestId: string

@@ -1,5 +1,7 @@
+import { EXTERNAL_CREDENTIAL_STORES } from '#lib/management/enums.js';
 import type { ExternalCredentialReference } from './credentials';
 
+const stores: readonly string[] = EXTERNAL_CREDENTIAL_STORES;
 const component = /^[A-Za-z0-9_-]+$/;
 const versionId = /^[A-Za-z0-9-]{32,64}$/;
 const numericVersion = /^[1-9][0-9]{0,18}$/;
@@ -118,7 +120,7 @@ export function parseExternalReference(
     throw new Error('Enter an external credential reference object.');
   const fields = reference as Record<string, unknown>;
   if (
-    !['aws', 'gcp', 'azure', 'vault'].includes(String(fields.store)) ||
+    !stores.includes(String(fields.store)) ||
     typeof fields.secret_id !== 'string' ||
     !fields.secret_id.trim() ||
     typeof fields.version !== 'string' ||

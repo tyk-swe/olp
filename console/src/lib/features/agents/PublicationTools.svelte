@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import type { PublicationForm, ServerPricingForm } from './form.js';
-  import { listServers, type MCPServer } from './api.js';
+  import { listServers, type MCPServer, type ToolPin } from './api.js';
 
   let {
     form = $bindable(),
@@ -26,6 +26,14 @@
     onSavePricing: () => void;
     onAddTool: (name: string) => void;
   } = $props();
+
+  const classificationLabels: Record<
+    NonNullable<ToolPin['classification']>,
+    string
+  > = {
+    read_only: 'Read-only',
+    approval_required: 'Approval required'
+  };
 
   function classifyTool(alias: string, value: string) {
     const classification =
@@ -87,8 +95,9 @@
             classifyTool(tool.alias, event.currentTarget.value)}
         >
           <option value="">Unclassified</option>
-          <option value="read_only">Read-only</option>
-          <option value="approval_required">Approval required</option>
+          {#each Object.entries(classificationLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </label><button
         class="button button-secondary"

@@ -22,6 +22,7 @@
     type IncreaseRequestField
   } from './increaseRequestDraft';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
+  import { budgetWindowLabels } from './increaseDraft';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
@@ -166,9 +167,9 @@
             <FormField label="Budget window" error={create.fieldErrors.window}>
               {#snippet control(attributes)}
                 <select {...attributes} bind:value={draft.window}>
-                  <option value="day">Day</option><option value="week">
-                    Week
-                  </option><option value="month">Month</option>
+                  {#each Object.entries(budgetWindowLabels) as [value, label] (value)}
+                    <option {value}>{label}</option>
+                  {/each}
                 </select>
               {/snippet}
             </FormField>

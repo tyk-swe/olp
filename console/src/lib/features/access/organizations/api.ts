@@ -7,6 +7,7 @@ import {
   ifMatch
 } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
+import type { components } from '#lib/management/schema.js';
 
 export async function createOrganization(name: string, requestId: string) {
   return unwrap(
@@ -47,7 +48,7 @@ export async function organizationMembers(
 export async function putOrganizationMember(
   organization_id: string,
   user_id: string,
-  role: 'manager' | 'viewer',
+  role: components['schemas']['PutProjectMemberRequest']['role'],
   etag: string
 ) {
   ensureOk(
@@ -129,7 +130,7 @@ export async function putProjectMember(
   organization_id: string,
   project_id: string,
   user_id: string,
-  role: 'manager' | 'viewer',
+  role: components['schemas']['PutProjectMemberRequest']['role'],
   etag: string
 ) {
   return unwrap(

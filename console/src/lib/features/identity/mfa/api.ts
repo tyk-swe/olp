@@ -12,6 +12,11 @@ import {
 } from '#lib/session/mfaChallenge.js';
 type Schemas = components['schemas'];
 export type MFAFactor = Schemas['MFAStatus']['factors'][number];
+export type MFAKind = Schemas['MFAEnrollmentRequest']['kind'];
+export const mfaKindLabels: Record<MFAKind, string> = {
+  totp: 'Authenticator app',
+  webauthn: 'Security key or passkey'
+};
 export async function getMFA(signal?: AbortSignal) {
   return unwrap(await apiClient.GET('/api/v1/profile/mfa', { signal }));
 }
@@ -23,7 +28,7 @@ export async function manageMFA() {
   );
 }
 export async function enrollMFA(
-  kind: 'totp' | 'webauthn',
+  kind: MFAKind,
   name: string,
   challenge?: string
 ) {

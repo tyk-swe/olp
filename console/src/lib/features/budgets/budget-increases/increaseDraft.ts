@@ -1,6 +1,16 @@
 import { validated, type Validation } from '#lib/editing/validation.js';
+import type { components } from '#lib/management/schema.js';
 import { limitForm, limitsError } from '../limitForm';
 import type { IncreaseInput } from './api';
+
+export const budgetWindowLabels: Record<
+  components['schemas']['BudgetWindowKind'],
+  string
+> = {
+  day: 'Day',
+  week: 'Week',
+  month: 'Month'
+};
 
 export type IncreaseDraft = {
   kind: IncreaseInput['target']['kind'];

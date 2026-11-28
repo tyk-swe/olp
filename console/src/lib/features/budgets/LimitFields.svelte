@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { limitFields, type LimitForm } from './limitForm';
+  import { costBasisLabels, limitFields, type LimitForm } from './limitForm';
   let { form = $bindable(), prefix }: { form: LimitForm; prefix: string } =
     $props();
 </script>
@@ -20,8 +20,9 @@
   <div class="form-field">
     <label for={`${prefix}-cost-basis`}>Budget basis</label>
     <select id={`${prefix}-cost-basis`} bind:value={form.cost_basis}>
-      <option value="cost">Provider cost</option>
-      <option value="charge">Consumer charge</option>
+      {#each Object.entries(costBasisLabels) as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
     </select>
   </div>
 </div>

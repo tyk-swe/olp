@@ -19,11 +19,18 @@
     editable: boolean;
     busy: boolean;
     onRemove: (member: OrganizationMember) => void;
-    onAdd: (userId: string, role: 'manager' | 'viewer') => Promise<boolean>;
+    onAdd: (
+      userId: string,
+      role: OrganizationMember['role']
+    ) => Promise<boolean>;
   } = $props();
 
   let userId = $state('');
-  let role = $state<'manager' | 'viewer'>('viewer');
+  let role = $state<OrganizationMember['role']>('viewer');
+  const roleLabels: Record<OrganizationMember['role'], string> = {
+    viewer: 'Viewer',
+    manager: 'Manager'
+  };
 
   async function add(event: SubmitEvent) {
     event.preventDefault();
@@ -62,9 +69,9 @@
         />
       </label><label class="form-field">
         Role<select bind:value={role} disabled={busy}>
-          <option value="viewer">Viewer</option><option value="manager">
-            Manager
-          </option>
+          {#each Object.entries(roleLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </label><button class="button button-primary" disabled={busy}>
         Add to organization

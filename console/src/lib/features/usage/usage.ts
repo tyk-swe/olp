@@ -3,6 +3,7 @@ import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
 import { apiProblem, unwrap } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
+import type { USAGE_DIMENSIONS } from '#lib/management/enums.js';
 
 export type UsagePoint = components['schemas']['UsagePointResponse'];
 export type UsageCompleteness =
@@ -49,18 +50,7 @@ export async function usageSeries(
   return unwrap({ data, error, response });
 }
 
-export type UsageDimension =
-  | 'route'
-  | 'provider'
-  | 'model'
-  | 'model_family'
-  | 'estimate_provenance'
-  | 'api_key'
-  | 'end_user'
-  | 'operation'
-  | 'attribution'
-  | 'project'
-  | 'session';
+export type UsageDimension = (typeof USAGE_DIMENSIONS)[number];
 
 export async function usageBreakdown(
   filters: UsageFilters,

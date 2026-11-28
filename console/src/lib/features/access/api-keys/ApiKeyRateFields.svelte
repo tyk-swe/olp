@@ -3,7 +3,7 @@
   import { RunLimits } from '#lib/features/budgets/index.js';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import { admissionPriorities } from './keyValidation.js';
+  import { ADMISSION_PRIORITIES } from '#lib/management/enums.js';
 
   let {
     form,
@@ -96,7 +96,7 @@
           >
             <option value="">Normal</option>
 
-            {#each admissionPriorities as priority (priority)}
+            {#each ADMISSION_PRIORITIES as priority (priority)}
               <option value={priority}>{priority}</option>
             {/each}
           </select>
@@ -120,7 +120,7 @@
           >
             <option value="">Its default</option>
 
-            {#each admissionPriorities as priority (priority)}
+            {#each ADMISSION_PRIORITIES as priority (priority)}
               <option value={priority}>{priority}</option>
             {/each}
           </select>

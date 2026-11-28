@@ -3,6 +3,7 @@
   import Dialog from '#lib/components/Dialog.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
+  import { GUARDRAIL_ACTIONS } from '#lib/management/enums.js';
   import type { useAction } from '#lib/editing/action.svelte.js';
   import type { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import {
@@ -156,9 +157,7 @@
           </label>
           <label class="form-field">
             Action<select bind:value={entry.action}>
-              {#each ['block', 'redact', 'mask', 'annotate'] as value (value)}<option
-                  {value}
-                >
+              {#each GUARDRAIL_ACTIONS as value (value)}<option {value}>
                   {value}
                 </option>{/each}
             </select>

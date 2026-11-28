@@ -13,10 +13,12 @@
   } from './sinkSettings';
   import {
     isSinkType,
+    sinkOutcomeLabels,
     sinkStreamOptions,
     sinkTypeFormats,
     sinkTypeLabels,
-    stripeMeterValues
+    stripeMeterValues,
+    type SinkOutcome
   } from './presentation';
 
   let {
@@ -51,7 +53,7 @@
     sinkProjectId: string;
     sinkFilterProject: string;
     sinkFilterRoute: string;
-    sinkFilterOutcome: '' | 'success' | 'failure';
+    sinkFilterOutcome: '' | SinkOutcome;
     sinkCredential: string;
     sinkClearCredential: boolean;
     sinkStripeKey: string;
@@ -205,9 +207,10 @@
               id="sink-filter-outcome"
               bind:value={sinkFilterOutcome}
             >
-              <option value="">All outcomes</option><option value="success">
-                Success
-              </option><option value="failure">Failure</option>
+              <option value="">All outcomes</option>
+              {#each Object.entries(sinkOutcomeLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </div>{/if}
         {#if delivery.type === 'stripe_meter'}

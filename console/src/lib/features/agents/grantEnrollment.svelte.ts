@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/svelte-query';
 import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 import { errorMessage } from '#lib/management/http.js';
+import type { components } from '#lib/management/schema.js';
 import { agentKeys } from './agentKeys';
 import {
   authorizeMCPGrant,
@@ -146,7 +147,9 @@ export class PersonalGrantEnrollment {
     });
   };
 
-  authorize = async (flow: 'authorization_code' | 'device_code') => {
+  authorize = async (
+    flow: components['schemas']['MCPGrantAuthorizationRequest']['flow']
+  ) => {
     const phase = this.phase;
     if (phase.kind !== 'claimed' && phase.kind !== 'authorization') return;
     await this.run(async (isCurrent) => {

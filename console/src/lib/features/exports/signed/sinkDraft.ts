@@ -1,16 +1,8 @@
 import { validated, type Validation } from '#lib/editing/validation.js';
+import { SIGNED_SINK_STREAMS } from '#lib/management/enums.js';
 import type { Sink, SinkInput } from './api';
 
 type Stream = SinkInput['streams'][number];
-
-export const SINK_STREAMS: readonly Stream[] = [
-  'requests',
-  'attempts',
-  'guardrail_decisions',
-  'audit',
-  'runs',
-  'trace_spans'
-];
 
 export type SinkDraft = {
   name: string;
@@ -37,7 +29,8 @@ export const sinkServerFields: Readonly<Record<string, SinkField>> = {
 
 function listedOrder(streams: readonly Stream[]) {
   return streams.toSorted(
-    (left, right) => SINK_STREAMS.indexOf(left) - SINK_STREAMS.indexOf(right)
+    (left, right) =>
+      SIGNED_SINK_STREAMS.indexOf(left) - SIGNED_SINK_STREAMS.indexOf(right)
   );
 }
 

@@ -30,9 +30,16 @@ Run these commands from the repository root after setup.
 
 Management requests use the generated `openapi-fetch` client and route
 authorization metadata. Update the fragments in `management/openapi/` alongside
-Go handlers and run `make api`. Never edit `src/lib/management/schema.d.ts` or
-`src/lib/management/requirements.ts` by hand. See
-[Contributing](../CONTRIBUTING.md) for repository-wide commands.
+Go handlers and run `make api`. Never edit `src/lib/management/schema.d.ts`,
+`src/lib/management/requirements.ts` or `src/lib/management/enums.ts` by hand.
+See [Contributing](../CONTRIBUTING.md) for repository-wide commands.
+
+Do not retype the values of a contract enum. Take the type from the schema, and
+when the console needs the values at run time, add an entry to
+`scripts/generate-enums.mjs` and import the array from
+`#lib/management/enums.js`. Options that carry their own labels or order are
+keyed by the schema type, for example `Record<Type, string>`, so the type
+checker rejects values the contract does not have.
 
 ## API wiring
 

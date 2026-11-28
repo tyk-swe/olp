@@ -2,7 +2,8 @@
   import { onDestroy } from 'svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
   import { formProblem } from '#lib/editing/validation.js';
-  import { enrollMFA, verifyMFA } from './api';
+  import { enrollMFA, mfaKindLabels, verifyMFA, type MFAKind } from './api';
+  import type { components } from '#lib/management/schema.js';
   import { webauthnCredential } from './webauthn';
   import type {
     MFAEnrollment,
@@ -24,10 +25,11 @@
   );
   let started = $state<MFAEnrollment | null>(null);
   const current = $derived(started ?? enrollment);
-  let method = $state<'totp' | 'recovery' | 'webauthn'>('totp');
+  let method =
+    $state<components['schemas']['MFAVerificationRequest']['method']>('totp');
   let code = $state('');
   let name = $state('My authenticator');
-  let kind = $state<'totp' | 'webauthn'>('totp');
+  let kind = $state<MFAKind>('totp');
   const mfa = useAction();
   let codes = $state<string[] | null>(null);
   let completed = $state<MFAVerification>();
@@ -126,12 +128,15 @@
         bind:value={kind}
         disabled={mfa.busy}
       >
-        <option value="totp">Authenticator app</option><option
-          value="webauthn"
-          disabled={challenge.webauthn_available === false}
-        >
-          Security key or passkey
-        </option>
+        {#each Object.entries(mfaKindLabels) as [value, label] (value)}
+          <option
+            {value}
+            disabled={value === 'webauthn' &&
+              challenge.webauthn_available === false}
+          >
+            {label}
+          </option>
+        {/each}
       </select>
     </div>
     <div class="form-field">

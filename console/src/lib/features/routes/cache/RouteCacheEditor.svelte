@@ -8,6 +8,30 @@
   import { errorMessage } from '#lib/management/http.js';
   import { cacheStatistics, purgeCache } from './api';
 
+  type CachePolicy = components['schemas']['ResponseCachePolicy'];
+  type PromptPolicy = components['schemas']['PromptCachePolicy'];
+  type CacheMode = CachePolicy['mode'];
+  const modeLabels: Record<CacheMode, string> = {
+    exact: 'Exact match',
+    semantic: 'Semantic match'
+  };
+  const scopeLabels: Record<NonNullable<CachePolicy['scope']>, string> = {
+    key: 'This API key',
+    project: 'Keys in this project',
+    route: 'Keys using this route'
+  };
+  const streamingLabels: Record<
+    NonNullable<CachePolicy['streaming']>,
+    string
+  > = { replay: 'Replay original events', bypass: 'Bypass cache' };
+  const ttlLabels: Record<NonNullable<PromptPolicy['ttl']>, string> = {
+    '5m': '5 minutes',
+    '1h': '1 hour'
+  };
+  const keySourceLabels: Record<
+    NonNullable<PromptPolicy['key_source']>,
+    string
+  > = { key: 'API key', session: 'Session label within the API key' };
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const locked = $derived(!editor.canManage || Boolean(editor.busy));
   let status = $state<components['schemas']['CacheStatistics'] | null>(null);
@@ -21,7 +45,7 @@
         ? null
         : {
             ...editor.behavior.cache,
-            mode: mode as 'exact' | 'semantic',
+            mode: mode as CacheMode,
             scope: editor.behavior.cache?.scope ?? 'key',
             ttl_seconds: editor.behavior.cache?.ttl_seconds ?? 3600,
             max_entry_bytes: editor.behavior.cache?.max_entry_bytes ?? 1048576,
@@ -106,9 +130,10 @@
         value={editor.behavior.cache?.mode ?? 'off'}
         onchange={(event) => setMode(event.currentTarget.value)}
       >
-        <option value="off">Disabled</option><option value="exact">
-          Exact match
-        </option><option value="semantic">Semantic match</option>
+        <option value="off">Disabled</option>
+        {#each Object.entries(modeLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     </div>
     {#if editor.behavior.cache}
@@ -119,9 +144,9 @@
             bind:value={editor.behavior.cache.scope}
             onchange={editor.touch}
           >
-            <option value="key">This API key</option><option value="project">
-              Keys in this project
-            </option><option value="route">Keys using this route</option>
+            {#each Object.entries(scopeLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         </div>
         <div class="form-field">
@@ -150,11 +175,9 @@
             bind:value={editor.behavior.cache.streaming}
             onchange={editor.touch}
           >
-            <option value="replay">Replay original events</option><option
-              value="bypass"
-            >
-              Bypass cache
-            </option>
+            {#each Object.entries(streamingLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         </div>
       </div>
@@ -263,9 +286,9 @@
             bind:value={editor.behavior.prompt_cache.ttl}
             onchange={editor.touch}
           >
-            <option value="5m">5 minutes</option><option value="1h">
-              1 hour
-            </option>
+            {#each Object.entries(ttlLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         </div>
         <div class="form-field">
@@ -274,9 +297,9 @@
             bind:value={editor.behavior.prompt_cache.key_source}
             onchange={editor.touch}
           >
-            <option value="key">API key</option><option value="session">
-              Session label within the API key
-            </option>
+            {#each Object.entries(keySourceLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         </div>
         {#if editor.behavior.prompt_cache.key_source === 'session'}<div

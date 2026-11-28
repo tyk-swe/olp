@@ -4,7 +4,11 @@
   import type { EntitySource } from '#lib/components/entityOptions.js';
   import type { FieldErrors } from '#lib/editing/validation.js';
   import type { IncreaseInput } from './api';
-  import type { IncreaseDraft, IncreaseField } from './increaseDraft';
+  import {
+    budgetWindowLabels,
+    type IncreaseDraft,
+    type IncreaseField
+  } from './increaseDraft';
 
   let {
     draft = $bindable(),
@@ -29,6 +33,16 @@
     onSubmit: (event: SubmitEvent & { currentTarget: HTMLFormElement }) => void;
     onReset: () => void;
   } = $props();
+
+  const targets = $derived<typeof kinds>([
+    ...kinds,
+    ...(canOrganize
+      ? [{ value: 'organization' as const, label: 'Organization' }]
+      : []),
+    ...(canInstall
+      ? [{ value: 'installation' as const, label: 'Installation' }]
+      : [])
+  ]);
 </script>
 
 <form onsubmit={onSubmit}>
@@ -37,13 +51,11 @@
       <FormField label="Budget boundary" error={errors.kind}>
         {#snippet control(attributes)}
           <select {...attributes} bind:value={draft.kind}>
-            {#each kinds as option (option.value)}<option value={option.value}>
+            {#each targets as option (option.value)}<option
+                value={option.value}
+              >
                 {option.label}
-              </option>{/each}{#if canOrganize}<option value="organization">
-                Organization
-              </option>{/if}{#if canInstall}<option value="installation">
-                Installation
-              </option>{/if}
+              </option>{/each}
           </select>
         {/snippet}
       </FormField>
@@ -113,9 +125,9 @@
       <FormField label="Budget window" error={errors.window}>
         {#snippet control(attributes)}
           <select {...attributes} bind:value={draft.window}>
-            <option value="day">Day</option><option value="week">
-              Week
-            </option><option value="month">Month</option>
+            {#each Object.entries(budgetWindowLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         {/snippet}
       </FormField>

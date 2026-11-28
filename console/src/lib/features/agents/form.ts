@@ -7,6 +7,7 @@ import type {
   ToolPin
 } from './api';
 import { validated, type Validation } from '#lib/editing/validation.js';
+import type { components } from '#lib/management/schema.js';
 
 export type ServerPricingForm = {
   unitPrice: string;
@@ -128,11 +129,11 @@ export type PublicationForm = {
   template: string;
   variables: string;
   promptMode: 'template' | 'messages';
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  messages: components['schemas']['PromptMessage'][];
   temperature: string;
   topP: string;
   maxOutputTokens: string;
-  protocol: 'a2a-0.3.0' | 'a2a-1.0.0';
+  protocol: components['schemas']['AgentDefinition']['protocol'];
   endpoint: string;
   cardDigest: string;
   oauthEnabled: boolean;
@@ -302,8 +303,11 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
   };
 }
 export type PublicationIdentity = Pick<Publication, 'id' | 'etag'>;
+type PublicationLabel = NonNullable<
+  components['schemas']['AgentPublicationRevision']['labels']
+>[number];
 export type PublicationAction =
-  'save' | 'publish' | 'retire' | 'production' | 'staging';
+  'save' | 'publish' | 'retire' | PublicationLabel;
 export type PublicationCommand =
   | { action: 'create'; kind: Kind; input: Draft }
   | {
@@ -316,7 +320,7 @@ export type PublicationCommand =
   | {
       action: 'label';
       observed: PublicationIdentity;
-      label: 'production' | 'staging';
+      label: PublicationLabel;
       revision: string;
     };
 export type PublicationCommandResult =

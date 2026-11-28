@@ -3,10 +3,10 @@
   import {
     emptyPassthrough,
     parsePassthroughLines,
-    passthroughMethods,
     validatePassthroughConfig,
     type PassthroughConfig
   } from './routePassthrough';
+  import { PASSTHROUGH_METHODS } from '#lib/management/enums.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const config = $derived(editor.behavior.passthrough ?? null);
   const problem = $derived(validatePassthroughConfig(config));
@@ -72,7 +72,7 @@
     </div>
     <fieldset class="form-field">
       <legend>Methods</legend>
-      {#each passthroughMethods as method (method)}
+      {#each PASSTHROUGH_METHODS as method (method)}
         <label>
           <input
             type="checkbox"

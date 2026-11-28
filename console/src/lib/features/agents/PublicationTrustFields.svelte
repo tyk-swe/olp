@@ -14,13 +14,18 @@
     removeCredential: boolean;
     entraClientSecret: string;
   } = $props();
+
+  const protocolLabels: Record<PublicationForm['protocol'], string> = {
+    'a2a-1.0.0': 'A2A 1.0.0',
+    'a2a-0.3.0': 'A2A 0.3.0'
+  };
 </script>
 
 <label class="form-field">
   Protocol contract <select bind:value={form.protocol}>
-    <option value="a2a-1.0.0">A2A 1.0.0</option><option value="a2a-0.3.0">
-      A2A 0.3.0
-    </option>
+    {#each Object.entries(protocolLabels) as [value, label] (value)}
+      <option {value}>{label}</option>
+    {/each}
   </select>
 </label><label class="form-field">
   Approved endpoint <input

@@ -1,4 +1,5 @@
 import { gatewayFetch } from '#lib/management/gateway.js';
+import type { components } from '#lib/management/schema.js';
 import {
   nativeObject,
   replaceNative,
@@ -18,6 +19,8 @@ import {
   validatePublicRoute,
   type Outcome
 } from './publicGateway';
+
+type SimulationDialect = components['schemas']['SimulationDialect'];
 
 const nativeOperationDialects = {
   completions: ['openai-completions'],
@@ -57,7 +60,7 @@ const nativeOperationDialects = {
     'parallel-search',
     'brave-search'
   ]
-} as const;
+} as const satisfies Record<string, readonly SimulationDialect[]>;
 
 export const publicNativeOperations: ReadonlySet<string> = new Set([
   'decision',
@@ -83,7 +86,7 @@ const bodyModelDialects: ReadonlySet<string> = new Set([
   'anthropic-count-tokens',
   'mistral-ocr',
   'azure-document-intelligence-ocr'
-]);
+] satisfies SimulationDialect[]);
 
 const publicPaths: Readonly<Record<string, string | undefined>> = {
   'openai-completions': '/v1/completions',
@@ -92,7 +95,7 @@ const publicPaths: Readonly<Record<string, string | undefined>> = {
   systemone: '/v1/systemone',
   'mistral-ocr': '/v1/ocr',
   'perplexity-search': '/v1/search'
-};
+} satisfies Partial<Record<SimulationDialect, string>>;
 
 const routeCarriedDialects: ReadonlySet<string> = new Set(
   nativeOperationDialects.search

@@ -1,5 +1,6 @@
 <script lang="ts" generics="Values extends ProviderEditValues">
   import type { ProviderEditValues } from './providerEditor';
+  import type { components } from '#lib/management/schema.js';
 
   let {
     values = $bindable(),
@@ -13,6 +14,10 @@
     onChange?: () => void;
   } = $props();
 
+  const periodLabels: Record<
+    components['schemas']['Commitment']['period'],
+    string
+  > = { hour: 'Hour', day: 'Day', month: 'Month' };
   const document = $derived(values.document);
   const fieldsDisabled = $derived(
     disabled || document?.fieldsAvailable === false
@@ -68,8 +73,8 @@
     onchange={(event) =>
       update(amount, (event.currentTarget as HTMLSelectElement).value)}
   >
-    <option value="hour">Hour</option>
-    <option value="day">Day</option>
-    <option value="month">Month</option>
+    {#each Object.entries(periodLabels) as [value, label] (value)}
+      <option {value}>{label}</option>
+    {/each}
   </select>
 </div>
