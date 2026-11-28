@@ -26,6 +26,9 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 | Promotion and process lifetime | `internal/promotion/` kernel, one `internal/promotion/<section>/` package per document section, `internal/promotion/serve/`, `cmd/olp/`, and `internal/platform/database/` |
 | Egress, secrets and telemetry | `internal/platform/egress/`, `internal/platform/secrets/`, `internal/platform/staging/`, `internal/platform/telemetry/`, `internal/platform/workerhealth/`, `internal/observability/`, and console `health/` |
 
+`make check-docs` fails when a directory directly under `internal/` or
+`console/src/lib/features/` is missing from this table.
+
 ## Area guides
 
 | Guide | Covers |

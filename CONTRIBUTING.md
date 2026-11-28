@@ -132,8 +132,8 @@ behavior has no journey of its own. Validate it by running the affected
 functionality directly and record the command and output.
 
 Documentation changes are validated by `make check-docs` (running
-`node scripts/check-docs.mjs`), and the same scoped link, anchor and
-handbook-index contract runs inside `make test-unit-console`.
+`node scripts/check-docs.mjs`), and the same scoped link, anchor,
+handbook-index and module-map contract runs inside `make test-unit-console`.
 
 Use conventional commit subjects and name agent-created branches `tyk-{name}`.
 Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,
