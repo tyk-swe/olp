@@ -77,14 +77,14 @@ it, so a feature can own several top-level routes. The folders under
 | `guardrails`    | `/guardrails`, `/guardrails/preview`, `/guardrails/try`                                                         | Guardrail definitions, policies, credentials, attachments, pre-dispatch preview and the Try it evaluator.                                                                                        |
 | `health`        | `/health`                                                                                                       | Readiness, provider health, gateway epochs and runtime generations.                                                                                                                              |
 | `identity`      | `/login`, `/setup`, `/invitations/accept`, `/members`, `/members/invitations`, `/identity`, `/settings/profile` | Sign-in, setup, MFA, OIDC, SAML, single sign-on, SCIM, sessions, tokens, workload issuers, users, invitations and the signed-in profile.                                                         |
-| `inference`     | `/playground`                                                                                                   | The playground and its request templates.                                                                                                                                                        |
+| `inference`     | `/playground`                                                                                                   | The playground.                                                                                                                                                                                  |
 | `media`         | `/media-jobs`                                                                                                   | Media job metadata.                                                                                                                                                                              |
 | `notifications` | `/notifications`                                                                                                | Notification rules, destinations and deliveries.                                                                                                                                                 |
 | `overview`      | `/`                                                                                                             | The landing page and its summaries.                                                                                                                                                              |
 | `plugins`       | `/plugins`                                                                                                      | The plugin index, installed plugins and the unconfined plugin and MCP executable reviews.                                                                                                        |
 | `providers`     | `/providers`, `/models`, `/models/catalog`, `/catalog/public/[projectId]`                                       | Provider connections, credentials, grants, billing imports, commitments and models, with cross-provider model comparison in `provider-models/` and published model catalogs in `model-catalog/`. |
 | `resources`     | `/provider-resources`                                                                                           | Retained provider resources and retrieval bindings.                                                                                                                                              |
-| `routes`        | `/routes`, `/routes/templates`                                                                                  | Route drafts, route templates, activation, routing policy and inspection, with the route cache editor in `cache/`.                                                                               |
+| `routes`        | `/routes`, `/routes/templates`                                                                                  | Route drafts, route templates, activation, bulk creation from models, routing policy and inspection, with the route cache editor in `cache/`.                                                    |
 | `settings`      | `/settings`, `/settings/routing`                                                                                | Installation settings, default routing and the branding write, with declarative configuration in `configuration/`.                                                                               |
 | `usage`         | `/usage`, `/usage/routing`, `/usage/calculator`, `/requests`, `/pricing`                                        | Usage reports, routing savings, cost calculator, request records in `history/`, pricing, rate cards and reconciliation.                                                                          |
 
@@ -154,10 +154,12 @@ The `orderedFeatures` list in `eslint.config.mjs` orders the feature folders,
 and `console/feature-order` (`eslint/feature-order.mjs`) lets a feature import
 only the features listed before it, so a new import cannot close a cycle between
 features. Type-only imports count. When the order forbids an import, move the
-shared part into a shared layer or pass it in. A new feature goes into the list
-after every feature it imports, and a feature can move within the list when no
-new violation appears. Test files are exempt. Imports between the subfolders of
-one feature are not checked.
+shared part into a shared layer or pass it in. To pass a component in, the page
+under `src/routes/` imports it and hands it to the earlier feature as a prop, as
+`src/routes/(console)/models/+page.svelte` does with `BulkRouteCreation`. A new
+feature goes into the list after every feature it imports, and a feature can
+move within the list when no new violation appears. Test files are exempt.
+Imports between the subfolders of one feature are not checked.
 
 ### Suppressed violations
 
@@ -184,8 +186,8 @@ The shared layers form one strict order, so no two of them import each other.
 The list runs from the lowest layer to the highest, and a layer imports only
 itself and the layers listed before it.
 
-1. `src/lib/*.ts` holds pure helpers such as formatting and imports no other
-   layer.
+1. `src/lib/*.ts` holds pure helpers such as formatting and static data such as
+   the request templates, and imports no other layer.
 2. `management/` is the management API transport, its generated schema and its
    query and header helpers. It imports `src/lib/*.ts`.
 3. `session/` is the signed-in principal, its permissions and the authenticated
@@ -212,12 +214,12 @@ import it.
 kind of resource. `domain/projects/` covers projects, project members and the
 signed-in user's project memberships, and it is the example to copy.
 
-| File          | Holds                                                    |
-| ------------- | -------------------------------------------------------- |
-| `api.ts`      | The read calls and the schema-derived types they return  |
-| `*Keys.ts`    | The query keys, including the root a feature nests under |
-| `queries.ts`  | One `queryOptions` factory for each shared query         |
-| Other modules | Pickers and the option sources that `EntityPicker` takes |
+| File          | Holds                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `api.ts`      | The read calls and the schema-derived types they return                                     |
+| `*Keys.ts`    | The query keys, including the root a feature nests under                                    |
+| `queries.ts`  | One `queryOptions` factory for each shared query                                            |
+| Other modules | Pickers, the option sources that `EntityPicker` takes and selections over what reads return |
 
 Writes stay in the feature that owns the resource, and so does a read that only
 that feature runs. A feature imports domain files directly, so a domain folder

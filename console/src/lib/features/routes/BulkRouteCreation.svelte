@@ -8,13 +8,10 @@
   import {
     createRouteDraft,
     activateRoute,
-    fidelityOptions
-  } from '#lib/features/routes/index.js';
-  import type {
-    RouteDraftValidation,
-    FidelityMode
-  } from '#lib/features/routes/index.js';
-  import type { ProviderModelInventory } from '../models';
+    type RouteDraftValidation
+  } from './api.js';
+  import { fidelityOptions, type FidelityMode } from './routeFidelity.js';
+  import type { ProviderModelInventory } from '#lib/features/providers/index.js';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
 
   const activateRouteIntent = useMutationIntents();

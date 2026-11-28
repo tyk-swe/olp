@@ -2,12 +2,12 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import Callout from '#lib/components/Callout.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
-  import BulkRouteCreation from './BulkRouteCreation.svelte';
   import ModelInventoryTable from './ModelInventoryTable.svelte';
   import { overviewKeys } from '#lib/features/overview/index.js';
   import { providerKeys } from '#lib/features/providers/providerKeys.js';
 
   import { resolve } from '$app/paths';
+  import type { Component } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
@@ -27,6 +27,15 @@
   import { useAction } from '#lib/editing/action.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
 
+  let {
+    BulkRoutes
+  }: {
+    BulkRoutes: Component<{
+      models: ProviderModelInventory[];
+      canManage: boolean;
+      outdated: boolean;
+    }>;
+  } = $props();
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
@@ -240,7 +249,7 @@
   </label>
 </div>
 
-<BulkRouteCreation
+<BulkRoutes
   models={inventory}
   {canManage}
   outdated={models.isPlaceholderData}

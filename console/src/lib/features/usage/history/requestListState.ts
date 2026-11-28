@@ -1,8 +1,6 @@
 import type { ReadonlyURLSearchParams } from '$app/state';
-import {
-  operationKinds,
-  type RequestFilters
-} from '#lib/features/usage/history/api.js';
+import type { RequestFilters } from '#lib/domain/requests/api.js';
+import { operationKinds } from '#lib/features/usage/history/api.js';
 import { REQUEST_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import {
   filteredListState,

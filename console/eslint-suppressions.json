@@ -1,67 +1,12 @@
 {
-  "src/lib/features/access/api-keys/ApiKeyPolicyForm.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/access/api-keys/ApiKeyScopeFields.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/access/api-keys/ApiKeySecretDialog.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/access/api-keys/ApiKeysPage.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/budgets/budget-groups/BudgetGroupsPanel.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/budgets/budget-increases/BudgetIncreasesPage.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
   "src/lib/features/identity/profile/profileIdentity.svelte.ts": {
     "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/lib/features/overview/Overview.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/overview/OverviewActivity.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/providers/ProviderBulkActions.svelte": {
-    "console/feature-order": {
       "count": 1
     }
   },
   "src/lib/features/providers/ProviderBulkModels.svelte": {
     "max-lines-per-function": {
       "count": 1
-    }
-  },
-  "src/lib/features/providers/model-catalog/DisclosureSettings.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/providers/provider-models/BulkRouteCreation.svelte": {
-    "console/feature-order": {
-      "count": 2
     }
   },
   "src/lib/features/providers/providerEditor.ts": {
@@ -76,11 +21,6 @@
   },
   "src/lib/features/providers/providerWizard.svelte.ts": {
     "max-lines": {
-      "count": 1
-    }
-  },
-  "src/lib/features/routes/RoutePublishPanel.svelte": {
-    "console/feature-order": {
       "count": 1
     }
   },

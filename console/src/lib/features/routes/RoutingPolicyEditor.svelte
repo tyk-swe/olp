@@ -16,7 +16,7 @@
     type RoutingPolicy,
     type RoutingPolicyScope
   } from './api';
-  import { routeKeys } from './routeKeys';
+  import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 
   const replaceRoutingPolicyIntent = useMutationIntent();
   type Policy = RoutingPolicy;

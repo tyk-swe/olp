@@ -18,7 +18,7 @@
   } from '#lib/format.js';
   import type { RequestListState } from '#lib/features/usage/history/requestListState.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
-  import type { RequestSummary } from '#lib/features/usage/history/api.js';
+  import type { RequestSummary } from '#lib/domain/requests/api.js';
   import type { CursorPage } from '#lib/management/http.js';
 
   let {

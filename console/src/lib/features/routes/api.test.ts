@@ -4,7 +4,6 @@ import {
   createRouteDraft,
   listRouteDraftPage,
   listRouteRevisions,
-  listRoutes,
   simulateRouting,
   type CreateRouteDraftInput,
   type RouteDraftValidation
@@ -25,26 +24,19 @@ describe('route management API', () => {
     });
   });
 
-  it.each([
-    { path: '/api/v1/routes', limit: '50', load: () => listRoutes() },
-    {
-      path: '/api/v1/routes/route-id/revisions',
-      limit: '100',
-      load: () => listRouteRevisions('route-id')
-    }
-  ])('loads all pages from $path', async ({ path, limit, load }) => {
+  it('loads every page of a route revision history', async () => {
     const cursors = vi.fn<(cursor: string | null) => void>();
     serve((request) => {
-      route(request, 'GET', path);
+      route(request, 'GET', '/api/v1/routes/route-id/revisions');
       const query = new URL(request.url).searchParams;
-      expect(query.get('limit')).toBe(limit);
+      expect(query.get('limit')).toBe('100');
       cursors(query.get('cursor'));
       return json({
         items: [],
         next_cursor: query.has('cursor') ? null : 'next-page'
       });
     });
-    await expect(load()).resolves.toEqual([]);
+    await expect(listRouteRevisions('route-id')).resolves.toEqual([]);
     expect(cursors.mock.calls).toEqual([[null], ['next-page']]);
   });
 

@@ -5,12 +5,8 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
-  import {
-    listOperationDialects,
-    listRoutes,
-    routeKeys,
-    selectActiveRoutes
-  } from '#lib/features/routes/index.js';
+  import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     getGuardrailPreview,
@@ -55,9 +51,8 @@
   };
 
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    notifyOnChangeProps: 'all',
-    queryFn: ({ signal }) => listRoutes(signal)
+    ...routeQueries.all(),
+    notifyOnChangeProps: 'all'
   }));
   const keys = createQuery(() => ({
     queryKey: apiKeyKeys.list(),
@@ -65,9 +60,8 @@
     queryFn: ({ signal }) => listApiKeys(signal)
   }));
   const dialects = createQuery(() => ({
-    queryKey: routeKeys.dialects(),
-    notifyOnChangeProps: 'all',
-    queryFn: ({ signal }) => listOperationDialects(signal)
+    ...routeQueries.dialects(),
+    notifyOnChangeProps: 'all'
   }));
   let routeId = $state('');
   let keyId = $state('');

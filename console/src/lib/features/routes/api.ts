@@ -29,32 +29,12 @@ export type RouteRevision = Schemas['RouteRevisionResponse'];
 export type RouteRevisionDiff = Schemas['RouteRevisionDiffResponse'];
 export type RouteActivation = Schemas['RouteActivationResponse'];
 export type RouteRetire = Schemas['RouteRetireResponse'];
-export type ActiveRoute = Schemas['RouteDetailResponse'];
 
 export async function listRouteDraftPage(
   cursor?: string,
   signal?: AbortSignal
 ): Promise<CursorPage<RouteDraft>> {
   const response = await apiClient.GET('/api/v1/route-drafts', {
-    params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
-    signal
-  });
-  return unwrapPage(response);
-}
-
-export async function listRoutes(signal?: AbortSignal): Promise<ActiveRoute[]> {
-  return collectCursorPages((cursor) => listRoutePage(cursor, signal));
-}
-
-export function selectActiveRoutes(routes: ActiveRoute[]): ActiveRoute[] {
-  return routes.filter((route) => route.state === 'active');
-}
-
-export async function listRoutePage(
-  cursor?: string,
-  signal?: AbortSignal
-): Promise<CursorPage<ActiveRoute>> {
-  const response = await apiClient.GET('/api/v1/routes', {
     params: { query: { limit: ROUTE_PAGE_SIZE, cursor } },
     signal
   });
@@ -331,9 +311,6 @@ export async function restoreRouteRevision(
   );
   return unwrap(response);
 }
-
-export const listOperationDialects = async (signal?: AbortSignal) =>
-  unwrap(await apiClient.GET('/api/v1/operation-dialects', { signal }));
 
 export type RouteTemplate = Schemas['RouteTemplateResponse'];
 export type TemplateInput = Schemas['RouteTemplateRequest'];

@@ -5,11 +5,8 @@ import {
   replaceNative,
   type NativeObject
 } from '#lib/nativeJson.js';
-import type {
-  InspectRoutingInput,
-  PlaygroundOperation,
-  PlaygroundRequest
-} from './api';
+import type { PlaygroundOperation } from '#lib/requestTemplates.js';
+import type { InspectRoutingInput, PlaygroundRequest } from './api';
 import { nativeOperationRequest } from './nativeOperation';
 import type {
   Composer,

@@ -2,7 +2,6 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { RoutingPolicyEditor } from '#lib/features/routes/index.js';
   import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
   import { overviewKeys } from '#lib/features/overview/index.js';
 
@@ -29,6 +28,7 @@
   import { isApiKeyUsable } from './apiKeyLifecycle';
 
   import { useMutation } from '#lib/editing/action.svelte.js';
+  import type { Component } from 'svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
   const write = useMutation();
@@ -36,11 +36,25 @@
   let {
     isNew = false,
     keyId,
-    listState = $bindable()
+    listState = $bindable(),
+    RoutingPolicyEditor
   }: {
     isNew?: boolean;
     keyId?: string;
     listState: ApiKeyListState;
+    RoutingPolicyEditor: Component<
+      {
+        scope: 'api-key';
+        id: string;
+        resourceEtag: string;
+        canManage: boolean;
+        dirty: boolean;
+        busy: boolean;
+        onSaved: (etag: string, previousEtag: string) => void;
+      },
+      object,
+      'dirty' | 'busy'
+    >;
   } = $props();
 
   const queryClient = useQueryClient();

@@ -5,7 +5,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { validRouteSlug } from '#lib/routeIdentity.js';
-  import { currentBudgetLimit } from '#lib/features/access/index.js';
+  import { currentBudgetLimit } from '../budgetLimit.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';

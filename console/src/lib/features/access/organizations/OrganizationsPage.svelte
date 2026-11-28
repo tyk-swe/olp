@@ -14,7 +14,9 @@
   import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { projectKeys } from '#lib/domain/projects/projectKeys.js';
-  import { organizationKeys } from './organizationKeys';
+  import type { Organization } from '#lib/domain/organizations/api.js';
+  import { organizationKeys } from '#lib/domain/organizations/organizationKeys.js';
+  import { organizationQueries } from '#lib/domain/organizations/queries.js';
   import { AggregateBudgetPanel } from '#lib/features/budgets/index.js';
   import * as api from './api';
 
@@ -29,10 +31,7 @@
   let newName = $state('');
   let projectName = $state('');
   let renameProject = $state('');
-  const organizations = createQuery(() => ({
-    queryKey: organizationKeys.root,
-    queryFn: ({ signal }) => api.listOrganizations(signal)
-  }));
+  const organizations = createQuery(() => organizationQueries.all());
   const organization = $derived(
     organizations.data?.find((o) => o.id === selected)
   );
@@ -135,8 +134,8 @@
           ),
         (o) => {
           newName = '';
-          client.setQueryData<api.Organization[]>(
-            organizationKeys.root,
+          client.setQueryData<Organization[]>(
+            organizationKeys.all,
             (current = []) => [...current.filter((item) => item.id !== o.id), o]
           );
           selected = o.id;

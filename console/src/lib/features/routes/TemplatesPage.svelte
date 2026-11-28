@@ -17,7 +17,7 @@
     applyTemplate,
     type RouteTemplate
   } from './api';
-  import { routeKeys } from './routeKeys';
+  import { routeKeys } from '#lib/domain/routes/routeKeys.js';
   import TemplateEditor from './TemplateEditor.svelte';
 
   const access = useRole();

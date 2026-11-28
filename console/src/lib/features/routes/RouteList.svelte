@@ -8,7 +8,7 @@
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
 
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { routeKeys } from '#lib/domain/routes/routeKeys.js';
   import { retiringTargets } from '#lib/features/routes/routeEditor.js';
 
   import { resolve } from '$app/paths';
@@ -17,12 +17,8 @@
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
-  import {
-    listRouteDraftPage,
-    listRoutePage,
-    retireRoute,
-    type ActiveRoute
-  } from '#lib/features/routes/api.js';
+  import { listRouteDraftPage, retireRoute } from '#lib/features/routes/api.js';
+  import { listRoutePage, type ActiveRoute } from '#lib/domain/routes/api.js';
   import { cursorPaginationProps } from '#lib/listing/pagination.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';

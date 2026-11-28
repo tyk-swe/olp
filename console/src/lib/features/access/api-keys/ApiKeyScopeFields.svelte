@@ -5,7 +5,7 @@
   import PolicyFields from '../end-users/PolicyFields.svelte';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import type { listRoutes } from '#lib/features/routes/index.js';
+  import type { ActiveRoute } from '#lib/domain/routes/api.js';
 
   let {
     form,
@@ -28,7 +28,7 @@
       isPending: boolean;
       isError: boolean;
       error: unknown;
-      data?: Awaited<ReturnType<typeof listRoutes>>;
+      data?: ActiveRoute[];
       refetch: () => Promise<unknown>;
     };
     toggle: (list: string[], value: string, checked: boolean) => string[];

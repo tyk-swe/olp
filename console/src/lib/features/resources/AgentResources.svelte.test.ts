@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
-import { routeKeys } from '#lib/features/routes/index.js';
+import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import {

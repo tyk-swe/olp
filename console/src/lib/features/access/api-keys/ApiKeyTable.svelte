@@ -3,9 +3,9 @@
   import { formatBudget, formatDate } from '#lib/format.js';
   import {
     budgetState,
-    budgetStateLabel,
-    currentBudgetLimit
+    budgetStateLabel
   } from '#lib/features/access/api-keys/budgetPresentation.js';
+  import { currentBudgetLimit } from '#lib/features/budgets/index.js';
   import {
     isApiKeyExpired,
     isApiKeyUsable

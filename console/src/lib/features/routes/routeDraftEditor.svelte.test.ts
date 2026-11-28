@@ -1,4 +1,4 @@
-import { templateFor } from '#lib/features/inference/playground/templates.js';
+import { templateFor } from '#lib/requestTemplates.js';
 import type { OperationDialect } from './inspectionDialects';
 import RoutePublishPanel from './RoutePublishPanel.svelte';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -7,7 +7,7 @@ import { json, route, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import { mountState } from '#test/mount.js';
 import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
-import { routeKeys } from './routeKeys';
+import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 import { RouteDraftEditorState } from './routeDraftEditor.svelte';
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));

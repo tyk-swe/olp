@@ -2,12 +2,11 @@
   import type { ApiKey } from './api.js';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import type { listBudgetGroups } from '#lib/features/budgets/index.js';
   import {
-    budgetStateNote,
-    budgetWindowState,
-    currentBudgetLimit
-  } from './budgetPresentation.js';
+    currentBudgetLimit,
+    type listBudgetGroups
+  } from '#lib/features/budgets/index.js';
+  import { budgetStateNote, budgetWindowState } from './budgetPresentation.js';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
 
   let {

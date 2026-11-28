@@ -12,6 +12,7 @@ import {
 } from '#test/mount.js';
 import type { ApiKey, UpdateApiKeyInput } from './api';
 import ApiKeysPage from './ApiKeysPage.svelte';
+import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
 
 type BeforeNavigate = Parameters<Parameters<typeof beforeNavigate>[0]>[0];
 
@@ -145,7 +146,11 @@ function renderEditor(
   vi.stubGlobal('confirm', confirm);
   const { target } = mountWithState(
     ApiKeysPage,
-    { keyId: baseKey.id, listState: emptyCursorHistory() },
+    {
+      keyId: baseKey.id,
+      listState: emptyCursorHistory(),
+      RoutingPolicyEditor
+    },
     {
       attach: true,
       configureClient: (client) =>

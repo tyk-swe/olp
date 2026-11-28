@@ -8,7 +8,7 @@
   import type { RoutingPolicy } from './api';
   import { fidelityOptions, type FidelityMode } from './routeFidelity';
   import { saveTemplate, type RouteTemplate } from './api';
-  import { routeKeys } from './routeKeys';
+  import { routeKeys } from '#lib/domain/routes/routeKeys.js';
   let {
     current,
     projects,

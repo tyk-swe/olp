@@ -5,11 +5,8 @@
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { captureResult } from '#lib/editing/result.js';
-  import {
-    listRoutes,
-    routeKeys,
-    selectActiveRoutes
-  } from '#lib/features/routes/index.js';
+  import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
     ResourceRequestError,
@@ -20,8 +17,7 @@
 
   const mutation = useMutation();
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal),
+    ...routeQueries.all(),
     select: selectActiveRoutes
   }));
   const eligible = $derived(

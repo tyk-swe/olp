@@ -8,9 +8,9 @@
   } from '#lib/format.js';
   import {
     budgetStateNote,
-    budgetWindowState,
-    currentBudgetLimit
+    budgetWindowState
   } from '#lib/features/access/index.js';
+  import { currentBudgetLimit } from '#lib/features/budgets/index.js';
   import { presentUsageCompleteness } from './completenessPresentation.js';
   import type { getApiKey } from '#lib/features/access/index.js';
   import {

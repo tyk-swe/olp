@@ -1,16 +1,14 @@
 import { createQuery } from '@tanstack/svelte-query';
 import { named } from '#lib/components/entityOptions.js';
 import { useRole } from '#lib/session/useRole.svelte.js';
-import { listOrganizations } from './organizations/api.js';
-import { organizationKeys } from './organizations/organizationKeys.js';
+import type { Organization } from './api.js';
+import { organizationQueries } from './queries.js';
 
 export function organizationOptions() {
   const { allows } = useRole();
   return createQuery(() => ({
-    queryKey: organizationKeys.all,
-    queryFn: ({ signal }) => listOrganizations(signal),
+    ...organizationQueries.all(),
     enabled: allows('GET /api/v1/organizations'),
-    select: (organizations: { id: string; name: string }[]) =>
-      organizations.map(named)
+    select: (organizations: Organization[]) => organizations.map(named)
   }));
 }

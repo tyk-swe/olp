@@ -3,7 +3,7 @@ import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { confirmAction } from '#lib/components/confirm.js';
 import { overviewKeys } from '#lib/features/overview/index.js';
-import { routeKeys } from '#lib/features/routes/routeKeys.js';
+import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 import { nativeObject, parseNativeJSON } from '#lib/nativeJson.js';
 import type { components } from '#lib/management/schema.js';
 import { errorMessage } from '#lib/management/http.js';
