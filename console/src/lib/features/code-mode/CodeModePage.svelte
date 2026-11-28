@@ -69,7 +69,7 @@
   {:else if projects.isPending}<p class="loading-state" role="status">
       Loading projects…
     </p>
-  {:else if projects.isError}
+  {:else if projects.isLoadingError}
     <Callout tone="danger" title="Projects could not be loaded">
       Check your connection and try again.
       {#snippet actions()}<button

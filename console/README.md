@@ -230,7 +230,10 @@ screens cannot disagree about how fresh the same data is. Pass it to
 site.
 
 `projectQueries.memberships` is never served from cache, because memberships
-decide what the signed-in user is offered.
+decide what the signed-in user is offered. That makes a refresh happen often,
+so a page that holds unsaved input under that query treats only
+`isLoadingError` as a failed page and keeps the input when a later refresh
+fails.
 
 ## Writes
 

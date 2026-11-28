@@ -101,7 +101,12 @@
 <PageTitle title={selected?.name ?? 'Project'} />
 
 <QueryView
-  query={projects}
+  query={{
+    isPending: projects.isPending,
+    isError: projects.isLoadingError,
+    error: projects.error,
+    refetch: projects.refetch
+  }}
   loading="Loading project…"
   errorTitle="Project didn’t load"
   failure={errorMessage(projects.error)}
