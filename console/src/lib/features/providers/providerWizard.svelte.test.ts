@@ -401,6 +401,11 @@ describe('provider wizard', () => {
         'Enter at least one upstream model identifier.'
       )
     );
+    await eventually(() =>
+      expect(document.activeElement).toBe(
+        wizard.field('Upstream model identifiers')
+      )
+    );
     expect(discovery).toHaveBeenCalledOnce();
     wizard.type('Upstream model identifiers', 'model-a\nmodel-b');
     await wizard.press('Add identifiers for review');

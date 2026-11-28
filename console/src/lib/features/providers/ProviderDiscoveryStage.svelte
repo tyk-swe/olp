@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import FormField from '#lib/components/FormField.svelte';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import type { ProviderProbe } from '#lib/features/providers/providers.js';
   import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
@@ -26,6 +27,7 @@
     onDeclareModels: () => void | Promise<void>;
   } = $props();
 
+  let stage = $state<HTMLElement>();
   const disabled = $derived(Boolean(busy));
   const profiles = createQuery(() => ({
     queryKey: providerKeys.profiles(),
@@ -36,6 +38,10 @@
   const declared = $derived(
     provider ? declaresModels(provider.configuration, profiles.data) : false
   );
+  async function declare() {
+    await onDeclareModels();
+    if (stage) await focusFormError(stage);
+  }
 </script>
 
 {#snippet declaration()}
@@ -50,14 +56,18 @@
   <button
     class="button button-secondary"
     type="button"
-    onclick={onDeclareModels}
+    onclick={declare}
     {disabled}
   >
     {busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}
   </button>
 {/snippet}
 
-<section class="card stage" aria-labelledby="discovery-heading">
+<section
+  class="card stage"
+  aria-labelledby="discovery-heading"
+  bind:this={stage}
+>
   <p class="eyebrow">Probe passed</p>
   {#if declared}
     <h2 id="discovery-heading">Declare upstream models</h2>
