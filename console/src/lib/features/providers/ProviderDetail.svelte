@@ -23,7 +23,7 @@
   import ProviderModelsSection from './ProviderModelsSection.svelte';
   import ProviderRevisionsSection from './ProviderRevisionsSection.svelte';
   import ProviderValidationIssues from './ProviderValidationIssues.svelte';
-  import { requiresGrant } from './providerEditor';
+  import { requiresGrant } from './providerKindSpec';
   import { ProviderEditor } from './providerEditor.svelte';
   let { providerId }: { providerId: string } = $props();
   const editor = new ProviderEditor(() => providerId);

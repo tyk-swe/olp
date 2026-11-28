@@ -4,7 +4,7 @@
   import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
-  import { probeSummary } from '#lib/features/providers/providerEditor.js';
+  import { probeSummary } from '#lib/features/providers/providerReadiness.js';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   let {

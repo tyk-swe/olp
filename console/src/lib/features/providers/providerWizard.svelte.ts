@@ -36,17 +36,21 @@ import type { ProviderProfile } from '#lib/features/providers/providerProfiles.j
 import type { GrantEnrollment } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
 import {
-  authOptionsFor,
   buildCreateProviderInput,
-  certificationPrerequisiteReady,
   createProviderDraft,
   parseManualModelNames,
-  probeSummary,
-  requiresCredential,
-  requiresGrant,
   validateProviderDraft,
   type ProviderDraft
 } from '#lib/features/providers/providerEditor.js';
+import {
+  authOptionsFor,
+  requiresCredential,
+  requiresGrant
+} from '#lib/features/providers/providerKindSpec.js';
+import {
+  certificationPrerequisiteReady,
+  probeSummary
+} from '#lib/features/providers/providerReadiness.js';
 import { useRole } from '#lib/session/useRole.svelte.js';
 import {
   EditorSession,

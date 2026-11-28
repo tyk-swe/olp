@@ -9,11 +9,6 @@
       "count": 1
     }
   },
-  "src/lib/features/providers/providerEditor.ts": {
-    "max-lines": {
-      "count": 1
-    }
-  },
   "src/lib/features/providers/providerEditorActions.ts": {
     "max-lines-per-function": {
       "count": 1

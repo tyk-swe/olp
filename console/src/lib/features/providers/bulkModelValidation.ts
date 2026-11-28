@@ -4,7 +4,7 @@ import {
   setProviderModel,
   type ProviderCapabilityOptions
 } from './models.js';
-import { certificationPrerequisiteReady } from './providerEditor.js';
+import { certificationPrerequisiteReady } from './providerReadiness.js';
 import { probeProvider } from './providers.js';
 import { getProvider, type Provider } from '#lib/domain/providers/api.js';
 

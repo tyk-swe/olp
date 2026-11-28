@@ -4,15 +4,15 @@
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
   import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
+  import { type ProviderEditValues } from './providerEditor';
   import {
     authOptionsFor,
     hasApiVersion,
     hasCloudProject,
     hasCloudRegion,
     hasCustomEndpoint,
-    hasDeployment,
-    type ProviderEditValues
-  } from './providerEditor';
+    hasDeployment
+  } from './providerKindSpec';
 
   let {
     values = $bindable(),

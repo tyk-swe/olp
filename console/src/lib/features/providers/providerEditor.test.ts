@@ -2,28 +2,30 @@ import { describe, expect, it } from 'vitest';
 import type { ProviderPreset } from './models';
 import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
 import {
+  parseManualModelNames,
+  buildCreateProviderInput,
+  buildUpdateProviderInput,
+  createProviderDraft,
+  providerEditValues,
+  selectPluginProfile,
+  selectProviderPreset,
+  setProviderDraftKind,
+  validateProviderDraft
+} from './providerEditor';
+import { requiresProbeModel } from './providerKindSpec';
+import {
   activationReady,
   capabilitiesCertified,
   capabilityLimitReached,
   certificationPrerequisiteReady,
   disableNotice,
   MAX_REVIEWED_CAPABILITIES,
-  parseManualModelNames,
   probeReady,
   probeSummary,
   providerStatus,
   providerStatusTone,
-  type ProviderReadiness,
-  buildCreateProviderInput,
-  buildUpdateProviderInput,
-  createProviderDraft,
-  providerEditValues,
-  requiresProbeModel,
-  selectPluginProfile,
-  selectProviderPreset,
-  setProviderDraftKind,
-  validateProviderDraft
-} from './providerEditor';
+  type ProviderReadiness
+} from './providerReadiness';
 
 const preset: ProviderPreset = {
   id: 'hosted',

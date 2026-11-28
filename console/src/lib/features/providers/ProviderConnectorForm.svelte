@@ -13,13 +13,15 @@
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
   import {
-    probeModelPrompt,
-    requiresCredential,
-    requiresGrant,
-    requiresProbeModel,
     selectProviderPreset,
     type ProviderDraft
   } from '#lib/features/providers/providerEditor.js';
+  import {
+    probeModelPrompt,
+    requiresCredential,
+    requiresGrant,
+    requiresProbeModel
+  } from '#lib/features/providers/providerKindSpec.js';
   import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let {

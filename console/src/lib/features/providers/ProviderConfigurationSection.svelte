@@ -11,7 +11,7 @@
   import {
     providerStatus,
     providerStatusTone
-  } from '#lib/features/providers/providerEditor.js';
+  } from '#lib/features/providers/providerReadiness.js';
 
   import type { ProviderEditor } from './providerEditor.svelte';
   let {

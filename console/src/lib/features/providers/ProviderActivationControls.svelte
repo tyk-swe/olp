@@ -7,7 +7,7 @@
     capabilitiesCertified,
     probeReady,
     providerDisabled
-  } from './providerEditor';
+  } from './providerReadiness';
   import { formatDate, stateLabel } from '#lib/format.js';
   let {
     current,
