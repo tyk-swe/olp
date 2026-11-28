@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward/codexwire"
 )
 
@@ -120,5 +121,36 @@ func TestResponsesWithoutOpenCodeObjectKeepsChargeUnknown(t *testing.T) {
 	observation := codexwire.Observe([]byte(body), false)
 	if observation.AllowanceCharge != nil {
 		t.Fatalf("charge = %s, want nil (unknown, never zero)", observation.AllowanceCharge)
+	}
+}
+
+func TestObservedTokenUsageEvidence(t *testing.T) {
+	t.Parallel()
+	const none = `{"Total":null,"Input":null,"Output":null,"Cached":null,"Reasoning":null}`
+	for _, tc := range []struct{ name, usage, want string }{
+		{
+			"details",
+			`{"input_tokens":1200,"output_tokens":300,"total_tokens":1500,"input_tokens_details":{"cached_tokens":1000},"output_tokens_details":{"reasoning_tokens":100}}`,
+			`{"Total":1500,"Input":1200,"Output":300,"Cached":1000,"Reasoning":100}`,
+		},
+		{"total is never computed", `{"input_tokens":11,"output_tokens":7}`, `{"Total":null,"Input":11,"Output":7,"Cached":null,"Reasoning":null}`},
+		{"output not reported", `{"input_tokens":11}`, `{"Total":null,"Input":11,"Output":null,"Cached":null,"Reasoning":null}`},
+		{"largest exact count", `{"input_tokens":9007199254740991}`, `{"Total":null,"Input":9007199254740991,"Output":null,"Cached":null,"Reasoning":null}`},
+		{"unusable counts are unknown", `{"input_tokens":9007199254740992,"output_tokens":-1,"total_tokens":"5","input_tokens_details":{"cached_tokens":1.0}}`, none},
+		{"inconsistent total", `{"input_tokens":11,"output_tokens":7,"total_tokens":99}`, none},
+		{"reasoning beyond output", `{"input_tokens":11,"output_tokens":7,"total_tokens":18,"output_tokens_details":{"reasoning_tokens":8}}`, none},
+		{"null usage", `null`, none},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := `"id":"resp_1","status":"completed","usage":` + tc.usage
+			for _, observation := range []codemode.Observation{
+				codexwire.Observe([]byte(`{"type":"response.completed","response":{`+response+`}}`), false),
+				codexwire.Observe([]byte(`{`+response+`}`), true),
+			} {
+				if got, err := json.Marshal(observation.Usage); err != nil || !observation.Terminal || string(got) != tc.want {
+					t.Fatalf("observation = %+v, usage = %s, want %s: %v", observation, got, tc.want, err)
+				}
+			}
+		})
 	}
 }

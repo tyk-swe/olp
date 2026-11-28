@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -319,6 +320,22 @@ func TestGeminiLiveModalitySharesSettle(t *testing.T) {
 
 }
 
+func TestGeminiLiveUsageAccumulatesAcrossTurns(t *testing.T) {
+	t.Parallel()
+	surface := sessionSurfaces()[1]
+	surface.upstream = []sessionStep{
+		{read: true}, {write: `{"setupComplete":{}}`},
+		{write: `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":10,"responseTokenCount":5,"toolUsePromptTokenCount":3,"thoughtsTokenCount":2,"cachedContentTokenCount":4,"totalTokenCount":12,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":6}],"cacheTokensDetails":[{"modality":"IMAGE","tokenCount":2}],"responseTokensDetails":[{"modality":"AUDIO","tokenCount":1}]}}`},
+		{write: `{"usageMetadata":{"promptTokenCount":7,"responseTokenCount":3,"thoughtsTokenCount":1,"cachedContentTokenCount":2,"totalTokenCount":99,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":2}],"cacheTokensDetails":[{"modality":"IMAGE","tokenCount":1}]}}`},
+		{write: `{"serverContent":{"turnComplete":true}}`},
+	}
+	settled := settledSessionUsage(t, runSessionCase(t, surface, sessionCondition{name: "two turns"}))
+	const want = `{"input_tokens":20,"output_tokens":11,"total_tokens":119,"cached_input_tokens":6,"audio_input_tokens":8,"audio_output_tokens":1,"cached_image_input_tokens":3,"reasoning_tokens":3}`
+	if got, err := json.Marshal(settled); err != nil || string(got) != want {
+		t.Fatalf("usage = %s, want %s: %v", got, want, err)
+	}
+}
+
 func TestRealtimeResponseDoneSettlesModalityShares(t *testing.T) {
 	surface := sessionSurfaces()[0]
 	surface.upstream = []sessionStep{{write: `{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150,"input_token_details":{"cached_tokens":40,"audio_tokens":30,"image_tokens":10,"cached_tokens_details":{"audio_tokens":12,"image_tokens":4}},"output_token_details":{"audio_tokens":20}}}}`}}
@@ -346,5 +363,87 @@ func TestHoldSessionExposureSweepsExpired(t *testing.T) {
 	}
 	if !s.localExposureHeld("live") || !s.localExposureHeld("other") {
 		t.Errorf("live exposures = %v, want both keys held", s.exposures.held)
+	}
+}
+
+func TestNativeDuplexUsageAccounting(t *testing.T) {
+	t.Parallel()
+	vertex := connectors.Config{
+		Kind: "vertex_ai", VendorID: "google-vertex", ProfileID: "vertex-realtime", ProfileRevision: connectors.ProfileRevision,
+		Endpoint:    "https://us-central1-aiplatform.googleapis.com/v1/projects/audit-project/locations/us-central1/publishers/google",
+		CloudRegion: "us-central1", CloudProject: "audit-project", AuthMode: "service_account",
+	}
+	bedrock := connectors.Config{
+		Kind: "bedrock", VendorID: "amazon-bedrock", ProfileID: "bedrock-realtime", ProfileRevision: connectors.ProfileRevision,
+		Endpoint:    connectors.DefaultProfileEndpoint("bedrock", "bedrock-realtime", "us-east-1", ""),
+		CloudRegion: "us-east-1", AuthMode: connectors.AuthStatic,
+	}
+	xai := connectors.Config{
+		Kind: "openai_compatible", VendorID: "xai", ProfileID: "xai-realtime", ProfileRevision: connectors.ProfileRevision,
+		Endpoint: "https://api.x.ai/v1", AuthMode: "api_key",
+	}
+	const manualTurns = `{"type":"session.update","session":{"turn_detection":null}}`
+	for _, tc := range []struct {
+		name           string
+		provider       connectors.Config
+		client, server []string
+		want           string
+		complete       bool
+	}{
+		{"Vertex sums turns and reads trailing usage", vertex, nil, []string{
+			`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":10,"responseTokenCount":5,"toolUsePromptTokenCount":3,"thoughtsTokenCount":2,"cachedContentTokenCount":4,"totalTokenCount":12,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":6}],"responseTokensDetails":[{"modality":"AUDIO","tokenCount":1}]}}`,
+			`{"serverContent":{"turnComplete":true}}`,
+			`{"usageMetadata":{"promptTokenCount":7,"responseTokenCount":3,"totalTokenCount":99,"promptTokensDetails":[{"modality":"AUDIO","tokenCount":2}]}}`,
+		}, `{"input_tokens":20,"output_tokens":10,"total_tokens":119,"cached_input_tokens":4,"audio_input_tokens":8,"audio_output_tokens":1,"reasoning_tokens":2}`, true},
+		{"Vertex turn without usage", vertex, nil, []string{`{"serverContent":{"turnComplete":true}}`}, `null`, false},
+		{"Nova Sonic keeps the largest running total", bedrock, nil, []string{
+			`{"event":{"completionStart":{}}}`,
+			`{"event":{"usageEvent":{"totalInputTokens":10,"totalOutputTokens":5,"totalTokens":15,"details":{"total":{"input":{"speechTokens":6},"output":{"speechTokens":4}}}}}}`,
+			`{"event":{"usageEvent":{"totalInputTokens":25,"totalOutputTokens":12,"totalTokens":37,"details":{"total":{"input":{"speechTokens":14},"output":{"speechTokens":9}}}}}}`,
+			`{"event":{"usageEvent":{"totalInputTokens":1,"totalOutputTokens":1,"totalTokens":2}}}`,
+			`{"event":{"completionEnd":{}}}`,
+		}, `{"input_tokens":25,"output_tokens":12,"total_tokens":37,"audio_input_tokens":14,"audio_output_tokens":9}`, true},
+		{"Nova Sonic usage without a total", bedrock, nil, []string{`{"event":{"usageEvent":{"totalInputTokens":10,"totalOutputTokens":5}}}`}, `null`, false},
+		{"Nova Sonic completion without usage", bedrock, nil, []string{
+			`{"event":{"usageEvent":{"totalInputTokens":10,"totalOutputTokens":5,"totalTokens":15}}}`,
+			`{"event":{"completionStart":{}}}`,
+			`{"event":{"completionEnd":{}}}`,
+		}, `{"input_tokens":10,"output_tokens":5,"total_tokens":15}`, false},
+		{"xAI sums responses", xai, []string{manualTurns}, []string{
+			`{"type":"response.created","response":{"id":"r1"}}`,
+			`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":21,"billable_audio_seconds":1.5}}}`,
+			`{"type":"response.created","response":{"id":"r2"}}`,
+			`{"type":"response.done","response":{"id":"r2","usage":{"input_tokens":4,"output_tokens":2}}}`,
+		}, `{"input_tokens":14,"output_tokens":7,"total_tokens":27,"media_units":"1.5"}`, true},
+		{"xAI bills seconds without tokens", xai, []string{manualTurns}, []string{
+			`{"type":"response.done","response":{"id":"r1","usage":{"billable_audio_seconds":2.5}}}`,
+		}, `{"input_tokens":0,"output_tokens":0,"total_tokens":0,"media_units":"2.5"}`, true},
+		{"xAI duration billed session stays incomplete", xai, nil, []string{
+			`{"type":"response.done","response":{"id":"r1","usage":{"input_tokens":10,"output_tokens":5}}}`,
+		}, `{"input_tokens":10,"output_tokens":5,"total_tokens":15}`, false},
+		{"xAI response without usage", xai, []string{manualTurns}, []string{`{"type":"response.done","response":{"id":"r1"}}`}, `null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			template, err := duplex.Compile(duplex.Config{Provider: tc.provider, Model: "audit-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := template.Observer(1 << 20)
+			for _, frame := range tc.client {
+				if err := o.ClientFrame([]byte(frame)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, frame := range tc.server {
+				if _, err := o.ServerFrame([]byte(frame)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := json.Marshal(o.Usage())
+			if err != nil || string(got) != tc.want || o.Complete() != tc.complete {
+				t.Fatalf("usage = %s, complete = %t, want %s, %t: %v", got, o.Complete(), tc.want, tc.complete, err)
+			}
+		})
 	}
 }

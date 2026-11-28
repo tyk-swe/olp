@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -437,4 +438,48 @@ func TestObserveRetainedExpiry(t *testing.T) {
 			t.Fatalf("got %v, want ErrContract", err)
 		}
 	})
+}
+
+func TestObserveRetainedJobTokenCounts(t *testing.T) {
+	t.Parallel()
+	job := &Resource{
+		Kind: "fine_tuning_job",
+		Metadata: json.RawMessage(`{
+			"upstream_model":"base-model",
+			"created_at":"2026-05-01T10:00:00Z",
+			"terminal_observed_at":"2026-05-01T10:05:00Z"
+		}`),
+	}
+	for name, tc := range map[string]struct{ count, want string }{
+		"number":              {`7500`, "7500"},
+		"numeric string":      {`"7500"`, "7500"},
+		"above double range":  {`9007199254740993`, "9007199254740993"},
+		"zero":                {`0`, "0"},
+		"null is unobserved":  {`null`, "unobserved"},
+		"negative":            {`-1`, "rejected"},
+		"negative string":     {`"-1"`, "rejected"},
+		"fraction":            {`7500.0`, "rejected"},
+		"exponent":            {`75e2`, "rejected"},
+		"beyond signed range": {`9223372036854775808`, "rejected"},
+		"boolean":             {`true`, "rejected"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := mustParseOIF(t, `{"status":"succeeded","trained_tokens":`+tc.count+`}`)
+			observed, err := ObserveRetained(job, retainedapi.Endpoint{}, body, time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC))
+			if got := describeTraining(observed, err); got != tc.want {
+				t.Fatalf("trained tokens = %s, want %s, %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
+func describeTraining(observed RetainedObservation, err error) string {
+	if err != nil {
+		return "rejected"
+	}
+	if len(observed.Lines) == 0 {
+		return "unobserved"
+	}
+	return strconv.FormatInt(*observed.Lines[0].Usage.TrainingTokens, 10)
 }

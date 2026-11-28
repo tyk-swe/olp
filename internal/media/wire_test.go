@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -244,5 +245,75 @@ func TestObserveMediaUsageAndHelpers(t *testing.T) {
 	}
 	if UnixTime(nil) != nil || UnixTime(new(int64(1700000000))).Unix() != 1700000000 {
 		t.Fatalf("UnixTime mismatch")
+	}
+}
+
+func TestMediaReplyUsageAccounting(t *testing.T) {
+	t.Parallel()
+	image := func(body []byte) (*ImageUsage, *Error) {
+		result, failure := DecodeImageResponse(body, stubStageImage)
+		if failure != nil {
+			return nil, failure
+		}
+		return result.Usage, nil
+	}
+	transcript := func(body []byte) (*ImageUsage, *Error) {
+		result, failure := DecodeTranscriptionJSON(body)
+		if failure != nil {
+			return nil, failure
+		}
+		return result.Tokens, nil
+	}
+	gemini := func(body []byte) (*ImageUsage, *Error) {
+		result, failure := readGemini(body)
+		if failure != nil {
+			return nil, failure
+		}
+		return result.tokens(), nil
+	}
+	for name, tc := range map[string]struct {
+		decode   func([]byte) (*ImageUsage, *Error)
+		body     string
+		want     *ImageUsage
+		rejected bool
+	}{
+		"image output without a breakdown is all image tokens": {decode: image,
+			body: `{"data":[{"b64_json":"YQ=="}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}`,
+			want: &ImageUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, ImageOutputTokens: new(int64(5))}},
+		"image without usage":    {decode: image, body: `{"data":[{"b64_json":"YQ=="}],"usage":null}`},
+		"image fractional count": {decode: image, body: `{"data":[{"b64_json":"YQ=="}],"usage":{"input_tokens":1.5}}`, rejected: true},
+		"transcription without a usage type": {decode: transcript,
+			body: `{"text":"hi","usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}`,
+			want: &ImageUsage{InputTokens: 12, OutputTokens: 5, TotalTokens: 17}},
+		"transcription billed by duration": {decode: transcript, body: `{"text":"hi","usage":{"type":"duration","seconds":3}}`},
+		"transcription fractional count":   {decode: transcript, body: `{"text":"hi","usage":{"type":"tokens","input_tokens":1.5}}`, rejected: true},
+		"Gemini modality buckets are summed": {decode: gemini,
+			body: `{"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15,"promptTokensDetails":[{"modality":"TEXT","tokenCount":1},{"modality":"AUDIO","tokenCount":2},{"modality":"IMAGE","tokenCount":3},{"modality":"VIDEO","tokenCount":4}],"candidatesTokensDetails":[{"modality":"AUDIO","tokenCount":5}]}}`,
+			want: &ImageUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, AudioInputTokens: new(int64(2)), ImageInputTokens: new(int64(7)), AudioOutputTokens: new(int64(5))}},
+		"Gemini without usage": {decode: gemini, body: `{"candidates":[{"finishReason":"STOP"}]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			usage, failure := tc.decode([]byte(tc.body))
+			if (failure != nil) != tc.rejected || !reflect.DeepEqual(usage, tc.want) {
+				t.Fatalf("usage = %+v (%v), want %+v", usage, failure, tc.want)
+			}
+		})
+	}
+}
+
+func TestObservedMediaUsagePrefersTheResponsesNames(t *testing.T) {
+	t.Parallel()
+	got := ObserveMediaUsage(`{"usage":{"input_tokens":1,"prompt_tokens":2,"output_tokens":3,"completion_tokens":4,"input_tokens_details":{"cached_tokens":5,"audio_tokens":6},"input_token_details":{"audio_tokens":7},"prompt_tokens_details":{"cached_tokens":8}}}`, OpTranscription)
+	want := &MediaUsage{Input: new(int64(1)), Output: new(int64(3)), Cached: new(int64(5)), AudioInput: new(int64(6))}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+	image := ObserveMediaUsage(`{"usage":{"output_tokens":9}}`, OpImageEdit)
+	if image == nil || !reflect.DeepEqual(image.ImageOutput, new(int64(9))) {
+		t.Fatalf("image usage = %+v", image)
+	}
+	if got := ObserveMediaUsage(`{"usage":{"input_tokens":1.5,"output_tokens":3}}`, OpImageGeneration); got != nil {
+		t.Fatalf("fractional usage = %+v", got)
 	}
 }

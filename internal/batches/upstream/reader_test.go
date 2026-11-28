@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
 
@@ -200,6 +201,40 @@ func TestVertexReconcilePagination(t *testing.T) {
 			}
 			if !errors.Is(err, tc.err) || !slices.Equal(ids, tc.ids) || calls != len(tc.pages) {
 				t.Fatalf("got jobs %v, error %v after %d requests; want jobs %v, error %v after %d requests", ids, err, calls, tc.ids, tc.err, len(tc.pages))
+			}
+		})
+	}
+}
+
+func describeManifest(manifest string) (string, error) {
+	result, err := parseBedrockManifest([]byte(manifest))
+	if err != nil {
+		return "rejected", err
+	}
+	complete := result.Usage.Evidence == usage.EvidenceObservedComplete
+	return fmt.Sprintf("%d %d complete=%t", *result.Usage.InputTokens, *result.Usage.OutputTokens, complete), nil
+}
+
+func TestBedrockManifestUsage(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ manifest, want string }{
+		"all records processed": {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":3,"outputTokenCount":2}`,
+			"3 2 complete=true"},
+		"records outstanding": {`{"totalRecordCount":3,"processedRecordCount":2,"inputTokenCount":3,"outputTokenCount":2}`,
+			"3 2 complete=false"},
+		"quoted counts": {`{"totalRecordCount":"2","processedRecordCount":"2","inputTokenCount":"9007199254740993","outputTokenCount":"2"}`,
+			"9007199254740993 2 complete=true"},
+		"more processed than total": {`{"totalRecordCount":1,"processedRecordCount":2,"inputTokenCount":3,"outputTokenCount":2}`, "rejected"},
+		"output missing":            {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":3}`, "rejected"},
+		"output null":               {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":3,"outputTokenCount":null}`, "rejected"},
+		"negative input":            {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":-1,"outputTokenCount":2}`, "rejected"},
+		"fractional input":          {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":1.5,"outputTokenCount":2}`, "rejected"},
+		"sum overflows":             {`{"totalRecordCount":2,"processedRecordCount":2,"inputTokenCount":9223372036854775807,"outputTokenCount":1}`, "rejected"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got, err := describeManifest(tc.manifest); got != tc.want {
+				t.Fatalf("manifest = %s, want %s, %v", got, tc.want, err)
 			}
 		})
 	}
