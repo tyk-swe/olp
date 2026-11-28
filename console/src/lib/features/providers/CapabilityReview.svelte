@@ -8,7 +8,7 @@
   import {
     capabilityLimitReached,
     MAX_REVIEWED_CAPABILITIES
-  } from '#lib/features/providers/providerEditor.js';
+  } from '#lib/features/providers/providerReadiness.js';
   import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import { stateLabel } from '#lib/format.js';
   import CapabilityEvidence from './CapabilityEvidence.svelte';

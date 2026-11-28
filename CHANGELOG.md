@@ -39,6 +39,7 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Changed
 
+- The provider wizard shows a missing or refused connection value under its own field and moves focus to it, and an empty manual model declaration reports at the identifier box.
 - The agent activity lists, investigations, pending agent spend and linked spans
   page with Previous and Next. The project filter on runs, tasks and
   investigations keeps its choice while projects reload, and the MCP server

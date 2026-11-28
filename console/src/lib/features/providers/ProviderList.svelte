@@ -26,7 +26,7 @@
   import {
     providerStatus,
     providerStatusTone
-  } from '#lib/features/providers/providerEditor.js';
+  } from '#lib/features/providers/providerReadiness.js';
 
   let { listState = $bindable() }: { listState: ProviderListState } = $props();
   const access = useRole();

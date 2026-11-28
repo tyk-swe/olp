@@ -40,12 +40,14 @@ import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import type { ProviderChangeReceipt } from './providerChanges';
 import {
   buildUpdateProviderInput,
-  certificationPrerequisiteReady,
-  disableNotice,
   parseManualModelNames,
-  probeSummary,
   type ProviderEditValues
 } from './providerEditor';
+import {
+  certificationPrerequisiteReady,
+  disableNotice,
+  probeSummary
+} from './providerReadiness';
 
 export const providerEditorIntentNames = [
   'activate',

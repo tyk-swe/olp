@@ -1,9 +1,9 @@
 import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
-import { ApiProblem } from '#lib/management/http.js';
 import type { MutationIntent } from '#lib/editing/mutationIntent.js';
 import {
   activateProvider,
   createProvider,
+  isRefusedProblem,
   updateProvider
 } from '#lib/features/providers/providers.js';
 import type {
@@ -33,15 +33,6 @@ export type ActivationProgress = { input: Pick<Provider, 'id' | 'etag'> } & (
   | { phase: 'pending'; uncertain: boolean }
   | { phase: 'committed'; generation: number }
 );
-
-export function isRefusedProblem(error: unknown): boolean {
-  return (
-    error instanceof ApiProblem &&
-    error.problem.status >= 400 &&
-    error.problem.status < 500 &&
-    ![408, 429].includes(error.problem.status)
-  );
-}
 
 export function isLiveGrant(
   credentials: ProviderCredential[] | undefined,
@@ -118,25 +109,45 @@ function connectionSaved(
   };
 }
 
+type SaveDeps = {
+  createIntent: MutationIntent;
+  rotateIntent: MutationIntent;
+  isCurrent: () => boolean;
+  setProgress: (next: ConnectionProgress | undefined) => void;
+  setNotice: (notice: string) => void;
+};
+
+async function trackWrite<T>(
+  progress: Extract<ConnectionProgress, { phase: 'create' | 'update' }>,
+  { createIntent, isCurrent, setProgress }: SaveDeps,
+  write: () => Promise<T>
+): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isCurrent()) {
+      if (!isRefusedProblem(error))
+        setProgress({ ...progress, uncertain: true });
+      else if (!progress.uncertain) {
+        setProgress(undefined);
+        createIntent.reset();
+      }
+    }
+    throw error;
+  }
+}
+
 export async function saveProviderConnection(
   progress: ConnectionProgress,
-  deps: {
-    createIntent: MutationIntent;
-    rotateIntent: MutationIntent;
-    isCurrent: () => boolean;
-    setProgress: (next: ConnectionProgress | undefined) => void;
-    setNotice: (notice: string) => void;
-  }
+  deps: SaveDeps
 ): Promise<Extract<ConnectionProgress, { phase: 'saved' }> | undefined> {
   if (progress.phase === 'saved') return progress;
   if (progress.phase === 'update') {
-    const updated = await updateProvider(
-      progress.provider.id,
-      progress.provider.etag,
-      {
+    const updated = await trackWrite(progress, deps, () =>
+      updateProvider(progress.provider.id, progress.provider.etag, {
         name: progress.input.name,
         configuration: progress.input.configuration
-      }
+      })
     );
     if (!deps.isCurrent()) return;
     const next: ConnectionProgress = {
@@ -177,7 +188,9 @@ export async function saveProviderConnection(
     return saved;
   }
   const request = deps.createIntent.prepare(progress.input);
-  const id = await createProvider(request.input, request.requestId);
+  const id = await trackWrite(progress, deps, () =>
+    createProvider(request.input, request.requestId)
+  );
   if (!deps.isCurrent()) return;
   deps.createIntent.reset();
   const saved = connectionSaved(progress.input, id);

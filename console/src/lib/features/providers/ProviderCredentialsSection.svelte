@@ -14,12 +14,8 @@
   } from '#lib/domain/providers/api.js';
   import type { ProviderEditor } from './providerEditor.svelte';
   import { formatDate } from '#lib/format.js';
-  import {
-    DISABLED_EDIT_NOTE,
-    providerDisabled,
-    requiresCredential,
-    requiresGrant
-  } from './providerEditor';
+  import { requiresCredential, requiresGrant } from './providerKindSpec';
+  import { DISABLED_EDIT_NOTE, providerDisabled } from './providerReadiness';
   import { providerQueries } from '#lib/domain/providers/queries.js';
   let {
     current,

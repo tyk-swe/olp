@@ -1,9 +1,13 @@
 <script lang="ts" generics="Values extends ProviderEditValues">
   import { createQuery } from '@tanstack/svelte-query';
+  import FormField from '#lib/components/FormField.svelte';
+  import type { FieldErrors } from '#lib/editing/validation.js';
+  import type { ConnectionField } from './wizard/connectionValidation';
   import { listProviderProfiles } from './providerProfiles';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
   import { nativeObject, type NativeValue } from '#lib/nativeJson.js';
+  import type { ProviderEditValues } from './providerEditor';
   import {
     authOptionsFor,
     hasApiVersion,
@@ -11,8 +15,8 @@
     hasCloudRegion,
     hasCustomEndpoint,
     hasDeployment,
-    type ProviderEditValues
-  } from './providerEditor';
+    showsEndpoint
+  } from './providerKindSpec';
 
   let {
     values = $bindable(),
@@ -21,6 +25,7 @@
     disabled = false,
     authEditable = false,
     endpointReadonly = false,
+    errors = {},
     onChange
   }: {
     values: Values;
@@ -29,6 +34,7 @@
     disabled?: boolean;
     authEditable?: boolean;
     endpointReadonly?: boolean;
+    errors?: FieldErrors<ConnectionField>;
     onChange?: () => void;
   } = $props();
   const profiles = createQuery(() => ({
@@ -92,39 +98,41 @@
   }
 </script>
 
-<div class="form-field">
-  <label for={`${idPrefix}-name`}>Provider name</label>
-  <input
-    id={`${idPrefix}-name`}
-    bind:value={values.name}
-    oninput={onChange}
-    disabled={fieldsDisabled}
-    required
-  />
-</div>
-<div class="form-field">
-  <label for={`${idPrefix}-auth`}>Authentication</label>
-  {#if authEditable || values.profileId}
-    <select
-      id={`${idPrefix}-auth`}
-      bind:value={values.authMode}
-      onchange={onChange}
+<FormField label="Provider name" error={errors.name}>
+  {#snippet control(attributes)}
+    <input
+      {...attributes}
+      bind:value={values.name}
+      oninput={onChange}
       disabled={fieldsDisabled}
-    >
-      {#if !authOptions.some(([mode]) => mode === values.authMode)}<option
-          value={values.authMode}
-          disabled
-        >
-          Current authentication is incompatible
-        </option>{/if}
-      {#each authOptions as option (option[0])}
-        <option value={option[0]}>{option[1]}</option>
-      {/each}
-    </select>
-  {:else}
-    <input id={`${idPrefix}-auth`} value={values.authMode} disabled />
-  {/if}
-</div>
+      required
+    />
+  {/snippet}
+</FormField>
+<FormField label="Authentication" error={errors.authMode}>
+  {#snippet control(attributes)}
+    {#if authEditable || values.profileId}
+      <select
+        {...attributes}
+        bind:value={values.authMode}
+        onchange={onChange}
+        disabled={fieldsDisabled}
+      >
+        {#if !authOptions.some(([mode]) => mode === values.authMode)}<option
+            value={values.authMode}
+            disabled
+          >
+            Current authentication is incompatible
+          </option>{/if}
+        {#each authOptions as option (option[0])}
+          <option value={option[0]}>{option[1]}</option>
+        {/each}
+      </select>
+    {:else}
+      <input {...attributes} value={values.authMode} disabled />
+    {/if}
+  {/snippet}
+</FormField>
 <div class="form-field full">
   <label for={`${idPrefix}-credential-source`}>Serving credentials</label>
   <select
@@ -152,62 +160,75 @@
   </small>
 </div>
 <!-- A plugin provider's endpoint is its profile's address, which the server sets. -->
-{#if spec.kind !== 'plugin' && (hasCustomEndpoint(spec) || values.profileId)}
-  <div class="form-field full">
-    <label for={`${idPrefix}-endpoint`}>
-      {spec.kind === 'azure_openai' ? 'Azure resource endpoint' : 'Endpoint'}
-    </label>
-    <input
-      id={`${idPrefix}-endpoint`}
-      type="url"
-      bind:value={values.endpoint}
-      oninput={onChange}
-      readonly={endpointReadonly}
-      disabled={fieldsDisabled}
-      required={hasCustomEndpoint(spec)}
-    />
-  </div>
+{#if showsEndpoint(values, spec)}
+  <FormField
+    label={spec.kind === 'azure_openai'
+      ? 'Azure resource endpoint'
+      : 'Endpoint'}
+    error={errors.endpoint}
+    full
+  >
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        type="url"
+        bind:value={values.endpoint}
+        oninput={onChange}
+        readonly={endpointReadonly}
+        disabled={fieldsDisabled}
+        required={hasCustomEndpoint(spec)}
+      />
+    {/snippet}
+  </FormField>
 {/if}
 {#if hasApiVersion(spec)}
-  <div class="form-field">
-    <label for={`${idPrefix}-version`}>API version</label>
-    <input
-      id={`${idPrefix}-version`}
-      bind:value={values.apiVersion}
-      oninput={onChange}
-      disabled={fieldsDisabled}
-      required={!v1}
-      aria-describedby={`${idPrefix}-version-help`}
-    />
-    {#if v1}<small id={`${idPrefix}-version-help`}>
-        Azure v1 does not use a dated API version. Clear this field explicitly
-        when migrating.
-      </small>{/if}
-  </div>
+  <FormField label="API version" error={errors.apiVersion}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        bind:value={values.apiVersion}
+        oninput={onChange}
+        disabled={fieldsDisabled}
+        required={!v1}
+        aria-describedby={[
+          attributes['aria-describedby'],
+          v1 && `${idPrefix}-version-help`
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined}
+      />
+      {#if v1}<small id={`${idPrefix}-version-help`}>
+          Azure v1 does not use a dated API version. Clear this field explicitly
+          when migrating.
+        </small>{/if}
+    {/snippet}
+  </FormField>
 {/if}
 {#if hasCloudRegion(spec)}
-  <div class="form-field">
-    <label for={`${idPrefix}-region`}>Cloud region</label>
-    <input
-      id={`${idPrefix}-region`}
-      bind:value={values.cloudRegion}
-      oninput={onChange}
-      disabled={fieldsDisabled}
-      required
-    />
-  </div>
+  <FormField label="Cloud region" error={errors.cloudRegion}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        bind:value={values.cloudRegion}
+        oninput={onChange}
+        disabled={fieldsDisabled}
+        required
+      />
+    {/snippet}
+  </FormField>
 {/if}
 {#if hasCloudProject(spec)}
-  <div class="form-field">
-    <label for={`${idPrefix}-project`}>Cloud project</label>
-    <input
-      id={`${idPrefix}-project`}
-      bind:value={values.cloudProject}
-      oninput={onChange}
-      disabled={fieldsDisabled}
-      required
-    />
-  </div>
+  <FormField label="Cloud project" error={errors.cloudProject}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        bind:value={values.cloudProject}
+        oninput={onChange}
+        disabled={fieldsDisabled}
+        required
+      />
+    {/snippet}
+  </FormField>
 {/if}
 {#if batchStorageProfile}
   <div class="form-field full">
@@ -273,14 +294,15 @@
   </div>
 {/if}
 {#if hasDeployment(spec)}
-  <div class="form-field">
-    <label for={`${idPrefix}-deployment`}>Cloud deployment</label>
-    <input
-      id={`${idPrefix}-deployment`}
-      bind:value={values.deployment}
-      oninput={onChange}
-      disabled={fieldsDisabled}
-      required={!v1}
-    />
-  </div>
+  <FormField label="Cloud deployment" error={errors.deployment}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        bind:value={values.deployment}
+        oninput={onChange}
+        disabled={fieldsDisabled}
+        required={!v1}
+      />
+    {/snippet}
+  </FormField>
 {/if}

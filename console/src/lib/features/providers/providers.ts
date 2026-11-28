@@ -131,6 +131,15 @@ export function isProviderInUse(error: unknown): boolean {
   );
 }
 
+export function isRefusedProblem(error: unknown): boolean {
+  return (
+    error instanceof ApiProblem &&
+    error.problem.status >= 400 &&
+    error.problem.status < 500 &&
+    ![408, 429].includes(error.problem.status)
+  );
+}
+
 export const deleteProvider = async (
   value: { id: string; etag: string },
   requestId: string

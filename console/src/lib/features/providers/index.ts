@@ -11,7 +11,8 @@ export {
   type LifecycleNotice,
   lifecycleNotice
 } from './provider-models/lifecycle.js';
-export { parseManualModelNames, requiresGrant } from './providerEditor.js';
+export { parseManualModelNames } from './providerEditor.js';
+export { requiresGrant } from './providerKindSpec.js';
 export {
   listProviderKinds,
   listProviderVendors

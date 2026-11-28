@@ -1,16 +1,19 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import FormField from '#lib/components/FormField.svelte';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import type { ProviderProbe } from '#lib/features/providers/providers.js';
   import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
-  import { probeSummary } from '#lib/features/providers/providerEditor.js';
+  import { probeSummary } from '#lib/features/providers/providerReadiness.js';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   let {
     provider,
     probe,
     manualModelNames = $bindable(),
+    error,
     busy,
     onDiscover,
     onDeclareModels
@@ -18,11 +21,13 @@
     provider: Provider | null;
     probe: ProviderProbe | null;
     manualModelNames: string;
+    error?: string;
     busy: string;
     onDiscover: () => void | Promise<void>;
     onDeclareModels: () => void | Promise<void>;
   } = $props();
 
+  let stage = $state<HTMLElement>();
   const disabled = $derived(Boolean(busy));
   const profiles = createQuery(() => ({
     queryKey: providerKeys.profiles(),
@@ -33,27 +38,36 @@
   const declared = $derived(
     provider ? declaresModels(provider.configuration, profiles.data) : false
   );
+  async function declare() {
+    await onDeclareModels();
+    if (stage) await focusFormError(stage);
+  }
 </script>
 
 {#snippet declaration()}
-  <div class="form-field">
-    <label for="manual-models-wizard">Upstream model identifiers</label>
-    <textarea
-      id="manual-models-wizard"
-      bind:value={manualModelNames}
-      placeholder="model-a&#10;model-b"></textarea>
-  </div>
+  <FormField label="Upstream model identifiers" {error}>
+    {#snippet control(attributes)}
+      <textarea
+        {...attributes}
+        bind:value={manualModelNames}
+        placeholder="model-a&#10;model-b"></textarea>
+    {/snippet}
+  </FormField>
   <button
     class="button button-secondary"
     type="button"
-    onclick={onDeclareModels}
+    onclick={declare}
     {disabled}
   >
     {busy === 'declare-models' ? 'Adding…' : 'Add identifiers for review'}
   </button>
 {/snippet}
 
-<section class="card stage" aria-labelledby="discovery-heading">
+<section
+  class="card stage"
+  aria-labelledby="discovery-heading"
+  bind:this={stage}
+>
   <p class="eyebrow">Probe passed</p>
   {#if declared}
     <h2 id="discovery-heading">Declare upstream models</h2>
