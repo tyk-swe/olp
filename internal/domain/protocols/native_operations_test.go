@@ -186,3 +186,46 @@ func TestPreparedResponseUsesDispatchedInputsAndCallerProjection(t *testing.T) {
 		t.Fatal("accepted an echoed document absent from dispatched inputs")
 	}
 }
+
+func TestEmbeddingAndRerankUsageAccounting(t *testing.T) {
+	t.Parallel()
+	embeddings := parseEmbeddings(t, `{"model":"route","input":["a","b"]}`)
+	single := parseEmbeddings(t, `{"model":"route","input":"a"}`)
+	rerank := parseRerank(t, `{"model":"route","query":"q","documents":["a","b"]}`)
+	const openaiData = `{"object":"list","model":"m","data":[{"object":"embedding","index":0,"embedding":[0.5]},{"object":"embedding","index":1,"embedding":[0.25]}]`
+	const results = `{"results":[{"index":0,"relevance_score":0.5}]`
+	for _, tc := range []struct {
+		name       string
+		wire       wire.Format
+		target     wire.Format
+		request    *wire.Request
+		body, want string
+	}{
+		{"OpenAI prompt tokens", wire.Embeddings, wire.Embeddings, embeddings, openaiData + `,"usage":{"prompt_tokens":4,"total_tokens":4}}`, `{"input_tokens":4,"output_tokens":0,"total_tokens":4}`},
+		{"OpenAI total only", wire.Embeddings, wire.Embeddings, embeddings, openaiData + `,"usage":{"total_tokens":6}}`, `{"input_tokens":6,"output_tokens":0,"total_tokens":6}`},
+		{"OpenAI usage absent", wire.Embeddings, wire.Embeddings, embeddings, openaiData + `}`, `null`},
+		{"OpenAI usage without counts", wire.Embeddings, wire.Embeddings, embeddings, openaiData + `,"usage":{}}`, ""},
+		{"Vertex predictions are summed", wire.VertexEmbeddings, wire.Embeddings, embeddings, `{"predictions":[{"embeddings":{"values":[0.5],"statistics":{"token_count":3}}},{"embeddings":{"values":[0.25],"statistics":{"token_count":4}}}]}`, `{"input_tokens":7,"output_tokens":0,"total_tokens":7}`},
+		{"Vertex negative count", wire.VertexEmbeddings, wire.Embeddings, embeddings, `{"predictions":[{"embeddings":{"values":[0.5],"statistics":{"token_count":-1}}},{"embeddings":{"values":[0.25],"statistics":{"token_count":4}}}]}`, ""},
+		{"Bedrock Titan", wire.BedrockEmbeddings, wire.Embeddings, single, `{"embedding":[0.5],"inputTextTokenCount":5}`, `{"input_tokens":5,"output_tokens":0,"total_tokens":5}`},
+		{"Bedrock Titan without count", wire.BedrockEmbeddings, wire.Embeddings, single, `{"embedding":[0.5]}`, ""},
+		{"rerank tokens", wire.Rerank, wire.Rerank, rerank, results + `,"usage":{"total_tokens":42}}`, `{"input_tokens":42,"output_tokens":0,"total_tokens":42}`},
+		{"rerank search units", wire.Rerank, wire.Rerank, rerank, results + `,"meta":{"billed_units":{"search_units":2}}}`, `{"input_tokens":0,"output_tokens":0,"total_tokens":0,"media_units":"2"}`},
+		{"rerank negative search units", wire.Rerank, wire.Rerank, rerank, results + `,"meta":{"billed_units":{"search_units":-2}}}`, ""},
+		{"rerank usage without total", wire.Rerank, wire.Rerank, rerank, results + `,"usage":{}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := DecodeRequest(tc.wire, tc.target, []byte(tc.body), "route", "", tc.request)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("accepted %s", tc.body)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertUsageJSON(t, c.Usage, tc.want)
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -172,6 +173,67 @@ func TestIncompleteToolResponsesPreserveFinishReasonAndUsage(t *testing.T) {
 			}
 			if completion.FinishReason != finish || len(completion.ToolCalls) != 1 || completion.ToolCalls[0].ID != "call-read" || completion.Usage == nil || completion.Usage.TotalTokens != 5 || !completion.UsageComplete {
 				t.Fatalf("incomplete tool reply %+v", completion)
+			}
+		})
+	}
+}
+
+func TestChatUsageAccounting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, usage, want string }{
+		{
+			"details",
+			`{"prompt_tokens":100,"completion_tokens":40,"total_tokens":140,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":20,"audio_tokens":5},"completion_tokens_details":{"reasoning_tokens":12,"audio_tokens":3}}`,
+			`{"input_tokens":100,"output_tokens":40,"total_tokens":140,"cached_input_tokens":60,"cache_write_input_tokens":20,"audio_input_tokens":5,"audio_output_tokens":3,"reasoning_tokens":12}`,
+		},
+		{"null total is computed", `{"prompt_tokens":11,"completion_tokens":7,"total_tokens":null}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`},
+		{"unusable total is computed", `{"prompt_tokens":11,"completion_tokens":7,"total_tokens":-1}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`},
+		{"unusable optional counts are ignored", `{"prompt_tokens":11,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":-1,"audio_tokens":"5"},"completion_tokens_details":{"reasoning_tokens":1.5}}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`},
+		{"null usage", `null`, `null`},
+		{"output not reported", `{"prompt_tokens":11,"total_tokens":11}`, ""},
+		{"negative input", `{"prompt_tokens":-1,"completion_tokens":7}`, ""},
+		{"computed total overflow", `{"prompt_tokens":9223372036854775807,"completion_tokens":1}`, ""},
+		{"details are not an object", `{"prompt_tokens":11,"completion_tokens":7,"prompt_tokens_details":5}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"id":"c","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":` + tc.usage + `}`
+			c, err := DecodeChat([]byte(body), "route", wire.Chat)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("accepted %s", tc.usage)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := json.Marshal(c.Usage); err != nil || string(got) != tc.want {
+				t.Fatalf("usage = %s, want %s: %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestResponsesUsageAccounting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, usage, want string }{
+		{
+			"details",
+			`{"input_tokens":100,"output_tokens":40,"total_tokens":140,"input_tokens_details":{"cached_tokens":60},"output_tokens_details":{"reasoning_tokens":12}}`,
+			`{"input_tokens":100,"output_tokens":40,"total_tokens":140,"cached_input_tokens":60,"reasoning_tokens":12}`,
+		},
+		{"provider total is kept", `{"input_tokens":11,"output_tokens":7,"total_tokens":99}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":99}`},
+		{"total not reported", `{"input_tokens":11,"output_tokens":7}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`},
+		{"null total and details", `{"input_tokens":11,"output_tokens":7,"total_tokens":null,"input_tokens_details":null,"output_tokens_details":null}`, `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`},
+		{"null usage", `null`, `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			observed, err := ObserveResponseUsage([]byte(`{"status":"completed","output":[],"usage":` + tc.usage + `}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := json.Marshal(observed.Usage); err != nil || string(got) != tc.want {
+				t.Fatalf("usage = %s, want %s: %v", got, tc.want, err)
 			}
 		})
 	}
