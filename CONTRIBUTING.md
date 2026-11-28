@@ -41,10 +41,12 @@ cloning or changing dependencies or the watcher version. `make dev` and
 regenerating tracked files. After editing an API schema or generator, run
 `make api` explicitly.
 
-Required CI includes `check-go`, `check-console`, `test-unit-go`,
+CI runs `check-go`, `check-console`, `test-unit-go`,
 `test-unit-console`, `test-integration`, `test-e2e-api`, `test-e2e-browser`,
 `contracts`, `helm`, `workflows`, `dependencies`, and `build`,
-each gated on the paths a change touches. Helm, dependency and release checks
+each gated on the paths a change touches. The `ci-gate` job fails when any of
+them fails or is cancelled and accepts the ones that were skipped, so it is the
+single check to require on `main`. Helm, dependency and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
 `management/management.json` is the checked-in source of truth. Update it
 alongside handlers and regenerate with `make api`. Never edit generated Go or
