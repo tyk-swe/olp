@@ -5,7 +5,6 @@ internal/export secrets 1
 internal/grants provider_credentials 1
 internal/identity installation 1
 internal/identity settings 2
-internal/mcp execution_debits 2
 internal/plugins provider_grants 1
 internal/release api_keys 1
 internal/release installation 1

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -192,11 +193,25 @@ func (s *Store) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDispatc
 	return held, err
 }
 
+const markUnknownSQL = `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND claim_id=$2 AND state IN ('dispatched','outcome_unknown')`
+
 func (s *Store) MarkUnknown(ctx context.Context, id, claim string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND claim_id=$2 AND state IN ('dispatched','outcome_unknown')`, id, claim)
+	return markedUnknown(s.pool.Exec(ctx, markUnknownSQL, id, claim))
+}
+
+func MarkUnknownTx(ctx context.Context, tx pgx.Tx, id, claim string) error {
+	return markedUnknown(tx.Exec(ctx, markUnknownSQL, id, claim))
+}
+
+func markedUnknown(tag pgconn.CommandTag, err error) error {
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrState
 	}
+	return err
+}
+
+func AbandonDispatchTx(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND state='dispatched'`, id)
 	return err
 }
 

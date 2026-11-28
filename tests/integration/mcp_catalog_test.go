@@ -434,3 +434,86 @@ func TestMCPLateSettlementAfterOrphanRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestGivingUpOnAToolDispatchMovesOnlyThatDebit(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	ctx := t.Context()
+	pub, rev, server, srev, claim := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+ INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES('%[1]s','%[2]s','toolset','given-up','{}','%[1]s','%[3]s');
+ INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by) VALUES('%[4]s','%[1]s','%[2]s','toolset','{}',repeat('0',64),'%[3]s');
+ INSERT INTO olp.mcp_servers(id,project_id,name,transport,endpoint,enabled,latest_revision_id,etag,created_by) VALUES('%[5]s','%[2]s','given-up','streamable_http','https://example.com/mcp',true,'%[6]s','%[5]s','%[3]s');
+ INSERT INTO olp.mcp_server_revisions(id,server_id,revision,endpoint,protocol_version,tools,digest,created_by) VALUES('%[6]s','%[5]s',1,'https://example.com/mcp','2025-03-26','[]',repeat('0',64),'%[3]s');`, pub, f.projectID, f.ownerID, rev, server, srev)); err != nil {
+		t.Fatal(err)
+	}
+	ledger := accounting.NewDurableLedger(pool, nil, nil, nil)
+	evidence := accounting.AttemptEvidence{ServerID: server, ServerRevisionID: srev, StartedAt: time.Now().UTC(), Status: accounting.StatusDispatched}
+	debit := func(kind, state string) *accounting.Reservation {
+		t.Helper()
+		id := uuid.NewString()
+		mustExec(t, pool, `INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,state,prepared_until,dispatched_at,closed_at)
+			VALUES($1,$2,$3,$4,'{}',decode(repeat('00',32),'hex'),$5,'USD',1,1,$6::text,now()+interval '1 hour',CASE WHEN $6::text<>'ready' THEN now()-interval '1 hour' END,CASE WHEN $6::text='settled' THEN now() END)`, id, f.keyID, f.projectID, kind, claim, state)
+		return &accounting.Reservation{DispatchID: id, ClaimID: claim, AttemptID: uuid.NewString(), APIKeyID: f.keyID, ProjectID: f.projectID, ToolsetID: pub, ToolsetRevisionID: rev, ToolAlias: "t_" + strings.Repeat("0", 32) + "_" + strings.Repeat("0", 32), InputDigest: strings.Repeat("0", 64), CallDigest: strings.Repeat("1", 64)}
+	}
+	dispatch := func() *accounting.Reservation {
+		t.Helper()
+		reservation := debit("tool", "ready")
+		if err := ledger.MarkDispatched(ctx, reservation, evidence); err != nil {
+			t.Fatal(err)
+		}
+		return reservation
+	}
+	expect := func(step string, reservation *accounting.Reservation, want string) {
+		t.Helper()
+		var state string
+		if err := pool.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&state); err != nil || state != want {
+			t.Fatalf("%s: debit=%q error=%v, want %q", step, state, err, want)
+		}
+	}
+
+	model := debit("model", "dispatched")
+	stale := dispatch()
+	var cutoff time.Time
+	if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&cutoff); err != nil {
+		t.Fatal(err)
+	}
+	live := dispatch()
+	if recovered, err := ledger.RecoverOrphanedDispatches(ctx, cutoff, 256); err != nil || recovered != 1 {
+		t.Fatalf("recovered=%d error=%v, want the one stale tool call", recovered, err)
+	}
+	expect("recovery of a stale call", stale, "outcome_unknown")
+	expect("recovery leaves a recent call", live, "dispatched")
+	expect("recovery leaves a model dispatch", model, "dispatched")
+
+	unknown := evidence
+	unknown.Status, unknown.ResultDigest, unknown.CompletedAt = accounting.StatusOutcomeUnknown, strings.Repeat("2", 64), time.Now().UTC()
+	otherClaim := *live
+	otherClaim.ClaimID = uuid.NewString()
+	if err := ledger.MarkUnknown(ctx, &otherClaim, unknown); !errors.Is(err, limitdebits.ErrState) {
+		t.Fatalf("another claim gave up the call: %v", err)
+	}
+	expect("another claim", live, "dispatched")
+	var callStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM olp.mcp_tool_calls WHERE dispatch_id=$1`, live.DispatchID).Scan(&callStatus); err != nil || callStatus != "dispatched" {
+		t.Fatalf("a refused claim recorded call status %q, error=%v", callStatus, err)
+	}
+	for range 2 {
+		if err := ledger.MarkUnknown(ctx, live, unknown); err != nil {
+			t.Fatal(err)
+		}
+		expect("the owning claim", live, "outcome_unknown")
+	}
+	expect("giving up one call leaves the claim's other dispatch", model, "dispatched")
+	settled := debit("tool", "settled")
+	if err := ledger.MarkUnknown(ctx, settled, unknown); err != nil {
+		t.Fatalf("giving up on a settled call: %v", err)
+	}
+	expect("a settled call", settled, "settled")
+	unsent := debit("tool", "ready")
+	if err := ledger.MarkUnknown(ctx, unsent, unknown); !errors.Is(err, limitdebits.ErrState) {
+		t.Fatalf("gave up a call that was never sent: %v", err)
+	}
+	expect("a call that was never sent", unsent, "ready")
+}

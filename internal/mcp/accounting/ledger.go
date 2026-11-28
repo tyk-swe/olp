@@ -286,7 +286,7 @@ func (l *DurableLedger) RecoverOrphanedDispatches(ctx context.Context, staleBefo
 		if _, err = tx.Exec(ctx, `UPDATE olp.mcp_tool_calls SET status='outcome_unknown',completed_at=clock_timestamp() WHERE dispatch_id=$1 AND status='dispatched'`, id); err != nil {
 			return 0, err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND state='dispatched'`, id); err != nil {
+		if err = debits.AbandonDispatchTx(ctx, tx, id); err != nil {
 			return 0, err
 		}
 	}
@@ -380,16 +380,14 @@ func (l *DurableLedger) MarkUnknown(ctx context.Context, reservation *Reservatio
 	if err = insertAttemptTx(ctx, tx, reservation, evidence); err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.execution_debits SET state='outcome_unknown' WHERE id=$1 AND claim_id=$2 AND state IN ('dispatched','outcome_unknown')`, reservation.DispatchID, reservation.ClaimID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() != 1 {
-		var state debits.State
-		if scanErr := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&state); scanErr == nil && state == debits.Settled {
-			return tx.Commit(ctx)
+	if err = debits.MarkUnknownTx(ctx, tx, reservation.DispatchID, reservation.ClaimID); err != nil {
+		if errors.Is(err, debits.ErrState) {
+			var state debits.State
+			if scanErr := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1`, reservation.DispatchID).Scan(&state); scanErr == nil && state == debits.Settled {
+				return tx.Commit(ctx)
+			}
 		}
-		return debits.ErrState
+		return err
 	}
 	return tx.Commit(ctx)
 }
