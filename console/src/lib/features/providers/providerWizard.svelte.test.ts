@@ -86,11 +86,21 @@ function refusal(status: number, field: string, message: string): Response {
   );
 }
 
+const grantKind: ProviderKindCapability = {
+  ...spec,
+  default_auth_mode: 'grant',
+  auth_modes: [
+    { mode: 'grant', label: 'Upstream sign-in', credential: 'grant' }
+  ]
+};
+
 function serveWizard({
+  kind = spec,
   probe = vi.fn(() => probeResponse(true)),
   saved = () => provider,
   override
 }: {
+  kind?: ProviderKindCapability;
   probe?: () => Response;
   saved?: () => Provider;
   override?: Override;
@@ -103,7 +113,7 @@ function serveWizard({
     const response = override?.(request);
     if (response) return response;
     const path = new URL(request.url).pathname;
-    if (path === '/api/v1/provider-kinds') return json({ items: [spec] });
+    if (path === '/api/v1/provider-kinds') return json({ items: [kind] });
     if (path === '/api/v1/providers' && request.method === 'POST')
       return create(request);
     if (path === `/api/v1/providers/${provider.id}/models`)
@@ -245,6 +255,52 @@ describe('provider wizard', () => {
     await wizard.press('Back');
     expect(wizard.field('Provider name').value).toBe('Service');
     expect(wizard.field('Credential').value).toBe('');
+  });
+
+  it('signs in upstream before it tests a connection that needs a grant', async () => {
+    const enrollments = `/api/v1/providers/${provider.id}/grant-enrollments`;
+    const signIn = vi.fn(async (request: Request) => {
+      if (new URL(request.url).pathname === enrollments) {
+        route(request, 'POST', enrollments);
+        return json({
+          id: 'enrollment-id',
+          provider_id: provider.id,
+          slot_id: 'slot-id',
+          expires_at: '2026-01-01T00:00:00Z',
+          authorization_url: 'https://example.test/authorize'
+        });
+      }
+      route(request, 'POST', `${enrollments}/enrollment-id/continue`);
+      expect(await request.json()).toEqual({ input: 'returned-code' });
+      return json({
+        provider_id: provider.id,
+        credential_id: 'credential-id',
+        credential_version: 1,
+        etag: provider.etag,
+        principal: 'operator'
+      });
+    });
+    const { probe } = serveWizard({
+      kind: grantKind,
+      override: (request) =>
+        request.url.includes('/grant-enrollments') ? signIn(request) : undefined
+    });
+    const wizard = await openWizard();
+    wizard.type('Provider name', 'Service');
+    wizard.type('Endpoint', 'https://example.test/v1');
+
+    submitForm(wizard.target);
+
+    await wizard.shows('Sign in upstream');
+    expect(probe).not.toHaveBeenCalled();
+    wizard.type(
+      'Paste back the callback URL or code the upstream returned',
+      'returned-code'
+    );
+    await wizard.press('Continue');
+    await wizard.shows('Discover upstream models');
+    expect(signIn).toHaveBeenCalledTimes(2);
+    expect(probe).toHaveBeenCalledOnce();
   });
 
   it('retries a failed connection test without creating the saved provider again', async () => {
