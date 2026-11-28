@@ -76,9 +76,7 @@ type Counter struct {
 
 // ForModel returns the counter for an upstream model name, the name the
 // provider is sent. A name the registry cannot place gets the heuristic: a
-// wrong tokenizer would miscount silently, so nothing defaults to one. factors
-// scale the heuristic of the families without a tokenizer, and a family with no
-// factor keeps the plain heuristic.
+// wrong tokenizer would miscount silently, so nothing defaults to one.
 func ForModel(model string, factors map[Family]float64) Counter {
 	switch family := FamilyOf(model); family {
 	case FamilyOpenAIO200k:
