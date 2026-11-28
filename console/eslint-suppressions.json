@@ -32,11 +32,6 @@
       "count": 1
     }
   },
-  "src/lib/session/lifecycle.ts": {
-    "max-lines": {
-      "count": 1
-    }
-  },
   "src/lib/shell/navigation.ts": {
     "max-lines": {
       "count": 1
