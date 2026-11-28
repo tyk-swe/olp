@@ -100,6 +100,9 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Fixed
 
+- The API key filter on the tool calls and provisional exposure pages accepts a
+  key UUID. The browser rejected every UUID, so neither list could be filtered
+  by key.
 - The signed export and alert silence forms show validation and API errors under
   the field that caused them. Choosing a project no longer leaves a checked audit
   stream locked on a signed export.
