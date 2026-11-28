@@ -39,6 +39,10 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Changed
 
+- Console screens that depend on your project memberships fetch them again when
+  they open or regain focus. The activity and investigation pages retry an
+  unanswered read once, and the SCIM page shares the project list with the other
+  screens.
 - `GET /api/v1/branding` no longer requires a session, so signed-out pages can
   show the installation identity. `PUT /api/v1/branding` now requires an
   `accent` field. The session response drops `installation_name` and
@@ -93,6 +97,8 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Fixed
 
+- A failed background refresh of project memberships no longer discards unsaved
+  input on the project settings and code mode pages.
 - Model discovery that records new facts for a model, such as its context
   length, now resets that provider's certified capabilities to declared and
   marks the draft pending activation, as any other configuration change does.
