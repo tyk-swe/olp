@@ -13,6 +13,8 @@ done
 for generated in console/src/lib/management/schema.d.ts console/src/lib/management/requirements.ts; do
   test -f "$generated" || { echo 'Console types are missing. Run make setup' >&2; exit 1; }
 done
+# shellcheck source=scripts/dev-env.sh
+source scripts/dev-env.sh
 compose=(docker compose -f deploy/compose.dev.yaml)
 "${compose[@]}" up -d --wait
 postgres_addr=$("${compose[@]}" port postgres 5432 | head -n 1)
@@ -21,14 +23,14 @@ cache_addr=$("${compose[@]}" port cache 6379 | head -n 1)
 export OLP_DATABASE_URL="postgres://olp:olp-local@$postgres_addr/olp?sslmode=disable"
 export OLP_VALKEY_URL="redis://:olp-local@$valkey_addr/0"
 export OLP_CACHE_VALKEY_URL="redis://:olp-local@$cache_addr/0"
-export OLP_LISTEN_ADDR=127.0.0.1:8082
-export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:9092
-export OLP_PUBLIC_ORIGIN=http://127.0.0.1:5173
-export OLP_DEV_API_ORIGIN=http://127.0.0.1:8082
+export OLP_LISTEN_ADDR=127.0.0.1:$api_port
+export OLP_OBSERVABILITY_LISTEN_ADDR=127.0.0.1:$observability_port
+export OLP_PUBLIC_ORIGIN=http://127.0.0.1:$console_port
+export OLP_DEV_API_ORIGIN=http://127.0.0.1:$api_port
 export OLP_SHUTDOWN_TIMEOUT=2s
 # shellcheck source=scripts/secrets.sh
 source scripts/secrets.sh "$PWD/.local/secrets"
-echo 'Development console at http://127.0.0.1:5173'
+echo "Development console at $OLP_PUBLIC_ORIGIN"
 echo "Bootstrap token file: $OLP_BOOTSTRAP_TOKEN_FILE"
 pids=()
 cleanup() {
@@ -48,7 +50,7 @@ watcher_pid=$!
 pids+=("$watcher_pid")
 (
   cd console
-  exec node_modules/.bin/vite --host 127.0.0.1 --port 5173 --strictPort
+  exec node_modules/.bin/vite --host 127.0.0.1 --port "$console_port" --strictPort
 ) &
 console_pid=$!
 pids+=("$console_pid")

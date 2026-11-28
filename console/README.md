@@ -8,10 +8,11 @@ static `build/` output with `index.html` as the SPA fallback. Start with the
 
 The [development workflow](../CONTRIBUTING.md#local-development) starts Vite
 with `make dev`. It proxies `/api/`, `/v1/`, `/native/`, `/code/`, `/anthropic/`,
-`/gemini/`, `/v1beta/`, and `/bedrock/` to Go on port 8082, preserving the
+`/gemini/`, `/v1beta/`, and `/bedrock/` to the Go backend, preserving the
 browser origin and cookies. WebSocket proxying is enabled for `/code/`.
 Console edits hot reload and backend edits trigger a Go rebuild and restart.
-`make dev` requires port 5173 so the browser origin stays consistent.
+Each checkout keeps its own fixed ports, so the browser origin stays
+consistent, and `make dev` fails if one of them is occupied.
 
 For an already running backend, `pnpm --dir console dev` starts Vite alone.
 Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
