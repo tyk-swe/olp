@@ -327,6 +327,7 @@ func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCal
 		return state
 	}
 	const stores, named, paid = "/v1/vector_stores", `{"name":"notes"}`, `{"expires_after":{"anchor":"last_active_at","days":1}}`
+	const mutationStatus = "X-OLP-Mutation-Status"
 	rejection, outage := `{"error":{"message":"The provider refused.","type":"invalid_request_error"}}`, `{"error":{"message":"The provider broke.","type":"server_error"}}`
 
 	provider.answers("POST /vector_stores", http.StatusBadRequest, rejection)
@@ -334,6 +335,9 @@ func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCal
 	refused := header.Get("X-OLP-Resource-ID")
 	if header.Get("X-Should-Retry") != "false" || kept(refused) != "not_accepted" {
 		t.Fatalf("a refused creation answered retry %q and is kept as %q", header.Get("X-Should-Retry"), kept(refused))
+	}
+	if got := header.Get(mutationStatus); got != "" {
+		t.Fatalf("a refused creation answered with mutation status %q", got)
 	}
 	provider.recovers("POST /vector_stores")
 	header, _ = ask("POST", stores, named, "refused", http.StatusConflict, "submission_exists", "")
@@ -370,15 +374,36 @@ func TestAVectorStoreProviderAnswerDecidesWhatIsKeptWhatIsForgottenAndWhatTheCal
 	}
 	provider.recovers("GET " + providerStorePath("1"))
 
-	ask("POST", stores+"/"+store.ID, paid, "accepted", http.StatusOK, "", "success")
-	ask("POST", stores+"/"+store.ID, paid, "accepted", http.StatusConflict, "idempotency_conflict", "")
-	provider.answers("POST "+providerStorePath("1"), http.StatusBadRequest, rejection)
-	ask("POST", stores+"/"+store.ID, paid, "rejected", http.StatusBadRequest, "provider_resource_error", "upstream_client")
-	provider.answers("POST "+providerStorePath("1"), http.StatusInternalServerError, outage)
-	ask("POST", stores+"/"+store.ID, paid, "uncertain", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
-	provider.recovers("POST " + providerStorePath("1"))
-	ask("POST", stores+"/"+store.ID, paid, "uncertain", http.StatusConflict, "idempotency_conflict", "")
-	for submission, want := range map[string]string{"accepted": "accepted", "rejected": "not_accepted", "uncertain": "submission_unknown"} {
+	storePath, update := stores+"/"+store.ID, "POST "+providerStorePath("1")
+	provider.answers(update, http.StatusBadRequest, rejection)
+	header, _ = ask("POST", storePath, paid, "rejected", http.StatusBadRequest, "provider_resource_error", "upstream_client")
+	if got := header.Get(mutationStatus); got != "not_accepted" || got != change(store.ID, "rejected") {
+		t.Fatalf("a rejected paid change answered with mutation status %q, want its persisted not_accepted status", got)
+	}
+	header, _ = ask("POST", storePath, named, "display-only", http.StatusBadRequest, "provider_resource_error", "upstream_client")
+	if got := header.Get(mutationStatus); got != "" {
+		t.Fatalf("a rejected display-only change answered with mutation status %q", got)
+	}
+	provider.recovers(update)
+	header, _ = ask("POST", storePath, paid, "rejected", http.StatusConflict, "idempotency_conflict", "")
+	if got := header.Get(mutationStatus); got != "" {
+		t.Fatalf("a rejected mutation's replay answered with mutation status %q", got)
+	}
+	ask("POST", storePath, paid, "accepted", http.StatusOK, "", "success")
+	ask("POST", storePath, paid, "accepted", http.StatusConflict, "idempotency_conflict", "")
+	provider.answers(update, http.StatusRequestTimeout, rejection)
+	header, _ = ask("POST", storePath, paid, "timeout", http.StatusRequestTimeout, "provider_resource_error", "upstream_client")
+	if got := header.Get(mutationStatus); got != "" {
+		t.Fatalf("a provider timeout answered with mutation status %q", got)
+	}
+	provider.answers(update, http.StatusInternalServerError, outage)
+	header, _ = ask("POST", storePath, paid, "uncertain", http.StatusInternalServerError, "provider_resource_error", "ambiguous")
+	if got := header.Get(mutationStatus); got != "" {
+		t.Fatalf("an uncertain provider failure answered with mutation status %q", got)
+	}
+	provider.recovers(update)
+	ask("POST", storePath, paid, "uncertain", http.StatusConflict, "idempotency_conflict", "")
+	for submission, want := range map[string]string{"accepted": "accepted", "rejected": "not_accepted", "timeout": "submission_unknown", "uncertain": "submission_unknown"} {
 		if got := change(store.ID, submission); got != want {
 			t.Fatalf("paid change %q is kept as %q, want %q", submission, got, want)
 		}

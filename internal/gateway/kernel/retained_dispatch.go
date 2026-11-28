@@ -62,7 +62,7 @@ func (s *Server) RetainedDispatch(w http.ResponseWriter, r *http.Request, req Re
 
 	native, failure := s.PinnedDo(r.Context(), x, p, e.Method, endpoint, body, contentType)
 	if failure != nil {
-		refusal := c.refused(r.Context(), failure)
+		refusal := c.refused(r.Context(), w.Header(), failure)
 		fail(refusal)
 		return refusal.Status
 	}
@@ -104,11 +104,17 @@ func (s *Server) dispatchFence(ctx context.Context, resource *resources.Resource
 	return s.Deps.Resources.BeginDeletion(ctx, resource)
 }
 
-func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) *fault.Error {
-	if err := RecordRetainedRejection(ctx, c.fence, failure); err != nil {
+func (c retainedExchange) refused(ctx context.Context, headers http.Header, failure *AttemptFailure) *fault.Error {
+	recorded, err := RecordRetainedRejection(ctx, c.fence, failure)
+	if err != nil {
 		return err
 	}
-	if c.resource != nil && c.endpoint.Action != "create" && failure.Status == http.StatusNotFound {
+	e := c.endpoint
+	if recorded && e.Metered && (e.Action == "update" || e.Action == "patch") &&
+		failure.Status >= http.StatusBadRequest && failure.Status < http.StatusInternalServerError {
+		headers.Set(headerMutationStatus, "not_accepted")
+	}
+	if c.resource != nil && e.Action != "create" && failure.Status == http.StatusNotFound {
 		commit, cancel := ResourceCommitContext(ctx)
 		defer cancel()
 		if removeErr := c.server.Deps.Resources.Tombstone(commit, c.resource.ID); removeErr == nil {
@@ -118,16 +124,16 @@ func (c retainedExchange) refused(ctx context.Context, failure *AttemptFailure) 
 	return RetainedPublicError(UpstreamError(failure), failure.Status)
 }
 
-func RecordRetainedRejection(ctx context.Context, fence *resources.Lifecycle, failure *AttemptFailure) *fault.Error {
+func RecordRetainedRejection(ctx context.Context, fence *resources.Lifecycle, failure *AttemptFailure) (bool, *fault.Error) {
 	if fence == nil || !failure.rejectedWithoutWork() {
-		return nil
+		return false, nil
 	}
 	commit, cancel := ResourceCommitContext(ctx)
 	defer cancel()
 	if err := fence.Reject(commit); err != nil {
-		return fault.ServerError(503, "provider_state_unavailable", "Provider rejection could not be committed.")
+		return false, fault.ServerError(503, "provider_state_unavailable", "Provider rejection could not be committed.")
 	}
-	return nil
+	return true, nil
 }
 
 func (c retainedExchange) answer(native *PinnedResponse, body []byte, commit context.Context) retainedAnswer {

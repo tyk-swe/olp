@@ -48,7 +48,8 @@ export type RetrievalBindingForm = {
 export class ResourceRequestError extends Error {
   constructor(
     message: string,
-    readonly resourceId: string | null
+    readonly resourceId: string | null,
+    readonly definitiveMutationRejection = false
   ) {
     super(message);
   }

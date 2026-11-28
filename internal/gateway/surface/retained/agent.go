@@ -347,7 +347,7 @@ func (q agentRequest) exchange(ctx context.Context, pin *kernel.Pin, endpoint st
 }
 
 func (q agentRequest) refused(ctx context.Context, resource *resources.Resource, creation *resources.Lifecycle, failure *kernel.AttemptFailure) *fault.Error {
-	if err := kernel.RecordRetainedRejection(ctx, creation, failure); err != nil {
+	if _, err := kernel.RecordRetainedRejection(ctx, creation, failure); err != nil {
 		return err
 	}
 	if q.endpoint.Action == "create" || failure.Status != http.StatusNotFound {
