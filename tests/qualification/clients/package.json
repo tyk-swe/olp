@@ -2,8 +2,8 @@
   "name": "olp-qualification-clients",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.330",
-    "@openai/codex": "0.171.0",
+    "@anthropic-ai/claude-code": "2.1.332",
+    "@openai/codex": "0.172.0",
     "opencode-ai": "1.19.6"
   }
 }
