@@ -125,3 +125,28 @@ export function setFieldValue(
   element.dispatchEvent(new Event(event, { bubbles: true }));
   flushSync();
 }
+
+export function findControl(
+  target: ParentNode,
+  label: string
+): HTMLInputElement {
+  const control = [...target.querySelectorAll('label')].find(
+    (item) => item.textContent?.trim() === label
+  )?.control;
+  if (!(control instanceof HTMLInputElement))
+    throw new Error(`Missing input ${label}`);
+  return control;
+}
+
+export function reportedError(control: Element): string | undefined {
+  if (control.getAttribute('aria-invalid') !== 'true') return undefined;
+  const id = control.getAttribute('aria-describedby');
+  return control.ownerDocument.getElementById(id ?? '')?.textContent?.trim();
+}
+
+export function submitForm(target: ParentNode): void {
+  target
+    .querySelector('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+}

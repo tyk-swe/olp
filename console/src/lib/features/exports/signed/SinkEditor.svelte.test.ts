@@ -4,7 +4,14 @@ import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
+import {
+  findButton,
+  findControl,
+  mountWithState,
+  reportedError,
+  setFieldValue,
+  submitForm
+} from '#test/mount.js';
 import SinkEditor from './SinkEditor.svelte';
 import type { Sink } from './api';
 
@@ -160,17 +167,17 @@ const sink: Sink = {
   delivery: { delivered: 0, failed: 0, expired: 0, last_delivered_at: null }
 };
 
-function mountSinks(operations: ManagementOperation[]) {
+function mountSinks(operations: ManagementOperation[], listed: Sink = sink) {
   serve(
     (request) =>
       json(
         new URL(request.url).pathname.endsWith('/projects')
           ? { items: [] }
-          : { items: [sink] }
+          : { items: [listed] }
       ),
     operations
   );
-  const { target } = mountWithState(SinksPage);
+  const { target } = mountWithState(SinksPage, {}, { attach: true });
   const button = (name: string) => findButton(target, name);
   return { target, button };
 }
@@ -232,4 +239,157 @@ it('clears a new draft when the operator accepts discarding it', async () => {
   flushSync();
 
   expect(name().value).toBe('');
+});
+
+function mountEditor(
+  respond: (body: unknown) => Response,
+  current: Sink | null = sink
+) {
+  const writes = vi.fn<(body: unknown) => void>();
+  serve(
+    async (request) => {
+      const body: unknown = await request.json();
+      writes(body);
+      return respond(body);
+    },
+    ['read', 'settings']
+  );
+  const saved = vi.fn();
+  const { target } = mountWithState(
+    SinkEditor,
+    { current, projects: [{ id: 'search', name: 'Search' }], saved },
+    { attach: true }
+  );
+  return { target, writes, saved };
+}
+
+it('reports a rejected draft on its inputs without writing, then saves the corrected one', async () => {
+  const { target, writes, saved } = mountEditor(() => json(sink));
+  const name = findControl(target, 'Name');
+  const destination = findControl(target, 'HTTPS destination');
+  const requests = findControl(target, 'requests');
+  setFieldValue(name, '   ');
+  setFieldValue(destination, 'http://export.example.test/facts');
+  requests.click();
+  submitForm(target);
+
+  expect(reportedError(name)).toBe('Enter a name.');
+  expect(reportedError(destination)).toBe('Enter an HTTPS URL.');
+  expect(reportedError(requests)).toBe('Choose between one and four streams.');
+  await eventually(() => expect(document.activeElement).toBe(name));
+  expect(writes).not.toHaveBeenCalled();
+
+  setFieldValue(name, ' Corrected ');
+  setFieldValue(destination, 'https://export.example.test/corrected');
+  requests.click();
+  submitForm(target);
+
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
+  expect(writes.mock.calls).toMatchObject([
+    [
+      {
+        name: 'Corrected',
+        destination: 'https://export.example.test/corrected',
+        streams: ['requests']
+      }
+    ]
+  ]);
+  expect(target.querySelector('[aria-invalid="true"]')).toBeNull();
+});
+
+it('lets the operator remove audit events from a project export', async () => {
+  const { target, writes } = mountEditor(() => json(sink), null);
+  setFieldValue(findControl(target, 'Name'), 'Search facts');
+  setFieldValue(
+    findControl(target, 'HTTPS destination'),
+    'https://export.example.test/search'
+  );
+  const audit = findControl(target, 'audit');
+  audit.click();
+  const scope = target.querySelector('select') as HTMLSelectElement;
+  setFieldValue(scope, 'search');
+  submitForm(target);
+
+  expect(reportedError(audit)).toBe(
+    'Audit events require an installation sink.'
+  );
+  expect(audit.disabled).toBe(false);
+
+  audit.click();
+  flushSync();
+  expect(audit.disabled).toBe(true);
+  submitForm(target);
+
+  await eventually(() => expect(writes).toHaveBeenCalledOnce());
+  expect(writes.mock.calls[0][0]).toMatchObject({
+    project_id: 'search',
+    streams: ['requests']
+  });
+});
+
+it('shows a refused field on its input and any other refusal above the form', async () => {
+  const refuse = (field: string, message: string) =>
+    json(
+      {
+        title: 'Validation failed',
+        status: 422,
+        detail: message,
+        errors: { [field]: [{ code: 'validation_failed', message }] }
+      },
+      422
+    );
+  const respond = vi
+    .fn<() => Response>()
+    .mockReturnValueOnce(refuse('destination', 'The endpoint is refused.'))
+    .mockReturnValueOnce(refuse('sinks', 'Too many exports.'));
+  const { target, saved } = mountEditor(respond);
+  const destination = findControl(target, 'HTTPS destination');
+  setFieldValue(destination, 'https://export.example.test/facts?team=a');
+  submitForm(target);
+
+  await eventually(() =>
+    expect(reportedError(destination)).toBe('The endpoint is refused.')
+  );
+  await eventually(() => expect(document.activeElement).toBe(destination));
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(destination.value).toBe('https://export.example.test/facts?team=a');
+
+  submitForm(target);
+
+  const summary = () => target.querySelector('[role="alert"]');
+  await eventually(() =>
+    expect(summary()?.textContent?.trim()).toBe('Too many exports.')
+  );
+  await eventually(() => expect(document.activeElement).toBe(summary()));
+  expect(reportedError(destination)).toBeUndefined();
+  expect(saved).not.toHaveBeenCalled();
+});
+
+it('asks to discard a changed stream list but not one switched back', async () => {
+  const ask = vi.fn(() => false);
+  vi.stubGlobal('confirm', ask);
+  const { target, button } = mountSinks(['read', 'settings'], {
+    ...sink,
+    streams: ['runs', 'requests']
+  });
+  await eventually(() => expect(button('Edit')).toBeDefined());
+  button('Edit')?.click();
+  flushSync();
+  const close = () => {
+    target
+      .querySelector<HTMLButtonElement>('dialog [aria-label="Close"]')
+      ?.click();
+    flushSync();
+  };
+
+  findControl(target, 'requests').click();
+  flushSync();
+  close();
+  expect(ask).toHaveBeenCalledOnce();
+
+  findControl(target, 'requests').click();
+  flushSync();
+  close();
+  expect(ask).toHaveBeenCalledOnce();
+  expect(target.querySelector('form')).toBeNull();
 });

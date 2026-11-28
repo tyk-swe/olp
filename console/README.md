@@ -243,17 +243,18 @@ fails.
 
 A component runs every write through `useAction` or `useMutation` from
 `src/lib/editing/action.svelte.ts` and never keeps its own busy flag, error
-string or `try` block. Both give the component `busy` and `error` to render,
-plus `key` naming the write in flight (`''` when idle) and `conflict` for a
-stale `If-Match`. They ignore a second submit while one is running and drop a
-response that arrives after the signed-in user changed.
+string or `try` block. Both give the component `busy`, `error` and
+`fieldErrors` to render, plus `key` naming the write in flight (`''` when idle)
+and `conflict` for a stale `If-Match`. They ignore a second submit while one is
+running and drop a response that arrives after the signed-in user changed.
 
-`useAction` runs `run(send, accept?, feedback?)` and returns whether the write
-still belonged to the mounted principal when it settled. `send` makes the one
+`useAction` runs `run(send, accept?, feedback?)` and returns `true` when the
+write succeeded and still belongs to the mounted principal. `send` makes the one
 API call, and `accept` does everything that follows a success, such as updating
 the query cache, showing a toast and navigating. `feedback` supplies an
-optional `key`, a `fallback` message, and a `failure(cause, stage)` mapper for
-`'send'` or `'accept'` failures. Only a send-stage ETag mismatch sets
+optional `key`, a `fallback` message, a `failure(cause, stage)` mapper for
+`'send'` or `'accept'` failures, and the `serverFields` described under
+[Edit forms](#edit-forms). Only a send-stage ETag mismatch sets
 `conflict` and invokes the optional refresh callback. `useMutation` adds an
 `Idempotency-Key` through `submit(input, send, accept?, feedback?)`, giving
 `send` a request ID that stays the same when the user retries the same input so
@@ -266,15 +267,38 @@ request ID on retry until the input changes or the write commits.
 An action is principal-scoped by default, so a principal change or unmount
 retires it. Lifecycle-authorized sign-in and sign-out pass `'authentication'`
 to stay alive through their own transition, ending only at unmount. `reset()`
-clears the reported error and conflict, and a mutation's `reset()` also drops
+clears the reported errors and conflict, and a mutation's `reset()` also drops
 the saved retry intent. Reads that can fail return the problem as a value
 through `captureResult` or `readResult` in `src/lib/editing/result.ts` rather
-than throwing through the component.
+than throwing through the component. Other logic that can fail, such as parsing
+what the user typed, belongs in a `.ts` module that returns the problem as a
+value, like `src/lib/editing/json.ts`.
 
-`src/lib/features/exports/signed/SinkEditor.svelte` is the example to copy for a
-form that creates and updates. Other logic that can fail, such as parsing what
-the user typed, belongs in a `.ts` module that returns the problem as a value,
-like `src/lib/editing/json.ts`.
+### Edit forms
+
+`src/lib/features/exports/signed/SinkEditor.svelte` and its `sinkDraft.ts` are
+the example to copy for a form that creates and updates.
+
+A form keeps what the user typed in one draft object. Its validator is a plain
+function in a `.ts` module that returns a `Validation` from
+`src/lib/editing/validation.ts`, which is either `{ ok: true, value }` with the
+request body or `{ ok: false, fieldErrors }` keyed by the form's own field
+names. `validated(fieldErrors, value)` builds one and calls `value` only when no
+field has an error.
+
+The component names those fields in `useMutation<SinkField>()`, passes the
+result to `action.check`, and writes `value` only when `check` returns `true`.
+To report a refused request on the same inputs, pass `serverFields` in
+`feedback`, a map from the API's field names to the form's. `action.error` is
+the message for the whole form, and it is empty when every field the server
+named is in the map. A form never assigns `action.error`.
+
+`FormField.svelte` renders a labelled control with its error and hands the
+control the `id` and ARIA attributes to spread. Set `novalidate` on the form so
+the browser does not report a second set of errors, give the form-level message
+`tabindex="-1"` and `data-error-summary`, and call `focusFormError(form)` after
+a failed check or write. `hasChanges(saved, draft)` tells the unsaved changes
+guard whether the draft differs from the saved record.
 
 ## Page building blocks
 

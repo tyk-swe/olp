@@ -2,21 +2,25 @@
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { useMutation } from '#lib/editing/action.svelte.js';
-  import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import {
+    guardUnsavedChanges,
+    hasChanges
+  } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import FormField from '#lib/components/FormField.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
-  import { saveSink, type Sink, type SinkInput } from './api';
+  import { saveSink, type Sink } from './api';
+  import {
+    SINK_STREAMS,
+    sinkDraft,
+    sinkServerFields,
+    validateSink,
+    type SinkField
+  } from './sinkDraft';
   import { sinkKeys } from './sinkKeys';
-  const SINK_STREAMS = [
-    'requests',
-    'attempts',
-    'guardrail_decisions',
-    'audit',
-    'runs',
-    'trace_spans'
-  ] as const;
   let {
     current,
     projects,
@@ -28,133 +32,125 @@
     reload?: () => void;
     saved: (value: Sink) => Promise<void>;
   } = $props();
+  const id = $props.id();
+  const streamsErrorId = `${id}-streams-error`;
   const initial = untrack(() => current);
-  let baseline = $state(initial);
+  let baseline = $state.raw(initial);
+  let draft = $state(sinkDraft(initial));
   const access = useRole();
-  let name = $state(initial?.name ?? '');
-  let project = $state(initial?.project_id ?? '');
-  let destination = $state(initial?.destination ?? '');
-  let enabled = $state(initial?.enabled ?? false);
-  let streams = $state<SinkInput['streams']>(initial?.streams ?? ['requests']);
-  let credential = $state('');
-  let removeCredential = $state(false);
   const client = useQueryClient();
-  const action = useMutation(() =>
+  const action = useMutation<SinkField>(() =>
     client.invalidateQueries({ queryKey: sinkKeys.all })
   );
   usePrincipalLifetime(() => {
-    credential = '';
+    draft.credential = '';
   });
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
-    if (!streams.length || streams.length > 4) {
-      action.error = 'Choose between one and four streams';
-      return;
-    }
-    if (project && streams.includes('audit')) {
-      action.error = 'Audit events require an installation sink';
-      return;
-    }
-    const body: SinkInput = {
-      name,
-      project_id: project || null,
-      type: 'https',
-      destination,
-      enabled,
-      streams,
-      ...(removeCredential
-        ? { credential: null }
-        : credential
-          ? { credential }
-          : {})
-    };
-    await action.submit(
-      { current: baseline, body },
+    const form = event.currentTarget;
+    const checked = validateSink(
+      $state.snapshot(draft),
+      !baseline && !access.can('settings.update')
+    );
+    if (!action.check(checked)) return focusFormError(form);
+    const accepted = await action.submit(
+      { current: baseline, body: checked.value },
       (input, requestId) => saveSink(input.current, input.body, requestId),
       async (value) => {
         baseline = value;
-        credential = '';
-        removeCredential = false;
-        clean = draft();
+        draft = sinkDraft(value);
         await saved(value);
-      }
+      },
+      { serverFields: sinkServerFields }
     );
+    if (!accepted) await focusFormError(form);
   }
-  const draft = () =>
-    JSON.stringify([
-      name,
-      project,
-      destination,
-      enabled,
-      streams,
-      credential,
-      removeCredential
-    ]);
-  let clean = $state(draft());
   export function isDirty() {
-    return draft() !== clean;
+    return hasChanges(sinkDraft(baseline), $state.snapshot(draft));
   }
   guardUnsavedChanges(isDirty);
 </script>
 
-<form class="form-card" onsubmit={submit}>
-  <label class="form-field">
-    Name<input required maxlength="100" bind:value={name} />
-  </label>
-  <label class="form-field">
-    Scope<select
-      required={!access.can('settings.update')}
-      disabled={Boolean(current)}
-      bind:value={project}
-    >
-      {#if access.can('settings.update')}<option value="">
-          Installation
-        </option>{:else}<option value="">
-          Choose project
-        </option>{/if}{#each projects as item (item.id)}<option value={item.id}>
-          {item.name}
-        </option>{/each}
-    </select>
-  </label>
-  <label class="form-field">
-    HTTPS destination<input
-      type="url"
-      required
-      pattern="https://.*"
-      bind:value={destination}
-    />
-  </label>
+<form class="form-card" novalidate onsubmit={submit}>
+  <FormField label="Name" error={action.fieldErrors.name}>
+    {#snippet control(attributes)}
+      <input {...attributes} required bind:value={draft.name} />
+    {/snippet}
+  </FormField>
+  <FormField label="Scope" error={action.fieldErrors.project}>
+    {#snippet control(attributes)}
+      <select
+        {...attributes}
+        required={!access.can('settings.update')}
+        disabled={Boolean(current)}
+        bind:value={draft.project}
+      >
+        <option value="">
+          {access.can('settings.update') ? 'Installation' : 'Choose project'}
+        </option>
+        {#each projects as item (item.id)}<option value={item.id}>
+            {item.name}
+          </option>{/each}
+      </select>
+    {/snippet}
+  </FormField>
+  <FormField label="HTTPS destination" error={action.fieldErrors.destination}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        type="url"
+        required
+        bind:value={draft.destination}
+      />
+    {/snippet}
+  </FormField>
   <fieldset>
-    <legend>
-      Streams, maximum four
-    </legend>{#each SINK_STREAMS as stream (stream)}<label class="check-field">
+    <legend>Streams, maximum four</legend>
+    {#each SINK_STREAMS as stream (stream)}<label class="check-field">
         <input
           type="checkbox"
           value={stream}
-          bind:group={streams}
-          disabled={stream === 'audit' && Boolean(project)}
+          bind:group={draft.streams}
+          disabled={stream === 'audit' &&
+            Boolean(draft.project) &&
+            !draft.streams.includes('audit')}
+          aria-invalid={action.fieldErrors.streams ? 'true' : undefined}
+          aria-describedby={action.fieldErrors.streams
+            ? streamsErrorId
+            : undefined}
         />{stateLabel(stream)}
       </label>{/each}
+    {#if action.fieldErrors.streams}<p class="field-error" id={streamsErrorId}>
+        {action.fieldErrors.streams}
+      </p>{/if}
   </fieldset>
-  <label class="form-field">
-    Replacement signing credential<input
-      type="password"
-      autocomplete="new-password"
-      bind:value={credential}
-      disabled={removeCredential}
-    />
-  </label>
+  <FormField
+    label="Replacement signing credential"
+    error={action.fieldErrors.credential}
+  >
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        type="password"
+        autocomplete="new-password"
+        bind:value={draft.credential}
+        disabled={draft.removeCredential}
+      />
+    {/snippet}
+  </FormField>
   <p class="inline-status">
     Blank retains the current credential. {baseline?.has_credential
       ? 'A signing credential is configured'
       : 'No signing credential is configured'}
   </p>
   {#if baseline?.has_credential}<label class="check-field">
-      <input type="checkbox" bind:checked={removeCredential} />Remove signing
-      credential
+      <input type="checkbox" bind:checked={draft.removeCredential} />Remove
+      signing credential
     </label>{/if}
   <label class="check-field">
-    <input type="checkbox" bind:checked={enabled} />Enabled
+    <input type="checkbox" bind:checked={draft.enabled} />Enabled
   </label>
   <div class="page-actions">
     <button class="button button-primary" disabled={action.busy}>
@@ -164,7 +160,12 @@
   {#if reload && current?.etag !== baseline?.etag}
     <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />
   {/if}
-  {#if action.error}<p class="inline-problem" role="alert">
+  {#if action.error}<p
+      class="inline-problem"
+      role="alert"
+      tabindex="-1"
+      data-error-summary
+    >
       {action.error}
     </p>{/if}
 </form>
