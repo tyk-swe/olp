@@ -11,5 +11,8 @@
     "api": "make api",
     "dev": "make dev",
     "check": "make check"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.84.0"
   }
 }

@@ -1,0 +1,5108 @@
+{
+  "paths": {
+    "/api/v1/route-drafts": {
+      "get": {
+        "operationId": "list_route_drafts",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "post": {
+        "operationId": "create_route_draft",
+        "parameters": [
+          {
+            "description": "Unique route-draft creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRouteDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftResponse"
+                }
+              }
+            },
+            "description": "Route draft created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Route draft is invalid"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}": {
+      "delete": {
+        "operationId": "delete_route_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "get": {
+        "operationId": "get_route_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "put": {
+        "operationId": "replace_route_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRouteDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}/activate": {
+      "post": {
+        "operationId": "activate_route_draft",
+        "parameters": [
+          {
+            "description": "Route draft ID",
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Validated route-draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique activation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteActivationResponse"
+                }
+              }
+            },
+            "description": "Route activated, runtime published, and the draft returned to `draft` under a new ETag"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The Idempotency-Key was already used for a different request"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}/check-fixtures": {
+      "post": {
+        "operationId": "check_route_draft_fixtures",
+        "description": "Compare an active route revision and its saved draft against a bounded set of synthetic requests using one planning snapshot. Performs no upstream dispatch or storage.",
+        "x-olp-read-only": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteFixtureFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteFixtureReport"
+                }
+              }
+            },
+            "description": "Comparison completed, including any failed assertions"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid or oversized JSON file"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller cannot view the draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Draft not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No published baseline in the draft's project"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid or unsupported fixture"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}/simulate": {
+      "post": {
+        "operationId": "simulate_route_draft",
+        "x-olp-read-only": true,
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateRouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteSimulationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-drafts/{draft_id}/validate": {
+      "post": {
+        "operationId": "validate_route_draft",
+        "parameters": [
+          {
+            "description": "Route draft ID",
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current route-draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftResponse"
+                }
+              }
+            },
+            "description": "Route draft validated"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Eligibility validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routes": {
+      "get": {
+        "operationId": "list_routes",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "post": {
+        "operationId": "create_route",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Create and publish a route atomically",
+        "description": "Validates targets and publishes an immutable revision in one transaction. Existing slugs conflict; independent console drafts are preserved.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRouteDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published route with observed ETag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDetailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Existing route or publication conflict"
+          },
+          "422": {
+            "description": "Target or policy validation failed"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{route_id}": {
+      "get": {
+        "operationId": "get_route",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDetailResponse"
+                }
+              }
+            },
+            "description": "",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "put": {
+        "operationId": "update_route",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Replace published route configuration atomically",
+        "description": "Checks the published route ETag, retains its project, slug and routing policy, validates a fresh draft, and publishes an immutable revision without changing independent console drafts.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePublishedRouteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published replacement and observed ETag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDetailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Retired route or publication conflict"
+          },
+          "412": {
+            "description": "Stale route ETag"
+          },
+          "422": {
+            "description": "Target or policy validation failed"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{route_id}/retire": {
+      "post": {
+        "operationId": "retire_route",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteRetireResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Route is already retired, or the Idempotency-Key was already used for a different request"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routes/{route_id}/revisions": {
+      "get": {
+        "operationId": "list_route_revisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteRevisionListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routes/{route_id}/revisions/diff": {
+      "get": {
+        "operationId": "diff_route_revisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteRevisionDiffResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routes/{route_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_route_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteRevisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft": {
+      "post": {
+        "operationId": "restore_route_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDraftDetailResponse"
+                }
+              }
+            },
+            "description": "",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/routing-policies/{scope}/{id}": {
+      "get": {
+        "operationId": "get_routing_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "put": {
+        "operationId": "put_routing_policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current policy ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_routing_policy",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Remove an explicit scoped routing policy",
+        "description": "Returns inherited defaults with a fresh ETag, preserving conditional-write protection across removal/recreation. Applies the same scope-specific permissions as PUT, publishes non-draft changes, and audits the removal.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current policy ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Explicit policy removed; parent authority updated",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope requires its specific operation"
+          },
+          "412": {
+            "description": "Stale observed policy ETag"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/routing/simulate": {
+      "post": {
+        "operationId": "simulate_routing",
+        "x-olp-read-only": true,
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "./shared.json#/components/schemas/RoutingDecision"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-templates": {
+      "get": {
+        "operationId": "list_route_templates",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTemplateListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "post": {
+        "operationId": "create_route_template",
+        "parameters": [
+          {
+            "description": "Unique route-template creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTemplateDetailResponse"
+                }
+              }
+            },
+            "description": "Route template created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used, or another template has the name"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Route template is invalid"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-templates/{template_id}": {
+      "get": {
+        "operationId": "get_route_template",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTemplateDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "put": {
+        "operationId": "replace_route_template",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTemplateDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Another template has the name"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_route_template",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Template deleted; the routes it generated stay"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    },
+    "/api/v1/route-templates/{template_id}/apply": {
+      "post": {
+        "operationId": "apply_route_template",
+        "description": "Applies the template to the certified models of every active connection it selects, catching up models certified before it existed. Provider activation applies every template automatically.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique template application key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTemplateApplyResponse"
+                }
+              }
+            },
+            "description": "Template applied; a release is published when a generated route was"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A generated route was refused by the release"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "routes"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateRouteDraftRequest": {
+        "properties": {
+          "max_attempts": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "Owning project; omit or null for an installation-wide route. Required for assigned principals.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTargetRequest"
+            },
+            "type": "array"
+          },
+          "fidelity": {
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fallbacks": {
+            "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "selectors": {
+            "description": "Ordered request selectors; the first match wins.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "overall_timeout_ms",
+          "max_attempts",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "PolicyResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal."
+          }
+        },
+        "required": [
+          "policy",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "ReplaceRouteDraftRequest": {
+        "properties": {
+          "max_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ReplaceRouteTargetRequest"
+            },
+            "type": "array"
+          },
+          "fidelity": {
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fallbacks": {
+            "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "selectors": {
+            "description": "Ordered request selectors; the first match wins.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "operations",
+          "overall_timeout_ms",
+          "max_attempts",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "ReplaceRouteTargetRequest": {
+        "properties": {
+          "priority": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "provider_model_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "weight": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tags": {
+            "description": "Labels selectors choose targets by.",
+            "items": {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "shadow": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/ShadowTarget"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider_model_id",
+          "priority",
+          "weight",
+          "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "RouteActivationResponse": {
+        "properties": {
+          "draft_etag": {
+            "description": "The activated draft returns to `draft` under this ETag; revalidate\nbefore activating it again.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "route_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "route_id",
+          "revision_id",
+          "revision",
+          "draft_etag",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "RouteDetailResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by_email": {
+            "description": "Email of the operator who created the route.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "etag": {
+            "description": "Optimistic-concurrency token for route mutations.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "latest_revision": {
+            "$ref": "#/components/schemas/RouteRevisionResponse"
+          },
+          "project_id": {
+            "description": "Owning project; null means installation-wide.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retired_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retired_by": {
+            "description": "User who retired the route; null while active.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "state": {
+            "description": "Lifecycle state: active routes serve; retired routes remain readable but serve nothing.",
+            "enum": [
+              "active",
+              "retired"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "project_id",
+          "project_name",
+          "created_at",
+          "revision_count",
+          "latest_revision",
+          "state",
+          "etag",
+          "retired_at",
+          "retired_by"
+        ],
+        "type": "object"
+      },
+      "RouteDraftDetailResponse": {
+        "properties": {
+          "based_on_revision_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by_email": {
+            "description": "Email of the operator who created the draft.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "max_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "project_id": {
+            "description": "Owning project; null means installation-wide.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTargetResponse"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fidelity": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "fallbacks": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "type": "array"
+          },
+          "selectors": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "state",
+          "project_id",
+          "project_name",
+          "overall_timeout_ms",
+          "max_attempts",
+          "etag",
+          "operations",
+          "targets",
+          "created_at",
+          "updated_at",
+          "fidelity",
+          "fallbacks",
+          "selectors",
+          "retry",
+          "affinity",
+          "budget",
+          "passthrough",
+          "certification"
+        ],
+        "type": "object"
+      },
+      "RouteDraftListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RouteDraftDetailResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RouteFixtureFile": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A local synthetic fixture set. The complete JSON file must not exceed 256 KiB.",
+        "properties": {
+          "synthetic": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Attest that every request, fixture name and classifier label is synthetic."
+          },
+          "fixtures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixture"
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "synthetic",
+          "fixtures"
+        ]
+      },
+      "RouteFixture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_. -]{0,63}$"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "dialect": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Synthetic native request for this operation, surface and mode."
+          },
+          "attribution": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "Optional synthetic attribution labels. Supply any label the key or project policy requires without a default."
+          },
+          "classifier_labels": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "Optional supplied classifier verdicts keyed by selector ID. Classifiers and plugins never run."
+          },
+          "expect_eligible": {
+            "type": "boolean",
+            "description": "Assert whether the draft can plan a serving attempt."
+          }
+        },
+        "required": [
+          "name",
+          "operation",
+          "surface",
+          "mode",
+          "seed",
+          "request"
+        ]
+      },
+      "RouteFixtureReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "published_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "published_revision": {
+            "type": "integer"
+          },
+          "draft_etag": {
+            "type": "string"
+          },
+          "planning_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "live_supply": {
+            "type": "string",
+            "enum": [
+              "not_simulated"
+            ],
+            "description": "Live capacity, spend and circuit state were not read. Configured caps without a spend reading remain unknown."
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "True when all specified draft assertions pass, even if an unasserted fixture changed."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureResult"
+            }
+          }
+        },
+        "required": [
+          "published_revision_id",
+          "published_revision",
+          "draft_etag",
+          "planning_time",
+          "live_supply",
+          "passed",
+          "results"
+        ]
+      },
+      "RouteFixtureResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "published": {
+            "$ref": "#/components/schemas/RouteFixturePlan"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/RouteFixturePlan"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "winner",
+                "eligibility",
+                "selector",
+                "reason"
+              ]
+            }
+          },
+          "expect_eligible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "published",
+          "draft",
+          "changes",
+          "expect_eligible",
+          "passed"
+        ]
+      },
+      "RouteFixturePlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "winner": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteFixtureTarget"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureDecision"
+            }
+          },
+          "selectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteFixtureSelector"
+            }
+          },
+          "fallbacks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FallbackStep"
+            }
+          }
+        },
+        "required": [
+          "winner",
+          "reason",
+          "targets",
+          "selectors",
+          "fallbacks"
+        ]
+      },
+      "RouteFixtureTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "provider_id",
+          "provider_name",
+          "model"
+        ]
+      },
+      "RouteFixtureDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A redacted target decision. Multiple rows may describe a target if its credential slots differed.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "shadow": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context_window": {
+            "$ref": "./shared.json#/components/schemas/RouteContextWindowPreview"
+          },
+          "context_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "estimated_input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "requested_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "estimate_provenance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "route",
+          "provider_id",
+          "provider_name",
+          "model",
+          "eligible",
+          "shadow",
+          "reason",
+          "context_length",
+          "estimated_input_tokens",
+          "requested_output_tokens",
+          "estimate_provenance"
+        ]
+      },
+      "RouteFixtureSelector": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Includes classifier_not_simulated for a missing verdict and plugin_not_simulated for a plugin predicate."
+          }
+        },
+        "required": [
+          "route",
+          "id",
+          "matched",
+          "outcome"
+        ]
+      },
+      "RouteDraftResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; null means installation-wide.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "fidelity": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route. Requires caller credentials on every target and equal policy on fallback/selector routes. Preserve usage and prices, rates and concurrency, but exclude caller attempts from USD budget admission and accrual. Probes/classifiers retain their own accounting policy."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "state",
+          "project_id",
+          "etag",
+          "fidelity"
+        ],
+        "type": "object"
+      },
+      "RouteListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RouteDetailResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RouteRetireResponse": {
+        "properties": {
+          "etag": {
+            "description": "Fresh route ETag recorded with the retirement.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "etag",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "RouteRevisionDiffResponse": {
+        "properties": {
+          "from_revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_attempts_changed": {
+            "type": "boolean"
+          },
+          "operations_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "operations_removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "routing_policy_after": {
+            "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+          },
+          "routing_policy_before": {
+            "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+          },
+          "routing_policy_changed": {
+            "type": "boolean"
+          },
+          "slug_changed": {
+            "type": "boolean"
+          },
+          "targets_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "targets_changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "targets_removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout_changed": {
+            "type": "boolean"
+          },
+          "to_revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "fidelity_changed": {
+            "type": "boolean"
+          },
+          "fidelity_before": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "fidelity_after": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "behavior_changed": {
+            "type": "boolean"
+          },
+          "behavior_before": {
+            "$ref": "#/components/schemas/RouteBehavior"
+          },
+          "behavior_after": {
+            "$ref": "#/components/schemas/RouteBehavior"
+          }
+        },
+        "required": [
+          "routing_policy_changed",
+          "routing_policy_before",
+          "routing_policy_after",
+          "from_revision",
+          "to_revision",
+          "slug_changed",
+          "timeout_changed",
+          "max_attempts_changed",
+          "operations_added",
+          "operations_removed",
+          "targets_added",
+          "targets_removed",
+          "targets_changed",
+          "fidelity_changed",
+          "fidelity_before",
+          "fidelity_after",
+          "behavior_changed",
+          "behavior_before",
+          "behavior_after"
+        ],
+        "type": "object"
+      },
+      "RouteRevisionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RouteRevisionResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RouteRevisionResponse": {
+        "properties": {
+          "activated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "activated_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "max_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "route_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "routing_policy": {
+            "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "source_draft_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTargetResponse"
+            },
+            "type": "array"
+          },
+          "fidelity": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "fallbacks": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "type": "array"
+          },
+          "selectors": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "routing_policy",
+          "id",
+          "route_id",
+          "revision",
+          "slug",
+          "overall_timeout_ms",
+          "max_attempts",
+          "source_draft_id",
+          "activated_by",
+          "activated_at",
+          "operations",
+          "targets",
+          "fidelity",
+          "fallbacks",
+          "selectors",
+          "retry",
+          "affinity",
+          "budget",
+          "passthrough",
+          "certification"
+        ],
+        "type": "object"
+      },
+      "RouteSimulationResponse": {
+        "properties": {
+          "deterministic_seed": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSimulationTargetResponse"
+            },
+            "type": "array"
+          },
+          "selectors": {
+            "description": "The named route's selector trace",
+            "items": {
+              "$ref": "#/components/schemas/SelectorOutcome"
+            },
+            "type": "array"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulatedAffinity"
+              }
+            ]
+          },
+          "legs": {
+            "description": "Routes the request moved to after the named route, in order",
+            "items": {
+              "$ref": "#/components/schemas/SimulatedRouteLeg"
+            },
+            "type": "array"
+          },
+          "fallbacks": {
+            "description": "Fallbacks the request started at plan time, then the ones a failed attempt could still start",
+            "items": {
+              "$ref": "#/components/schemas/FallbackStep"
+            },
+            "type": "array"
+          },
+          "gateway_execution": {
+            "$ref": "./shared.json#/components/schemas/GatewayExecutionCapability"
+          }
+        },
+        "required": [
+          "deterministic_seed",
+          "operation",
+          "surface",
+          "mode",
+          "targets",
+          "selectors",
+          "affinity",
+          "legs",
+          "fallbacks"
+        ],
+        "type": "object"
+      },
+      "RouteSimulationTargetResponse": {
+        "properties": {
+          "attempt": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "decision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RoutingDecision"
+              }
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "priority": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_model": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies."
+          },
+          "target_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "provider_id",
+          "provider_name",
+          "provider_model",
+          "priority",
+          "eligible"
+        ],
+        "type": "object"
+      },
+      "RouteTargetRequest": {
+        "properties": {
+          "priority": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_model": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "weight": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tags": {
+            "description": "Labels selectors choose targets by.",
+            "items": {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "shadow": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/ShadowTarget"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider_id",
+          "provider_model",
+          "priority",
+          "weight",
+          "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "RouteTargetResponse": {
+        "properties": {
+          "available": {
+            "description": "False when the provider was disabled or the model left the provider's\nactivated revision. The target is still part of the stored route.",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lifecycle": {
+            "description": "The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "priority": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_model": {
+            "type": "string"
+          },
+          "provider_model_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "weight": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shadow": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/ShadowTarget"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "provider_model_id",
+          "provider_id",
+          "provider_name",
+          "provider_model",
+          "available",
+          "priority",
+          "weight",
+          "timeout_ms",
+          "position",
+          "lifecycle",
+          "tags",
+          "shadow"
+        ],
+        "type": "object"
+      },
+      "SimulateRouteRequest": {
+        "properties": {
+          "estimated_input_tokens": {
+            "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_output_tokens": {
+            "description": "Reply bound to weigh the context windows by. It replaces the bound the request names.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "preferences": {
+            "$ref": "./shared.json#/components/schemas/RoutingPreferences"
+          },
+          "seed": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "api_key_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/SimulationDialect"
+          },
+          "client_contract": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation."
+          },
+          "query_settings": {
+            "$ref": "#/components/schemas/SimulationQuerySettings"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
+          },
+          "semantic_headers": {
+            "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "attribution": {
+            "description": "Attribution labels the request would carry. They only matter to a route keeping sessions by a label.",
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "classifier_labels": {
+            "description": "The label each classifier selector would receive, by selector id. Simulation never calls a classifier; a classifier selector without a label here is reported as classifier_not_simulated.",
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "surface",
+          "mode",
+          "seed"
+        ],
+        "type": "object",
+        "additionalProperties": false
+      },
+      "SimulationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_output_tokens": {
+            "description": "Reply bound to weigh the context windows by. It replaces the bound the request names.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "./shared.json#/components/schemas/TransportMode"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/SimulationOperation"
+          },
+          "preferences": {
+            "$ref": "./shared.json#/components/schemas/RoutingPreferences"
+          },
+          "seed": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "surface": {
+            "$ref": "./shared.json#/components/schemas/Surface"
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/SimulationDialect"
+          },
+          "query_settings": {
+            "$ref": "#/components/schemas/SimulationQuerySettings"
+          },
+          "semantic_headers": {
+            "$ref": "#/components/schemas/SimulationSemanticHeaders"
+          },
+          "client_contract": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation."
+          },
+          "attribution": {
+            "description": "Attribution labels the request would carry. They only matter to a route keeping sessions by a label.",
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          "classifier_labels": {
+            "description": "The label each classifier selector would receive, by selector id. Simulation never calls a classifier; a classifier selector without a label here is reported as classifier_not_simulated.",
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "surface",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "SimulationDialect": {
+        "type": "string",
+        "enum": [
+          "openai-chat",
+          "openai-responses",
+          "anthropic-messages",
+          "gemini-generate-content",
+          "openai-input-tokens",
+          "anthropic-count-tokens",
+          "gemini-count-tokens",
+          "openai-embeddings",
+          "openai-moderation",
+          "rerank",
+          "voyage-embeddings",
+          "tei-embeddings",
+          "tei-sparse-embeddings",
+          "tei-multivector-embeddings",
+          "gemini-embeddings",
+          "gemini-batch-embeddings",
+          "vertex-embeddings",
+          "bedrock-embeddings",
+          "voyage-rerank",
+          "tei-rerank",
+          "tei-classification",
+          "tei-scoring",
+          "bedrock-count-tokens",
+          "tei-tokenize",
+          "openai-completions",
+          "openai-decisions",
+          "systemone",
+          "gemini-decisions",
+          "mistral-ocr",
+          "azure-document-intelligence-ocr",
+          "vertex-document-processing-ocr",
+          "perplexity-search",
+          "tavily-search",
+          "exa-search",
+          "parallel-search",
+          "brave-search",
+          "cohere-embed-v2",
+          "cohere-rerank-v2"
+        ],
+        "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
+      },
+      "SimulationOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
+          },
+          "route": {
+            "type": "string",
+            "description": "Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported."
+          }
+        }
+      },
+      "SimulationQuerySettings": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "description": "Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output."
+      },
+      "SimulationSemanticHeaders": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "description": "Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output."
+      },
+      "RouteBehavior": {
+        "properties": {
+          "fallbacks": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "type": "array"
+          },
+          "selectors": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certification": {
+            "description": "Whether the route's serving tuples are certified. Pass-through routes always read uncertified.",
+            "enum": [
+              "certified",
+              "uncertified"
+            ],
+            "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fallbacks",
+          "selectors",
+          "retry",
+          "affinity",
+          "budget",
+          "passthrough",
+          "certification"
+        ],
+        "type": "object"
+      },
+      "RouteTemplateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Unique template name."
+          },
+          "provider_selector": {
+            "type": "string",
+            "description": "`vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers."
+          },
+          "model_filter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one."
+          },
+          "slug_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens."
+          },
+          "overall_timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 3600000
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 32767
+          },
+          "fidelity": {
+            "description": "Fidelity of generated routes; omit, or send null, for strict.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "routing_policy": {
+            "description": "Routing policy each generated draft starts with.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auto_publish": {
+            "type": "boolean",
+            "description": "Publish generated routes as soon as their model is certified, instead of leaving drafts for review."
+          },
+          "project_id": {
+            "description": "Owning project; generated routes belong to it and only its connections are considered.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "provider_selector",
+          "model_filter",
+          "slug_pattern",
+          "overall_timeout_ms",
+          "max_attempts"
+        ]
+      },
+      "RouteTemplateResult": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider_model_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "route_slug": {
+            "type": "string"
+          },
+          "draft_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "skipped"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the model was skipped, or why a generated draft was not published."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "template_id",
+          "provider_id",
+          "provider_model_id",
+          "upstream_model",
+          "route_slug",
+          "draft_id",
+          "outcome",
+          "reason"
+        ]
+      },
+      "RouteTemplateResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Unique template name."
+          },
+          "provider_selector": {
+            "type": "string",
+            "description": "`vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers."
+          },
+          "model_filter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one."
+          },
+          "slug_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens."
+          },
+          "overall_timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 3600000
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 32767
+          },
+          "fidelity": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "routing_policy": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auto_publish": {
+            "type": "boolean",
+            "description": "Publish generated routes as soon as their model is certified, instead of leaving drafts for review."
+          },
+          "project_id": {
+            "description": "Owning project; generated routes belong to it and only its connections are considered.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider_selector",
+          "model_filter",
+          "slug_pattern",
+          "overall_timeout_ms",
+          "max_attempts",
+          "fidelity",
+          "routing_policy",
+          "auto_publish",
+          "project_id",
+          "etag",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "RouteTemplateDetailResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "Unique template name."
+          },
+          "provider_selector": {
+            "type": "string",
+            "description": "`vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers."
+          },
+          "model_filter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one."
+          },
+          "slug_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens."
+          },
+          "overall_timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 3600000
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 32767
+          },
+          "fidelity": {
+            "$ref": "./shared.json#/components/schemas/RouteFidelity"
+          },
+          "routing_policy": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RoutingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "auto_publish": {
+            "type": "boolean",
+            "description": "Publish generated routes as soon as their model is certified, instead of leaving drafts for review."
+          },
+          "project_id": {
+            "description": "Owning project; generated routes belong to it and only its connections are considered.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTemplateResult"
+            },
+            "description": "Every certified model the template has placed on a route."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider_selector",
+          "model_filter",
+          "slug_pattern",
+          "overall_timeout_ms",
+          "max_attempts",
+          "fidelity",
+          "routing_policy",
+          "auto_publish",
+          "project_id",
+          "etag",
+          "created_at",
+          "updated_at",
+          "routes"
+        ]
+      },
+      "RouteTemplateListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTemplateResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RouteTemplateApplyResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTemplateResult"
+            }
+          },
+          "runtime_generation": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "results",
+          "runtime_generation"
+        ]
+      },
+      "SelectorOutcome": {
+        "description": "How one selector judged the request. The first matched selector wins; the ones after it are not evaluated.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "description": "matched, not_matched, or why a predicate or delegation could not decide: predicate_unavailable, classifier_failed, classifier_forbidden, classifier_not_simulated, plugin_failed, plugin_not_simulated, selector_route_unavailable or selector_route_forbidden",
+            "type": "string"
+          },
+          "label": {
+            "description": "The classifier label the request received",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "matched",
+          "outcome",
+          "label"
+        ],
+        "type": "object"
+      },
+      "FallbackStep": {
+        "description": "One fallback the request started or would start.",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "conditions": {
+            "description": "The conditions met, or for a standby fallback the ones it names",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/FallbackCondition"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "description": "planned when the fallback ranked attempts, standby when only a failed attempt could start it, or the reason it was skipped: fallback_route_unavailable, fallback_route_forbidden, fallback_route_repeated or the route's selection refusal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "route",
+          "conditions",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "SimulatedAffinity": {
+        "description": "Whether the request carried the session key its route keeps sessions by. When it does, that key seeds the target and slot ranking in place of the simulation seed.",
+        "properties": {
+          "source": {
+            "enum": [
+              "label",
+              "cache_key"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "label",
+          "session"
+        ],
+        "type": "object"
+      },
+      "SimulatedRouteLeg": {
+        "description": "A route the request moved to by selector delegation or fallback.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "selector",
+              "fallback",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selectors": {
+            "items": {
+              "$ref": "#/components/schemas/SelectorOutcome"
+            },
+            "type": "array"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulatedAffinity"
+              }
+            ]
+          },
+          "decisions": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RoutingDecision"
+            },
+            "type": "array"
+          },
+          "gateway_execution": {
+            "$ref": "./shared.json#/components/schemas/GatewayExecutionCapability"
+          }
+        },
+        "required": [
+          "route",
+          "via",
+          "selectors",
+          "affinity",
+          "decisions"
+        ],
+        "type": "object"
+      },
+      "UpdatePublishedRouteRequest": {
+        "properties": {
+          "max_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string",
+            "description": "The published slug is immutable."
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ReplaceRouteTargetRequest"
+            },
+            "type": "array"
+          },
+          "fidelity": {
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fallbacks": {
+            "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteFallback"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "selectors": {
+            "description": "Ordered request selectors; the first match wins.",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RouteSelector"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "./shared.json#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "provider_fetched_documents": {
+            "type": "boolean",
+            "description": "Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself."
+          },
+          "cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/ResponseCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_cache": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PromptCachePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passthrough": {
+            "description": "Governed pass-through binding; null or omitted for ordinary routes. A pass-through route serves only the passthrough operation with exactly one non-shadow target and one attempt, and rejects fallback, mirroring, translation, response caching and guardrails at plan and publication.",
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/PassthroughConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+          },
+          "responses_mcp_items": {
+            "type": "boolean",
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "slug",
+          "operations",
+          "overall_timeout_ms",
+          "max_attempts",
+          "targets"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,0 +1,2381 @@
+{
+  "paths": {
+    "/api/v1/notifications/deliveries": {
+      "get": {
+        "operationId": "list_notification_deliveries",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only deliveries of this rule.",
+            "in": "query",
+            "name": "rule_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only deliveries in this status.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDeliveryListResponse"
+                }
+              }
+            },
+            "description": "Delivery metadata visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter values"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/destinations": {
+      "get": {
+        "operationId": "list_notification_destinations",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationListResponse"
+                }
+              }
+            },
+            "description": "Notification destinations visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "post": {
+        "operationId": "create_notification_destination",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationDestinationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestination"
+                }
+              }
+            },
+            "description": "Notification destination created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination fields or a URL the egress policy refuses"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Egress policy or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/destinations/{notification_destination_id}/tests/{action_id}": {
+      "get": {
+        "operationId": "get_notification_destination_test",
+        "description": "Read the current test result without sending.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "post": {
+        "operationId": "send_notification_destination_test",
+        "description": "Send one test from a saved, enabled webhook or email destination. Reusing an action ID returns the existing result without sending or consuming the rate limit.",
+        "parameters": [
+          {
+            "description": "Saved destination ID.",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client-generated UUID. Use the same ID to replay or check one test. A new ID starts a separate test.",
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTest"
+                }
+              }
+            },
+            "description": "Current test result"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination or action UUID"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks destination write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination or test not found, or destination outside the caller’s scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Disabled destination or unsupported destination type"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many new tests for this destination",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/destinations/{notification_destination_id}": {
+      "get": {
+        "operationId": "get_notification_destination",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestination"
+                }
+              }
+            },
+            "description": "Notification destination"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "patch": {
+        "operationId": "update_notification_destination",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationDestinationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestination"
+                }
+              }
+            },
+            "description": "Notification destination updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Destination not found or outside the caller's scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Name is already taken in this scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid destination fields or a URL the egress policy refuses"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_notification_destination",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/rules": {
+      "get": {
+        "operationId": "list_notification_rules",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleListResponse"
+                }
+              }
+            },
+            "description": "Notification rules visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "post": {
+        "operationId": "create_notification_rule",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationRuleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRule"
+                }
+              }
+            },
+            "description": "Notification rule created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An identical rule already exists, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid rule fields for its event, a subject or destination outside the rule's project, or a provider event rule in a project"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/rules/{notification_rule_id}": {
+      "get": {
+        "operationId": "get_notification_rule",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRule"
+                }
+              }
+            },
+            "description": "Notification rule"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Rule not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "patch": {
+        "operationId": "update_notification_rule",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required when setting or canceling a silence",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationRuleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRule"
+                }
+              }
+            },
+            "description": "Notification rule updated"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid request or missing Idempotency-Key for a silence change"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Rule not found or outside the caller's scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An identical rule already exists or the Idempotency-Key belongs to another request"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid rule fields for its event, a subject or destination outside the rule's project, or a provider event rule in a project"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_notification_rule",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    }
+  },
+  "webhooks": {
+    "budget.threshold": {
+      "post": {
+        "description": "Posted to the destination of each enabled budget.threshold rule once per rule, window and threshold.",
+        "operationId": "budget_threshold_webhook",
+        "parameters": [
+          {
+            "description": "sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.",
+            "in": "header",
+            "name": "X-OLP-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetThresholdEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Delivered. Any other status, or none within five seconds, fails the attempt; a delivery is attempted up to five times, 2^(attempts-1) minutes apart."
+          }
+        },
+        "summary": "A budget threshold was crossed",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "provider.grant.lapsed": {
+      "post": {
+        "description": "Posted to the destination of each enabled provider.grant.lapsed rule once per lapse, when a worker records that a grant can no longer be refreshed.",
+        "operationId": "provider_grant_lapsed_webhook",
+        "parameters": [
+          {
+            "description": "sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.",
+            "in": "header",
+            "name": "X-OLP-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderGrantLapsedEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Delivered. Any other status, or none within five seconds, fails the attempt; a delivery is attempted up to five times, 2^(attempts-1) minutes apart."
+          }
+        },
+        "summary": "A grant lapsed",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "key.expiring": {
+      "post": {
+        "description": "Posted once per rule, key, reason and scheduled date when expiry or declared rotation is within 24 hours or overdue. Superseded pending schedules are cancelled; delivery is revalidated immediately before claiming a send. No credential is generated or included.",
+        "operationId": "key_expiring_webhook",
+        "parameters": [
+          {
+            "description": "sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.",
+            "in": "header",
+            "name": "X-OLP-Signature",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyExpiringEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "2XX": {
+            "description": "Delivered. Any other status, or none within five seconds, fails the attempt; a delivery is attempted up to five times, 2^(attempts-1) minutes apart."
+          }
+        },
+        "summary": "An API key expires or is due for rotation",
+        "tags": [
+          "notifications"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BudgetSubjectKind": {
+        "description": "Whose spend a budget.threshold rule watches.",
+        "enum": [
+          "api_key",
+          "budget_group"
+        ],
+        "type": "string"
+      },
+      "BudgetThresholdEvent": {
+        "description": "The webhook body of a budget.threshold event: the subject of a budget threshold rule accrued at least its threshold of its limit in the current UTC window. Metadata only: it never carries prompts, outputs or attribution labels.",
+        "properties": {
+          "accrued": {
+            "description": "The exact accrual that crossed the threshold, as claimed.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "The pricing currency, or empty when none is set.",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "budget.threshold"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "The subject's limit for the window, as claimed.",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind"
+          }
+        },
+        "required": [
+          "event",
+          "rule_id",
+          "rule_name",
+          "subject_kind",
+          "subject_id",
+          "window_kind",
+          "window_id",
+          "threshold_percent",
+          "accrued",
+          "limit",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "BudgetWindowKind": {
+        "description": "The UTC window a budget.threshold rule watches.",
+        "enum": [
+          "day",
+          "week",
+          "month"
+        ],
+        "type": "string"
+      },
+      "CreateNotificationDestinationRequest": {
+        "properties": {
+          "configuration": {
+            "description": "Per-channel configuration object; required for email destinations.",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "enabled": {
+            "description": "Defaults to true.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; omit or null for an installation-wide destination.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
+          "url": {
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "CreateNotificationRuleRequest": {
+        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, and spend.spike requires a project.",
+        "properties": {
+          "configuration": {
+            "description": "Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Defaults to true.",
+            "type": "boolean"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; subject and destination must belong to the same project.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string",
+            "description": " For key.expiring, set only subject_kind=api_key and subject_id."
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind",
+            "description": " For key.expiring, set only subject_kind=api_key and subject_id."
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer",
+            "description": " For key.expiring, set only subject_kind=api_key and subject_id."
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind",
+            "description": " For key.expiring, set only subject_kind=api_key and subject_id."
+          }
+        },
+        "required": [
+          "name",
+          "event",
+          "destination_id"
+        ],
+        "type": "object"
+      },
+      "NotificationDestinationTest": {
+        "description": "Result of a single test attempt, separate from incident delivery history.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationTestStatus"
+          },
+          "failure": {
+            "description": "Sanitized failure code when available.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "NotificationTestStatus": {
+        "description": "Pending means there is no recorded outcome yet. Unconfirmed means the receiver may have accepted the test.",
+        "enum": [
+          "pending",
+          "delivered",
+          "failed",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
+      "NotificationDelivery": {
+        "description": "Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.",
+        "properties": {
+          "accrued": {
+            "description": "The exact accrual that crossed the threshold, preserved from claim time. Set for budget.threshold deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credential_version": {
+            "description": "The number of the credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "credential_version_id": {
+            "description": "The credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_code": {
+            "description": "Safe failure category only; raw errors are never stored.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "description": "The subject limit evaluated at claim time. Set for budget.threshold deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "description": "The provider whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "description": "The provider's name when its grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "threshold_percent": {
+            "description": "Set for budget.threshold deliveries only; null for other events.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "window_id": {
+            "description": "Set for budget.threshold deliveries only; null for other events.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "api_key_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "api_key_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "expiry",
+              "rotation",
+              null
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "rule_name",
+          "project_id",
+          "event",
+          "window_id",
+          "threshold_percent",
+          "accrued",
+          "limit",
+          "currency",
+          "provider_id",
+          "provider_name",
+          "credential_version_id",
+          "credential_version",
+          "status",
+          "attempts",
+          "last_error_code",
+          "created_at",
+          "last_attempt_at",
+          "delivered_at"
+        ],
+        "type": "object"
+      },
+      "NotificationDeliveryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationDelivery"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotificationDestination": {
+        "properties": {
+          "configuration": {
+            "description": "Per-channel configuration object; required for email destinations (from/to/subject_prefix/ca_certificate).",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret_configured": {
+            "description": "Whether a credential secret is stored; the secret itself is never returned.",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+          }
+        },
+        "required": [
+          "configuration",
+          "created_at",
+          "created_by",
+          "created_by_email",
+          "enabled",
+          "etag",
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "secret_configured",
+          "type",
+          "updated_at",
+          "url"
+        ],
+        "type": "object"
+      },
+      "NotificationDestinationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationDestination"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotificationEvent": {
+        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend, spend.spike) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, spend.spike requires a project, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.",
+        "enum": [
+          "budget.exhausted",
+          "budget.threshold",
+          "key.expiring",
+          "model.retirement",
+          "provider.circuit.closed",
+          "provider.circuit.open",
+          "provider.credential.failing",
+          "provider.error_rate",
+          "provider.grant.lapsed",
+          "report.spend",
+          "route.latency",
+          "runtime.install_failed",
+          "spend.spike",
+          "worker.stale"
+        ],
+        "type": "string"
+      },
+      "NotificationRule": {
+        "description": "A notification rule subscribes a destination to an event. budget.threshold rules name a subject, window and threshold; key.expiring names an api_key subject and takes lead_time_seconds; generic events carry configuration only. Generic rules are capped at 1000 per installation.",
+        "properties": {
+          "configuration": {
+            "description": "Canonical event-specific rule configuration (thresholds, windows, cooldowns, lead time, metric, period).",
+            "type": "object",
+            "additionalProperties": true
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "destination_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/NotificationEvent"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; null for an installation-wide rule, as every provider event rule is.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_id": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_kind": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BudgetSubjectKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "silence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationSilence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threshold_percent": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "window_kind": {
+            "description": "Set for budget.threshold rules only; null for other events.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BudgetWindowKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "configuration",
+          "created_at",
+          "created_by",
+          "created_by_email",
+          "destination_id",
+          "destination_name",
+          "enabled",
+          "etag",
+          "event",
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "silence",
+          "subject_id",
+          "subject_kind",
+          "subject_name",
+          "threshold_percent",
+          "updated_at",
+          "window_kind"
+        ],
+        "type": "object"
+      },
+      "NotificationRuleListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationRule"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NotificationSilence": {
+        "description": "One time window on a project-scoped route.latency webhook rule. The start is inclusive and the end is exclusive.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProviderGrantLapsedEvent": {
+        "description": "The webhook body of a provider.grant.lapsed event: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment replaces it. It reports the provider, credential version, credential slots and observed principal as they were when the grant lapsed, and never carries secret material: no access or refresh token, grant facts or refresh failure.",
+        "properties": {
+          "credential_slots": {
+            "description": "The provider's credential slots bound to the credential version, in its draft or its active revision: usually one.",
+            "items": {
+              "properties": {
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "credential_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "credential_version_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "provider.grant.lapsed"
+            ],
+            "type": "string"
+          },
+          "lapsed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "observed_principal": {
+            "description": "The upstream principal the grant's enrollment observed.",
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rule_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "rule_id",
+          "rule_name",
+          "provider_id",
+          "provider_name",
+          "credential_version_id",
+          "credential_version",
+          "credential_slots",
+          "observed_principal",
+          "lapsed_at"
+        ],
+        "type": "object"
+      },
+      "UpdateNotificationDestinationRequest": {
+        "properties": {
+          "configuration": {
+            "description": "Replaces the channel configuration; null clears it to {}.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+          }
+        },
+        "type": "object",
+        "description": "Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret."
+      },
+      "UpdateNotificationRuleRequest": {
+        "description": "Replace parts of a notification rule; send the latest record's ETag with If-Match. budget.threshold rules keep their subject_kind/subject_id, window_kind and threshold_percent; key.expiring rules keep their api_key subject and take lead_time_seconds in configuration; generic events carry configuration only.",
+        "properties": {
+          "configuration": {
+            "description": "Replaces the rule configuration; null resets to the event defaults.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "destination_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "silence": {
+            "description": "Set or replace a project-scoped route.latency webhook rule's silence. The end must be in the future. Send null to cancel or omit to leave unchanged unless switching to a non-webhook destination. Including this field requires Idempotency-Key.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationSilence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "subject_kind": {
+            "$ref": "#/components/schemas/BudgetSubjectKind"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_kind": {
+            "$ref": "#/components/schemas/BudgetWindowKind"
+          }
+        },
+        "type": "object"
+      },
+      "KeyExpiringEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "key.expiring"
+          },
+          "rule_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rule_name": {
+            "type": "string"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "expiry",
+              "rotation"
+            ]
+          }
+        },
+        "required": [
+          "event",
+          "rule_id",
+          "rule_name",
+          "api_key_id",
+          "api_key_name",
+          "project_id",
+          "due_at",
+          "reason"
+        ]
+      }
+    }
+  }
+}

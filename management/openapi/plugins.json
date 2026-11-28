@@ -1,0 +1,1568 @@
+{
+  "paths": {
+    "/api/v1/plugins": {
+      "get": {
+        "description": "Lists installed provider plugins with the profiles and origins each declares: confined plugins and, where the deployment enables the unconfined tier, the unconfined plugins an owner permitted. Any role with read access may list them.",
+        "operationId": "list_plugins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Installed plugins, by name and newest install first"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Installs a provider plugin from its WebAssembly module. OLP instantiates the module within the plugin memory and time limits, reads its manifest and stores the module by its SHA-256 digest. The plugin can't be used until an owner approves its declared origins. Installing an installed digest changes nothing.",
+        "operationId": "install_plugin",
+        "requestBody": {
+          "content": {
+            "application/wasm": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The plugin module, at most 32 MiB",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "The digest was already installed; nothing changed",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin installed; it awaits approval of its declared origins",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "Path of the installed plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The module exceeds 32 MiB"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not application/wasm"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin refused: plugin_module_invalid (not a plugin OLP can run), plugin_abi_unsupported (built for another ABI version), plugin_manifest_invalid, plugin_dialect_unknown (a profile names a dialect OLP doesn't have), plugin_timed_out or plugin_failed (the module exceeded its limits), or plugin_limit (64 digests are installed)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}": {
+      "delete": {
+        "description": "Uninstalls a provider plugin: it deletes a confined plugin's module, or withdraws the permission of an unconfined plugin, whose executable stays in the image. A plugin that a provider draft or published provider revision pins can't be uninstalled.",
+        "operationId": "uninstall_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Plugin uninstalled"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider revisions pin the plugin (plugin_pinned); the problem names the providers"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      },
+      "get": {
+        "operationId": "get_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Installed plugin",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or token scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugins/{plugin_digest}/approve": {
+      "post": {
+        "description": "Approves the origins a plugin declares, after which it can be used. The request lists exactly the declared origins, so an approval covers only what the owner reviewed.",
+        "operationId": "approve_plugin",
+        "parameters": [
+          {
+            "description": "Lowercase hexadecimal SHA-256 digest of the plugin module",
+            "in": "path",
+            "name": "plugin_digest",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current plugin ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Plugin approved",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed digest or request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin not installed"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Plugin already approved"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The origins differ from those the plugin declares (plugin_origins_mismatch)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins": {
+      "get": {
+        "description": "Lists the executables in the deployment's unconfined plugin directory, without running them. Only an owner with a user session sees them, and only where a deployment setting enables the experimental unconfined tier.",
+        "operationId": "list_unconfined_executables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableListResponse"
+                }
+              }
+            },
+            "description": "Executables, by name"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OLP can't read the unconfined plugin directory the deployment names (unconfined_plugin_dir_unreadable)"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/permit": {
+      "post": {
+        "description": "Permits an executable as an unconfined plugin, which providers may then pin by its digest. An unconfined plugin runs with native privileges, so permitting takes an owner who reauthenticated for plugin_permit within five minutes and acknowledges that risk. OLP runs the executable again and refuses the permission if it no longer has the reviewed digest.",
+        "operationId": "permit_unconfined_plugin",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/UnconfinedPluginPermitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plugin"
+                }
+              }
+            },
+            "description": "Unconfined plugin permitted",
+            "headers": {
+              "ETag": {
+                "description": "Current plugin ETag",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "The permitted plugin",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable changed since the owner reviewed it (plugin_executable_changed), or this build is already permitted (plugin_permitted)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The risk is not acknowledged, the installation holds its limit of plugin digests, or the executable is not a plugin OLP can run"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner has not reauthenticated for plugin_permit (reauthentication_required)"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/unconfined-plugins/{executable}/review": {
+      "post": {
+        "description": "Runs an executable in the unconfined plugin directory to read the manifest it declares, for an owner to review before permitting it. OLP refuses an executable that doesn't speak the plugin ABI over standard input and output, was built for another ABI version, or declares an invalid manifest.",
+        "operationId": "review_unconfined_executable",
+        "parameters": [
+          {
+            "description": "File name of the executable in the unconfined plugin directory",
+            "in": "path",
+            "name": "executable",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnconfinedExecutableReview"
+                }
+              }
+            },
+            "description": "The executable and its manifest"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The deployment does not enable unconfined plugins (unconfined_plugins_disabled), or no executable has this name (plugin_executable_unknown)"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The executable is not a plugin OLP can run: plugin_executable_invalid, plugin_abi_unsupported, plugin_manifest_invalid, plugin_dialect_unknown, plugin_timed_out or plugin_failed; errors names the offending manifest field"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_plugins",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/v1/plugin-index": {
+      "get": {
+        "description": "Lists the reviewed plugins in the signed index this release ships, with whether each reviewed digest is installed and approved. Browsing installs nothing: installing a module, approving its origins and permitting it stay explicit owner actions.",
+        "operationId": "get_plugin_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginIndexResponse"
+                }
+              }
+            },
+            "description": "Plugin index"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified plugin index"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PluginGrantAuthentication": {
+        "additionalProperties": false,
+        "description": "Declares that providers using the profile authenticate with a grant the plugin enrolls. In the profile's hosting templates, {credential} stands for the grant's current access token.",
+        "properties": {
+          "facts": {
+            "description": "The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}, and with which the address may begin when the fact holds the upstream's base URL.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "input": {
+            "description": "The operator continues enrollment with a pasted upstream secret, such as an API key. When absent, enrollment accepts a callback URL or code.",
+            "enum": [
+              "secret"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PluginHosting": {
+        "additionalProperties": false,
+        "description": "A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.",
+        "properties": {
+          "address": {
+            "description": "Upstream base URL, at one of the plugin's origins; options may appear in its path. A provider using the profile has it as its endpoint, with the provider's options in place. A grant profile's address may instead begin with the grant fact that holds the upstream's base URL, such as {grant.api_base}/v1: the endpoint's origin is then https://grant.invalid, and OLP sends each request to its grant's base URL, which must be at one of the plugin's approved origins.",
+            "type": "string"
+          },
+          "classification": {
+            "description": "Declared failure classification, in order: the first rule that matches an upstream failure decides its class. OLP's built-in rules classify every failure no rule matches.",
+            "items": {
+              "$ref": "#/components/schemas/PluginFailureRule"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "discovery": {
+            "$ref": "#/components/schemas/PluginDiscovery"
+          },
+          "envelope": {
+            "$ref": "#/components/schemas/PluginEnvelope"
+          },
+          "force_streaming": {
+            "description": "The upstream serves only streaming requests. OLP sends every request as a streaming one and aggregates the stream into the dialect's non-streaming result for a caller that did not ask to stream. Only openai-responses profiles may force streaming.",
+            "type": "boolean"
+          },
+          "headers": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared request headers by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "query": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Declared query parameters by name, with value templates.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "rewrites": {
+            "description": "Declared changes to the dialect's request body, applied in order before the envelope wraps it.",
+            "items": {
+              "$ref": "#/components/schemas/PluginRewrite"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "PluginEnvelope": {
+        "additionalProperties": false,
+        "description": "The upstream's own JSON object around the dialect's bodies. OLP wraps each request body in it and unwraps each successful response and stream event; a response or event without the response member, such as an upstream error, reaches the dialect as it is.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "The request object's other members by name, with value templates in which {model} stands for the upstream model and {options.<name>} for the provider's value of one of the profile's required options. They become JSON strings.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "request": {
+            "description": "The member of the upstream's request object that carries the dialect's request body.",
+            "type": "string"
+          },
+          "response": {
+            "description": "The member of the upstream's responses and stream events that carries the dialect's response or event.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PluginRewrite": {
+        "additionalProperties": false,
+        "description": "A declared change to one member of the dialect's request body.",
+        "properties": {
+          "op": {
+            "description": "set replaces the member, default sets it unless the request has it, and delete removes it.",
+            "enum": [
+              "set",
+              "default",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON pointer to an object member, such as /generationConfig/seed. Setting it creates the objects above it.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The JSON value to set or default to, which may be null; absent for delete.",
+            "x-go-type": "json.RawMessage",
+            "x-go-type-skip-optional-pointer": true
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "type": "object"
+      },
+      "PluginDiscovery": {
+        "additionalProperties": false,
+        "description": "The upstream's model listing, which discovery reads with the provider's credential placed as for every request. Without it, operators declare a plugin provider's models.",
+        "properties": {
+          "id": {
+            "description": "The field of each model object that holds its ID.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "models": {
+            "description": "The top-level field of the listing that holds the array of model objects.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PluginPagination"
+          },
+          "path": {
+            "description": "The listing's path, which extends the address, such as /models.",
+            "maxLength": 512,
+            "pattern": "^(/[A-Za-z0-9._~!$'()*+,;=:@-]+)+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "models",
+          "id"
+        ],
+        "type": "object"
+      },
+      "PluginFailureRule": {
+        "additionalProperties": false,
+        "description": "Classifies the upstream failures it matches: unsuccessful responses by status and the error their body states, and errors stated in-band, such as a stream's error event, by code and type. It matches when every value it declares matches exactly, and declares at least one.",
+        "properties": {
+          "class": {
+            "description": "credential cools the credential version and fails over; rate_limited cools the slot, for the upstream's Retry-After, and fails over; retryable fails over unless the upstream may have performed work that must not repeat; terminal returns the rejection without failing over.",
+            "enum": [
+              "credential",
+              "rate_limited",
+              "retryable",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "code": {
+            "description": "The stated error's code.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "status": {
+            "description": "The unsuccessful response's HTTP status. A rule with a status never matches an in-band error.",
+            "maximum": 599,
+            "minimum": 400,
+            "type": "integer"
+          },
+          "type": {
+            "description": "The stated error's type.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "class"
+        ],
+        "type": "object"
+      },
+      "PluginPagination": {
+        "additionalProperties": false,
+        "description": "How a model listing continues: a page's cursor field holds the next page's cursor, which discovery sends back in the parameter query parameter. A page without a cursor, or whose more field is not true when one is declared, is the last.",
+        "properties": {
+          "cursor": {
+            "description": "The top-level field of a page that holds the next page's cursor.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "more": {
+            "description": "The top-level boolean field of a page that reports whether another page follows.",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parameter": {
+            "description": "The query parameter that carries the cursor.",
+            "pattern": "^[A-Za-z0-9._~-]{1,128}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter",
+          "cursor"
+        ],
+        "type": "object"
+      },
+      "Plugin": {
+        "additionalProperties": false,
+        "description": "An installed provider plugin: its digest and the manifest it declared. A confined plugin's WebAssembly module is stored with it; an unconfined plugin's executable lives in the deployment's image.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the plugin was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "approved_at": {
+            "description": "When an owner approved the declared origins, or permitted an unconfined plugin; null while the plugin awaits approval and can't be used.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approved_by_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the module, or of an unconfined plugin's executable, which identifies the plugin.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "executable": {
+            "description": "For an unconfined plugin, the name of its executable in the deployment's unconfined plugin directory; null for a confined plugin. Unconfined plugins are listed only where the deployment enables them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "installed_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "installed_by_email": {
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "size_bytes": {
+            "description": "Size of the module or executable.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "executable",
+          "manifest",
+          "installed_by",
+          "installed_by_email",
+          "installed_at",
+          "approved_by",
+          "approved_by_email",
+          "approved_at",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "PluginApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "origins": {
+            "description": "Exactly the origins the plugin declares, in any order.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "origins"
+        ],
+        "type": "object"
+      },
+      "PluginListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Plugin"
+            },
+            "type": "array"
+          },
+          "unconfined_plugins_enabled": {
+            "description": "Whether this deployment enables the experimental unconfined plugin tier. Only a deployment setting enables it, never the management API.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "unconfined_plugins_enabled"
+        ],
+        "type": "object"
+      },
+      "PluginManifest": {
+        "additionalProperties": false,
+        "description": "What a plugin declared at install. It never changes for a digest.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifies the plugin across its versions; several digests of one plugin may be installed side by side.",
+            "type": "string"
+          },
+          "origins": {
+            "description": "The only origins the plugin may reach once an owner approves them, as scheme://host[:port].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/PluginProfile"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "version": {
+            "description": "The author's label for this build.",
+            "type": "string"
+          },
+          "guardrail": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "origins",
+          "profiles"
+        ],
+        "type": "object"
+      },
+      "PluginProfile": {
+        "additionalProperties": false,
+        "description": "A provider profile the plugin supplies around a built-in dialect.",
+        "properties": {
+          "carries_traffic": {
+            "description": "Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.",
+            "type": "boolean"
+          },
+          "dialect": {
+            "description": "The built-in dialect the profile serves.",
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/PluginGrantAuthentication"
+          },
+          "hosting": {
+            "$ref": "#/components/schemas/PluginHosting"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "description": "Non-secret settings each provider using the profile sets, in the order the provider wizard shows them.",
+            "items": {
+              "$ref": "#/components/schemas/PluginOption"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "signing": {
+            "description": "Whether the plugin signs each upstream request of the profile: its signing hook runs once per request, after hosting placed it, and adds headers.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "dialect",
+          "hosting"
+        ],
+        "type": "object"
+      },
+      "PluginOption": {
+        "additionalProperties": false,
+        "description": "A non-secret setting a plugin profile declares, such as an account ID, a region or a project, whose value the operator sets on each provider using the profile. Values are text of 1-256 characters without control characters.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "enum": {
+            "description": "The only values the option takes.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifies the option in provider configuration and as {options.<name>} in hosting templates.",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "optional": {
+            "description": "Whether a provider may leave the option unset. Hosting templates reference only options that are not optional.",
+            "type": "boolean"
+          },
+          "pattern": {
+            "description": "A regular expression in RE2 syntax that values match; anchor it with ^ and $ to match whole values.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutable": {
+        "additionalProperties": false,
+        "description": "An executable in the deployment's unconfined plugin directory, which an owner may review and permit as an unconfined plugin.",
+        "properties": {
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnconfinedExecutable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "UnconfinedExecutableReview": {
+        "additionalProperties": false,
+        "description": "An executable in the unconfined plugin directory with the manifest it declared when OLP ran it for review.",
+        "properties": {
+          "abi_version": {
+            "description": "Plugin ABI version the executable was built for.",
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "digest": {
+            "description": "Lowercase hexadecimal SHA-256 digest of the executable, which identifies the plugin once permitted.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "name": {
+            "description": "The executable's file name in the unconfined plugin directory.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "permitted": {
+            "description": "Whether an owner permitted this build of the executable, which is then an installed plugin.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "description": "Size of the executable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "size_bytes",
+          "permitted",
+          "abi_version",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "PluginIndexRelease": {
+        "additionalProperties": false,
+        "description": "A reviewed build of a plugin: an owner installs exactly this module digest and approves exactly these origins.",
+        "properties": {
+          "abi_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "approved": {
+            "description": "Whether this digest is installed and its origins approved.",
+            "type": "boolean"
+          },
+          "commit": {
+            "description": "Source revision the digest builds from, reproducibly.",
+            "type": "string"
+          },
+          "digest": {
+            "description": "Hex SHA-256 of the WebAssembly module.",
+            "type": "string"
+          },
+          "installed": {
+            "description": "Whether this digest is installed.",
+            "type": "boolean"
+          },
+          "origins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "origins",
+          "profiles",
+          "commit",
+          "reviewed_at",
+          "installed",
+          "approved"
+        ],
+        "type": "object"
+      },
+      "PluginIndexEntry": {
+        "additionalProperties": false,
+        "description": "A reviewed plugin and its source.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "documentation_url": {
+            "type": "string"
+          },
+          "maintainer": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Source directory within the repository.",
+            "type": "string"
+          },
+          "releases": {
+            "description": "Reviewed releases, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexRelease"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "maintainer",
+          "documentation_url",
+          "repository",
+          "path",
+          "releases"
+        ],
+        "type": "object"
+      },
+      "PluginIndexResponse": {
+        "additionalProperties": false,
+        "description": "The signed index of reviewed plugins this release ships.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexEntry"
+            },
+            "type": "array"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the index.",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed index document.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "published_at",
+          "sha256",
+          "key_id",
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

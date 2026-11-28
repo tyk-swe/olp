@@ -1,0 +1,35 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "contact": {
+      "email": "support@mail.tyk.sh",
+      "name": "OpenLLMProxy",
+      "url": "https://github.com/tyk-swe/olp"
+    },
+    "description": "Manage OpenLLMProxy access, providers, routes, usage and operations.\n\nAll management operations, including public authentication endpoints, may return HTTP 403 with a Problem code of management_ip_not_allowed when deployment CIDRs exclude the resolved client address.",
+    "license": {
+      "identifier": "AGPL-3.0-only",
+      "name": "AGPL-3.0-only"
+    },
+    "title": "OpenLLMProxy Management API",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "openapi",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "OpenAPI document for the management API"
+          }
+        },
+        "security": []
+      }
+    }
+  }
+}

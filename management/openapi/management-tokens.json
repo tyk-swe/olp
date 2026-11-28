@@ -1,0 +1,591 @@
+{
+  "paths": {
+    "/api/v1/management-tokens": {
+      "get": {
+        "operationId": "list_management_tokens",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementTokenListResponse"
+                }
+              }
+            },
+            "description": "Management tokens"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "management-tokens"
+        ]
+      },
+      "post": {
+        "operationId": "create_management_token",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateManagementTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateManagementTokenResponse"
+                }
+              }
+            },
+            "description": "Management token created; secret is shown once",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency conflict or operation in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key, authentication HMAC key, or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "management-tokens"
+        ]
+      }
+    },
+    "/api/v1/management-tokens/{management_token_id}": {
+      "get": {
+        "operationId": "get_management_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "management_token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementTokenResponse"
+                }
+              }
+            },
+            "description": "Management token"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Management token not found"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "management-tokens"
+        ]
+      }
+    },
+    "/api/v1/management-tokens/{management_token_id}/revoke": {
+      "post": {
+        "operationId": "revoke_management_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "management_token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current management-token ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementTokenRevokeResponse"
+                }
+              }
+            },
+            "description": "Management token revoked; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a session-authenticated owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Management token not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency conflict, token already revoked, or operation in progress"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_tokens",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "management-tokens"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateManagementTokenRequest": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_ids": {
+            "description": "Projects the token may administer. Omit for all projects.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagementTokenScope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "CreateManagementTokenResponse": {
+        "properties": {
+          "all_projects": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lookup_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret": {
+            "description": "Returned only by this creation response.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "lookup_id",
+          "name",
+          "scopes",
+          "all_projects",
+          "project_ids",
+          "created_by",
+          "created_by_email",
+          "etag",
+          "expires_at",
+          "revoked_at",
+          "created_at",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "ManagementTokenListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManagementTokenResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ManagementTokenScope": {
+        "description": "A management operation that may be delegated to a management token.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access",
+          "manage_projects",
+          "manage_organization"
+        ],
+        "type": "string"
+      },
+      "ManagementTokenResponse": {
+        "properties": {
+          "all_projects": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lookup_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagementTokenScope"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "lookup_id",
+          "name",
+          "scopes",
+          "all_projects",
+          "project_ids",
+          "created_by",
+          "created_by_email",
+          "etag",
+          "expires_at",
+          "revoked_at",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ManagementTokenRevokeResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "etag"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

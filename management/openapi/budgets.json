@@ -1,0 +1,220 @@
+{
+  "paths": {
+    "/api/v1/execution-debits": {
+      "get": {
+        "operationId": "list_execution_debits",
+        "tags": [
+          "budgets"
+        ],
+        "summary": "list execution debits",
+        "description": "Provisional financial exposure, reported separately from observed usage and invoice charges.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionDebitList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExecutionDebit": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api",
+              "model",
+              "tool",
+              "agent"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "bound_violation": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "project_id",
+          "run_id",
+          "kind",
+          "state",
+          "currency",
+          "bound_violation",
+          "created_at",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "ExecutionDebitList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionDebit"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      }
+    }
+  }
+}

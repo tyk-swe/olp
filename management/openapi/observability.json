@@ -1,0 +1,2631 @@
+{
+  "paths": {
+    "/api/v1/observability/capture": {
+      "get": {
+        "operationId": "get_capture_configuration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureConfiguration"
+                }
+              }
+            },
+            "description": "Capture configuration"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_capture_configuration",
+        "parameters": [
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCaptureConfigurationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureConfiguration"
+                }
+              }
+            },
+            "description": "Capture configuration updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may change capture configuration"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-policies": {
+      "get": {
+        "operationId": "list_capture_policies",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicyListResponse"
+                }
+              }
+            },
+            "description": "Capture policies visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_capture_policy",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCapturePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A policy for this project and route already exists, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid policy fields, or capture is disabled"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-policies/{capture_policy_id}": {
+      "get": {
+        "operationId": "get_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy detail"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCapturePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid policy fields, or capture is disabled"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Capture policy deleted"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks": {
+      "get": {
+        "operationId": "list_export_sinks",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSinkListResponse"
+                }
+              }
+            },
+            "description": "Export sinks visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_export_sink",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExportSinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid sink fields or a destination the egress policy refuses"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ],
+        "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes."
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}": {
+      "get": {
+        "operationId": "get_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink detail and per-stream delivery status"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExportSinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink name is already taken in this scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid sink fields or a destination the egress policy refuses"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Export sink deleted"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/gaps": {
+      "get": {
+        "operationId": "list_export_sink_gaps",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSinkGapListResponse"
+                }
+              }
+            },
+            "description": "Recorded export delivery gaps for the sink"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/metering-deliveries/{attempt_id}": {
+      "get": {
+        "operationId": "get_export_sink_metering_delivery",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeteringDeliveryLookup"
+                }
+              }
+            },
+            "description": "Delivery state of one metering attempt on the sink, or no retained evidence when nothing attempt-specific remains in the caller's scope"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found, outside the caller's scope, or not a CloudEvents metering sink"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-sinks": {
+      "get": {
+        "summary": "List capture sink options",
+        "description": "Enabled installation-wide export sinks a capture policy may write to; ids and names only, never destinations or credentials.",
+        "tags": [
+          "Observability"
+        ],
+        "operationId": "listCaptureSinks",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available capture sinks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureSinkOptionList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/focus-datasets": {
+      "get": {
+        "operationId": "list_export_sink_focus_datasets",
+        "description": "Delivered and pending FOCUS dataset revisions for the sink, newest charge date first.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FocusDatasetListResponse"
+                }
+              }
+            },
+            "description": "Delivered and pending FOCUS datasets for the sink"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    }
+  },
+  "webhooks": {
+    "observability.runs": {
+      "post": {
+        "summary": "Observability run evidence",
+        "operationId": "observability_run_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityRunEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "observability.trace_spans": {
+      "post": {
+        "summary": "Observability trace span evidence",
+        "operationId": "observability_trace_span_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityTraceSpanEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CaptureConfiguration": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "etag"
+        ]
+      },
+      "UpdateCaptureConfigurationRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "CapturePolicy": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UTC deadline for collecting and enqueueing payloads. Null means no expiry."
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "redactor_revisions": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "$ref": "#/components/schemas/CaptureRedactorRevision"
+            },
+            "description": "Pinned detector metadata in execution order. Never includes detector configuration or captured content."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "route_slug",
+          "sink",
+          "sample_ratio",
+          "include",
+          "redact",
+          "key_ids",
+          "end_user_digests",
+          "max_bytes",
+          "enabled",
+          "etag",
+          "expires_at"
+        ]
+      },
+      "CreateCapturePolicyRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339 capture deadline, returned in UTC. Omit or send null for no expiry."
+          }
+        },
+        "required": [
+          "sink",
+          "sample_ratio",
+          "include",
+          "max_bytes"
+        ]
+      },
+      "UpdateCapturePolicyRequest": {
+        "type": "object",
+        "properties": {
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "description": "Ordered local detector names. Creation or an explicit redact update pins their active immutable revisions in the policy project (or route project). Omit on unrelated edits to preserve pins; resend to refresh. Empty means unredacted capture."
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC 3339 capture deadline, returned in UTC. Omit to keep the current deadline or send null to remove it."
+          }
+        }
+      },
+      "CapturePolicyListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CapturePolicy"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ExportSink": {
+        "type": "object",
+        "properties": {
+          "export_sink_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob",
+              "stripe_meter"
+            ],
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "streams": {
+            "items": {
+              "enum": [
+                "requests",
+                "attempts",
+                "usage_rollups",
+                "guardrail_decisions",
+                "audit",
+                "metering",
+                "focus",
+                "runs",
+                "trace_spans"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "cloudevents",
+              "otlp",
+              "jsonl",
+              "csv_gzip",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential_configured": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "type": "array"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
+          }
+        },
+        "required": [
+          "export_sink_id",
+          "name",
+          "project_id",
+          "type",
+          "destination",
+          "streams",
+          "format",
+          "filter",
+          "enabled",
+          "credential_configured",
+          "etag",
+          "status"
+        ]
+      },
+      "CreateExportSinkRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob",
+              "stripe_meter"
+            ],
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "streams": {
+            "items": {
+              "enum": [
+                "requests",
+                "attempts",
+                "usage_rollups",
+                "guardrail_decisions",
+                "audit",
+                "metering",
+                "focus",
+                "runs",
+                "trace_spans"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "cloudevents",
+              "otlp",
+              "jsonl",
+              "csv_gzip",
+              "stripe"
+            ],
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "description": "Write-only sink credential document.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
+          }
+        },
+        "required": [
+          "type",
+          "destination",
+          "streams",
+          "format",
+          "name"
+        ]
+      },
+      "UpdateExportSinkRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
+          }
+        }
+      },
+      "ExportSinkListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExportSink"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ExportSinkGap": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "record_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stream",
+          "record_count",
+          "first_occurred_at",
+          "last_occurred_at",
+          "reason"
+        ]
+      },
+      "ExportSinkGapListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExportSinkGap"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MeteringDeliveryLookup": {
+        "description": "What OLP can prove about one priced attempt's delivery to one CloudEvents metering sink. Accepted means the sink answered 2xx and OLP recorded it. Delivery unconfirmed means retries ended after a send may have occurred without a recorded acknowledgement. No payload or destination is included.",
+        "properties": {
+          "attempt_id": {
+            "description": "Attempt id, which is also the CloudEvents event id",
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempts": {
+            "description": "Delivery claims made for this attempt on this sink, or null when no evidence remains",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "event_id": {
+            "description": "Durable export record id sent as X-OLP-Event-ID, or null when no evidence remains",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "export_sink_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "description": "When the most recent delivery claim was made, or null",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_code": {
+            "description": "Safe category of the most recent delivery failure, or null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "description": "When the priced attempt was observed, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "description": "pending or retrying while queued, accepted after a recorded 2xx, delivery_unconfirmed when retries ended after a possible send, expired_before_delivery when evidence rules out every send, no_retained_evidence when nothing attempt-specific remains in scope",
+            "enum": [
+              "pending",
+              "retrying",
+              "accepted",
+              "delivery_unconfirmed",
+              "expired_before_delivery",
+              "no_retained_evidence"
+            ],
+            "type": "string"
+          },
+          "queued_at": {
+            "description": "When the export record was queued, or null when no evidence remains",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settled_at": {
+            "description": "When delivery was recorded as accepted or the receipt reached its terminal state, or null while queued",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "attempt_id",
+          "attempts",
+          "event_id",
+          "export_sink_id",
+          "last_attempt_at",
+          "last_error_code",
+          "occurred_at",
+          "outcome",
+          "queued_at",
+          "settled_at"
+        ],
+        "type": "object"
+      },
+      "CaptureSinkOption": {
+        "type": "object",
+        "required": [
+          "export_sink_id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "export_sink_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CaptureSinkOptionList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureSinkOption"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "FocusDataset": {
+        "type": "object",
+        "properties": {
+          "charge_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "generated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "row_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Null until the dataset has been generated."
+          },
+          "part_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Null until the dataset has been generated."
+          },
+          "billed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "commitment_totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CommitmentTotals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for legacy datasets awaiting regeneration and charge-basis datasets."
+          }
+        },
+        "required": [
+          "charge_date",
+          "revision",
+          "generated_at",
+          "delivered_at",
+          "row_count",
+          "part_count",
+          "billed_cost",
+          "effective_cost",
+          "attempts",
+          "last_error_code",
+          "current",
+          "commitment_totals"
+        ]
+      },
+      "FocusDatasetListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FocusDataset"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "CommitmentTotals": {
+        "type": "object",
+        "description": "Exact commitment totals for periods touching this dataset. Scoped exports disclose only their allocated cost; purchase and unused totals are zero. Completeness includes historical evidence and export-window coverage.",
+        "properties": {
+          "purchased_cost": {
+            "type": "string"
+          },
+          "allocated_cost": {
+            "type": "string"
+          },
+          "unused_cost": {
+            "type": "string"
+          },
+          "provisional": {
+            "type": "boolean"
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "purchased_cost",
+          "allocated_cost",
+          "unused_cost",
+          "provisional",
+          "complete"
+        ]
+      },
+      "CaptureRedactorRevision": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "guardrail_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "builtin.regex",
+              "builtin.pii",
+              "builtin.secrets",
+              "builtin.keywords"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "guardrail_id",
+          "revision_id",
+          "revision",
+          "type"
+        ]
+      },
+      "ObservabilityRunEvidence": {
+        "type": "object",
+        "description": "Gateway-observed run metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "agent_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "gateway_observed"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "project_id",
+          "route_revision_id",
+          "agent_revision_id",
+          "created_at",
+          "evidence_origin"
+        ]
+      },
+      "ObservabilityTraceSpanEvidence": {
+        "type": "object",
+        "description": "Client-asserted trace span metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "span_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ended_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embeddings",
+              "text_completion",
+              "execute_tool",
+              "invoke_agent",
+              "create_agent",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gen_ai.usage.input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gen_ai.usage.output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "http.response.status_code": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "client_asserted"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "run_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "attributes",
+          "evidence_origin"
+        ]
+      },
+      "ObservabilityRunEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "runs"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityRunEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ObservabilityTraceSpanEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "trace_spans"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityTraceSpanEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "paths": {
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "list_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            },
+            "description": "Installation settings"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/{key}": {
+      "get": {
+        "operationId": "get_setting",
+        "parameters": [
+          {
+            "description": "Setting key",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingResponse"
+                }
+              }
+            },
+            "description": "Setting with ETag"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_setting",
+        "parameters": [
+          {
+            "description": "Setting key",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Quoted setting ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingResponse"
+                }
+              }
+            },
+            "description": "Updated setting"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "settings"
+        ],
+        "description": "Changing auth.mfa_required additionally requires installation access authority. It gates local sessions; linked identity sign-in follows the identity provider policy. Existing enrolled users always require their local second factor."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SettingResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "calendar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "window_kind",
+                "time_zone",
+                "starts_at",
+                "ends_at",
+                "pending_time_zone",
+                "effective_at"
+              ],
+              "properties": {
+                "window_kind": {
+                  "type": "string",
+                  "enum": [
+                    "day",
+                    "week",
+                    "month"
+                  ]
+                },
+                "time_zone": {
+                  "type": "string"
+                },
+                "starts_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "ends_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "pending_time_zone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "effective_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Only on budgets.time_zone: current periods and pending zone changes. Each period finishes before switching; no active spend resets."
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "etag",
+          "updated_by",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SettingsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SettingResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "UpdateSettingRequest": {
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

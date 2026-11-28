@@ -1,0 +1,2809 @@
+{
+  "paths": {
+    "/api/v1/usage/breakdown": {
+      "get": {
+        "operationId": "usage_breakdown",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.",
+            "in": "query",
+            "name": "dimension",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "route",
+                "provider",
+                "model",
+                "model_family",
+                "estimate_provenance",
+                "api_key",
+                "end_user",
+                "operation",
+                "attribution",
+                "project",
+                "session"
+              ],
+              "default": "route"
+            }
+          },
+          {
+            "description": "Maximum number of breakdown rows",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageBreakdownResponse"
+                }
+              }
+            },
+            "description": "Usage breakdown"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/comparison": {
+      "get": {
+        "operationId": "usage_comparison",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageComparisonResponse"
+                }
+              }
+            },
+            "description": "Observed subtotals, accounting completeness, and comparable route changes if available"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ],
+        "description": "Compare recorded estimated costs by route against the immediately preceding period of equal length. Both range bounds are UTC midnights. The start is inclusive, the end exclusive, and the range must cover 1 to 31 closed days. Route changes are returned only for complete periods with compatible currency."
+      }
+    },
+    "/api/v1/usage/completeness": {
+      "get": {
+        "operationId": "usage_completeness",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageCompletenessResponse"
+                }
+              }
+            },
+            "description": "Usage and pricing completeness"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/selector-savings": {
+      "get": {
+        "description": "Compare each route selector's cost with the most expensive target it avoided.",
+        "operationId": "usage_selector_savings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to records owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectorSavingsResponse"
+                }
+              }
+            },
+            "description": "Selector savings"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/shadow-experiments": {
+      "get": {
+        "description": "Compare each shadow target with the primary path of the requests it mirrored.",
+        "operationId": "usage_shadow_experiments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to records owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShadowExperimentResponse"
+                }
+              }
+            },
+            "description": "Shadow experiments"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/unpriced-breakdown": {
+      "get": {
+        "operationId": "usage_unpriced_breakdown",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of groups (defaults to 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnpricedBreakdownResponse"
+                }
+              }
+            },
+            "description": "Unpriced attempt breakdown"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ],
+        "description": "Unpriced billable attempts grouped by provider, upstream model, operation and recorded cause. Results are ranked by attempt count. Retained hourly rollups contribute only for whole hours."
+      }
+    },
+    "/api/v1/usage/summary": {
+      "get": {
+        "operationId": "usage_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Usage and estimated-cost summary"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/time-series": {
+      "get": {
+        "operationId": "usage_time_series",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bucket size: hour or day",
+            "in": "query",
+            "name": "granularity",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageTimeSeriesResponse"
+                }
+              }
+            },
+            "description": "Usage time series"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/export.csv": {
+      "get": {
+        "summary": "Export breakdown as CSV",
+        "description": "Download the usage summary plus a breakdown as CSV. At most 10000 groups and 32MiB; larger exports answer 422.",
+        "tags": [
+          "usage"
+        ],
+        "operationId": "exportUsageCsv",
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.",
+            "in": "query",
+            "name": "dimension",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "route",
+                "provider",
+                "model",
+                "model_family",
+                "estimate_provenance",
+                "api_key",
+                "end_user",
+                "operation",
+                "attribution",
+                "project",
+                "session"
+              ],
+              "default": "route"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Export exceeds the bounded record or byte limit."
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/quote": {
+      "post": {
+        "operationId": "pricing_quote",
+        "x-olp-read-only": true,
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "The priced quote."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid quote request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unknown provider"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/reconciliation": {
+      "get": {
+        "operationId": "get_usage_reconciliation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or out-of-range start/end",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the usage scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The named provider has no visible billing import",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RequestMetadataConsumerStatusResponse": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeat_age_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lag_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oldest_pending_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pending_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "pending_events",
+          "lag_events"
+        ],
+        "type": "object"
+      },
+      "UnpricedBreakdownItem": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model",
+          "operation",
+          "cause",
+          "attempt_count"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "no_applicable_price",
+              "missing_price_component",
+              "incomplete_usage",
+              "not_recorded"
+            ],
+            "description": "Cause recorded at accounting time. not_recorded identifies older usage with no stored cause."
+          },
+          "attempt_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "sample_request_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Representative request ID when request history is still available to the caller."
+          }
+        }
+      },
+      "UnpricedBreakdownResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnpricedBreakdownItem"
+            }
+          }
+        }
+      },
+      "UsageBreakdownItem": {
+        "properties": {
+          "cache_write_1h_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_5m_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_input_tokens": {
+            "type": "string"
+          },
+          "cached_input_tokens": {
+            "type": "string"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
+          },
+          "incomplete_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "string"
+          },
+          "media_units": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
+            "type": "string"
+          },
+          "request_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unpriced_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
+          }
+        },
+        "required": [
+          "dimension",
+          "request_count",
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "cache_write_input_tokens",
+          "cache_write_5m_input_tokens",
+          "cache_write_1h_input_tokens",
+          "media_units",
+          "unpriced_count",
+          "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
+        ],
+        "type": "object"
+      },
+      "UsageBreakdownResponse": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/UsageRangeCoverageResponse"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBreakdownItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "coverage"
+        ],
+        "type": "object"
+      },
+      "UsageComparisonResponse": {
+        "type": "object",
+        "required": [
+          "previous",
+          "current",
+          "status",
+          "currency",
+          "items"
+        ],
+        "properties": {
+          "previous": {
+            "$ref": "#/components/schemas/UsageComparisonPeriod"
+          },
+          "current": {
+            "$ref": "#/components/schemas/UsageComparisonPeriod"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "incomplete",
+              "incompatible_currency",
+              "no_priced_usage"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageRouteSpendChange"
+            },
+            "maxItems": 25
+          }
+        }
+      },
+      "UsageComparisonPeriod": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "completeness",
+          "subtotals"
+        ],
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/UsageCompletenessResponse"
+          },
+          "subtotals": {
+            "type": "array",
+            "description": "Observed estimated cost by recorded currency. Missing costs are not represented by zero.",
+            "items": {
+              "$ref": "#/components/schemas/UsageCostSubtotal"
+            }
+          }
+        }
+      },
+      "UsageCostSubtotal": {
+        "type": "object",
+        "required": [
+          "currency",
+          "estimated_cost"
+        ],
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": "string"
+          }
+        }
+      },
+      "UsageRouteSpendChange": {
+        "type": "object",
+        "required": [
+          "route",
+          "previous_cost",
+          "current_cost",
+          "change",
+          "percent_change"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "previous_cost": {
+            "type": "string"
+          },
+          "current_cost": {
+            "type": "string"
+          },
+          "change": {
+            "type": "string"
+          },
+          "percent_change": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Percent change, rounded to six decimal places, or null when the previous amount is zero."
+          }
+        }
+      },
+      "UsageCompletenessResponse": {
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/UsageRangeCoverageResponse"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "incomplete_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "priced_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_metadata_consumer": {
+            "$ref": "#/components/schemas/RequestMetadataConsumerStatusResponse"
+          },
+          "request_metadata_gap_events": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uncertain_request_metadata_gap_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unpriced_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_count",
+          "priced_count",
+          "unpriced_count",
+          "incomplete_count",
+          "request_metadata_gap_events",
+          "uncertain_request_metadata_gap_count",
+          "coverage",
+          "request_metadata_consumer",
+          "complete"
+        ],
+        "type": "object"
+      },
+      "UsagePointResponse": {
+        "properties": {
+          "bucket": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cache_write_1h_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_5m_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_input_tokens": {
+            "type": "string"
+          },
+          "cached_input_tokens": {
+            "type": "string"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
+          },
+          "incomplete_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "string"
+          },
+          "media_units": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
+            "type": "string"
+          },
+          "request_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unpriced_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
+          }
+        },
+        "required": [
+          "bucket",
+          "request_count",
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "cache_write_input_tokens",
+          "cache_write_5m_input_tokens",
+          "cache_write_1h_input_tokens",
+          "media_units",
+          "unpriced_count",
+          "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
+        ],
+        "type": "object"
+      },
+      "UsageRangeCoverageResponse": {
+        "properties": {
+          "approximate": {
+            "type": "boolean"
+          },
+          "excluded_partial_aggregate_boundaries": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "range_complete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "range_complete",
+          "approximate",
+          "excluded_partial_aggregate_boundaries"
+        ],
+        "type": "object"
+      },
+      "UsageSummaryResponse": {
+        "properties": {
+          "cache_write_1h_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_5m_input_tokens": {
+            "type": "string"
+          },
+          "cache_write_input_tokens": {
+            "type": "string"
+          },
+          "cached_input_tokens": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/UsageRangeCoverageResponse"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
+          },
+          "incomplete_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "string"
+          },
+          "media_units": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
+            "type": "string"
+          },
+          "request_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_metadata_consumer": {
+            "$ref": "#/components/schemas/RequestMetadataConsumerStatusResponse"
+          },
+          "request_metadata_gap_events": {
+            "description": "Exact loss plus known in-flight lower bounds from unclean epochs.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uncertain_request_metadata_gap_count": {
+            "description": "Unclean gateway epochs make completeness unknown even when their last\ndurable in-flight lower bound was zero.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unpriced_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
+          }
+        },
+        "required": [
+          "request_count",
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "cache_write_input_tokens",
+          "cache_write_5m_input_tokens",
+          "cache_write_1h_input_tokens",
+          "media_units",
+          "unpriced_count",
+          "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count",
+          "request_metadata_gap_events",
+          "uncertain_request_metadata_gap_count",
+          "coverage",
+          "request_metadata_consumer",
+          "complete",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
+        ],
+        "type": "object"
+      },
+      "UsageTimeSeriesResponse": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/UsageRangeCoverageResponse"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UsagePointResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "coverage"
+        ],
+        "type": "object"
+      },
+      "SelectorSavings": {
+        "additionalProperties": false,
+        "type": "object",
+        "description": "One selector's attempts, compared with their own usage priced on the most expensive target the selector avoided. Only attempts with both prices are compared.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "compared_attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "baseline_cost": {
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "savings": {
+            "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "selector",
+          "attempts",
+          "compared_attempts",
+          "estimated_cost",
+          "baseline_cost",
+          "savings"
+        ]
+      },
+      "SelectorSavingsResponse": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "start": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SelectorSavings"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "currency",
+          "items"
+        ]
+      },
+      "ExperimentSide": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "successes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "mean_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "mean_first_byte_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "output_tokens": {
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "estimated_cost": {
+            "oneOf": [
+              {
+                "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unpriced_requests": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "training_tokens": {
+            "type": "string",
+            "description": "Exact aggregate training tokens."
+          },
+          "storage_byte_seconds": {
+            "type": "string",
+            "description": "Exact aggregate byte-seconds."
+          },
+          "cache_token_seconds": {
+            "type": "string",
+            "description": "Exact aggregate cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact aggregate session counts keyed by memory tier."
+          }
+        },
+        "required": [
+          "successes",
+          "mean_latency_ms",
+          "mean_first_byte_ms",
+          "input_tokens",
+          "output_tokens",
+          "estimated_cost",
+          "unpriced_requests"
+        ]
+      },
+      "ShadowExperiment": {
+        "additionalProperties": false,
+        "type": "object",
+        "description": "A route's primary path compared with one shadow target over the requests the shadow mirrored, from metadata only.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "pairs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "primary": {
+            "$ref": "#/components/schemas/ExperimentSide"
+          },
+          "shadow": {
+            "$ref": "#/components/schemas/ExperimentSide"
+          }
+        },
+        "required": [
+          "route",
+          "provider_id",
+          "upstream_model",
+          "pairs",
+          "primary",
+          "shadow"
+        ]
+      },
+      "ShadowExperimentResponse": {
+        "additionalProperties": false,
+        "type": "object",
+        "properties": {
+          "start": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ShadowExperiment"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "currency",
+          "items"
+        ]
+      },
+      "PricingQuoteRequest": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model",
+          "operation",
+          "usage"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Attempt usage dimensions, the same members accounting records.",
+            "properties": {
+              "input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_5m_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_1h_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "media_units": {
+                "type": "string",
+                "description": "Exact decimal media units, as the wire carries them."
+              },
+              "tool_calls": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                }
+              },
+              "batch": {
+                "type": "boolean"
+              }
+            }
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Defaults to now."
+          },
+          "successful": {
+            "type": "boolean",
+            "description": "Defaults to true."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null,
+            "description": "The consumer project the charge is priced for; absent, the installation's card applies."
+          }
+        }
+      },
+      "PricingQuoteResponse": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "complete",
+          "list_cost",
+          "cost",
+          "charge",
+          "components",
+          "commitment"
+        ],
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pricing_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "discount_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rate_card_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Every priced dimension had a rate."
+          },
+          "list_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Undiscounted, uncommitted cost."
+          },
+          "cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider cost after discount and commitment."
+          },
+          "charge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Consumer charge under the applicable rate card."
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commitment": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "period": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "amount",
+              "period"
+            ]
+          }
+        }
+      },
+      "ReconciliationReport": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "attributed_cost": {
+                  "type": "string",
+                  "description": "Exact decimal: estimated cost plus allocated commitment, excluding caller-paid and budget-exempt attempts."
+                },
+                "invoiced_cost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Exact decimal when covered, or null for mixed invoice currencies or no coverage."
+                },
+                "invoiced_currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "capture_rate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "attributed_cost / invoiced_cost rounded to 6 decimals."
+                },
+                "capture_rate_unavailable_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "not_imported",
+                    "zero_invoice",
+                    "currency_mismatch",
+                    null
+                  ]
+                },
+                "priced_attempts": {
+                  "type": "integer"
+                },
+                "unpriced_attempts": {
+                  "type": "integer"
+                },
+                "incomplete_attempts": {
+                  "type": "integer"
+                },
+                "unpriced_share": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "unpriced/(priced+unpriced) to 6 decimals."
+                },
+                "excluded_caller_attempts": {
+                  "type": "integer"
+                },
+                "provisional": {
+                  "type": "boolean",
+                  "description": "True within two days of the current date or when the last successful import is stale for the day."
+                },
+                "import": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "last_success_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "last_error_code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "required": [
+                "provider_id",
+                "day",
+                "attributed_cost",
+                "invoiced_cost",
+                "invoiced_currency",
+                "capture_rate",
+                "capture_rate_unavailable_reason",
+                "priced_attempts",
+                "unpriced_attempts",
+                "incomplete_attempts",
+                "unpriced_share",
+                "excluded_caller_attempts",
+                "provisional",
+                "import"
+              ]
+            }
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "attributed_cost": {
+                  "type": "string"
+                },
+                "attributed_cost_covered": {
+                  "type": "string",
+                  "description": "Attributed spend over covered days only; the numerator capture_rate uses, since uninvoiced days cannot be billed."
+                },
+                "invoiced_cost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Exact decimal in the report currency, or null when there is no coverage or the invoices include a different currency."
+                },
+                "capture_rate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "capture_rate_unavailable_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unpriced_share": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "provider_id",
+                "attributed_cost",
+                "attributed_cost_covered",
+                "invoiced_cost",
+                "capture_rate",
+                "capture_rate_unavailable_reason",
+                "unpriced_share"
+              ]
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "currency",
+          "items",
+          "totals"
+        ]
+      }
+    }
+  }
+}

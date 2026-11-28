@@ -1,0 +1,2053 @@
+{
+  "paths": {
+    "/api/v1/budget-groups": {
+      "get": {
+        "operationId": "list_budget_groups",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetGroupListResponse"
+                }
+              }
+            },
+            "description": "Budget groups visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      },
+      "post": {
+        "operationId": "create_budget_group",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateBudgetGroupResponse"
+                }
+              }
+            },
+            "description": "Budget group created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Budget group name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      }
+    },
+    "/api/v1/budget-groups/{budget_group_id}": {
+      "get": {
+        "operationId": "get_budget_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_group_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetGroupDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      },
+      "patch": {
+        "operationId": "update_budget_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_group_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current budget group ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBudgetGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetGroupMutationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_budget_group",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_group_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current budget group ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      }
+    },
+    "/api/v1/budget-increases": {
+      "get": {
+        "operationId": "list_budget_increases",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreasesResponse"
+                }
+              }
+            },
+            "description": "Budget groups visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "List temporary budget increases"
+      },
+      "post": {
+        "operationId": "create_budget_increase",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetIncreaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncrease"
+                }
+              }
+            },
+            "description": "Budget group created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Budget group name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "manage_organization"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Temporarily raise one cost budget"
+      }
+    },
+    "/api/v1/budget-increases/{increase_id}": {
+      "get": {
+        "operationId": "get_budget_increase",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "increase_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncrease"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Read a temporary budget increase"
+      },
+      "delete": {
+        "operationId": "revoke_budget_increase",
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Revoke a temporary budget increase",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "increase_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Quoted project etag from GET."
+          }
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "manage_organization"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked. Propagates through key-authority refresh."
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Project not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid policy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Project changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid policy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "description": "Project allocation budgets with independent exact-decimal day/week/month ceilings. Unknown balances fail closed until current history is reconstructed. All applicable caps remain enforced. Changes require keys permission and project-manager access; clearing does not erase accounting."
+      }
+    },
+    "/api/v1/budget-increase-requests": {
+      "get": {
+        "operationId": "list_budget_increase_requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreaseRequestsResponse"
+                }
+              }
+            },
+            "description": "Budget increase requests visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "List temporary budget increase requests"
+      },
+      "post": {
+        "operationId": "create_budget_increase_request",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetIncreaseRequestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreaseRequest"
+                }
+              }
+            },
+            "description": "Budget increase request recorded, with no change to serving limits",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller is not a signed-in member who can see the project"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "An idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed, or the project has no permanent cap for the selected window"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Request a temporary project budget increase"
+      }
+    },
+    "/api/v1/budget-increase-requests/{request_id}": {
+      "get": {
+        "operationId": "get_budget_increase_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreaseRequest"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Read a temporary budget increase request"
+      }
+    },
+    "/api/v1/budget-increase-requests/{request_id}/approve": {
+      "post": {
+        "operationId": "approve_budget_increase_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreaseRequest"
+                }
+              }
+            },
+            "description": "The recorded decision, with one budget increase granted on the first approval and none on a repeat approval"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access, or asked for this increase"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request was already declined, its base cap or window moved on so a new request is needed, or the active increase limit was reached"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Approve a temporary budget increase request"
+      }
+    },
+    "/api/v1/budget-increase-requests/{request_id}/decline": {
+      "post": {
+        "operationId": "decline_budget_increase_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetIncreaseRequest"
+                }
+              }
+            },
+            "description": "The recorded decision, with no change to serving limits"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request was already approved"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ],
+        "summary": "Decline a temporary budget increase request"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BudgetGroupBudgetResponse": {
+        "properties": {
+          "daily": {
+            "$ref": "#/components/schemas/BudgetGroupBudgetWindowResponse"
+          },
+          "enforcement_active": {
+            "description": "False when the amounts are stored policy only; accrued values are not live accounting.",
+            "type": "boolean"
+          },
+          "monthly": {
+            "$ref": "#/components/schemas/BudgetGroupBudgetWindowResponse"
+          },
+          "unpriced_attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "weekly": {
+            "$ref": "#/components/schemas/BudgetGroupBudgetWindowResponse"
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ]
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "daily",
+          "monthly",
+          "unpriced_attempts"
+        ],
+        "type": "object"
+      },
+      "BudgetGroupBudgetWindowResponse": {
+        "properties": {
+          "accrued": {
+            "type": "string"
+          },
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reset_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "effective_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Effective template/inline cap plus active temporary increases. Permanent editable limit remains separate."
+          },
+          "temporary_increase": {
+            "type": "string",
+            "description": "Active extra USD for this window; never changes accrued spend."
+          },
+          "increase_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Earliest expiration among active increases."
+          }
+        },
+        "required": [
+          "accrued",
+          "limit",
+          "remaining",
+          "reset_at"
+        ],
+        "type": "object"
+      },
+      "BudgetGroupDetailResponse": {
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/BudgetGroupBudgetResponse"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; null means installation-wide.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "effective_limits": {
+            "$ref": "./shared.json#/components/schemas/EndUserLimits"
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "daily_cost_limit",
+          "monthly_cost_limit",
+          "created_by",
+          "created_by_email",
+          "etag",
+          "created_at",
+          "updated_at",
+          "budget"
+        ],
+        "type": "object"
+      },
+      "BudgetGroupListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BudgetGroupDetailResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "BudgetGroupMutationResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "etag"
+        ],
+        "type": "object"
+      },
+      "CreateBudgetGroupRequest": {
+        "properties": {
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; omit or null for an installation-wide group. Required for assigned principals.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateBudgetGroupResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "UpdateBudgetGroupRequest": {
+        "description": "Merge patch; omitted fields retain values, null clears a limit or template reference. project_id is immutable. Inline limits and a project template intersect; at least one limit or a template reference is required.",
+        "properties": {
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        },
+        "type": "object"
+      },
+      "BudgetIncreaseTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "project",
+              "api_key",
+              "budget_group",
+              "key_route",
+              "key_end_user",
+              "project_end_user",
+              "attribution",
+              "organization",
+              "guardrail",
+              "sink",
+              "mcp_server"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+          },
+          "end_user_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "label": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+          }
+        },
+        "description": "Identifies one caller/aggregate cost owner. id is the key, group or project UUID; installation has no id. key_route requires route; end-user targets require an existing project-scoped digest; attribution requires label and value. Extra target selectors are rejected. Supply connection/slot/route policies are not caller budget targets."
+      },
+      "CreateBudgetIncreaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "window",
+          "amount",
+          "reason"
+        ],
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/BudgetIncreaseTarget"
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "Adds a positive exact USD amount to an existing effective cap. Reason must be a single line. Default expiry is the current calendar-window end; later requested expiries are clipped to that end. At most eight active increases per owner/window; concurrent grants add together. Existing accrued and in-flight costs are unchanged. Authorization is keys plus project-manager access, or installation settings for the installation target."
+      },
+      "BudgetIncrease": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/BudgetIncreaseTarget"
+          },
+          "window_kind": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ]
+          },
+          "window_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "window_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "project_id",
+          "target",
+          "window_kind",
+          "window_id",
+          "amount",
+          "reason",
+          "starts_at",
+          "expires_at",
+          "window_ends_at",
+          "created_at",
+          "created_by",
+          "revoked_at",
+          "revoked_by",
+          "etag"
+        ],
+        "description": "Auditable, installation-local exception. Applies only to its original period, and Valkey server time enforces expiration even without another authority refresh. Revocation follows normal authority freshness. Clearing a permanent cap makes the increase irrelevant; restoring it within this period retains the exception. This record and encrypted mutation replay contain only administrative metadata."
+      },
+      "BudgetIncreasesResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BudgetIncrease"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CreateBudgetIncreaseRequestRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "window",
+          "amount",
+          "reason"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "description": "Asks a reviewer to add a positive exact USD amount to a project budget cap in its current window. The request binds to that project, window and base cap, so a changed cap or a rolled window needs a new request. A signed-in project member may ask, and asking never changes serving limits."
+      },
+      "BudgetIncreaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "window_kind": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ]
+          },
+          "window_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "window_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "base_cap": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "declined",
+              "expired"
+            ]
+          },
+          "requested_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "increase_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "owner_id",
+          "window_kind",
+          "window_id",
+          "window_ends_at",
+          "base_cap",
+          "amount",
+          "reason",
+          "status",
+          "requested_by",
+          "decided_by",
+          "decided_at",
+          "increase_id",
+          "etag",
+          "created_at"
+        ],
+        "description": "A member request for one temporary project budget increase. Pending, declined and expired requests never change serving limits, and a pending request reads as expired once its window has ended. Approval creates one normal budget increase, linked as increase_id, and no one may approve their own request."
+      },
+      "BudgetIncreaseRequestsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BudgetIncreaseRequest"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

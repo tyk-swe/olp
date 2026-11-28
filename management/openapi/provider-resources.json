@@ -1,0 +1,972 @@
+{
+  "paths": {
+    "/api/v1/provider-resources": {
+      "get": {
+        "description": "Metadata-only provider resources: files, batches, responses and encrypted continuation contracts. Native state and projected delivery are never included.",
+        "operationId": "list_provider_resources",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "file",
+                "batch",
+                "response",
+                "continuation",
+                "strict_response",
+                "interaction",
+                "strict_file",
+                "strict_batch",
+                "anthropic_file",
+                "anthropic_batch",
+                "gemini_upload",
+                "gemini_file",
+                "gemini_batch",
+                "cloud_batch",
+                "fine_tuning_job",
+                "fine_tuning_event",
+                "fine_tuning_checkpoint",
+                "vector_store",
+                "vector_store_file",
+                "vector_store_batch",
+                "conversation",
+                "conversation_item",
+                "container",
+                "container_file",
+                "eval",
+                "eval_run",
+                "eval_output_item",
+                "skill",
+                "skill_version",
+                "context_cache",
+                "agent_resource",
+                "vertex_tuning_job"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResourceListResponse"
+                }
+              }
+            },
+            "description": "Metadata-only provider resource page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter value"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/provider-resource-contracts": {
+      "get": {
+        "description": "Reviewed resource lifecycle contracts. Only entries with implemented=true are selectable; declarations do not enable native APIs.",
+        "operationId": "list_provider_resource_contracts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResourceContractList"
+                }
+              }
+            },
+            "description": "Resource capability catalogue"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid filter value"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/provider-resources/{id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_provider_resource",
+        "description": "Schedule pinned reconciliation. Upstream IDs are verification hints and never authorize adoption.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainedReconcileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retained operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    },
+    "/api/v1/provider-resources/{id}/usage-evidence": {
+      "post": {
+        "operationId": "submit_provider_resource_usage_evidence",
+        "description": "Record audited operator-verified usage through the same atomic coverage ledger as provider evidence. Ownership and pricing pins are derived by the server. Requires installation settings and project change authority.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainedUsageEvidenceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retained operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request refused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "provider-resources"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProviderResourceItem": {
+        "description": "Metadata-only provider resource mapping. Rows never carry prompts, file bytes, response bodies, JSONL lines, tool payloads, audio, or output content.",
+        "properties": {
+          "api_key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "api_key_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Gateway-issued local identifier (kind_ plus a dash-free UUID).",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "batch",
+              "response",
+              "continuation",
+              "strict_response",
+              "interaction",
+              "strict_file",
+              "strict_batch",
+              "anthropic_file",
+              "anthropic_batch",
+              "gemini_upload",
+              "gemini_file",
+              "gemini_batch",
+              "cloud_batch",
+              "fine_tuning_job",
+              "fine_tuning_event",
+              "fine_tuning_checkpoint",
+              "vector_store",
+              "vector_store_file",
+              "vector_store_batch",
+              "conversation",
+              "conversation_item",
+              "container",
+              "container_file",
+              "eval",
+              "eval_run",
+              "eval_output_item",
+              "skill",
+              "skill_version",
+              "context_cache",
+              "agent_resource",
+              "vertex_tuning_job"
+            ],
+            "type": "string"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "settlement": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Metadata-only batch settlement progress, when the resource has a settlement record.",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "expected_results": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "settled_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "uncertain_results": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_error_class": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "close_after": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "closed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "state",
+              "expected_results",
+              "settled_results",
+              "uncertain_results",
+              "last_error_class",
+              "close_after",
+              "closed_at"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "upstream_id": {
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "retained_settlement": {
+            "$ref": "#/components/schemas/RetainedSettlementStatus"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "api_key_id",
+          "api_key_name",
+          "route",
+          "provider_id",
+          "provider_name",
+          "upstream_id",
+          "upstream_model",
+          "state",
+          "expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProviderResourceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceItem"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "ProviderResourceContract": {
+        "type": "object",
+        "required": [
+          "operation",
+          "surface",
+          "kind",
+          "path",
+          "methods",
+          "providers",
+          "implemented",
+          "metered"
+        ],
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "implemented": {
+            "type": "boolean"
+          },
+          "metered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProviderResourceContractList": {
+        "type": "object",
+        "required": [
+          "revision",
+          "items"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceContract"
+            }
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderResourceEndpoint"
+            }
+          }
+        }
+      },
+      "RetainedSettlementStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "evidence_missing",
+              "closed"
+            ]
+          },
+          "missing_evidence": {
+            "type": "boolean"
+          },
+          "remote_terminated": {
+            "type": "boolean"
+          },
+          "terminal_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_observation_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Models authorized and priced at original acceptance."
+          }
+        },
+        "required": [
+          "state",
+          "missing_evidence",
+          "remote_terminated",
+          "next_observation_at"
+        ]
+      },
+      "RetainedUsageEvidenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "evidence_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inclusive UTC interval start, canonicalized to PostgreSQL microsecond precision."
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exclusive UTC interval end, canonicalized to PostgreSQL microsecond precision."
+          },
+          "model": {
+            "type": "string",
+            "description": "Required when acceptance pinned more than one model."
+          },
+          "terminal": {
+            "type": "boolean",
+            "description": "Requests closure only after independent remote termination and complete interval coverage."
+          },
+          "input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cached_input_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Required together with input and output totals for evaluation generation evidence; omission is unknown."
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "invocation_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Required for per-model evaluation usage. Actual generation/grader invocations; never the original submission request."
+          }
+        },
+        "required": [
+          "idempotency_key",
+          "evidence_digest",
+          "start",
+          "end",
+          "terminal"
+        ]
+      },
+      "RetainedReconcileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "upstream_id": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Verification hint only; adoption also requires authenticated provider evidence of original intent correlation."
+          }
+        }
+      },
+      "RetainedActionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "settlement_status": {
+            "type": "string"
+          },
+          "provenance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "ProviderResourceEndpoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "ancestors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation",
+          "surface",
+          "kind",
+          "action",
+          "method",
+          "pattern",
+          "ancestors",
+          "metered"
+        ]
+      }
+    }
+  }
+}

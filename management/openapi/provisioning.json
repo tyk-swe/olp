@@ -1,0 +1,228 @@
+{
+  "paths": {
+    "/api/v1/provisioning/{source}/users/{external_id}": {
+      "delete": {
+        "operationId": "deprovision_user",
+        "parameters": [
+          {
+            "description": "Provisioning source",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "External identity within the source",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Provisioned user deactivated"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid provisioning identifiers"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provisioning mapping not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Lifecycle ownership changed or the last usable owner would be removed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "provisioning"
+        ]
+      },
+      "put": {
+        "operationId": "provision_user",
+        "parameters": [
+          {
+            "description": "Provisioning source",
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "External identity within the source",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisionUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/UserDetailResponse"
+                }
+              }
+            },
+            "description": "Provisioned user reconciled"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid provisioning identifiers"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role or scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Lifecycle ownership changed or email belongs to another account"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "provisioning"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProvisionUserRequest": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "operator",
+              "developer",
+              "viewer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "display_name",
+          "role",
+          "active"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

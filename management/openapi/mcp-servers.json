@@ -1,0 +1,2787 @@
+{
+  "paths": {
+    "/api/v1/mcp-servers": {
+      "get": {
+        "operationId": "list_mcp_servers",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp servers",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "create mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Certified server created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMCPServerRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}": {
+      "get": {
+        "operationId": "get_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "update mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMCPServerRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "delete mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_mcp_server_revision",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server revision",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/catalog-preview": {
+      "post": {
+        "operationId": "preview_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "preview mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Preview rediscovers the live catalog with the saved endpoint, transport and credential, and reports how it differs from the certified catalog. It never invokes a tool and never changes the registration, its certification or any toolset.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live catalog compared with the certified catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPCatalogPreviewResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration"
+          },
+          "422": {
+            "description": "Registration cannot be reviewed or upstream certification failed"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/catalog-approval": {
+      "post": {
+        "operationId": "approve_mcp_server_catalog",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "approve mcp server catalog",
+        "description": "Project-scoped upstream MCP registration. Approval rediscovers the live catalog with the saved binding and certifies it as a new immutable revision only when the discovered protocol version and digest still match the reviewed preview and the registration still matches If-Match. It never invokes a tool.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired registration, catalog changed since review, or live catalog already certified"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid approval or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveMCPServerCatalogRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls": {
+      "get": {
+        "operationId": "list_mcp_tool_calls",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp tool calls",
+        "description": "Content-free tool call attempt records. Arguments, results and credentials are never stored.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "toolset_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}": {
+      "get": {
+        "operationId": "get_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp tool call",
+        "description": "One content-free tool call attempt record.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-tool-calls/{call_id}/resolve": {
+      "post": {
+        "operationId": "resolve_mcp_tool_call",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "resolve mcp tool call",
+        "description": "Resolve the held debit of a tool call whose outcome is unknown, exactly once, from reviewed evidence. Settled records later observed evidence, and not_accepted records an audited finding that the upstream never accepted the call.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPToolCallResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool call record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPToolCallResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Outcome already known or debit already resolved"
+          },
+          "422": {
+            "description": "Invalid outcome or evidence digest"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-user-grants": {
+      "get": {
+        "operationId": "list_mcp_user_grants",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp user grants",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Personal grant standing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPUserGrantList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/grant-enrollments": {
+      "post": {
+        "operationId": "start_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "start mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/MCPGrantHandoff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/StartMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/claim": {
+      "post": {
+        "operationId": "claim_mcp_grant_enrollment",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "claim mcp grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantClaimResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-user-grants/{grant_id}": {
+      "delete": {
+        "operationId": "revoke_mcp_user_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "revoke mcp user grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Enrollment or grant updated"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize": {
+      "post": {
+        "operationId": "authorize_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "authorize mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/complete": {
+      "post": {
+        "operationId": "complete_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "complete mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPGrantCompletionRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mcp-grant-enrollments/{enrollment_id}/poll": {
+      "post": {
+        "operationId": "poll_mcp_grant",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "poll mcp grant",
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantAuthorization"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          },
+          "503": {
+            "description": "OAuth client setup is unavailable. The enrollment can be polled again."
+          }
+        },
+        "parameters": [
+          {
+            "name": "enrollment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MCPRegisteredTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "input_schema"
+        ]
+      },
+      "MCPRegisteredCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "tools",
+          "digest"
+        ]
+      },
+      "ApproveMCPServerCatalogRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ],
+            "description": "Protocol version discovered by the reviewed catalog preview."
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Catalog digest discovered by the reviewed catalog preview."
+          }
+        },
+        "required": [
+          "protocol_version",
+          "digest"
+        ]
+      },
+      "MCPCatalogModifiedTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "changed_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "description",
+                "input_schema"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          },
+          "saved_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "discovered_description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "saved_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "discovered_input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "changed_fields",
+          "saved_description",
+          "discovered_description",
+          "saved_input_schema",
+          "discovered_input_schema"
+        ]
+      },
+      "MCPCatalogToolsetReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 1,
+            "maxItems": 128,
+            "description": "Tool names this published toolset pins on this server."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "revision_id",
+          "tools"
+        ]
+      },
+      "MCPCatalogPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "saved_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "saved_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "discovered_protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26",
+              "2024-11-05"
+            ]
+          },
+          "discovered_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "added": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "modified": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogModifiedTool"
+            }
+          },
+          "toolsets": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/MCPCatalogToolsetReference"
+            },
+            "description": "Visible published toolsets whose current revision pins any tool on this server. Approval creates a new server revision, so each one serves these tools again only after it is republished."
+          }
+        },
+        "required": [
+          "server_id",
+          "etag",
+          "revision_id",
+          "revision",
+          "saved_protocol_version",
+          "saved_digest",
+          "discovered_protocol_version",
+          "discovered_digest",
+          "added",
+          "removed",
+          "modified",
+          "toolsets"
+        ]
+      },
+      "CreateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http",
+              "sse",
+              "stdio"
+            ]
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "./shared.json#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
+          }
+        },
+        "required": [
+          "name",
+          "enabled",
+          "project_id",
+          "transport"
+        ]
+      },
+      "UpdateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "delegation": {
+            "$ref": "./shared.json#/components/schemas/MCPDelegationConfiguration"
+          },
+          "delegation_private_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "PKCS8 Ed25519 private signing key. Omit to retain the existing local key."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Dedicated middle-tier client secret. Stored sealed and omitted from reads and exports."
+          }
+        },
+        "required": [
+          "name",
+          "enabled"
+        ]
+      },
+      "MCPServerResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http",
+              "sse",
+              "stdio"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "./shared.json#/components/schemas/MCPDelegationConfiguration"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "catalog",
+          "certified_at",
+          "retired_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "endpoint",
+          "delegation"
+        ]
+      },
+      "MCPServerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http",
+              "sse",
+              "stdio"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "./shared.json#/components/schemas/MCPDelegationConfiguration"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "certified_at",
+          "retired_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "endpoint",
+          "delegation"
+        ]
+      },
+      "MCPServerListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPServerSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MCPToolCallResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolset_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool_alias": {
+            "type": "string",
+            "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+          },
+          "input_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "result_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "dispatched",
+              "succeeded",
+              "upstream_error",
+              "outcome_unknown",
+              "settled",
+              "not_accepted",
+              "refused_unpriced",
+              "guardrail_blocked"
+            ]
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "call_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "debit_state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Pinned unit price charged for the dispatched call. Null only when pricing_state is unpriced."
+          },
+          "pricing_state": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "free",
+              "unpriced"
+            ],
+            "description": "Whether the call settled at a price, at an explicit free price, or without any price."
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "description": "Installation pricing currency the bounds and observed amounts use."
+          },
+          "guardrail_decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "identity_decisions": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/MCPIdentityDecision"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_id",
+          "api_key_id",
+          "project_id",
+          "toolset_id",
+          "toolset_revision_id",
+          "server_id",
+          "server_revision_id",
+          "tool_alias",
+          "input_digest",
+          "result_digest",
+          "status",
+          "is_error",
+          "started_at",
+          "completed_at",
+          "created_at",
+          "call_digest",
+          "debit_state",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "unit_price",
+          "pricing_state",
+          "currency",
+          "guardrail_decisions",
+          "identity_decisions"
+        ]
+      },
+      "MCPToolCallResolveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "not_accepted"
+            ]
+          },
+          "evidence_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observed_cost": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed provider cost carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          },
+          "observed_charge": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "description": "Observed charge carried by the reviewed evidence for a settled outcome. It defaults to zero and settles against the held debit bound."
+          }
+        },
+        "required": [
+          "outcome",
+          "evidence_digest"
+        ]
+      },
+      "MCPToolCallList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPToolCallResponse"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MCPServerRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$",
+            "description": "Unit price for each dispatched tool call in the installation pricing currency, with no currency conversion. Null means unpriced, which refuses dispatch while an enforced budget ceiling applies. An explicit 0 is a known free price. The price is pinned by the certified server revision."
+          },
+          "tool_prices": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "maxProperties": 128,
+            "description": "Per-tool unit prices keyed by certified tool name, in the installation pricing currency. A tool price overrides the server unit price for that tool."
+          },
+          "calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed against this server across all keys. Defaults to 60 and stays inside installation limits."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed against this server across all keys. Defaults to 8 and stays inside installation limits."
+          },
+          "per_key_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60000,
+            "description": "Dispatched calls per minute allowed for one API key against this server. Defaults to 60 and stays inside installation limits."
+          },
+          "per_key_max_concurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "description": "Concurrent dispatched calls allowed for one API key against this server. Defaults to 8 and stays inside installation limits."
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "stdio": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/MCPStdioBinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delegation": {
+            "$ref": "./shared.json#/components/schemas/MCPDelegationConfiguration"
+          }
+        },
+        "required": [
+          "id",
+          "server_id",
+          "revision",
+          "endpoint",
+          "catalog",
+          "certified_at",
+          "unit_price",
+          "tool_prices",
+          "calls_per_minute",
+          "max_concurrency",
+          "per_key_calls_per_minute",
+          "per_key_max_concurrency",
+          "oauth",
+          "delegation"
+        ]
+      },
+      "MCPGrantIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "end_user"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "workload_issuer_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "MCPGrantBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "oauth": {
+            "$ref": "./shared.json#/components/schemas/MCPOAuthConfiguration"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/MCPGrantIdentity"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entra_credential_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Non-secret identifier for the agent's bound Entra client credential."
+          }
+        },
+        "required": [
+          "project_id",
+          "endpoint",
+          "oauth",
+          "identity"
+        ]
+      },
+      "MCPGrantEnrollment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "claimed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "binding",
+          "expires_at",
+          "claimed_at"
+        ]
+      },
+      "MCPGrantClaimResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment": {
+            "$ref": "#/components/schemas/MCPGrantEnrollment"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "enrollment",
+          "state"
+        ]
+      },
+      "MCPUserGrantStanding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "grant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/MCPGrantBinding"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "revoked",
+              "denied",
+              "failed"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "grant_id",
+          "binding",
+          "state",
+          "expires_at",
+          "created_at"
+        ]
+      },
+      "MCPUserGrantList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPUserGrantStanding"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ClaimMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handoff_token": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 128,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "handoff_token"
+        ]
+      },
+      "MCPGrantAuthorizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "type": "string",
+            "enum": [
+              "authorization_code",
+              "device_code"
+            ]
+          }
+        },
+        "required": [
+          "flow"
+        ]
+      },
+      "MCPGrantCompletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "writeOnly": true
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ]
+      },
+      "MCPGrantDeviceChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verification_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "verification_url",
+          "user_code",
+          "interval",
+          "expires_at"
+        ]
+      },
+      "MCPGrantAuthorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "expired",
+              "denied",
+              "failed"
+            ]
+          },
+          "authorization_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "device": {
+            "$ref": "#/components/schemas/MCPGrantDeviceChallenge"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "MCPIdentityDecision": {
+        "type": "object",
+        "properties": {
+          "hook": {
+            "type": "string",
+            "enum": [
+              "mcp_security",
+              "mcp_end_user_permission",
+              "mcp_jwt_signer",
+              "agent_365"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "denied",
+              "not_configured"
+            ]
+          }
+        },
+        "required": [
+          "hook",
+          "outcome"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

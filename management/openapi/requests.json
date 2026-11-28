@@ -1,0 +1,1415 @@
+{
+  "paths": {
+    "/api/v1/requests": {
+      "get": {
+        "operationId": "list_requests",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_after",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestListResponse"
+                }
+              }
+            },
+            "description": "Metadata-only request page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid cursor or filter"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{request_id}": {
+      "get": {
+        "operationId": "get_request",
+        "parameters": [
+          {
+            "description": "UUIDv7 request ID",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestDetailResponse"
+                }
+              }
+            },
+            "description": "Metadata timeline"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request not found"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/export.csv": {
+      "get": {
+        "summary": "Export requests as CSV",
+        "description": "Download the filtered request history as CSV. At most 10000 records and 32MiB; larger exports answer 422.",
+        "tags": [
+          "requests"
+        ],
+        "operationId": "exportRequestsCsv",
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_after",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Export exceeds the bounded record or byte limit."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AppliedRoutingPolicy": {
+        "properties": {
+          "digest": {
+            "description": "SHA-256 of the effective policy inputs; request preferences are never persisted.",
+            "type": "string"
+          },
+          "pricing_pinned": {
+            "type": "boolean"
+          },
+          "strategy": {
+            "$ref": "./shared.json#/components/schemas/RoutingStrategy"
+          },
+          "vendor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "strategy",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "AttemptResponse": {
+        "properties": {
+          "cache_write_1h_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cache_write_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "charge_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "committed": {
+            "type": "boolean"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_byte_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "latency_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "media_units": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pricing_revision_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "provider_request_id": {
+            "description": "Request ID returned by the provider for this attempt. Omitted when no supported provider ID was captured.",
+            "maxLength": 128,
+            "pattern": "^req_[A-Za-z0-9]+$",
+            "type": "string"
+          },
+          "routing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptRoutingMetadata"
+              }
+            ]
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unpriced": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "usage_complete": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "usage_observed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "audio_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Metered server-side tool invocations by tool name.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "batch": {
+            "description": "The attempt's usage was produced at batch terms.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "pricing_components": {
+            "description": "The price components the attempt was charged through.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "commitment_weight": {
+            "description": "The list-cost weight the committed attempt divides its commitment period's amount by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_amount": {
+            "description": "The commitment amount the attempt's provider owes per period.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_period": {
+            "description": "The UTC calendar period the commitment amount covers, when the attempt's provider is committed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount_id": {
+            "description": "The discount the attempt was priced under, when one applied.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "charge": {
+            "description": "What the attempt's consumer was billed, an exact decimal string.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rate_card_revision_id": {
+            "description": "The rate card revision the charge came from, when a card applied.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "invocation_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Verified generation/grader invocation count for deferred per-model usage."
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "provider_id",
+          "provider_name",
+          "upstream_model",
+          "started_at",
+          "committed"
+        ],
+        "type": "object"
+      },
+      "AttemptRoutingMetadata": {
+        "properties": {
+          "credential_slot_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credential_version_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_output_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/TransportMode"
+              }
+            ]
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AppliedRoutingPolicy"
+              }
+            ]
+          },
+          "pricing_revision_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "streamed_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "interaction": {
+            "$ref": "#/components/schemas/AttemptInteractionMetadata"
+          },
+          "leg": {
+            "$ref": "#/components/schemas/RouteLeg"
+          },
+          "selector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retry": {
+            "description": "Same-target retry number of this attempt.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "budgets": {
+            "description": "Route, connection and slot whose spend caps this attempt spent from.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "credential_source": {
+            "type": "string",
+            "enum": [
+              "operator",
+              "caller"
+            ],
+            "description": "Absent means operator credentials. Caller attempts do not name an operator credential version."
+          },
+          "budget_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid usage remains priced and reported but is excluded from cost budgets."
+          },
+          "cache": {
+            "$ref": "#/components/schemas/ResponseCacheEvidence"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/PromptAttemptReference"
+          }
+        },
+        "required": [
+          "provider_revision_id"
+        ],
+        "type": "object"
+      },
+      "RequestDetailResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RequestSummary"
+          },
+          {
+            "properties": {
+              "cache_lookup_reason": {
+                "description": "Reason observed when deciding whether to look up an exact response cache entry. Absent for ordinary misses, hits, and bypasses without a recorded reason.",
+                "type": "string",
+                "enum": [
+                  "no_store",
+                  "refresh",
+                  "multiple_choices",
+                  "backend_unavailable"
+                ]
+              },
+              "attempts": {
+                "items": {
+                  "$ref": "#/components/schemas/AttemptResponse"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "attempts"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "RequestListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RequestSummary"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RequestSummary": {
+        "properties": {
+          "api_key_id": {
+            "description": "Null for installation traffic: shadow and probe requests.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "attribution": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Bounded allowlisted labels reported with this request; never content.",
+            "type": "object"
+          },
+          "cache_write_1h_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cache_write_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_byte_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "operation": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "route": {
+            "type": "string"
+          },
+          "runtime_generation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status_code": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "surface": {
+            "type": "string"
+          },
+          "total_latency_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unpriced": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "usage_complete": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RequestOrigin"
+          },
+          "parent_request_id": {
+            "description": "The caller request a shadow or classifier request derives from.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "end_user_digest": {
+            "description": "Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.",
+            "type": "string",
+            "pattern": "^([0-9a-f]{64})?$"
+          },
+          "budget_boundary": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "budget_group",
+              "key_route",
+              "key_end_user",
+              "project_end_user",
+              "attribution",
+              "project",
+              "organization",
+              "installation"
+            ],
+            "description": "Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs."
+          },
+          "payload_captured": {
+            "type": "boolean"
+          },
+          "audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "audio_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "charge": {
+            "description": "Sum of the request's attempt charges, an exact decimal string.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guardrail_decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "./shared.json#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "evaluator_guardrail_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "cache_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "hit",
+              "semantic-hit",
+              "miss",
+              "bypass",
+              null
+            ]
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "id",
+          "runtime_generation_id",
+          "api_key_id",
+          "route",
+          "operation",
+          "surface",
+          "started_at",
+          "attempt_count",
+          "attribution",
+          "origin",
+          "payload_captured"
+        ],
+        "type": "object"
+      },
+      "AttemptInteractionMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_state": {
+            "type": "string",
+            "enum": [
+              "unobserved",
+              "partially-observed",
+              "actionable",
+              "terminal"
+            ]
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "strict"
+            ]
+          },
+          "plan_class": {
+            "type": "string",
+            "enum": [
+              "native_identity",
+              "qualified_interaction"
+            ]
+          },
+          "upstream_state": {
+            "type": "string",
+            "enum": [
+              "not-sent",
+              "outcome-unknown",
+              "accepted",
+              "terminal"
+            ]
+          }
+        },
+        "required": [
+          "fidelity",
+          "plan_class",
+          "upstream_state",
+          "client_state"
+        ],
+        "description": "Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions."
+      },
+      "RouteLeg": {
+        "description": "The route that served an attempt when it is not the route the caller named.",
+        "properties": {
+          "route": {
+            "type": "string"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "fallback",
+              "selector"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "revision_id",
+          "via"
+        ],
+        "type": "object"
+      },
+      "RequestOrigin": {
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. cache_embedding: a semantic-cache embedding call charged to the requesting key. probe: an active health probe. playground: a console member's Playground call. batch_settlement: one settled batch result, linked to the batch creation request and charged to its key. Shadow, probe and Playground requests belong to the installation and carry no key. retained_settlement: verified retained billing coverage linked to its original submission.",
+        "enum": [
+          "caller",
+          "shadow",
+          "classifier",
+          "cache_embedding",
+          "probe",
+          "playground",
+          "batch_settlement",
+          "retained_settlement"
+        ],
+        "type": "string"
+      },
+      "ResponseCacheEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "hit",
+              "semantic-hit"
+            ]
+          },
+          "age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "similarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "currency": {
+            "type": "string"
+          },
+          "avoided_cost": {
+            "type": "string"
+          },
+          "budget_cost": {
+            "type": "string"
+          },
+          "budget_charge": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "age_seconds"
+        ]
+      },
+      "PromptAttemptReference": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revision_id"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}
