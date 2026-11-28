@@ -1,48 +1,40 @@
 import { useAction } from '#lib/editing/action.svelte.js';
-import { errorMessage } from '#lib/management/http.js';
-import { beginOidcLink } from '#lib/features/identity/oidc/api.js';
+import type { listOidcIdentities } from '#lib/features/identity/profile/api.js';
 import {
-  beginIdentityReauthentication,
-  listOidcIdentities,
-  unlinkOidcIdentity
-} from '#lib/features/identity/profile/api.js';
-import { reauthenticateWithPassword } from '#lib/features/identity/profile/reauthentication.js';
+  startOidcLink,
+  unlinkOidc,
+  verifyIdentityChange
+} from '#lib/features/identity/profile/identityOperations.js';
+import { useReauthenticationDialog } from '#lib/features/identity/profile/reauthenticationDialog.svelte.js';
 import {
   ENROLLMENT_VERIFIED_MESSAGE,
   type PendingIdentityAction
 } from '#lib/features/identity/profile/recentAuthentication.js';
 
-export const SECURITY_OPERATION_FAILED =
-  'The security operation could not be completed.';
-export const IDENTITY_UNLINKED =
+const IDENTITY_UNLINKED =
   'OIDC identity unlinked. All previous sessions were revoked and this browser was rotated.';
-export const UNLINK_TARGET_MISSING =
-  'The identity selected for unlinking is missing.';
+const UNLINK_TARGET_MISSING = 'The identity selected for unlinking is missing.';
 
 type OidcIdentities = Awaited<ReturnType<typeof listOidcIdentities>>;
 
-export type ReauthenticationRequest = {
-  purpose: 'oidc_link' | 'oidc_unlink';
-  resourceId?: string;
-};
-
-export function useProfileIdentity(deps: {
+type ProfileIdentityDependencies = {
   identities: () => OidcIdentities | undefined;
   refreshSecurityData: () => Promise<unknown>;
   markEnrollmentVerified: () => void;
   clearMessages: () => void;
   setMessage: (value: string) => void;
-}) {
+};
+
+export function useProfileIdentity(deps: ProfileIdentityDependencies) {
   const identity = useAction();
-  const reauth = useAction();
   let pendingIdentityAction = $state<PendingIdentityAction | undefined>();
-  let reauthenticationRequest = $state<ReauthenticationRequest | null>(null);
+  const reauthentication = useReauthenticationDialog(applyChange);
 
   function resumeSecurityOperation(
     purpose: 'password_enrollment' | 'oidc_link' | 'oidc_unlink',
     resourceId?: string
   ) {
-    identity.error = '';
+    identity.reset();
     deps.clearMessages();
     if (purpose === 'password_enrollment') {
       pendingIdentityAction = undefined;
@@ -67,166 +59,45 @@ export function useProfileIdentity(deps: {
     );
   }
 
+  function applyChange(change: PendingIdentityAction) {
+    if (change.purpose === 'oidc_link') return startOidcLink(identity);
+    return unlinkOidc(identity, change.resourceId, async () => {
+      pendingIdentityAction = undefined;
+      deps.setMessage(IDENTITY_UNLINKED);
+      await deps.refreshSecurityData();
+    });
+  }
+
   async function completePendingIdentityAction() {
-    const action = pendingIdentityAction;
-    if (!action) return;
+    if (!pendingIdentityAction) return;
     deps.setMessage('');
-    await identity.run(
-      async () => {
-        if (action.purpose === 'oidc_link')
-          return { redirect: await beginOidcLink() };
-        await unlinkOidcIdentity(action.resourceId);
-        return { unlinked: true as const };
-      },
-      async (outcome) => {
-        if ('redirect' in outcome) {
-          if (outcome.redirect !== undefined)
-            window.location.assign(outcome.redirect);
-          return;
-        }
-        pendingIdentityAction = undefined;
-        deps.setMessage(IDENTITY_UNLINKED);
-        await deps.refreshSecurityData();
-      },
-      {
-        key: action.purpose === 'oidc_link' ? 'link' : action.resourceId,
-        failure: (cause) => errorMessage(cause, SECURITY_OPERATION_FAILED)
-      }
-    );
+    await applyChange(pendingIdentityAction);
   }
 
-  async function linkIdentity() {
+  async function requestChange(change: PendingIdentityAction) {
     pendingIdentityAction = undefined;
-    await identity.run(
-      async () => {
-        if (deps.identities()?.has_local_password)
-          return { reauth: true as const };
-        return {
-          redirect: await beginIdentityReauthentication('oidc_link')
-        };
-      },
-      (outcome) => {
-        if ('reauth' in outcome) {
-          reauth.error = '';
-          reauthenticationRequest = { purpose: 'oidc_link' };
-          return;
-        }
-        if (outcome.redirect !== undefined)
-          window.location.assign(outcome.redirect);
-      },
-      {
-        key: 'link',
-        failure: (cause) =>
-          errorMessage(cause, 'The OIDC link flow could not start.')
-      }
-    );
-  }
-
-  async function unlinkIdentity(id: string) {
-    pendingIdentityAction = undefined;
-    await identity.run(
-      async () => {
-        if (deps.identities()?.has_local_password)
-          return { reauth: true as const };
-        return {
-          redirect: await beginIdentityReauthentication('oidc_unlink', id)
-        };
-      },
-      (outcome) => {
-        if ('reauth' in outcome) {
-          reauth.error = '';
-          reauthenticationRequest = { purpose: 'oidc_unlink', resourceId: id };
-          return;
-        }
-        if (outcome.redirect !== undefined)
-          window.location.assign(outcome.redirect);
-      },
-      {
-        key: id,
-        failure: (cause) =>
-          errorMessage(cause, 'The OIDC identity could not be unlinked.')
-      }
-    );
-  }
-
-  async function confirmWithOidc() {
-    const request = reauthenticationRequest;
-    if (!request) return;
-    await reauth.run(
-      () => beginIdentityReauthentication(request.purpose, request.resourceId),
-      (url) => window.location.assign(url),
-      {
-        failure: (cause) => errorMessage(cause, SECURITY_OPERATION_FAILED)
-      }
-    );
-  }
-
-  function cancelReauthentication() {
-    reauthenticationRequest = null;
-    reauth.error = '';
-  }
-
-  async function confirmReauthentication(password: string) {
-    const request = reauthenticationRequest;
-    if (!request) return;
-    await reauth.run(
-      () =>
-        reauthenticateWithPassword(
-          password,
-          request.purpose,
-          request.resourceId
-        ),
-      async () => {
-        reauthenticationRequest = null;
-        if (request.purpose === 'oidc_link') {
-          await identity.run(
-            () => beginOidcLink(),
-            (url) => window.location.assign(url),
-            {
-              key: 'link',
-              failure: (cause) => errorMessage(cause, SECURITY_OPERATION_FAILED)
-            }
-          );
-          return;
-        }
-        const resourceId = request.resourceId;
-        if (!resourceId) {
-          identity.error = UNLINK_TARGET_MISSING;
-          return;
-        }
-        await identity.run(
-          () => unlinkOidcIdentity(resourceId),
-          async () => {
-            deps.setMessage(IDENTITY_UNLINKED);
-            await deps.refreshSecurityData();
-          },
-          {
-            key: resourceId,
-            failure: (cause) => errorMessage(cause, SECURITY_OPERATION_FAILED)
-          }
-        );
-      },
-      {
-        failure: (cause) => errorMessage(cause, SECURITY_OPERATION_FAILED)
-      }
-    );
+    await verifyIdentityChange(identity, change, {
+      usePassword: Boolean(deps.identities()?.has_local_password),
+      askForPassword: reauthentication.open
+    });
   }
 
   return {
     identity,
-    reauth,
+    reauth: reauthentication.action,
     get pendingIdentityAction() {
       return pendingIdentityAction;
     },
     get reauthenticationRequest() {
-      return reauthenticationRequest;
+      return reauthentication.request;
     },
     resumeSecurityOperation,
     completePendingIdentityAction,
-    linkIdentity,
-    unlinkIdentity,
-    confirmWithOidc,
-    cancelReauthentication,
-    confirmReauthentication
+    linkIdentity: () => requestChange({ purpose: 'oidc_link' }),
+    unlinkIdentity: (resourceId: string) =>
+      requestChange({ purpose: 'oidc_unlink', resourceId }),
+    confirmWithOidc: reauthentication.confirmWithOidc,
+    cancelReauthentication: reauthentication.cancel,
+    confirmReauthentication: reauthentication.confirm
   };
 }
