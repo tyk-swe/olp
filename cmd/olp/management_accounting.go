@@ -17,7 +17,7 @@ import (
 )
 
 func (m Management) registerAccounting(mux *http.ServeMux) {
-	(&sinks.Server{Access: m.Access, Egress: m.core.policy}).Register(mux)
+	sinks.NewAPI(m.Access, m.core.policy).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.

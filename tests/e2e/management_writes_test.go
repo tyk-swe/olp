@@ -3,6 +3,7 @@
 package e2e_test
 
 import (
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -92,7 +93,23 @@ func TestSinkWritesReplayGuardRetainedHistoryAndAuditOnce(t *testing.T) {
 	if updated["name"] != "lake" || updated["has_credential"] != true || updated["etag"] == created["etag"] {
 		t.Fatalf("updated sink = %v, want the new name, the kept credential and a new etag", updated)
 	}
+	project := s.Want(owner, "POST", "/api/v1/projects", map[string]any{"name": "exports"}, harness.Idempotent(), http.StatusCreated)["id"]
+	scoped := s.Want(owner, "POST", "/api/v1/sinks", sink("scoped", map[string]any{"type": "https", "project_id": project}), harness.Idempotent(), http.StatusCreated)
+	audited := map[string]any{"streams": []string{"audit"}}
+	s.expectStatus(owner, "PUT", fmt.Sprintf("/api/v1/sinks/%s", scoped["id"]), sink("scoped", audited), harness.Idempotent(harness.ETag(scoped)), http.StatusUnprocessableEntity)
+	s.expectStatus(owner, "POST", "/api/v1/sinks", sink("trail", map[string]any{"type": "https", "project_id": project, "streams": []string{"audit"}}), harness.Idempotent(), http.StatusUnprocessableEntity)
+	s.expectStatus(owner, "POST", "/api/v1/sinks", sink("ledger", map[string]any{"type": "https", "streams": []string{"audit"}}), harness.Idempotent(), http.StatusCreated)
 	s.Want(owner, "DELETE", path, nil, harness.Idempotent(harness.ETag(updated)), http.StatusNoContent)
+	listed, _ := s.Want(owner, "GET", "/api/v1/sinks", nil, nil, http.StatusOK)["items"].([]any)
+	holds := func(want any) bool {
+		return slices.ContainsFunc(listed, func(item any) bool {
+			entry, ok := item.(map[string]any)
+			return ok && entry["id"] == want
+		})
+	}
+	if holds(created["id"]) || !holds(scoped["id"]) {
+		t.Fatalf("listed sinks = %v, want the active project sink and not the retired one", listed)
+	}
 	var etag string
 	if err := s.Pool.QueryRow(t.Context(), "SELECT etag::text FROM olp.managed_export_sinks WHERE id=$1 AND retired_at IS NOT NULL AND credential_id IS NULL", id).Scan(&etag); err != nil {
 		t.Fatalf("retired sink kept its credential or stayed active: %v", err)
