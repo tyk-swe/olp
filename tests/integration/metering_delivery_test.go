@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/export/capture"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	exportstream "github.com/tyk-swe/olp/internal/export/stream"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -31,6 +32,46 @@ import (
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/tests/harness"
 )
+
+func TestExportCreateAuthorizesTargetBeforeValidatingReferences(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	filterProject, viewerID := uuid.NewString(), uuid.NewString()
+	mustExec(t, pool, `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1,'Filter project',$1,$2)`, filterProject, f.ownerID)
+	mustExec(t, pool, `INSERT INTO olp.users(id,email,display_name,role,access_scope,etag)
+		VALUES($1,$2,'Project viewer','developer','assigned',$1)`, viewerID, viewerID+"@example.test")
+	mustExec(t, pool, `INSERT INTO olp.project_members(project_id,user_id,role,added_by)
+		VALUES($1,$3,'viewer',$4),($2,$3,'viewer',$4)`, f.projectID, filterProject, viewerID, f.ownerID)
+	owner := managementHTTPAs(t, pool, f.ownerID, func(mux *http.ServeMux, server *access.Server) {
+		destination.NewAPI(server, &egress.Policy{}).Register(mux)
+		capture.NewAPI(server).Register(mux)
+	})
+	viewer := owner.as(t, viewerID)
+
+	const sinks = "/api/v1/observability/sinks"
+	saved := expectStatus(t, "create fixture sink", owner.call(t, http.MethodPost, sinks, "", fmt.Sprintf(
+		`{"project_id":%q,"name":"Project sink","type":"https","destination":"https://sinks.example.test/capture","streams":["requests"],"format":"json"}`, filterProject)), http.StatusCreated)
+	var sink struct {
+		ID string `json:"export_sink_id"`
+	}
+	if err := json.Unmarshal(saved.body, &sink); err != nil {
+		t.Fatal(err)
+	}
+	const config = "/api/v1/observability/capture"
+	current := expectStatus(t, "read capture configuration", owner.call(t, http.MethodGet, config, "", ""), http.StatusOK)
+	expectStatus(t, "enable capture", owner.call(t, http.MethodPatch, config, current.etag, `{"enabled":true}`), http.StatusOK)
+
+	for _, request := range []struct{ path, body string }{
+		{sinks, fmt.Sprintf(`{"project_id":%q,"name":"Filtered sink","type":"https","destination":"https://sinks.example.test/filtered","streams":["requests"],"format":"json","filter":{"project":%q}}`, f.projectID, filterProject)},
+		{"/api/v1/observability/capture-policies", fmt.Sprintf(`{"project_id":%q,"sink":%q,"sample_ratio":"1","include":["input"],"max_bytes":65536}`, f.projectID, sink.ID)},
+	} {
+		expectStatus(t, "owner POST "+request.path, owner.call(t, http.MethodPost, request.path, "", request.body), http.StatusUnprocessableEntity)
+		if got := viewer.call(t, http.MethodPost, request.path, "", request.body); got.status != http.StatusForbidden {
+			t.Errorf("viewer POST %s returned %d %s, want 403", request.path, got.status, got.body)
+		}
+	}
+}
 
 func TestMeteringDeliveryLookup(t *testing.T) {
 	t.Parallel()

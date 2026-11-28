@@ -79,9 +79,9 @@ type createRequest struct {
 	ExpiresAt   *time.Time  `json:"expires_at"`
 }
 
-func (c createRequest) settings() Settings {
+func (c createRequest) settings(projectID *string) Settings {
 	return Settings{
-		ProjectID: c.ProjectID, Route: c.Route, SinkID: c.SinkID, SampleRatio: c.SampleRatio, Include: c.Include,
+		ProjectID: projectID, Route: c.Route, SinkID: c.SinkID, SampleRatio: c.SampleRatio, Include: c.Include,
 		Redact: ptr.NonNil(c.Redact), KeyIDs: ptr.NonNil(c.KeyIDs), EndUsers: ptr.NonNil(c.EndUsers), MaxBytes: c.MaxBytes,
 		Enabled: c.Enabled == nil || *c.Enabled, ExpiresAt: c.ExpiresAt,
 	}
@@ -223,13 +223,16 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	settings := input.settings()
+	projectID, err := destination.ParseProjectID(input.ProjectID)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	settings := input.settings(projectID)
 	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (resolved, error) {
-		scope, err := admit(r.Context(), tx, settings)
-		if err != nil {
+		if err := destination.RequireScope(r.Context(), a.server, tx, p, projectID); err != nil {
 			return resolved{}, err
 		}
-		return scope, destination.RequireScope(r.Context(), a.server, tx, p, scope.project)
+		return admit(r.Context(), tx, settings)
 	}, func(tx pgx.Tx, p authz.Principal, scope resolved) (httpkit.Reply, access.Event, error) {
 		pins, err := pinFor(r.Context(), tx, scope, settings.Redact)
 		if err != nil {
@@ -384,42 +387,20 @@ func check(ctx context.Context, q database.Queryer, s Settings) (resolved, error
 	if err != nil {
 		return resolved{}, httpkit.Invalid("sink", "sink must be a valid UUID")
 	}
-	project, err := checkProject(ctx, q, s.ProjectID)
-	if err != nil {
-		return resolved{}, err
-	}
 	if err := checkSink(ctx, q, sink); err != nil {
 		return resolved{}, err
 	}
-	routeProject, err := checkRoute(ctx, q, s.Route, project)
+	routeProject, err := checkRoute(ctx, q, s.Route, s.ProjectID)
 	if err != nil {
 		return resolved{}, err
 	}
-	if err := checkKeys(ctx, q, s.KeyIDs, project); err != nil {
+	if err := checkKeys(ctx, q, s.KeyIDs, s.ProjectID); err != nil {
 		return resolved{}, err
 	}
-	if project != nil {
-		return resolved{project: project, sink: sink, detectors: project}, nil
+	if s.ProjectID != nil {
+		return resolved{project: s.ProjectID, sink: sink, detectors: s.ProjectID}, nil
 	}
 	return resolved{sink: sink, detectors: routeProject}, nil
-}
-
-func checkProject(ctx context.Context, q database.Queryer, raw *string) (*string, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	project, err := httpkit.ParseUUID(*raw)
-	if err != nil {
-		return nil, httpkit.Invalid("project_id", "project_id must be a valid UUID")
-	}
-	exists, err := destination.ProjectExists(ctx, q, project)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, httpkit.Invalid("project_id", "the policy project does not exist")
-	}
-	return &project, nil
 }
 
 func checkSink(ctx context.Context, q database.Queryer, sink string) error {
