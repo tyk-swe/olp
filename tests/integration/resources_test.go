@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
@@ -327,4 +328,61 @@ func TestListedResourcesSkipStaleRowsAndRefillPages(t *testing.T) {
 		expect(t, secret, tuningPath, http.StatusBadGateway, "provider_protocol_error")
 		expect(t, secret, tuningPath, http.StatusTooManyRequests, "budget_exhausted")
 	})
+}
+
+func TestTuningResultsAreDiscoveredOnceForTheOwningJobOnly(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	store := resources.New(pool)
+	job, err := store.Put(ctx, fixture.resource("fine_tuning_job", fixture.keyID, "ftjob-discovery"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := store.Put(ctx, fixture.resource("batch", fixture.keyID, "batch-discovery"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	discover := func(parent resources.Resource, model string) {
+		t.Helper()
+		document, err := oif.ParseJSON(fmt.Appendf(nil, `{"fine_tuned_model":%q}`, model), oif.Limits{MaxBytes: 1 << 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DiscoverRetainedModels(ctx, &parent, document); err != nil {
+			t.Fatalf("discover %s: %v", model, err)
+		}
+	}
+	discovered := func() string {
+		t.Helper()
+		var rows string
+		if err := pool.QueryRow(ctx, `SELECT coalesce(string_agg(concat_ws('|',provider_id,upstream_model,display_name,enabled,capabilities,discovered_at IS NOT NULL),E'\n' ORDER BY upstream_model),'') FROM olp.provider_models`).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+
+	otherKey, otherProvider, unknownJob, mislabelled := *job, *job, *job, *batch
+	otherKey.APIKeyID = uuid.NewString()
+	otherProvider.ProviderID = uuid.NewString()
+	unknownJob.UUID = uuid.New()
+	mislabelled.Kind = "fine_tuning_job"
+	discover(otherKey, "another-keys-model")
+	discover(otherProvider, "another-providers-model")
+	discover(unknownJob, "an-unknown-jobs-model")
+	discover(mislabelled, "a-batch-model")
+	if rows := discovered(); rows != "" {
+		t.Fatalf("a resource that does not own a tuning job discovered\n%s", rows)
+	}
+
+	discover(*job, "tuned-model")
+	if rows, want := discovered(), fixture.providerID+"|tuned-model|tuned-model|f|[]|t"; rows != want {
+		t.Fatalf("discovered models=%q, want %q", rows, want)
+	}
+	mustExec(t, pool, `UPDATE olp.provider_models SET enabled=true,display_name='Reviewed',capabilities='["reviewed"]'`)
+	discover(*job, "tuned-model")
+	if rows, want := discovered(), fixture.providerID+`|tuned-model|Reviewed|t|["reviewed"]|t`; rows != want {
+		t.Fatalf("rediscovery changed a reviewed model to %q, want %q", rows, want)
+	}
 }
