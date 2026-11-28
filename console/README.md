@@ -29,8 +29,8 @@ Run these commands from the repository root after setup.
 | `pnpm --dir console build` | Static assets                                                 |
 
 Management requests use the generated `openapi-fetch` client and route
-authorization metadata. Update `management/management.json` alongside Go
-handlers and run `make api`. Never edit `src/lib/management/schema.d.ts` or
+authorization metadata. Update the fragments in `management/openapi/` alongside
+Go handlers and run `make api`. Never edit `src/lib/management/schema.d.ts` or
 `src/lib/management/requirements.ts` by hand. See
 [Contributing](../CONTRIBUTING.md) for repository-wide commands.
 

@@ -1,0 +1,677 @@
+{
+  "paths": {
+    "/api/v1/workload-issuers": {
+      "get": {
+        "operationId": "get_workload_issuers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadIssuerList"
+                }
+              }
+            },
+            "description": "Budget groups visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "summary": "GET workload issuer",
+        "description": "Owner-managed workload issuer, with identity-egress JWKS verification and first-match claim mappings. Enabled writes validate public signing keys. Issuer URLs are immutable; disable an issuer without needing a working endpoint. Subject and mapping/project bindings are stable. No bearer token or raw subject is returned or stored."
+      },
+      "post": {
+        "operationId": "post_workload_issuers",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkloadIssuerWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadIssuer"
+                }
+              }
+            },
+            "description": "Budget group created",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Budget group name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "summary": "POST workload issuer",
+        "description": "Owner-managed workload issuer, with identity-egress JWKS verification and first-match claim mappings. Enabled writes validate public signing keys. Issuer URLs are immutable; disable an issuer without needing a working endpoint. Subject and mapping/project bindings are stable. No bearer token or raw subject is returned or stored."
+      }
+    },
+    "/api/v1/workload-issuers/{issuer_id}": {
+      "get": {
+        "operationId": "get_workload_issuer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issuer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadIssuer"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "summary": "GET workload issuer",
+        "description": "Owner-managed workload issuer, with identity-egress JWKS verification and first-match claim mappings. Enabled writes validate public signing keys. Issuer URLs are immutable; disable an issuer without needing a working endpoint. Subject and mapping/project bindings are stable. No bearer token or raw subject is returned or stored."
+      },
+      "put": {
+        "operationId": "put_workload_issuer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issuer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current budget group ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkloadIssuerWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadIssuer"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "access"
+        ],
+        "summary": "PUT workload issuer",
+        "description": "Owner-managed workload issuer, with identity-egress JWKS verification and first-match claim mappings. Enabled writes validate public signing keys. Issuer URLs are immutable; disable an issuer without needing a working endpoint. Subject and mapping/project bindings are stable. No bearer token or raw subject is returned or stored."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WorkloadMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "match",
+          "project_id",
+          "limit_template",
+          "route_groups",
+          "scopes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "maxLength": 100
+          },
+          "match": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^/",
+              "maxLength": 256
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "description": "Exact string matches at JSON pointers. The first matching mapping wins; an empty object matches all verified subjects."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit_template": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "maxLength": 100
+          },
+          "route_groups": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "maxLength": 100
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "inference",
+                "models_read",
+                "guardrails",
+                "tools",
+                "agents",
+                "traces_write",
+                "delegate"
+              ]
+            }
+          },
+          "end_user_claim": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^/",
+            "maxLength": 256
+          },
+          "allow_provider_state": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "agent_principal": {
+            "type": "boolean",
+            "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
+          }
+        },
+        "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
+      },
+      "WorkloadIssuerWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "issuer",
+          "jwks_url",
+          "enabled",
+          "audiences",
+          "algorithms",
+          "max_lifetime_seconds",
+          "disabled_key_ids",
+          "mappings"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "jwks_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "audiences": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "algorithms": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "RS256",
+                "ES256",
+                "EdDSA"
+              ]
+            }
+          },
+          "max_lifetime_seconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          },
+          "disabled_key_ids": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "mappings": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/WorkloadMapping"
+            }
+          }
+        }
+      },
+      "WorkloadIssuer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "issuer",
+          "jwks_url",
+          "enabled",
+          "audiences",
+          "algorithms",
+          "max_lifetime_seconds",
+          "disabled_key_ids",
+          "mappings",
+          "id",
+          "etag",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "jwks_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "audiences": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "algorithms": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "RS256",
+                "ES256",
+                "EdDSA"
+              ]
+            }
+          },
+          "max_lifetime_seconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          },
+          "disabled_key_ids": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "mappings": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/WorkloadMapping"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WorkloadIssuerList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkloadIssuer"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

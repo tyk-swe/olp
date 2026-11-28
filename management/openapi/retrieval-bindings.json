@@ -1,0 +1,725 @@
+{
+  "paths": {
+    "/api/v1/retrieval-bindings": {
+      "get": {
+        "operationId": "list_retrieval_bindings",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "list retrieval bindings",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "create retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Binding created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalBindingInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-bindings/{binding_id}": {
+      "get": {
+        "operationId": "get_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "get retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "update retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalBindingInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_retrieval_binding",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "delete retrieval binding",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Binding retired; immutable history preserved"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_retrieval_binding_revision",
+        "tags": [
+          "retrieval-bindings"
+        ],
+        "summary": "get retrieval binding revision",
+        "description": "Project-owned query-only binding for an operator-managed Knowledge Base, RAG corpus or search index. Configure permission and project-change authority are required for writes. Every revision pins explicit API-key grants, one route target, native backend resource and field mappings. Queries require current published certified provider authority. Index creation and synchronization are excluded.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding or revision metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalBindingRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid binding, target, field mapping or key grants"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RetrievalBindingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "bedrock_knowledge_base",
+              "vertex_rag",
+              "azure_ai_search"
+            ]
+          },
+          "backend_resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "fields": {
+            "$ref": "./shared.json#/components/schemas/RetrievalBindingFields"
+          },
+          "key_grants": {
+            "type": "array",
+            "maxItems": 2000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "route",
+          "target_id",
+          "backend",
+          "backend_resource",
+          "fields",
+          "key_grants",
+          "enabled"
+        ]
+      },
+      "RetrievalBindingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "bedrock_knowledge_base",
+              "vertex_rag",
+              "azure_ai_search"
+            ]
+          },
+          "backend_resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "fields": {
+            "$ref": "./shared.json#/components/schemas/RetrievalBindingFields"
+          },
+          "key_grants": {
+            "type": "array",
+            "maxItems": 2000,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Explicit active API-key UUIDs in this binding project; an empty list grants no access."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "description": "Serving connection derived from the selected target; caller input cannot authorize a different connection."
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "route",
+          "target_id",
+          "backend",
+          "backend_resource",
+          "fields",
+          "key_grants",
+          "enabled",
+          "id",
+          "revision_id",
+          "revision",
+          "etag",
+          "retired_at",
+          "provider_id"
+        ]
+      },
+      "RetrievalBindingListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetrievalBindingResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "RetrievalBindingRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "binding_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/RetrievalBindingInput"
+          }
+        },
+        "required": [
+          "id",
+          "binding_id",
+          "revision",
+          "definition"
+        ]
+      }
+    }
+  }
+}

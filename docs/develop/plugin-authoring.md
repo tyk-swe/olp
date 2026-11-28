@@ -26,8 +26,9 @@ compatibility aliases remain at the old paths.
 | `github.com/tyk-swe/olp/sdk/inference` | `github.com/tyk-swe/olp/inference` |
 | `github.com/tyk-swe/olp/openapi` | `github.com/tyk-swe/olp/management` and `github.com/tyk-swe/olp/guardrails` |
 
-The management contract lives at `management/management.json`, the inference
-contract at `inference/inference.json`, and the guardrails contract at
+The management contract lives at `management/management.json`, which `make api`
+combines from the fragments in `management/openapi/`. The inference contract
+lives at `inference/inference.json`, and the guardrails contract at
 `guardrails/guardrails.json`. Each first-party plugin program builds from a
 folder next to the adapter module it serves, such as
 `internal/codemode/claudeauth/claude` and the folders under

@@ -1,0 +1,4610 @@
+{
+  "components": {
+    "schemas": {
+      "BTreeMap": {
+        "additionalProperties": {
+          "items": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "ConnectionLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "max_concurrency": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "requests_per_minute": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "daily_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority_shares": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityShares"
+              }
+            ]
+          },
+          "saturation_percent": {
+            "description": "Usage percentage of the quota above which each class is held to its share.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Commitment": {
+        "additionalProperties": false,
+        "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+        "properties": {
+          "amount": {
+            "description": "The commitment amount, a positive decimal string.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "period": {
+            "description": "The UTC calendar period the amount covers.",
+            "enum": [
+              "hour",
+              "day",
+              "month"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "period"
+        ],
+        "type": "object"
+      },
+      "ConnectionOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "bindings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderServingBinding"
+            },
+            "description": "Serving bindings keyed by configured upstream model.",
+            "maxProperties": 2000,
+            "type": "object"
+          },
+          "credential_headers": {
+            "default": [],
+            "description": "Header names whose values are supplied in the encrypted credential JSON.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "limits": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConnectionLimits"
+              }
+            ]
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelMetadata"
+            },
+            "default": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "network": {
+            "$ref": "#/components/schemas/ProviderNetworkOptions"
+          },
+          "operation_defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderOperationDefaults"
+            },
+            "description": "Defaults keyed by operation; each set names its owning profile dialect.",
+            "type": "object"
+          },
+          "parameter_defaults": {
+            "additionalProperties": {},
+            "default": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "plugin_options": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "description": "A plugin provider's values for the options its plugin profile declares, by option name, which the profile's options_schema describes. Hosting templates and plugin calls for the provider use them. An empty value leaves an option unset.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "query_settings": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Profile-allowlisted semantic query settings; cannot replace operation addressing or authentication.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "semantic_headers": {
+            "additionalProperties": {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            "description": "Profile-allowlisted semantic and version headers, separate from encrypted credential headers.",
+            "maxProperties": 16,
+            "type": "object"
+          },
+          "vendor_id": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "health_probe": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HealthProbe"
+              }
+            ]
+          },
+          "commitment": {
+            "$ref": "#/components/schemas/Commitment"
+          },
+          "tuning_dataset_uri_prefixes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "Operator-managed GCS dataset prefixes accepted by native Vertex tuning jobs. Empty grants no datasets."
+          },
+          "document_uri_prefixes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "Operator-managed GCS document prefixes accepted by Vertex document processing. Empty grants no document locations."
+          },
+          "shared_token_quotas": {
+            "description": "Deployment models assigned to named token quota groups whose tokens per minute ceiling every member connection in the same project shares for ordinary generation, in addition to the connection and credential slot limits. Each model joins at most one group and every member of a group declares the same ceiling.",
+            "items": {
+              "$ref": "#/components/schemas/SharedTokenQuota"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CreateProjectRequest": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ManagementOperation": {
+        "description": "A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.",
+        "enum": [
+          "read",
+          "usage",
+          "keys",
+          "playground",
+          "configure",
+          "settings",
+          "access_read",
+          "access",
+          "self",
+          "manage_sessions",
+          "manage_tokens",
+          "manage_projects",
+          "local_login",
+          "manage_plugins",
+          "manage_organization"
+        ],
+        "type": "string"
+      },
+      "Measurement": {
+        "properties": {
+          "latency_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "output_tokens_per_second": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "samples": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latency_ms",
+          "samples",
+          "observed_at"
+        ],
+        "type": "object"
+      },
+      "ModelMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "canonical_model": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context_length": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "data_collection": {
+            "default": null,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deployment": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input_modalities": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "max_output_tokens": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "observed_at": {
+            "default": null,
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_modalities": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "quantization": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supported_parameters": {
+            "default": null,
+            "description": "None means unknown, an empty set means no optional parameters are supported.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "zero_data_retention": {
+            "default": null,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "OidcAuthorizationResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "type": "object"
+      },
+      "OidcLoginRequest": {
+        "properties": {
+          "return_to": {
+            "description": "Same-origin absolute-path destination used only after a successful callback.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "OidcReauthenticationRequest": {
+        "properties": {
+          "purpose": {
+            "description": "Exact durable security operation that the resulting one-time grant may authorize.",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Required only when unlinking one specific OIDC identity.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "OidcRoleMappingRequest": {
+        "properties": {
+          "claim_value": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_value",
+          "role"
+        ],
+        "type": "object"
+      },
+      "PriceCeiling": {
+        "additionalProperties": false,
+        "properties": {
+          "input_per_million": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_per_million": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_price": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PriceToolCalls": {
+        "additionalProperties": {
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "type": "string"
+        },
+        "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+        "maxProperties": 16,
+        "minProperties": 1,
+        "type": "object"
+      },
+      "PriceTier": {
+        "additionalProperties": false,
+        "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+        "properties": {
+          "above_input_tokens": {
+            "description": "Input tokens per attempt above which this tier's rates apply.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "input_per_million": {
+            "description": "Input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_input_per_million": {
+            "description": "Cached input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_input_per_million": {
+            "description": "Generic cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "description": "5-minute TTL cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_1h_input_per_million": {
+            "description": "1-hour TTL cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_per_million": {
+            "description": "Output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_input_per_million": {
+            "description": "Audio input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Cached audio input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Audio output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Image input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Cached image input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Image output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "above_input_tokens"
+        ],
+        "type": "object"
+      },
+      "PriceWindowPeriod": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+            "items": {
+              "maximum": 7,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "end": {
+            "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+            "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+            "type": "string"
+          },
+          "multiplier": {
+            "description": "Multiplier applied to the attempt's whole usage charge.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "start": {
+            "description": "Local time the period starts at, inclusive.",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "start",
+          "end",
+          "multiplier"
+        ],
+        "type": "object"
+      },
+      "PriceWindows": {
+        "additionalProperties": false,
+        "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+        "properties": {
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/PriceWindowPeriod"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "time_zone": {
+            "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time_zone",
+          "periods"
+        ],
+        "type": "object"
+      },
+      "Problem": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "errors": {
+            "$ref": "#/components/schemas/BTreeMap",
+            "description": "Human-readable validation messages, keyed by field name."
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "ProjectDetailResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "member_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Single-level organization membership. Once assigned, this project cannot move between organizations."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "etag",
+          "created_by",
+          "created_by_email",
+          "member_count",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProjectListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectDetailResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProjectMemberListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProjectMemberResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "added_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "added_by_email": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "project_role": {
+            "enum": [
+              "manager",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "project_role",
+          "email",
+          "display_name",
+          "role",
+          "active",
+          "added_by",
+          "added_by_email",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ProjectMembershipItem": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "manager",
+              "viewer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ],
+        "type": "object"
+      },
+      "ProviderAuthMode": {
+        "enum": [
+          "api_key",
+          "none",
+          "headers",
+          "adc",
+          "service_account",
+          "default_chain",
+          "static",
+          "azure_default",
+          "azure_client_secret",
+          "ibm_iam",
+          "static_credential",
+          "grant"
+        ],
+        "type": "string",
+        "description": "How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
+      },
+      "ProviderConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "api_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "auth_mode": {
+            "$ref": "#/components/schemas/ProviderAuthMode"
+          },
+          "cloud_project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cloud_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_storage": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "Operator-owned object-storage prefixes used by Vertex batch prediction or Bedrock batch inference. These values are nonsecret.",
+            "properties": {
+              "input_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch input URIs. Vertex uses gs:// and Bedrock uses s3://."
+              },
+              "output_uri_prefix": {
+                "type": "string",
+                "description": "Allowed object-storage prefix for batch output URIs. The normalized prefix ends with a slash."
+              },
+              "role_arn": {
+                "type": "string",
+                "description": "Bedrock batch job IAM role ARN with permission to read input and write output."
+              }
+            },
+            "required": [
+              "input_uri_prefix",
+              "output_uri_prefix"
+            ]
+          },
+          "deployment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address, with the provider's plugin options in place."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "options": {
+            "$ref": "#/components/schemas/ConnectionOptions"
+          },
+          "profile_id": {
+            "description": "Versioned provider profile identity. Omit together with profile_revision for an Automatic provider, whose endpoints follow from its provider kind.",
+            "type": "string"
+          },
+          "profile_revision": {
+            "description": "Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.",
+            "type": "string"
+          },
+          "credential_source": {
+            "type": "string",
+            "enum": [
+              "operator",
+              "caller"
+            ],
+            "description": "Operator credentials are the default. Caller mode requires X-OLP-Provider-Credential for serving through the fixed endpoint/profile; retained operator credentials remain for probes and certification. Supported with built-in API-key, declared-header, or static AWS authentication. Caller secrets are request-local and never reused across targets."
+          }
+        },
+        "required": [
+          "kind",
+          "auth_mode"
+        ],
+        "type": "object"
+      },
+      "ProviderKind": {
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "vertex_ai",
+          "bedrock",
+          "sagemaker",
+          "watsonx",
+          "azure_openai",
+          "openai_compatible",
+          "plugin",
+          "azure_ai_search"
+        ],
+        "type": "string",
+        "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+      },
+      "ProviderNetworkOptions": {
+        "additionalProperties": false,
+        "description": "Public per-provider transport configuration. max_idle_conns_per_host must not exceed either explicitly configured total idle or per-host active connection limits. Redirects and environment proxies are refused.",
+        "properties": {
+          "connect_timeout_ms": {
+            "format": "int64",
+            "maximum": 120000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "credential_id": {
+            "description": "Unrevoked network credential owned by this provider. Secret proxy authentication and client certificate/key material remain encrypted and are never returned here.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "idle_conn_timeout_ms": {
+            "format": "int64",
+            "maximum": 3600000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_conns_per_host": {
+            "format": "int32",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_idle_conns": {
+            "format": "int32",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_idle_conns_per_host": {
+            "format": "int32",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "proxy_url": {
+            "description": "HTTP, HTTPS or SOCKS5 proxy origin without credentials, query, fragment or path. Both proxy and destination resolve locally under the egress policy; remote proxy DNS is unsupported.",
+            "format": "uri",
+            "type": "string"
+          },
+          "response_header_timeout_ms": {
+            "format": "int64",
+            "maximum": 600000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tls_handshake_timeout_ms": {
+            "format": "int64",
+            "maximum": 120000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "trust_roots_pem": {
+            "description": "Public PEM certificates augmenting system trust. Private keys and other PEM blocks are forbidden.",
+            "maxLength": 262144,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderOperationDefaults": {
+        "additionalProperties": false,
+        "description": "Typed defaults for one operation and dialect. At most 64 total values and native_options; client-supplied members always take precedence.",
+        "properties": {
+          "dialect": {
+            "description": "Dialect owned by the selected profile for this operation.",
+            "type": "string"
+          },
+          "native_options": {
+            "additionalProperties": {},
+            "description": "Explicit dialect-native extension defaults. May not collide with values or reserved routing, identity, resource or authentication fields.",
+            "maxProperties": 64,
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": {},
+            "description": "Omission fillers validated against the operation default schema. Each value, including null, arrays and objects, is atomic.",
+            "maxProperties": 64,
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      },
+      "ProviderServingBinding": {
+        "additionalProperties": false,
+        "description": "Serving environment identity independent of credentials. A binding may select a model or Azure deployment, never both. Region must match the provider connection.",
+        "properties": {
+          "defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderOperationDefaults"
+            },
+            "description": "Operation defaults overriding the provider defaults by whole member.",
+            "type": "object"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal_id": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "resource_scope": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "snapshot": {
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PutProjectMemberRequest": {
+        "properties": {
+          "role": {
+            "enum": [
+              "manager",
+              "viewer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "RoutingConstraints": {
+        "additionalProperties": false,
+        "properties": {
+          "deny_data_collection": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ignore": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_price": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceCeiling"
+              }
+            ]
+          },
+          "only": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "quantizations": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "regions": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "require_parameters": {
+            "default": false,
+            "type": "boolean"
+          },
+          "require_zero_data_retention": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
+          }
+        },
+        "type": "object"
+      },
+      "RouteContextWindowPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Context sizing for a supplied generation request. Counts are planning estimates, not billed usage. Use the decision's context_length, estimated_input_tokens, requested_output_tokens and estimate_provenance alongside this object.",
+        "properties": {
+          "input_breakdown": {
+            "description": "Input tokens by category, summing to estimated_input_tokens. Null for a caller-supplied estimate.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteInputTokenBreakdown"
+              }
+            ]
+          },
+          "retained_context_unknown": {
+            "type": "boolean",
+            "description": "The request references provider-held or opaque context not included in the inline estimate."
+          },
+          "remaining_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Model context length less estimated input and any output bound used by the preview, per completion. Negative means over the window. Null if the limit, input or retained context is unknown."
+          }
+        },
+        "required": [
+          "input_breakdown",
+          "retained_context_unknown",
+          "remaining_tokens"
+        ]
+      },
+      "RouteInputTokenBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Counts for the prompt checked against the window. For batched completions, this is the largest prompt. Unclassified includes framing and counted material outside the named categories.",
+        "properties": {
+          "instructions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "conversation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_schemas": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tool_calls_results": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "media": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unclassified": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "instructions",
+          "conversation",
+          "tool_schemas",
+          "tool_calls_results",
+          "media",
+          "unclassified"
+        ]
+      },
+      "RoutingDecision": {
+        "properties": {
+          "attempt": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "context_length": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "context_window": {
+            "$ref": "#/components/schemas/RouteContextWindowPreview"
+          },
+          "credential_slot_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "estimate_provenance": {
+            "description": "How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_input_tokens": {
+            "description": "The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_output_tokens": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "metadata_observed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_family": {
+            "description": "The family of models that share the tokenizer estimated_input_tokens was counted with: openai-o200k, openai-cl100k, anthropic, gemini or other. Null when the caller supplied the estimate or no request was inspected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "performance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Measurement"
+              }
+            ]
+          },
+          "price": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoutingPrice"
+              }
+            ]
+          },
+          "priority": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies."
+          },
+          "requested_output_tokens": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/RoutingStrategy"
+          },
+          "target_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          },
+          "vendor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "incompatibility": {
+            "$ref": "#/components/schemas/InteractionIncompatibility"
+          },
+          "interaction": {
+            "$ref": "#/components/schemas/InteractionInspection"
+          },
+          "selector": {
+            "description": "The request selector that chose this target.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shadow": {
+            "description": "The target mirrors traffic rather than serving it.",
+            "type": "boolean"
+          },
+          "unhealthy": {
+            "description": "Fleet health marks the provider unhealthy, so the target was ordered after healthy ones.",
+            "type": "boolean"
+          },
+          "headroom": {
+            "description": "Smallest remaining fraction of the best credential slot's request, token and concurrency quotas.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "max_cost": {
+            "description": "The effective cost ceiling eligibility applied, in the installation currency. Null when no scope set one. The ceiling is the configured rule that admitted the attempt, separate from the attempt's own estimated_cost.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bounded_cost_fallback_reason": {
+            "description": "Why the bounded_cost strategy ordered this candidate by weight instead of by its upper estimate. operation_not_generation means the operation is not generation, insufficient_cost_bounds means fewer than two candidates in its tier have an upper estimate, and cost_bound_unknown means this candidate has none while others in its tier rank by theirs. Absent when the upper estimate decided its place, the candidate was alone in its tier, or another strategy ran.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "operation_not_generation",
+              "insufficient_cost_bounds",
+              "cost_bound_unknown",
+              null
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve, with the priced input estimate and reserved output allowance the maximum covers. Null when the price cannot bound the request or no demand is known.",
+            "properties": {
+              "minimum": {
+                "type": "string"
+              },
+              "maximum": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "priced_input_tokens": {
+                "description": "The input tokens the maximum priced. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reserved_output_tokens": {
+                "description": "The output allowance the maximum reserved: the declared reply bound, or the default allowance when none was declared. Null when the bound did not price tokens.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "minimum",
+              "maximum",
+              "currency"
+            ]
+          },
+          "gateway_execution": {
+            "$ref": "#/components/schemas/GatewayExecutionCapability"
+          }
+        },
+        "required": [
+          "target_id",
+          "provider_id",
+          "upstream_model",
+          "eligible",
+          "priority",
+          "strategy"
+        ],
+        "type": "object"
+      },
+      "RoutingPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_strategies": {
+            "default": null,
+            "items": {
+              "$ref": "#/components/schemas/RoutingStrategy"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "constraints": {
+            "default": {
+              "deny_data_collection": false,
+              "ignore": [],
+              "max_price": null,
+              "only": null,
+              "quantizations": null,
+              "regions": null,
+              "require_parameters": false,
+              "require_zero_data_retention": false
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoutingConstraints"
+              }
+            ]
+          },
+          "defaults": {
+            "default": {
+              "allow_fallbacks": null,
+              "deny_data_collection": false,
+              "ignore": [],
+              "max_price": null,
+              "only": null,
+              "order": null,
+              "preferred_max_latency_ms": null,
+              "preferred_min_throughput": null,
+              "quantizations": null,
+              "regions": null,
+              "require_parameters": false,
+              "require_zero_data_retention": false,
+              "strategy": null
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoutingPreferences"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RoutingPreferences": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_fallbacks": {
+            "default": null,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "deny_data_collection": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ignore": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_attempts": {
+            "description": "Optional request ceiling; cannot exceed the published route budget.",
+            "maximum": 32767,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_price": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceCeiling"
+              }
+            ]
+          },
+          "only": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "order": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "preferred_max_latency_ms": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "preferred_min_throughput": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "quantizations": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "regions": {
+            "default": null,
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ],
+            "uniqueItems": true
+          },
+          "require_parameters": {
+            "default": false,
+            "type": "boolean"
+          },
+          "require_zero_data_retention": {
+            "default": false,
+            "type": "boolean"
+          },
+          "strategy": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoutingStrategy"
+              }
+            ]
+          },
+          "priority": {
+            "description": "Admission class for this request, up to the key's max_priority. Only the X-OLP-Routing header carries it; routing policies refuse it.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
+          }
+        },
+        "type": "object"
+      },
+      "RoutingPrice": {
+        "properties": {
+          "cache_write_1h_input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "output_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scope_priority": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
+            ]
+          },
+          "training_per_million": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million training tokens."
+          },
+          "storage_per_gib_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per GiB-day; GiB is 2^30 bytes."
+          },
+          "cache_storage_per_million_token_hour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact currency rate per million cached token-hours."
+          },
+          "container_per_session": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Exact per-session rates keyed by native memory tier, for example 1g or 4g."
+          }
+        },
+        "required": [
+          "effective_at",
+          "scope_priority",
+          "revision",
+          "revision_id",
+          "provider_id",
+          "model",
+          "operation",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "RoutingStrategy": {
+        "enum": [
+          "weighted",
+          "price",
+          "latency",
+          "throughput",
+          "capacity",
+          "bounded_cost"
+        ],
+        "type": "string"
+      },
+      "RuntimeGenerationResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "SharedTokenQuota": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "description": "Name of the shared token quota group within the connection project. Connections in the same project using the same name share one counter.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "description": "Deployment model on this connection that joins the group.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "tokens_per_minute": {
+            "description": "Total tokens per minute every member connection shares. Every member of a group declares the same ceiling.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group",
+          "model",
+          "tokens_per_minute"
+        ],
+        "type": "object"
+      },
+      "SessionResponse": {
+        "properties": {
+          "csrf_token": {
+            "type": "string"
+          },
+          "operations": {
+            "description": "The management operations the signed-in member may perform now; the console shows only what the server would admit.",
+            "items": {
+              "$ref": "#/components/schemas/ManagementOperation"
+            },
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Public session identifier for session-scoped console preferences; conveys no authentication proof."
+          }
+        },
+        "required": [
+          "user",
+          "csrf_token",
+          "operations"
+        ],
+        "type": "object"
+      },
+      "Surface": {
+        "enum": [
+          "openai",
+          "anthropic",
+          "gemini",
+          "bedrock",
+          "native"
+        ],
+        "type": "string"
+      },
+      "TransportMode": {
+        "enum": [
+          "unary",
+          "streaming",
+          "async",
+          "realtime",
+          "webrtc"
+        ],
+        "type": "string"
+      },
+      "UnconfinedPluginPermitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge_risk": {
+            "description": "Must be true: the owner acknowledges that an unconfined plugin runs with the operating system privileges of OLP's processes, outside every confinement, and can reach anything they can.",
+            "type": "boolean"
+          },
+          "digest": {
+            "description": "Digest of the executable the owner reviewed. OLP refuses the permission if the executable has changed since.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "acknowledge_risk"
+        ],
+        "type": "object"
+      },
+      "UpdateProjectRequest": {
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "UserDetailResponse": {
+        "properties": {
+          "access_scope": {
+            "enum": [
+              "global",
+              "assigned"
+            ],
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "projects": {
+            "description": "Projects the user may reach, with the membership role in each. Present only on the profile response.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectMembershipItem"
+            },
+            "type": "array"
+          },
+          "role": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name",
+          "role",
+          "access_scope",
+          "active",
+          "etag",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "UserResponse": {
+        "properties": {
+          "access_scope": {
+            "enum": [
+              "global",
+              "assigned"
+            ],
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name",
+          "role",
+          "access_scope"
+        ],
+        "type": "object"
+      },
+      "RouteFidelity": {
+        "additionalProperties": false,
+        "description": "Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.",
+        "properties": {
+          "mode": {
+            "default": "strict",
+            "description": "Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.",
+            "enum": [
+              "strict",
+              "transformed"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "InspectedEffectiveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/InspectedRequestField"
+            }
+          },
+          "structure": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/InspectedTurn"
+            },
+            "description": "Ordered role/scope and block kinds from the prepared request. No content, tool names, IDs, schema keys or opaque state."
+          },
+          "omitted_turns": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "redacted_native_fields": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "fields",
+          "structure",
+          "omitted_turns",
+          "redacted_native_fields"
+        ]
+      },
+      "InspectedTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "system",
+              "instructions",
+              "system_instruction",
+              "messages",
+              "input",
+              "contents"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "developer",
+              "user",
+              "assistant",
+              "tool",
+              "model",
+              "function",
+              "instruction",
+              "unspecified",
+              "other"
+            ]
+          },
+          "parts": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/InspectedPart"
+            }
+          },
+          "omitted_parts": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "scope",
+          "index",
+          "role",
+          "parts",
+          "omitted_parts"
+        ]
+      },
+      "InspectedPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "media",
+              "document",
+              "tool_call",
+              "tool_result",
+              "reasoning",
+              "refusal",
+              "null",
+              "opaque"
+            ]
+          },
+          "call_ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32,
+            "description": "Content-free ordinal linking a result to a preceding call ID when that relationship is explicit."
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "InspectedRequestField": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "absent",
+              "null",
+              "boolean",
+              "number",
+              "string",
+              "array",
+              "object"
+            ]
+          },
+          "origin": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "For present strings/arrays/objects only; distinguishes an empty value without exposing its contents."
+          },
+          "value_json": {
+            "type": "string",
+            "description": "Exact original JSON spelling of an allowlisted scalar setting. Kept as text so JSON clients cannot round integers or erase numeric precision. Omitted for redacted content.",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "field",
+          "kind",
+          "origin",
+          "redacted"
+        ],
+        "description": "Only allowlisted scalar controls expose values. Content, tools/schemas, identifiers and opaque state remain redacted; unknown property names are not returned."
+      },
+      "InteractionDisposition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "disposition",
+          "rule",
+          "evidence"
+        ]
+      },
+      "InteractionIncompatibility": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "requirement",
+          "message"
+        ],
+        "description": "Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values."
+      },
+      "InteractionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "dispositions": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/InteractionDisposition"
+            }
+          },
+          "effective_request": {
+            "$ref": "#/components/schemas/InspectedEffectiveRequest"
+          },
+          "egress_dialect": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "transformed"
+            ]
+          },
+          "ingress_dialect": {
+            "type": "string"
+          },
+          "obligations": {
+            "$ref": "#/components/schemas/InteractionObligations"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "profile_revision": {
+            "type": "string"
+          },
+          "return_dialect": {
+            "type": "string"
+          },
+          "semantic_context": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/InspectedRequestField"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_inspected",
+              "not_evaluated",
+              "incompatible",
+              "transformed",
+              "admitted"
+            ]
+          },
+          "representation": {
+            "type": "string",
+            "enum": [
+              "oif"
+            ]
+          },
+          "serving": {
+            "$ref": "#/components/schemas/InspectedServingIdentity"
+          },
+          "omitted_dispositions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count collapsed by safe-pointer redaction or omitted by the 64-entry display bound. The execution planner retains its complete receipt."
+          }
+        },
+        "required": [
+          "status",
+          "fidelity",
+          "evidence"
+        ],
+        "description": "Safe result from the same interaction planner used by strict execution. Admission describes semantic/policy preparation; outer eligibility also applies current authority, routing constraints and attempt budgets. Tuple-only and transformed previews never claim strict qualification."
+      },
+      "InteractionObligations": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string"
+          },
+          "guard_results": {
+            "type": "boolean"
+          },
+          "lifetime": {
+            "type": "string"
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_event_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reject_ambiguous_failover": {
+            "type": "boolean"
+          },
+          "retry": {
+            "type": "string"
+          },
+          "submission": {
+            "type": "string"
+          },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Effect obligations such as inference, client_tool_call, resource_read and resource_mutation; no effect is executed by inspection."
+          },
+          "max_continuation_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Planner upper bound for retained native dependency and projected delivery; deployment limits may be tighter."
+          },
+          "actionability": {
+            "type": "string",
+            "description": "Declared dependency barrier before ordinary actionable client tool bytes."
+          }
+        },
+        "required": [
+          "delivery",
+          "lifetime",
+          "continuation",
+          "retry",
+          "max_body_bytes",
+          "max_event_bytes",
+          "reject_ambiguous_failover",
+          "guard_results",
+          "submission",
+          "effects"
+        ],
+        "description": "Planner upper bounds and client continuation obligations. Installed transport/body limits may be tighter; simulation does not run inference, tools or authentication exchanges."
+      },
+      "InspectedServingIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal_declared": {
+            "description": "A serving binding declares the upstream principal.",
+            "type": "boolean"
+          },
+          "principal_observed": {
+            "description": "Grant enrollment observed the upstream principal, which replaces any a binding declares.",
+            "type": "boolean"
+          },
+          "snapshot_declared": {
+            "type": "boolean"
+          },
+          "region_declared": {
+            "type": "boolean"
+          },
+          "resource_scope_declared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider_revision_id",
+          "model",
+          "principal_declared",
+          "principal_observed",
+          "snapshot_declared",
+          "region_declared",
+          "resource_scope_declared"
+        ],
+        "description": "Selected model and immutable provider revision, with presence-only serving facts. Account/resource/snapshot strings are not exposed, and declarations do not establish empirical verification; an observed principal is the one grant enrollment reported."
+      },
+      "CodeAccountMaxConcurrency": {
+        "description": "Maximum simultaneous generations for this account across gateways, routes and API keys. Null means no account cap.",
+        "type": [
+          "integer",
+          "null"
+        ],
+        "format": "int32",
+        "minimum": 1,
+        "maximum": 2147483647
+      },
+      "ReferenceCatalog": {
+        "additionalProperties": false,
+        "description": "The signed reference catalog this release ships, verified at start-up.",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the catalog.",
+            "type": "string"
+          },
+          "model_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed catalog document; facts taken from it are tagged catalog@<sha256>.",
+            "type": "string"
+          },
+          "vendor_count": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_version",
+          "published_at",
+          "sha256",
+          "key_id",
+          "vendor_count",
+          "model_count"
+        ],
+        "type": "object"
+      },
+      "ModelLifecycle": {
+        "additionalProperties": false,
+        "description": "A model's deprecation and retirement as its vendor documents them in the reference catalog.",
+        "properties": {
+          "deprecated_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replacement": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retires_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Vendor page that documents the dates.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deprecated_at",
+          "retires_at",
+          "replacement",
+          "source"
+        ],
+        "type": "object"
+      },
+      "AdmissionPriority": {
+        "description": "Admission class of a request. A saturated gateway dequeues critical, high, normal and low 8:4:2:1, and capacity shares divide provider quotas between them.",
+        "enum": [
+          "critical",
+          "high",
+          "normal",
+          "low"
+        ],
+        "type": "string"
+      },
+      "FallbackCondition": {
+        "description": "exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.",
+        "enum": [
+          "exhausted",
+          "context_window",
+          "content_filter",
+          "rate_limit",
+          "budget"
+        ],
+        "type": "string"
+      },
+      "RouteFallback": {
+        "additionalProperties": false,
+        "properties": {
+          "route": {
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "type": "string"
+          },
+          "on": {
+            "items": {
+              "$ref": "#/components/schemas/FallbackCondition"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "route",
+          "on"
+        ],
+        "type": "object"
+      },
+      "ClassifierPredicate": {
+        "additionalProperties": false,
+        "description": "Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.",
+        "properties": {
+          "route": {
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "maxLength": 64,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "min_score": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "maximum": 30000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "route",
+          "labels",
+          "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "PluginPredicate": {
+        "additionalProperties": false,
+        "description": "Runs the route_predicate hook of an approved, confined plugin over the request features. It can only narrow the candidate set.",
+        "properties": {
+          "digest": {
+            "description": "SHA-256 digest of an approved confined plugin exporting route_predicate",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "type": "object"
+      },
+      "SelectorPredicate": {
+        "additionalProperties": false,
+        "description": "Conjunction of request features the gateway computes during admission. Every stated condition must hold; attribution labels never take part.",
+        "properties": {
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "min_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "min_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "streaming": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "structured_output": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "modalities": {
+            "description": "Matches when the input carries any of these modalities.",
+            "items": {
+              "enum": [
+                "text",
+                "image",
+                "audio",
+                "video",
+                "file"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "reasoning_effort": {
+            "items": {
+              "pattern": "^[a-z]{1,16}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "classifier": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClassifierPredicate"
+              }
+            ]
+          },
+          "plugin": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PluginPredicate"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RouteSelector": {
+        "additionalProperties": false,
+        "description": "The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.",
+        "properties": {
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "type": "string"
+          },
+          "when": {
+            "$ref": "#/components/schemas/SelectorPredicate"
+          },
+          "tags": {
+            "items": {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "route": {
+            "description": "Delegates matching requests to this route instead of choosing tags.",
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "when"
+        ],
+        "type": "object"
+      },
+      "RetryRule": {
+        "additionalProperties": false,
+        "properties": {
+          "max_retries": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "base_backoff_ms": {
+            "format": "int64",
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_backoff_ms": {
+            "format": "int64",
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "respect_retry_after": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "max_retries",
+          "base_backoff_ms",
+          "max_backoff_ms",
+          "respect_retry_after"
+        ],
+        "type": "object"
+      },
+      "RouteRetry": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/RetryRule"
+        },
+        "description": "Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.",
+        "propertyNames": {
+          "enum": [
+            "connect",
+            "timeout",
+            "rate_limit",
+            "upstream_server"
+          ]
+        },
+        "type": "object"
+      },
+      "RouteAffinity": {
+        "additionalProperties": false,
+        "description": "Keeps requests that carry the same session key on the same target and slot while it stays eligible, by hashing the key into the rendezvous seed.",
+        "properties": {
+          "source": {
+            "enum": [
+              "label",
+              "cache_key"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "description": "Attribution label carrying the session key when source is label.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "SpendCap": {
+        "additionalProperties": false,
+        "description": "Daily and monthly cost caps. An exhausted cap removes its owner from selection.",
+        "properties": {
+          "daily_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ShadowTarget": {
+        "additionalProperties": false,
+        "description": "Mirrors the sampled share of requests to this target after admission. The caller's response never comes from it.",
+        "properties": {
+          "sample_rate": {
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "sample_rate"
+        ],
+        "type": "object"
+      },
+      "PriorityShares": {
+        "additionalProperties": false,
+        "description": "Percentages of the quota each admission class may hold once usage passes saturation_percent; they sum to 100.",
+        "properties": {
+          "critical": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "high": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "normal": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "low": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "critical",
+          "high",
+          "normal",
+          "low"
+        ],
+        "type": "object"
+      },
+      "HealthProbe": {
+        "additionalProperties": false,
+        "description": "Opts the connection into active health probes: bounded synthetic requests accounted to the installation.",
+        "properties": {
+          "interval_seconds": {
+            "format": "int64",
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "interval_seconds"
+        ],
+        "type": "object"
+      },
+      "EndUserLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A complete limit set. Null or omitted dimensions are unlimited.",
+        "properties": {
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        }
+      },
+      "EndUserPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/EndUserLimits"
+          },
+          "overrides": {
+            "type": "object",
+            "maxProperties": 256,
+            "propertyNames": {
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EndUserLimits"
+            },
+            "description": "Project-scoped digests. Each entry replaces the complete default limit set at this boundary; policies at other boundaries still apply."
+          },
+          "blocked": {
+            "type": "array",
+            "maxItems": 256,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          }
+        }
+      },
+      "AttributionPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Required labels accumulate across key and project boundaries. Pinned defaults fill omitted labels and cannot be overridden. Conflicting pins fail closed. At most four distinct required or pinned keys.",
+        "properties": {
+          "required_attribution_keys": {
+            "type": "array",
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            }
+          },
+          "attribution_defaults": {
+            "type": "object",
+            "maxProperties": 4,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+            }
+          }
+        }
+      },
+      "RouteGroups": {
+        "type": "object",
+        "maxProperties": 64,
+        "propertyNames": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+          "maxLength": 100
+        },
+        "additionalProperties": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "maxLength": 100
+          }
+        },
+        "description": "Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies."
+      },
+      "BudgetPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Aggregate inference cost caps. Each configured boundary applies independently. Omitted or null dimensions are unlimited.",
+        "properties": {
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        }
+      },
+      "AggregateBudgetUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "daily",
+          "monthly",
+          "unpriced_attempts"
+        ],
+        "properties": {
+          "daily": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accrued",
+              "window_ends_at"
+            ],
+            "properties": {
+              "accrued": {
+                "type": "string"
+              },
+              "window_ends_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "monthly": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accrued",
+              "window_ends_at"
+            ],
+            "properties": {
+              "accrued": {
+                "type": "string"
+              },
+              "window_ends_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "unpriced_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weekly": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "accrued",
+              "window_ends_at"
+            ],
+            "properties": {
+              "accrued": {
+                "type": "string"
+              },
+              "window_ends_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "The measure accrued expresses."
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Billable attempts in the month whose charge could not be computed."
+          }
+        }
+      },
+      "AggregateBudget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy",
+          "etag",
+          "usage"
+        ],
+        "properties": {
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/AggregateBudgetUsage"
+          }
+        }
+      },
+      "LimitTemplates": {
+        "type": "object",
+        "maxProperties": 64,
+        "propertyNames": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/EndUserLimits"
+        },
+        "description": "Project-scoped policy ceilings; each referencing boundary keeps separate counters. Empty limits add no ceilings. Referenced templates cannot be removed."
+      },
+      "AttributionBudgets": {
+        "type": "object",
+        "maxProperties": 64,
+        "propertyNames": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+        },
+        "additionalProperties": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/components/schemas/BudgetPolicy"
+          }
+        },
+        "description": "At most 64 project label/value pairs in total, each with at least one positive day/week/month cap. Caps apply to resolved labels across all keys and system work carrying those labels. Unpinned caller-selected labels are allocation controls; pin or require labels to prevent omission or reassignment. Removing/readding caps preserves current-window spend."
+      },
+      "MFAChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "totp",
+                "webauthn",
+                "recovery"
+              ]
+            }
+          },
+          "enrollment_required": {
+            "type": "boolean"
+          },
+          "public_key": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "webauthn_available": {
+            "type": "boolean",
+            "description": "Whether the configured public origin supports a DNS WebAuthn relying-party ID and a secure browser context. HTTPS is required outside localhost development."
+          }
+        },
+        "required": [
+          "challenge",
+          "expires_at",
+          "methods",
+          "enrollment_required",
+          "public_key"
+        ]
+      },
+      "ExternalCredentialReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "store",
+          "secret_id",
+          "version"
+        ],
+        "properties": {
+          "store": {
+            "type": "string",
+            "enum": [
+              "aws",
+              "gcp",
+              "azure",
+              "vault"
+            ]
+          },
+          "secret_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "field": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+      },
+      "GuardrailEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "guardrail_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "redact",
+              "mask",
+              "annotate"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "blocked",
+              "redacted",
+              "masked",
+              "annotated",
+              "monitored",
+              "failed_open",
+              "failed_closed",
+              "skipped"
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "guardrail_id",
+          "revision",
+          "phase",
+          "action",
+          "outcome",
+          "latency_ms"
+        ]
+      },
+      "ResponseCachePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "semantic"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "key",
+              "project",
+              "route"
+            ],
+            "default": "key"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 604800,
+            "default": 3600
+          },
+          "max_entry_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16777216,
+            "default": 1048576
+          },
+          "streaming": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "bypass"
+            ],
+            "default": "replay"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "generation",
+                "embeddings",
+                "rerank",
+                "moderation"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "count_hits_against": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "tokens",
+                "budgets"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "embedding_route": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "allow_unsealed_vectors": {
+            "type": "boolean"
+          },
+          "allow_multiturn": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "PromptCachePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "system",
+                "tools",
+                "last_user"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "ttl": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "1h"
+            ],
+            "default": "5m"
+          },
+          "key_source": {
+            "type": "string",
+            "enum": [
+              "key",
+              "session"
+            ],
+            "default": "key"
+          },
+          "session_label": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "required": []
+      },
+      "CodeResearchTools": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "description": "Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.",
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "services": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "search",
+                "reader",
+                "zread"
+              ]
+            }
+          }
+        },
+        "required": [
+          "account_id",
+          "services"
+        ]
+      },
+      "AgentToolPin": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalog_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string",
+            "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "read_only",
+              "approval_required"
+            ],
+            "description": "Operator classification of a published tool. Unclassified tools require approval."
+          }
+        },
+        "required": [
+          "server_id",
+          "revision_id",
+          "catalog_digest",
+          "name",
+          "alias"
+        ]
+      },
+      "ToolsetDefinition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentToolPin"
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "tools"
+        ]
+      },
+      "AgentDefinition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "a2a-0.3.0",
+              "a2a-1.0.0"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "card_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
+          },
+          "credential_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/AgentOAuthConfiguration"
+          },
+          "toolset_revisions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "route_revisions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "pricing_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_cost": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "message_price": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "remote_work_bound_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+          },
+          "max_task_continuations": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128,
+            "description": "Maximum observed continuations per task. Defaults to 32."
+          },
+          "task_deadline_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "Maximum gateway task duration in seconds. Defaults to 600."
+          }
+        },
+        "required": [
+          "protocol",
+          "endpoint",
+          "card_digest",
+          "toolset_revisions",
+          "route_revisions",
+          "pricing_revision_id",
+          "max_cost"
+        ]
+      },
+      "PromptDefinition": {
+        "type": "object",
+        "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
+        "additionalProperties": false,
+        "properties": {
+          "template": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "variables": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+            },
+            "maxItems": 256
+          },
+          "messages": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/PromptMessage"
+            }
+          },
+          "variable_schema": {
+            "$ref": "#/components/schemas/PromptVariableSchema"
+          },
+          "default_parameters": {
+            "$ref": "#/components/schemas/PromptDefaultParameters"
+          }
+        }
+      },
+      "RetrievalBindingFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "search": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Explicit logical metadata keys mapped to native backend fields. Requests cannot use unmapped fields."
+          }
+        }
+      },
+      "PassthroughConfig": {
+        "additionalProperties": false,
+        "description": "Governed pass-through binding. Its presence makes the route a pass-through route, neither strict nor transformed, advertised as uncertified and bound to exactly one connection. Paths are anchored segment patterns where * matches one nonempty segment.",
+        "properties": {
+          "dialect": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Native namespace segment the route serves under /native/{dialect}/routes/{route}/."
+          },
+          "methods": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "HEAD",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ]
+            }
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "query": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "headers": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "acknowledge_opaque_unmetered": {
+            "type": "boolean",
+            "description": "Operator acknowledgement that the bound endpoint may create opaque provider state and unmetered work. Required true."
+          }
+        },
+        "required": [
+          "dialect",
+          "methods",
+          "paths",
+          "acknowledge_opaque_unmetered"
+        ],
+        "type": "object"
+      },
+      "MCPOAuthConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "minLength": 0
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "device_authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "entra_obo": {
+            "$ref": "#/components/schemas/MCPEntraOBO"
+          }
+        },
+        "required": [
+          "client_id",
+          "audience",
+          "scopes",
+          "token_endpoint"
+        ],
+        "description": "Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth."
+      },
+      "MCPGrantHandoff": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enrollment_url": {
+            "type": "string",
+            "description": "One-use browser link. Its secret remains in the URL fragment and must not be logged or retained."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "enrollment_url",
+          "expires_at"
+        ]
+      },
+      "StartMCPGrantEnrollmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "api_key_id"
+        ]
+      },
+      "MCPStdioBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executable",
+          "digest"
+        ],
+        "properties": {
+          "executable": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "MCPDelegationConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "issuer",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "MCPEntraOBO": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issuer"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Exact registered workload issuer trusted for delegated user assertions."
+          }
+        }
+      },
+      "PromptMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "PromptVariableSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "object"
+            ]
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PromptVariableProperty"
+            }
+          },
+          "required": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+            },
+            "uniqueItems": true
+          },
+          "additionalProperties": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "properties",
+          "required",
+          "additionalProperties"
+        ]
+      },
+      "PromptVariableProperty": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "PromptDefaultParameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "top_p": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      },
+      "WorkflowRunLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_iterations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "max_concurrent_runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "max_run_cost": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          }
+        }
+      },
+      "AgentOAuthConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "Required for browser and device OAuth."
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "device_authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "entra_obo": {
+            "$ref": "#/components/schemas/MCPEntraOBO"
+          }
+        },
+        "required": [
+          "client_id",
+          "audience",
+          "scopes",
+          "token_endpoint"
+        ],
+        "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+      },
+      "GatewayExecutionTool": {
+        "type": "object",
+        "properties": {
+          "toolset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "alias": {
+            "type": "string",
+            "description": "Name exposed to the model during gateway execution."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name in the published toolset."
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "read_only",
+              "approval_required"
+            ],
+            "description": "Operator classification. An unclassified tool is reported as approval_required."
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free."
+          }
+        },
+        "required": [
+          "toolset_id",
+          "revision_id",
+          "alias",
+          "name",
+          "classification",
+          "unit_price"
+        ]
+      },
+      "GatewayExecutionCapability": {
+        "type": "object",
+        "description": "Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this surface."
+          },
+          "default_toolsets_allowed": {
+            "type": "boolean",
+            "description": "Whether all default toolsets on the named route can be resolved together for the caller."
+          },
+          "limits": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              }
+            ],
+            "description": "Effective named-route, caller and request limits, including defaults. Delegated legs keep the named route workflow policy."
+          },
+          "certified_modes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "unary",
+                "streaming"
+              ]
+            },
+            "description": "Modes with an enabled non-shadow serving target certified for generation tool calls on the request surface."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GatewayExecutionTool"
+            },
+            "description": "Tools from published toolsets on the named route that the caller may resolve, including their classification and pinned price."
+          }
+        },
+        "required": [
+          "enabled",
+          "default_toolsets_allowed",
+          "limits",
+          "certified_modes",
+          "tools"
+        ]
+      },
+      "BillingScope": {
+        "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PollingBillingScope"
+          },
+          {
+            "$ref": "#/components/schemas/AWSBillingScope"
+          },
+          {
+            "$ref": "#/components/schemas/GoogleBillingScope"
+          },
+          {
+            "$ref": "#/components/schemas/AzureBillingScope"
+          }
+        ]
+      },
+      "PollingBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+            }
+          },
+          "workspace_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "project_ids",
+            "workspace_ids"
+          ]
+        }
+      },
+      "AWSBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payer_account_id",
+          "bucket",
+          "report_prefix",
+          "region"
+        ],
+        "properties": {
+          "payer_account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$"
+          },
+          "bucket": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+          },
+          "report_prefix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "CUR report prefix including the report name"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+          },
+          "linked_account_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            }
+          }
+        }
+      },
+      "GoogleBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "billing_account_id",
+          "bigquery_project_id",
+          "dataset_id",
+          "table_id"
+        ],
+        "properties": {
+          "billing_account_id": {
+            "type": "string"
+          },
+          "bigquery_project_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": "string"
+          },
+          "project_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AzureBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "billing_scope",
+          "export_name",
+          "storage_account",
+          "container"
+        ],
+        "properties": {
+          "billing_scope": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "export_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "storage_account": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{3,24}$"
+          },
+          "container": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 63
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "subscription_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bootstrapSetupToken": {
+        "description": "One-time bootstrap token required only while creating the first installation owner.",
+        "in": "header",
+        "name": "X-OLP-Setup-Token",
+        "type": "apiKey"
+      },
+      "csrfToken": {
+        "description": "Double-submit CSRF token required with authenticated mutations.",
+        "in": "header",
+        "name": "x-csrf-token",
+        "type": "apiKey"
+      },
+      "managementToken": {
+        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "sessionCookie": {
+        "description": "Opaque PostgreSQL-backed management session. Requirement scopes name the management operation the member's role must hold; `installation` also requires an installation-wide access scope.",
+        "in": "cookie",
+        "name": "__Host-olp_session",
+        "type": "apiKey"
+      },
+      "apiKeyBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Gateway API key with models_read scope. Admitted only for consumer catalog reads, with the gateway authority-age, revocation, route and client-address restrictions."
+      }
+    }
+  }
+}

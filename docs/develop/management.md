@@ -5,11 +5,12 @@
 Feature packages own SQL, transactions, validation and audit provenance. Prefer
 concrete types and explicit dependencies, and introduce interfaces only at
 actual substitution boundaries. Package context supplies names instead of
-redundant provider- or protocol-specific aliases. `management/management.json` is
-the management source and `management/document.go` embeds it. `make api`
-generates Go and TypeScript types, console authorization requirements and safe
-SDK, CLI and MCP consumer metadata. Unsupported serializer shapes fail
-generation, and integration tests enforce contract and handler parity.
+redundant provider- or protocol-specific aliases. `make api` combines the
+[contract fragments](#contract-fragments) into `management/management.json`,
+which `management/document.go` embeds. The same command generates Go and
+TypeScript types, console authorization requirements and safe SDK, CLI and MCP
+consumer metadata. Unsupported serializer shapes fail generation, and
+integration tests enforce contract and handler parity.
 
 Callers own logical mutation identity. Console drafts retain submitted payload,
 ETag and Idempotency-Key through ambiguous retries, retire secrets on
@@ -77,12 +78,38 @@ signing for MCP and agent calls. Configure-time validation remains with
 registration over the shared types in `domain/grantconfig`. Registration hands
 `grants/personal` its server lookup through the constructor in `cmd/olp`.
 
+## Contract fragments
+
+The management contract is edited in `management/openapi/`, where every file is
+a partial OpenAPI document.
+
+| File | Content |
+| --- | --- |
+| `<tag>.json` | The paths and webhooks of one tag, and the components that only this tag uses, in a file named for the tag in lower case |
+| `shared.json` | Components that more than one fragment uses, and the security schemes |
+| `document.json` | The `openapi` version, `info` and the operation that serves the contract |
+
+An operation with a tag belongs in the file of its first tag, and a new tag only
+needs a new file. A fragment refers to its own component as
+`#/components/schemas/Name` and to a shared one as
+`./shared.json#/components/schemas/Name`. It cannot refer to another tag's
+fragment, so move a component into `shared.json` when a second fragment needs
+it. Fragments are canonical two-space JSON.
+
+`make api` refuses a path, webhook, component or `operationId` that is defined
+twice. It then runs the [Redocly CLI](https://redocly.com/docs/cli/commands/bundle)
+bundler to write `management/management.json`, which lists paths, webhooks and
+components in name order. Never edit that file by hand. `make check-contracts`
+fails when it differs from what the fragments produce. After a merge conflict in
+it, resolve the fragments and run `make api` again.
+
 ## Adding a management endpoint
 
 Copy `internal/guardrails/credential/api.go`. It is the reference for every
 management endpoint and shows the complete shape in one file.
 
-1. Describe the operation in `management/management.json` and run `make api`.
+1. Describe the operation in its [contract fragment](#contract-fragments) and
+   run `make api`.
    `Route` refuses to start when a registered pattern is missing from the
    contract, and it reads the permission the route needs from there.
 2. Register the handler in the feature's `Register(mux)` with

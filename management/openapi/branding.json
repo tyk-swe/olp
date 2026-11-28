@@ -1,0 +1,192 @@
+{
+  "paths": {
+    "/api/v1/branding": {
+      "get": {
+        "operationId": "get_installation_branding",
+        "summary": "Read the installation name, logo and brand color",
+        "tags": [
+          "branding"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Current installation branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_installation_branding",
+        "summary": "Update the installation name and embedded logo",
+        "tags": [
+          "branding"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInstallationBrandingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "InstallationBrandingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo",
+          "accent",
+          "accent_scale",
+          "etag"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          },
+          "accent": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{6})?$",
+            "description": "Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text."
+          },
+          "accent_scale": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "300",
+              "400",
+              "500",
+              "600",
+              "700"
+            ],
+            "properties": {
+              "300": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "400": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "500": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "600": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              "700": {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              }
+            },
+            "description": "Accessible accent shades derived from accent, or null for the default palette."
+          },
+          "etag": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateInstallationBrandingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo",
+          "accent"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          },
+          "accent": {
+            "type": "string",
+            "pattern": "^(#[0-9a-fA-F]{6})?$",
+            "description": "Empty for the default accent, or a #rrggbb brand color that keeps 4.5:1 contrast under white button text."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,3435 @@
+{
+  "paths": {
+    "/scim/v2/Users": {
+      "get": {
+        "operationId": "scim_users_list",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users list",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "startIndex",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "attributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "excludedAttributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "scim_users_create",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users create",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMUser"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMUser"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Users/.search": {
+      "post": {
+        "operationId": "scim_users_search",
+        "x-olp-read-only": true,
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users search",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMSearch"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMSearch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Users/{scim_id}": {
+      "get": {
+        "operationId": "scim_users_get",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users get",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "excludedAttributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "scim_users_replace",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users replace",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMUser"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMUser"
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "scim_users_patch",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users patch",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMPatch"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "scim_users_delete",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim users delete",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "SCIM operation succeeded."
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Groups": {
+      "get": {
+        "operationId": "scim_groups_list",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups list",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "startIndex",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "attributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "excludedAttributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "scim_groups_create",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups create",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMGroup"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMGroup"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Groups/.search": {
+      "post": {
+        "operationId": "scim_groups_search",
+        "x-olp-read-only": true,
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups search",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMSearch"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMSearch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Groups/{scim_id}": {
+      "get": {
+        "operationId": "scim_groups_get",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups get",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "excludedAttributes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "scim_groups_replace",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups replace",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMGroup"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMGroup"
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "scim_groups_patch",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups patch",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/scim+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMPatch"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCIMPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "scim_groups_delete",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim groups delete",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional strong or weak resource ETag; stale versions fail atomically."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "SCIM operation succeeded."
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/ServiceProviderConfig": {
+      "get": {
+        "operationId": "scim_serviceproviderconfig",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim serviceproviderconfig",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Schemas": {
+      "get": {
+        "operationId": "scim_schemas",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim schemas",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/Schemas/{schema_id}": {
+      "get": {
+        "operationId": "scim_schemas_schema_id",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim schemas schema id",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "schema_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/ResourceTypes": {
+      "get": {
+        "operationId": "scim_resourcetypes",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim resourcetypes",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scim/v2/ResourceTypes/{scim_type}": {
+      "get": {
+        "operationId": "scim_resourcetypes_scim_type",
+        "tags": [
+          "scim"
+        ],
+        "summary": "scim resourcetypes scim type",
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scim_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SCIM operation succeeded.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SCIM error; driver details and request values are not echoed.",
+            "content": {
+              "application/scim+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scim/groups": {
+      "get": {
+        "operationId": "list_scim_groups",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMManagedGroupList"
+                }
+              }
+            },
+            "description": "Budget groups visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "scim"
+        ],
+        "summary": "List SCIM group access mappings",
+        "description": "Owner-managed workload issuer, with identity-egress JWKS verification and first-match claim mappings. Enabled writes validate public signing keys. Issuer URLs are immutable; disable an issuer without needing a working endpoint. Subject and mapping/project bindings are stable. No bearer token or raw subject is returned or stored."
+      }
+    },
+    "/api/v1/scim/groups/{scim_id}/mapping": {
+      "put": {
+        "operationId": "update_scim_group_mapping",
+        "parameters": [
+          {
+            "description": "Current budget group ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mapping"
+                ],
+                "properties": {
+                  "mapping": {
+                    "$ref": "#/components/schemas/SCIMGroupAccess"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMManagedGroup"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the keys permission or project manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "scim"
+        ],
+        "summary": "Replace SCIM group role and project grants",
+        "description": "Owner-managed mapping for a provisioned group. Requires Access, a quoted ETag and current installation authority. Group membership changes reconcile these grants, preserve direct project memberships, revoke affected managed-user sessions and protect the last usable owner. SCIM PUT preserves an omitted OLP extension; an explicit extension replaces it."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SCIMError": {
+        "type": "object",
+        "required": [
+          "schemas",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[45][0-9]{2}$"
+          },
+          "scimType": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMMeta": {
+        "type": "object",
+        "properties": {
+          "resourceType": {
+            "type": "string"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastModified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "location": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMUserAccess": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "developer",
+              "viewer"
+            ],
+            "default": "viewer"
+          },
+          "accessScope": {
+            "type": "string",
+            "enum": [
+              "assigned",
+              "global"
+            ],
+            "default": "assigned"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMGroupAccess": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "operator",
+              "developer",
+              "viewer"
+            ]
+          },
+          "accessScope": {
+            "type": "string",
+            "enum": [
+              "assigned",
+              "global"
+            ],
+            "default": "assigned"
+          },
+          "projects": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "required": [
+                "value",
+                "role"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "viewer",
+                    "manager"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMUser": {
+        "type": "object",
+        "required": [
+          "schemas",
+          "userName"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "externalId": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "userName": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          },
+          "name": {
+            "type": "object",
+            "properties": {
+              "formatted": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "familyName": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "givenName": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "middleName": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "honorificPrefix": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "honorificSuffix": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "additionalProperties": false
+          },
+          "emails": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "display": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "$ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "groups": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "display": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "$ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "roles": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "display": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "$ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SCIMMeta"
+          },
+          "urn:openllmproxy:params:scim:schemas:extension:2.0:User": {
+            "$ref": "#/components/schemas/SCIMUserAccess"
+          }
+        },
+        "additionalProperties": true,
+        "description": "SCIM-managed federated user. Attribute names are case-insensitive; ambiguous duplicates are refused. userName is a unique email. Roles/groups are computed read-only values. The OLP extension provides base grants; groups add grants. Password provisioning is unsupported. Local takeover prevents subsequent SCIM writes."
+      },
+      "SCIMGroup": {
+        "type": "object",
+        "required": [
+          "schemas",
+          "displayName"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "externalId": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "members": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "display": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "$ref": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SCIMMeta"
+          },
+          "urn:openllmproxy:params:scim:schemas:extension:2.0:Group": {
+            "$ref": "#/components/schemas/SCIMGroupAccess"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Flat group of SCIM users. Group role/scope grants combine with base user grants; project grants are inherited independently of direct membership."
+      },
+      "SCIMDocument": {
+        "type": "object",
+        "required": [
+          "schemas"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          }
+        },
+        "additionalProperties": true
+      },
+      "SCIMList": {
+        "type": "object",
+        "required": [
+          "schemas",
+          "totalResults",
+          "startIndex",
+          "itemsPerPage",
+          "Resources"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "totalResults": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "startIndex": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "itemsPerPage": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "Resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCIMDocument"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMPatch": {
+        "type": "object",
+        "required": [
+          "schemas",
+          "Operations"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "Operations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "required": [
+                "op"
+              ],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "add",
+                    "remove",
+                    "replace",
+                    "Add",
+                    "Remove",
+                    "Replace"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "value": {}
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "SCIMSearch": {
+        "type": "object",
+        "required": [
+          "schemas"
+        ],
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "filter": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "startIndex": {
+            "type": "integer"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64
+          },
+          "excludedAttributes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64
+          },
+          "sortBy": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "sortOrder": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      },
+      "SCIMManagedGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "external_id",
+          "mapping",
+          "etag",
+          "member_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mapping": {
+            "$ref": "#/components/schemas/SCIMGroupAccess"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "member_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SCIMManagedGroupList": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCIMManagedGroup"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

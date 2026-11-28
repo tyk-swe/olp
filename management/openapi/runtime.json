@@ -1,0 +1,132 @@
+{
+  "paths": {
+    "/api/v1/runtime-generations": {
+      "get": {
+        "description": "Runtime generations span every project and name their publishers, so listing them requires an installation-wide access scope.",
+        "operationId": "list_runtime_generations",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeGenerationListResponse"
+                }
+              }
+            },
+            "description": "Runtime generations"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "runtime"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RuntimeGenerationItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "sha256",
+          "created_by",
+          "created_by_email",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "RuntimeGenerationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeGenerationItem"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

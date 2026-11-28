@@ -1,0 +1,198 @@
+{
+  "paths": {
+    "/api/v1/cache/purge": {
+      "post": {
+        "operationId": "purge_response_cache",
+        "tags": [
+          "cache"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CachePurgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "purged": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "purged"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid request"
+          },
+          "503": {
+            "description": "Cache unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/cache/statistics": {
+      "get": {
+        "operationId": "get_response_cache_statistics",
+        "tags": [
+          "cache"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheStatistics"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid request"
+          },
+          "503": {
+            "description": "Cache unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CachePurgeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "route_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Supply exactly one route_id or project_id."
+      },
+      "CacheStatistics": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "requests": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hits": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "misses": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "bypasses": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "avoided_costs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "currency": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "currency",
+                "amount"
+              ]
+            }
+          }
+        },
+        "required": [
+          "configured",
+          "requests",
+          "hits",
+          "misses",
+          "bypasses",
+          "avoided_costs"
+        ]
+      }
+    }
+  }
+}

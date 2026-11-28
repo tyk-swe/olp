@@ -1,0 +1,509 @@
+{
+  "paths": {
+    "/api/v1/playground": {
+      "post": {
+        "operationId": "execute_playground",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaygroundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaygroundResponse"
+                }
+              }
+            },
+            "description": "Ephemeral session-authorized generation result"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF, origin, or role check failed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request or route is invalid"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider response is invalid"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No healthy eligible target"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "playground"
+            ]
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
+          }
+        ],
+        "tags": [
+          "playground"
+        ]
+      }
+    },
+    "/api/v1/playground/stream": {
+      "post": {
+        "description": "Generation-only streaming playground: each transient provider frame is wrapped as `event: frame`, then a metadata-only `event: done` or `event: error` terminates the stream. Frames and prompts are never stored.",
+        "operationId": "stream_playground",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaygroundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Management SSE stream of provider frames followed by a terminal event"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF, origin, or role check failed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request or route is invalid"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No healthy eligible target"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "playground"
+            ]
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
+          }
+        ],
+        "tags": [
+          "playground"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PlaygroundRequest": {
+        "properties": {
+          "input": {
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "generation",
+              "token_count",
+              "embeddings",
+              "moderation",
+              "rerank"
+            ],
+            "type": "string"
+          },
+          "request": {
+            "additionalProperties": true,
+            "description": "Optional raw public request body; its model is replaced by the top-level route model and it cannot be combined with input, tools, response_format, temperature or max_output_tokens.",
+            "type": "object"
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "response_format": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlaygroundResponseFormat"
+              }
+            ]
+          },
+          "routing": {
+            "$ref": "./shared.json#/components/schemas/RoutingPreferences"
+          },
+          "surface": {
+            "type": "string"
+          },
+          "temperature": {
+            "format": "float",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundToolRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "PlaygroundResponse": {
+        "properties": {
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output_text": {
+            "type": "string"
+          },
+          "provider_model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refusal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response": {
+            "description": "Parsed non-generation operation result (embeddings, moderation, rerank, token count)."
+          },
+          "response_raw": {
+            "type": "string",
+            "description": "Original native JSON response bytes for an ephemeral non-generation playground result. Exact number tokens, ordering and storage representation remain available beside the interpreted view."
+          },
+          "routing": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/RoutingDecision"
+            },
+            "type": "array"
+          },
+          "structured_output": {},
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundToolCall"
+            },
+            "type": "array"
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlaygroundUsage"
+              }
+            ]
+          }
+        },
+        "required": [
+          "routing",
+          "id",
+          "model",
+          "output_text",
+          "tool_calls",
+          "latency_ms"
+        ],
+        "type": "object"
+      },
+      "PlaygroundResponseFormat": {
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "json_object"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "schema": {},
+              "strict": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "type": {
+                "enum": [
+                  "json_schema"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "schema",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "PlaygroundToolCall": {
+        "properties": {
+          "arguments": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "arguments"
+        ],
+        "type": "object"
+      },
+      "PlaygroundToolRequest": {
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input_schema": {},
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "input_schema"
+        ],
+        "type": "object"
+      },
+      "PlaygroundUsage": {
+        "properties": {
+          "cached_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasoning_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "total_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "training_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "storage_byte_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact byte-seconds, without monetary rounding."
+          },
+          "cache_token_seconds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact cached token-seconds."
+          },
+          "container_sessions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

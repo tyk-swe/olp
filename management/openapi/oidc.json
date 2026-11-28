@@ -1,0 +1,851 @@
+{
+  "paths": {
+    "/api/v1/oidc/callback": {
+      "get": {
+        "operationId": "callback",
+        "parameters": [
+          {
+            "description": "Authorization code",
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One-time flow identifier and state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider error code",
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "OIDC login, identity link, or recent authentication completed"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid or rejected callback"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ID token validation or initiating session failed"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Fresh identity did not match the initiating local account"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Explicit link required or identity already linked"
+          }
+        },
+        "security": [],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/configuration": {
+      "get": {
+        "operationId": "get_configuration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcConfigurationResponse"
+                }
+              }
+            },
+            "description": "Redacted single-provider OIDC configuration"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active session"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only owners can manage OIDC"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC is not configured"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      },
+      "put": {
+        "operationId": "put_configuration",
+        "parameters": [
+          {
+            "description": "Required UUID ETag when updating",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcConfigurationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcConfigurationResponse"
+                }
+              }
+            },
+            "description": "OIDC configuration updated"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcConfigurationResponse"
+                }
+              }
+            },
+            "description": "OIDC configuration created"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Discovery or configuration validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/identities": {
+      "get": {
+        "operationId": "list_identities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcIdentityListResponse"
+                }
+              }
+            },
+            "description": "OIDC identities and authentication methods for the current account"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active session"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/identities/{identity_id}": {
+      "delete": {
+        "operationId": "unlink_identity",
+        "parameters": [
+          {
+            "description": "Linked identity ID",
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Identity unlinked and session rotated"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active session"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF or origin check failed"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Identity not linked to this account"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unlink would remove the final authentication method"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Recent authentication is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/link": {
+      "post": {
+        "operationId": "begin_link",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/OidcAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Authorization URL for explicit identity linking"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active local session"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF or origin check failed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Recent authentication is required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC authorization flow creation is rate limited"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/login": {
+      "get": {
+        "operationId": "begin_login",
+        "parameters": [
+          {
+            "description": "Validated same-origin relative destination after login",
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Redirect to the configured identity provider"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC is not configured or enabled"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC login flow creation is rate limited"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC dependency unavailable"
+          }
+        },
+        "security": [],
+        "tags": [
+          "oidc"
+        ]
+      },
+      "post": {
+        "operationId": "begin_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/OidcLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/OidcAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Authorization URL for OIDC login"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Origin check failed"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC is not configured or enabled"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC login flow creation is rate limited"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC dependency unavailable"
+          }
+        },
+        "security": [],
+        "summary": "Same-origin initiation used by the console so failures remain styled API\nproblems instead of becoming raw navigation responses. The GET endpoint is\nretained for ordinary OAuth top-level navigation compatibility.",
+        "tags": [
+          "oidc"
+        ]
+      }
+    },
+    "/api/v1/oidc/reauthenticate": {
+      "post": {
+        "operationId": "begin_reauthentication",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/OidcReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/OidcAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Authorization URL for fresh IdP authentication"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid operation scope"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No active local session"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "CSRF or origin check failed"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "OIDC authorization flow creation is rate limited"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "self"
+            ]
+          }
+        ],
+        "tags": [
+          "oidc"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OidcConfigurationRequest": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true
+          },
+          "default_role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discovery_url": {
+            "type": "string"
+          },
+          "email_claim": {
+            "type": "string"
+          },
+          "email_role_mappings": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/OidcRoleMappingRequest"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "group_role_mappings": {
+            "items": {
+              "$ref": "./shared.json#/components/schemas/OidcRoleMappingRequest"
+            },
+            "type": "array"
+          },
+          "groups_claim": {
+            "type": "string"
+          },
+          "issuer": {
+            "description": "Issuer identifier configured out-of-band with the identity provider.\nDiscovery must return this exact value.",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "discovery_url",
+          "issuer",
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "OidcConfigurationResponse": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "default_role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discovery_url": {
+            "type": "string"
+          },
+          "email_claim": {
+            "type": "string"
+          },
+          "email_role_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/OidcRoleMappingResponse"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "group_role_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/OidcRoleMappingResponse"
+            },
+            "type": "array"
+          },
+          "groups_claim": {
+            "type": "string"
+          },
+          "has_client_secret": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_by_email": {
+            "description": "Email of the operator who last saved this configuration.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "discovery_url",
+          "issuer",
+          "client_id",
+          "has_client_secret",
+          "enabled",
+          "scopes",
+          "email_claim",
+          "groups_claim",
+          "email_role_mappings",
+          "group_role_mappings",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "OidcIdentityListResponse": {
+        "properties": {
+          "has_local_password": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OidcIdentityResponse"
+            },
+            "type": "array"
+          },
+          "linking_available": {
+            "type": "boolean"
+          },
+          "oidc_reauthentication_available": {
+            "description": "A linked identity is usable with the current OIDC configuration. Reauthentication still verifies the exact identity and session.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "linking_available",
+          "has_local_password"
+        ],
+        "type": "object"
+      },
+      "OidcIdentityResponse": {
+        "properties": {
+          "can_unlink": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "email_at_link": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "last_login_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "issuer",
+          "created_at",
+          "can_unlink"
+        ],
+        "type": "object"
+      },
+      "OidcRoleMappingResponse": {
+        "properties": {
+          "claim_value": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_value",
+          "role"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

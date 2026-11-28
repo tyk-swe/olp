@@ -13,6 +13,7 @@ export const versionCopies = [
   ['deploy/compose.yaml', (text) => /ghcr\.io\/tyk-swe\/olp:([^}\s]+)/.exec(text)?.[1]],
   ['docs/operate/deployment.md', (text) => /^VERSION=(\S+)$/m.exec(text)?.[1]],
   ['docs/use/plugins.md', (text) => /^FROM ghcr\.io\/tyk-swe\/olp:(\S+)$/m.exec(text)?.[1]],
+  ['management/openapi/document.json', (text) => json(text).info?.version],
   ['management/management.json', (text) => json(text).info?.version]
 ];
 

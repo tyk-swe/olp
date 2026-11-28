@@ -1,0 +1,256 @@
+{
+  "paths": {
+    "/api/v1/audit": {
+      "get": {
+        "operationId": "list_audit_events",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exact audit action, such as `provider.update`.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact resource type, such as `provider`.",
+            "in": "query",
+            "name": "resource_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact resource identifier, as recorded on the event.",
+            "in": "query",
+            "name": "resource_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identifier of the acting user.",
+            "in": "query",
+            "name": "actor_user_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact outcome, `success` or `failure`.",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Oldest event to return, inclusive.",
+            "in": "query",
+            "name": "occurred_after",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Newest event to return, inclusive.",
+            "in": "query",
+            "name": "occurred_before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditListResponse"
+                }
+              }
+            },
+            "description": "Audit page"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid time range"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "read",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "audit"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AuditEventResponse": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor_label": {
+            "description": "Actor display label: the user's email or the management token's name.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor_management_token_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor_type": {
+            "enum": [
+              "user",
+              "management_token",
+              "system"
+            ],
+            "type": "string"
+          },
+          "actor_user_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "source_ip": {
+            "description": "Source address recorded for the request, when the boundary supplied one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_agent_family": {
+            "description": "Coarse user-agent family; the full user-agent string is never stored.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "actor_type",
+          "resource_type",
+          "outcome",
+          "occurred_at"
+        ],
+        "type": "object"
+      },
+      "AuditListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

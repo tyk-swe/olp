@@ -1,0 +1,262 @@
+{
+  "paths": {
+    "/api/v1/overview": {
+      "get": {
+        "operationId": "overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewResponse"
+                }
+              }
+            },
+            "description": "Aggregate provider, model, route, and API-key counts for the console overview"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup": {
+      "post": {
+        "operationId": "setup",
+        "parameters": [
+          {
+            "description": "One-time bootstrap token from OLP_BOOTSTRAP_TOKEN_FILE",
+            "in": "header",
+            "name": "X-OLP-Setup-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Owner and session created"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bootstrap token missing, unreadable, or wrong"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Setup already completed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Password work is rate limited"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "PostgreSQL unavailable"
+          }
+        },
+        "security": [
+          {
+            "bootstrapSetupToken": []
+          }
+        ],
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/status": {
+      "get": {
+        "operationId": "setup_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            },
+            "description": "Installation setup state"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "PostgreSQL unavailable"
+          }
+        },
+        "security": [],
+        "tags": [
+          "setup"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OverviewResponse": {
+        "additionalProperties": false,
+        "description": "Aggregate counts the console overview needs; one round-trip instead of paginating every collection.",
+        "properties": {
+          "active_providers": {
+            "description": "Providers with a published active revision.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "active_routes": {
+            "description": "Published routes serving inference traffic.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled_models": {
+            "description": "Provider models marked eligible for routes.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usable_api_key": {
+            "description": "Whether at least one API key has not been revoked, including expired keys.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active_providers",
+          "active_routes",
+          "enabled_models",
+          "usable_api_key"
+        ],
+        "type": "object"
+      },
+      "SetupRequest": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "installation_name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "display_name"
+        ],
+        "type": "object"
+      },
+      "SetupStatus": {
+        "description": "Unauthenticated first-run probe. It deliberately carries nothing but\nbooleans: the installation name is an authenticated detail the console reads\nfrom `SessionResponse`.",
+        "properties": {
+          "bootstrap_token_configured": {
+            "description": "Whether the server can read a bootstrap token, without revealing it",
+            "type": "boolean"
+          },
+          "setup_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bootstrap_token_configured",
+          "setup_required"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

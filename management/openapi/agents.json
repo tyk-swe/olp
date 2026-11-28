@@ -1,0 +1,4293 @@
+{
+  "paths": {
+    "/api/v1/toolsets": {
+      "get": {
+        "operationId": "list_toolsets",
+        "tags": [
+          "agents"
+        ],
+        "summary": "list toolsets",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_toolset",
+        "tags": [
+          "agents"
+        ],
+        "summary": "create toolset",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/toolsets/{publication_id}": {
+      "get": {
+        "operationId": "get_toolset",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get toolset",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_toolset",
+        "tags": [
+          "agents"
+        ],
+        "summary": "update toolset",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "retire_toolset",
+        "tags": [
+          "agents"
+        ],
+        "summary": "retire toolset",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/toolsets/{publication_id}/publish": {
+      "post": {
+        "operationId": "publish_toolset",
+        "tags": [
+          "agents"
+        ],
+        "summary": "publish toolset",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/toolsets/{publication_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_toolset_revision",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get toolset revision",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationRevision"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/agents": {
+      "get": {
+        "operationId": "list_agents",
+        "tags": [
+          "agents"
+        ],
+        "summary": "list agents",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_agent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "create agent",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{publication_id}": {
+      "get": {
+        "operationId": "get_agent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get agent",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_agent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "update agent",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "retire_agent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "retire agent",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{publication_id}/publish": {
+      "post": {
+        "operationId": "publish_agent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "publish agent",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{publication_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_agent_revision",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get agent revision",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationRevision"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts": {
+      "get": {
+        "operationId": "list_prompts",
+        "tags": [
+          "agents"
+        ],
+        "summary": "list prompts",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_prompt",
+        "tags": [
+          "agents"
+        ],
+        "summary": "create prompt",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{publication_id}": {
+      "get": {
+        "operationId": "get_prompt",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get prompt",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_prompt",
+        "tags": [
+          "agents"
+        ],
+        "summary": "update prompt",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPublicationWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "retire_prompt",
+        "tags": [
+          "agents"
+        ],
+        "summary": "retire prompt",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{publication_id}/publish": {
+      "post": {
+        "operationId": "publish_prompt",
+        "tags": [
+          "agents"
+        ],
+        "summary": "publish prompt",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{publication_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_prompt_revision",
+        "tags": [
+          "agents"
+        ],
+        "summary": "get prompt revision",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublicationRevision"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/prompts/{publication_id}/labels/{label}": {
+      "put": {
+        "operationId": "set_prompt_label",
+        "tags": [
+          "agents"
+        ],
+        "summary": "set prompt label",
+        "description": "Project-owned metadata-only draft/publication management. Does not execute tools or agents. Immutable revisions pin reviewed authority; live revocation overrides publication.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "publication_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "production",
+                "staging"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Publication metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPublication"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptLabelWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/delegation-consents": {
+      "post": {
+        "operationId": "create_delegation_consent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegationConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationConsent"
+                }
+              }
+            },
+            "description": "One-time member consent created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/delegation-options": {
+      "get": {
+        "operationId": "get_delegation_options",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eligible agents and currently authorized inference routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project management permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authority is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          }
+        ],
+        "summary": "List eligible agents and routes for member consent"
+      }
+    },
+    "/api/v1/agents/{agent_id}/grant-enrollments": {
+      "post": {
+        "operationId": "start_agent_grant_enrollment",
+        "tags": [
+          "agents"
+        ],
+        "summary": "start agent grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/MCPGrantHandoff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./shared.json#/components/schemas/StartMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/agent-runs": {
+      "get": {
+        "operationId": "list_agent_runs",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List gateway runs",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List gateway runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-runs/{run_id}": {
+      "get": {
+        "operationId": "get_agent_run",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get a gateway run",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get a gateway run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-runs/{run_id}/spans": {
+      "get": {
+        "operationId": "list_agent_run_spans",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List correlated run spans",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "span_id",
+            "in": "query",
+            "required": false,
+            "description": "Return only the referenced internal span UUID within this run.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List correlated run spans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunSpanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/investigations": {
+      "get": {
+        "operationId": "list_investigations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List investigations",
+        "description": "Investigations visible to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Save an investigation",
+        "description": "Store typed filters, bounded evidence references and an operator-authored summary. Source payloads are not accepted.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Investigation saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Path of the investigation",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or unsupported fields"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Idempotency key conflict"
+          },
+          "422": {
+            "description": "Invalid investigation, filters or evidence references"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestigationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investigations/{investigation_id}": {
+      "get": {
+        "operationId": "get_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an investigation",
+        "description": "Requires current project access; referenced evidence is accessed separately under its own current authority check.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/a2a-tasks": {
+      "get": {
+        "operationId": "list_a2a_tasks",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List A2A tasks",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List A2A tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}": {
+      "get": {
+        "operationId": "get_a2a_task",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an A2A task",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an A2A task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-delegations": {
+      "get": {
+        "operationId": "list_agent_delegations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List delegations",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List delegations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDelegationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentPublicationDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required owning UUID in management writes. Configuration promotion rebinds this field from its explicit project name."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "toolset": {
+            "$ref": "./shared.json#/components/schemas/ToolsetDefinition"
+          },
+          "agent": {
+            "$ref": "./shared.json#/components/schemas/AgentDefinition"
+          },
+          "prompt": {
+            "$ref": "./shared.json#/components/schemas/PromptDefinition"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ]
+      },
+      "AgentPublicationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "toolset": {
+            "$ref": "./shared.json#/components/schemas/ToolsetDefinition"
+          },
+          "agent": {
+            "$ref": "./shared.json#/components/schemas/AgentDefinition"
+          },
+          "prompt": {
+            "$ref": "./shared.json#/components/schemas/PromptDefinition"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192,
+            "writeOnly": true,
+            "description": "Bearer credential; absent preserves, null removes. Never returned."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ]
+      },
+      "AgentPublicationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "toolset",
+              "agent",
+              "prompt"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "retired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "kind",
+          "name",
+          "etag",
+          "revision_id",
+          "retired"
+        ]
+      },
+      "AgentPublication": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "toolset",
+              "agent",
+              "prompt"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "retired": {
+            "type": "boolean"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/AgentPublicationDraft"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "kind",
+          "name",
+          "etag",
+          "revision_id",
+          "retired",
+          "draft"
+        ]
+      },
+      "AgentPublicationRevision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "toolset",
+              "agent",
+              "prompt"
+            ]
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/AgentPublicationDraft"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "production",
+                "staging"
+              ]
+            },
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "id",
+          "publication_id",
+          "project_id",
+          "kind",
+          "digest",
+          "definition",
+          "current",
+          "labels"
+        ]
+      },
+      "AgentPublicationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentPublicationSummary"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "PromptLabelWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "revision_id"
+        ]
+      },
+      "DelegationConsent": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "description": "One-use consent code, shown only once and bound to the selected agent.",
+            "type": "string"
+          },
+          "delegation_pair_digest": {
+            "description": "Stable pair budget ID for this delegation.",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consent",
+          "expires_at",
+          "delegation_pair_digest"
+        ],
+        "type": "object"
+      },
+      "DelegationConsentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "allowed_agents": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_routes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_toolsets": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "api_key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "inference",
+                "tools",
+                "agents"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "ttl_seconds": {
+            "maximum": 900,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "api_key_id"
+        ],
+        "type": "object"
+      },
+      "DelegationOptions": {
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelegationOption"
+            }
+          }
+        }
+      },
+      "DelegationOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "allowed_routes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "allowed_routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Active inference routes currently allowed by both the key and the agent."
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published toolsets currently allowed by both the key and the agent."
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agents currently allowed by both the key and the workload."
+          }
+        }
+      },
+      "AgentRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free gateway run metadata.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "project_id",
+          "revision_id",
+          "route_revision_id",
+          "created_at"
+        ]
+      },
+      "AgentRunStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api",
+              "model",
+              "tool",
+              "agent"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "bound_violation": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tool_alias": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool alias, if a tool call exists."
+          },
+          "tool_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool call execution status."
+          },
+          "tool_is_error": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the tool returned an error result."
+          },
+          "pricing_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              null
+            ],
+            "description": "Recorded tool pricing state; unpriced amounts are unknown."
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_id",
+          "ordinal",
+          "kind",
+          "state",
+          "currency",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "bound_violation",
+          "created_at",
+          "tool_alias",
+          "tool_status",
+          "tool_is_error",
+          "pricing_state"
+        ]
+      },
+      "AgentRunApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Approval metadata without tokens or content.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "dispatch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "expires_at",
+          "consumed_at",
+          "dispatch_id"
+        ]
+      },
+      "AgentRunSpan": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Correlated span metadata without messages, arguments, results or rendered prompts.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "span_id": {
+            "type": "string"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "string"
+          },
+          "ended_nanos": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "received_at"
+        ]
+      },
+      "AgentRunDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunStep"
+            }
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunApproval"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "project_id",
+          "revision_id",
+          "route_revision_id",
+          "created_at",
+          "steps",
+          "approvals"
+        ]
+      },
+      "AgentRunList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRun"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AgentRunSpanList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunSpan"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "description": "Correlated spans, ordered by start time and ID from newest to oldest."
+      },
+      "InvestigationFilters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "min_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [],
+        "description": "Typed filters used to investigate agent evidence."
+      },
+      "InvestigationEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
+      },
+      "InvestigationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidence"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "project_id",
+          "filters",
+          "evidence",
+          "summary"
+        ],
+        "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+      },
+      "Investigation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidenceView"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "filters",
+          "evidence",
+          "summary",
+          "created_at"
+        ]
+      },
+      "InvestigationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Investigation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "InvestigationEvidenceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The associated run, when this step, approval or span is still retained."
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads."
+      },
+      "A2ATask": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free remote task metadata.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id"
+        ]
+      },
+      "A2ATaskRemoteFee": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A remote message fee and its unresolved exposure.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "created_at"
+        ]
+      },
+      "A2ATaskDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free task and associated remote message fees.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remote_fees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskRemoteFee"
+            }
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          },
+          "callback_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskModelCallback"
+            }
+          },
+          "callback_tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskToolCallback"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "remote_fees",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id",
+          "callback_models",
+          "callback_tools"
+        ]
+      },
+      "A2ATaskList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATask"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AgentDelegation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free delegation principals, revocation and pair budget.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "member_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "consent_pending": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "api_key_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "agent_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "budget_policy": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "./shared.json#/components/schemas/AggregateBudgetUsage"
+          },
+          "member_authorized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Current authority of the consenting member, or null for key delegation."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "agent_id",
+          "member_id",
+          "consent_pending",
+          "expires_at",
+          "consumed_at",
+          "revoked_at",
+          "api_key_revoked_at",
+          "agent_revoked_at",
+          "budget_policy",
+          "budget",
+          "member_authorized"
+        ]
+      },
+      "AgentDelegationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentDelegation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "A2ATaskModelCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "not_billable",
+              "outcome_unknown",
+              "unpriced",
+              "uncharged",
+              "free",
+              "priced"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "request_id",
+          "attempt_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "A2ATaskToolCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "pricing_state": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              "unknown"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "pricing_state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      }
+    }
+  }
+}

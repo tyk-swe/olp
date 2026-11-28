@@ -19,11 +19,12 @@ Go formatting, vet and lint, console formatting, types and lint, then the unit
 tier. CI runs each suite as its own job, named after its make target.
 
 `make check-contracts` generates temporary outputs and compares all tracked
-management, guardrail and inference artifacts with the working tree. It accepts
-correct uncommitted generated changes and reports stale or missing files with
-an instruction to run `make api`. `make check-console` regenerates ignored
-console types before validating them. Checks may write ignored caches and build
-metadata, but they do not rewrite tracked files.
+management, guardrail and inference artifacts, including the combined
+`management/management.json`, with the working tree. It accepts correct
+uncommitted generated changes and reports files that are stale, edited by hand or
+missing with an instruction to run `make api`. `make check-console` regenerates
+ignored console types before validating them. Checks may write ignored caches and
+build metadata, but they do not rewrite tracked files.
 
 ## Budgets
 

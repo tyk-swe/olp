@@ -1,7 +1,4 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-
-const repoRoot = resolve(import.meta.dirname, '..');
 
 export function operationsFrom(document) {
   const resolveRef = (value) => {
@@ -129,9 +126,7 @@ export function operationsFrom(document) {
 }
 
 if (import.meta.main) {
-  const document = JSON.parse(readFileSync(join(repoRoot, 'management/management.json'), 'utf8'));
-  writeFileSync(
-    process.argv[2] ?? join(repoRoot, 'management/operations.gen.json'),
-    JSON.stringify(operationsFrom(document), null, 2) + '\n'
-  );
+  const [contract, output] = process.argv.slice(2);
+  const document = JSON.parse(readFileSync(contract, 'utf8'));
+  writeFileSync(output, JSON.stringify(operationsFrom(document), null, 2) + '\n');
 }

@@ -1,0 +1,2267 @@
+{
+  "paths": {
+    "/api/v1/api-keys": {
+      "get": {
+        "operationId": "list_api_keys",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_by",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyListResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "post": {
+        "operationId": "create_api_key",
+        "parameters": [
+          {
+            "description": "Unique creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateApiKeyResponse"
+                }
+              }
+            },
+            "description": "API key created; secret is shown once",
+            "headers": {
+              "Location": {
+                "description": "Path of the created resource",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient role, CSRF, or origin failure"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency conflict or operation in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key, authentication HMAC key, or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}": {
+      "get": {
+        "operationId": "get_api_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyDetailResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "patch": {
+        "operationId": "update_api_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyMutationResponse"
+                }
+              }
+            },
+            "description": "API-key policy updated and runtime published"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/revoke": {
+      "post": {
+        "operationId": "revoke_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique revocation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+                }
+              }
+            },
+            "description": "API key revoked and new runtime published; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause": {
+      "post": {
+        "operationId": "pause_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique pause key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key paused and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/resume": {
+      "post": {
+        "operationId": "resume_api_key",
+        "parameters": [
+          {
+            "description": "API key ID",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current API-key ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique resume key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseResponse"
+                }
+              }
+            },
+            "description": "API key resumed and new authority generation committed; an identical retry replays this response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "API key not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress, or the key state forbids this change"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/pause-rollout": {
+      "get": {
+        "operationId": "get_api_key_pause_rollout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPauseRolloutResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/rotate": {
+      "post": {
+        "operationId": "rotate_api_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RotateApiKeyRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateApiKeyResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used or is in progress"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Master key, authentication HMAC key, or database unavailable"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{api_key_id}/end-user": {
+      "post": {
+        "operationId": "lookup_end_user",
+        "x-olp-read-only": true,
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Compute an end-user digest in the API key project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "identifier"
+                ],
+                "properties": {
+                  "identifier": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project-scoped identity; the request body is never persisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "end_user_digest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "end_user_digest"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope or CSRF proof",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found in caller scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid identifier",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./shared.json#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyBudgetResponse": {
+        "properties": {
+          "daily": {
+            "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "enforcement_active": {
+            "description": "False when the amounts are stored policy only; accrued values are not live accounting.",
+            "type": "boolean"
+          },
+          "monthly": {
+            "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "unpriced_attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "weekly": {
+            "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ]
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "daily",
+          "monthly",
+          "unpriced_attempts"
+        ],
+        "type": "object"
+      },
+      "ApiKeyBudgetWindowResponse": {
+        "properties": {
+          "accrued": {
+            "type": "string"
+          },
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "window_ends_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "effective_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Effective template/inline cap plus active temporary increases. Permanent editable limit remains separate."
+          },
+          "temporary_increase": {
+            "type": "string",
+            "description": "Active extra USD for this window; never changes accrued spend."
+          },
+          "increase_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Earliest expiration among active increases."
+          }
+        },
+        "required": [
+          "limit",
+          "accrued",
+          "window_ends_at"
+        ],
+        "type": "object"
+      },
+      "ApiKeyDetailResponse": {
+        "properties": {
+          "allow_provider_state": {
+            "description": "Permits stateful provider resources (stored responses, background\njobs, previous_response_id chains) under this key. Provider state may\nretain user content.",
+            "type": "boolean"
+          },
+          "allowed_attribution_keys": {
+            "description": "Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "allowed_routes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ApiKeyBudgetResponse"
+          },
+          "budget_group_id": {
+            "description": "Shared budget group this key spends against; null means key-only budgets.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "description": "The operator who issued this installation-scoped key.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_by_email": {
+            "type": "string"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lookup_id": {
+            "type": "string"
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; null means installation-wide.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rotated_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "priority": {
+            "description": "Admission class of requests that name none; defaults to normal.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "max_priority": {
+            "description": "Highest class a request may choose through X-OLP-Routing; defaults to priority.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "end_user_source": {
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "header",
+              "native",
+              null
+            ]
+          },
+          "end_user_policy": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/EndUserPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_cidrs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix."
+          },
+          "required_attribution_keys": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "description": "Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch."
+          },
+          "attribution_defaults": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 4,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+            },
+            "description": "Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply."
+          },
+          "allowed_route_groups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "maxLength": 100
+            },
+            "maxItems": 64,
+            "uniqueItems": true,
+            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+          },
+          "rotation_interval_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders."
+          },
+          "rotation_due_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "active_overlaps": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "required": [
+                "lookup_id",
+                "expires_at"
+              ],
+              "properties": {
+                "lookup_id": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "last_observed_use": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Key detail only. Latest observed admitted HTTP generation request using this overlap, or null when none was recorded."
+                },
+                "observation_status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "degraded"
+                  ],
+                  "description": "Key detail only. Degraded means that uses of this overlap may have been missed."
+                },
+                "last_recording_error_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Key detail only. Latest request timestamp affected by a recording failure, or null."
+                }
+              }
+            },
+            "description": "Previous secret lookup segments and their remaining authentication deadlines. Key detail also includes best-effort observation evidence. Digests and secrets are never returned."
+          },
+          "route_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiKeyRouteLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "workload_issuer_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret."
+          },
+          "workload_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret."
+          },
+          "workload_mapping": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret."
+          },
+          "effective_limits": {
+            "$ref": "./shared.json#/components/schemas/EndUserLimits",
+            "description": "Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these."
+          },
+          "regional_limits": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "lookup_id",
+          "name",
+          "project_id",
+          "project_name",
+          "budget_group_id",
+          "created_by",
+          "created_by_email",
+          "scopes",
+          "allowed_routes",
+          "allow_provider_state",
+          "budget",
+          "etag",
+          "created_at",
+          "allowed_attribution_keys",
+          "response_metadata",
+          "regional_limits"
+        ],
+        "type": "object"
+      },
+      "ApiKeyListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyDetailResponse"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ApiKeyMutationResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "etag",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          }
+        },
+        "required": [
+          "etag",
+          "paused",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseReplica": {
+        "properties": {
+          "authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "gateway_instance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_instance",
+          "authority_sequence"
+        ],
+        "type": "object"
+      },
+      "ApiKeyPauseRolloutResponse": {
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "paused_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_authority_sequence": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "replicas": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyPauseReplica"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enforced",
+          "paused",
+          "replicas"
+        ],
+        "type": "object"
+      },
+      "CreateApiKeyRequest": {
+        "properties": {
+          "allow_provider_state": {
+            "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content; defaults to false.",
+            "type": "boolean"
+          },
+          "allowed_attribution_keys": {
+            "description": "Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "allowed_routes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "budget_group_id": {
+            "description": "Shared budget group; must belong to the same project as the key (both may be null).",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Owning project; omit or null for an installation-wide key. Required for assigned principals.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "priority": {
+            "description": "Admission class of requests that name none; defaults to normal.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "max_priority": {
+            "description": "Highest class a request may choose through X-OLP-Routing; defaults to priority.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "end_user_source": {
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "header",
+              "native",
+              null
+            ]
+          },
+          "end_user_policy": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/EndUserPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_cidrs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix."
+          },
+          "required_attribution_keys": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "description": "Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch."
+          },
+          "attribution_defaults": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 4,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+            },
+            "description": "Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply."
+          },
+          "allowed_route_groups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "maxLength": 100
+            },
+            "maxItems": 64,
+            "uniqueItems": true,
+            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+          },
+          "rotation_interval_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders."
+          },
+          "route_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiKeyRouteLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateApiKeyResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lookup_id": {
+            "type": "string"
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          },
+          "secret": {
+            "description": "Returned only by this creation response.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "lookup_id",
+          "secret",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "RotateApiKeyRequest": {
+        "properties": {
+          "budget_group_id": {
+            "description": "Omit to keep the stored group; send null to clear it.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overlap_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "default": 0,
+            "description": "Allow the previous secret for this many seconds, bounded by key expiry. Zero (default) immediately ends all prior overlaps on authority refresh. At most eight previous secrets may overlap; every version shares current policy, counters and budgets. Replay never extends an overlap."
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          }
+        },
+        "type": "object"
+      },
+      "RotateApiKeyResponse": {
+        "properties": {
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lookup_id": {
+            "type": "string"
+          },
+          "runtime_generation": {
+            "$ref": "./shared.json#/components/schemas/RuntimeGenerationResponse"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "overlap_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Previous secret authentication deadline; null for immediate replacement."
+          }
+        },
+        "required": [
+          "id",
+          "lookup_id",
+          "secret",
+          "etag",
+          "runtime_generation"
+        ],
+        "type": "object"
+      },
+      "UpdateApiKeyRequest": {
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "properties": {
+          "allow_provider_state": {
+            "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
+            "type": "boolean"
+          },
+          "allowed_attribution_keys": {
+            "description": "Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "allowed_routes": {
+            "description": "Omit to keep the stored allowlist. Send `[]` to clear it; an empty\nallowlist places no route restriction on the key.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "budget_group_id": {
+            "description": "Omit to keep the stored group; send null to clear it.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "daily_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "requests_per_minute": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true
+          },
+          "tokens_per_minute": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "priority": {
+            "description": "Admission class of requests that name none; defaults to normal.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "max_priority": {
+            "description": "Highest class a request may choose through X-OLP-Routing; defaults to priority.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "./shared.json#/components/schemas/AdmissionPriority"
+              }
+            ]
+          },
+          "end_user_source": {
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "header",
+              "native",
+              null
+            ]
+          },
+          "end_user_policy": {
+            "anyOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/EndUserPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_cidrs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix."
+          },
+          "required_attribution_keys": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "description": "Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch."
+          },
+          "attribution_defaults": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 4,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+            },
+            "description": "Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply."
+          },
+          "allowed_route_groups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "maxLength": 100
+            },
+            "maxItems": 64,
+            "uniqueItems": true,
+            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+          },
+          "rotation_interval_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders."
+          },
+          "route_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiKeyRouteLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit_template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference."
+          },
+          "weekly_cost_limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
+          },
+          "forbid_response_cache": {
+            "type": "boolean",
+            "description": "Forbid response cache lookup and storage for this key."
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "./shared.json#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ApiKeyRouteLimits": {
+        "type": "object",
+        "maxProperties": 100,
+        "propertyNames": {
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+        },
+        "additionalProperties": {
+          "$ref": "./shared.json#/components/schemas/EndUserLimits"
+        },
+        "description": "Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend."
+      },
+      "RegionalRateLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.",
+        "properties": {
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "tokens_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "max_concurrency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      }
+    }
+  }
+}

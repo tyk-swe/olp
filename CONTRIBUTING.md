@@ -49,9 +49,11 @@ each gated on the paths a change touches. The `ci-gate` job fails when any of
 them fails or is cancelled and accepts the ones that were skipped, so it is the
 single check to require on `main`. Dependency, workflow and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
-`management/management.json` is the checked-in source of truth. Update it
-alongside handlers and regenerate with `make api`. Never edit generated Go or
-TypeScript files by hand.
+The fragments in `management/openapi/` are the source of the management
+contract. Update them alongside handlers and regenerate with `make api`, as
+[Contract fragments](docs/develop/management.md#contract-fragments) describes.
+Never edit `management/management.json` or generated Go or TypeScript files by
+hand.
 
 ## Local development
 
@@ -170,11 +172,12 @@ Other version exceptions need a concrete incompatibility and removal condition.
 
 Root `package.json` owns the version. `node scripts/check-release-version.mjs`
 enforces version parity across `console/package.json`, `deploy/helm/Chart.yaml`,
-`deploy/Dockerfile`, `deploy/compose.yaml`, `management/management.json`, the
-two versioned documentation pins in `docs/operate/deployment.md` and
-`docs/use/plugins.md`, and the release tag. The Makefile injects the version
-into the binary. Build Linux amd64 and arm64 images natively because static
-console assets ship separately in the nonroot distroless image.
+`deploy/Dockerfile`, `deploy/compose.yaml`, `management/openapi/document.json`,
+`management/management.json`, the two versioned documentation pins in
+`docs/operate/deployment.md` and `docs/use/plugins.md`, and the release tag. The
+Makefile injects the version into the binary. Build Linux amd64 and arm64 images
+natively because static console assets ship separately in the nonroot distroless
+image.
 
 Platform digests form one candidate index. Packaged image mode, service,
 compose and vulnerability qualification (`scripts/qualify-image.sh`) consumes
