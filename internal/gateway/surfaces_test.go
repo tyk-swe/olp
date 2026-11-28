@@ -641,7 +641,9 @@ func runSurfaceCase(t *testing.T, entry surfaceEntry, condition surfaceCondition
 	if entry.method != http.MethodGet {
 		payload = []byte(body)
 	}
-	return h.record(t, h.do(t.Context(), entry.method, strings.ReplaceAll(entry.path, "{route}", condition.route), condition.key, payload, headers))
+	response := h.do(t.Context(), entry.method, strings.ReplaceAll(entry.path, "{route}", condition.route), condition.key, payload, headers)
+	defer func() { _ = response.Body.Close() }()
+	return h.record(t, response)
 }
 
 func surfaceCaseApplies(entry surfaceEntry, condition surfaceCondition) bool {

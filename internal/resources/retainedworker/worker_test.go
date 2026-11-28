@@ -591,13 +591,13 @@ func TestDrainAndClose(t *testing.T) {
 
 	t.Run("nil body is safe", func(t *testing.T) {
 		t.Parallel()
-		drainAndClose(nil)
+		drainAndClose(&http.Response{})
 	})
 
 	t.Run("drains normal body and closes", func(t *testing.T) {
 		t.Parallel()
 		body := newTrackingBody(bytes.Repeat([]byte("a"), 1024))
-		drainAndClose(body)
+		drainAndClose(&http.Response{Body: body})
 		if body.bytesRead != 1024 || !body.closed {
 			t.Fatalf("drainAndClose read=%d closed=%t, want 1024 and true", body.bytesRead, body.closed)
 		}
@@ -606,7 +606,7 @@ func TestDrainAndClose(t *testing.T) {
 	t.Run("caps draining at 64 KiB and closes", func(t *testing.T) {
 		t.Parallel()
 		body := newTrackingBody(bytes.Repeat([]byte("b"), maxDrainBytes*4))
-		drainAndClose(body)
+		drainAndClose(&http.Response{Body: body})
 		if body.bytesRead != maxDrainBytes || !body.closed {
 			t.Fatalf("drainAndClose read=%d closed=%t, want %d and true", body.bytesRead, body.closed, maxDrainBytes)
 		}
@@ -618,7 +618,7 @@ func TestDrainAndClose(t *testing.T) {
 			body := newTrackingBody(bytes.Repeat([]byte("e"), 2048))
 			resp := &http.Response{StatusCode: status, Body: body}
 			func() {
-				defer drainAndClose(resp.Body)
+				defer drainAndClose(resp)
 				_, _, errClass := decodePollResponse(retainedapi.Endpoint{Family: retainedapi.Family{Identity: "id"}}, "vs-1", resp)
 				if errClass != "poll_failed" {
 					t.Errorf("decodePollResponse(%d) = %q, want poll_failed", status, errClass)

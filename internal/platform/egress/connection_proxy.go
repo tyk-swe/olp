@@ -218,6 +218,7 @@ func httpConnect(connection net.Conn, target string, credentials connectionSecre
 	if err != nil {
 		return nil, errors.New("proxy returned an invalid CONNECT response")
 	}
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("proxy refused CONNECT with status %d", response.StatusCode)
 	}

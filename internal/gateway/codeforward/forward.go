@@ -260,6 +260,7 @@ func deliverCodeResponse(ctx context.Context, w http.ResponseWriter, r *http.Req
 	w.WriteHeader(response.StatusCode)
 	meteredResponse, finishUsage := attempt.meterPaidResponse(response)
 	defer finishUsage()
+	defer func() { _ = meteredResponse.Body.Close() }()
 	attempt.copyResponse(ctx, w, meteredResponse)
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values

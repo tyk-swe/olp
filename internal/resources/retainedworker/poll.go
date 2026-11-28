@@ -66,7 +66,7 @@ func (w *Worker) poll(ctx context.Context, settlements settlementStore, c resour
 	if err != nil {
 		return "poll_failed"
 	}
-	defer drainAndClose(response.Body)
+	defer drainAndClose(response)
 	if response.StatusCode == http.StatusNotFound && !adopt {
 		return w.handleMissingRemote(ctx, settlements, c, r)
 	}
@@ -303,10 +303,10 @@ func copyResource(r *resources.Resource) resources.Resource {
 	return copied
 }
 
-func drainAndClose(body io.ReadCloser) {
-	if body == nil {
+func drainAndClose(response *http.Response) {
+	if response.Body == nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrainBytes))
-	_ = body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxDrainBytes))
+	_ = response.Body.Close()
 }
