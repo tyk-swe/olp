@@ -175,7 +175,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *Call, fact *even
 		if previous := x.previousResponse(); previous != nil {
 			projection.PreviousUpstream, projection.PreviousLocal = previous.UpstreamID, previous.ID
 		}
-		mapped, err = projection.Project(doc, "/response")
+		mapped, err = projection.project(doc, "/response")
 	} else {
 		changes := []oif.Change{{Pointer: "/response/id", Value: string(encoded), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
 		if previous, present := response.Lookup("previous_response_id"); present {

@@ -3,13 +3,9 @@ package kernel
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptrace"
-	"net/url"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -19,7 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
-	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -330,86 +325,6 @@ func (s *Server) classifySessionSendError(x *Call, fact events.AttemptFact, stat
 	fact.Duration = s.Now().Sub(fact.StartedAt)
 	x.facts = append(x.facts, fact)
 	return SessionCreateResult{Rejected: rejected, Exposure: dispatched}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider could not complete the request.")
-}
-
-func RealtimeUpgrade(r *http.Request) bool {
-	if r.Method != http.MethodGet {
-		return false
-	}
-	upgrades := false
-	for _, line := range r.Header.Values("Connection") {
-		for token := range strings.SplitSeq(line, ",") {
-			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
-				upgrades = true
-			}
-		}
-	}
-	if !upgrades || !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
-		return false
-	}
-	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Version")) != "13" {
-		return false
-	}
-	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key")))
-	return err == nil && len(key) == 16
-}
-
-const duplexFrameWriteTimeout = 5 * time.Second
-
-type duplexFrameWriter interface {
-	Write(context.Context, websocket.MessageType, []byte) error
-}
-
-func WriteDuplexFrame(ctx context.Context, conn duplexFrameWriter, kind websocket.MessageType, payload []byte) error {
-	return writeDuplexFrameWithin(ctx, conn, kind, payload, duplexFrameWriteTimeout)
-}
-
-func writeDuplexFrameWithin(ctx context.Context, conn duplexFrameWriter, kind websocket.MessageType, payload []byte, timeout time.Duration) error {
-	frameCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return conn.Write(frameCtx, kind, payload)
-}
-
-// geminiClientKey validates all SDK-supported key locations before the shared
-// authority authenticates one value. Duplicate keys or competing locations
-// must not silently select the first query/header value.
-func GeminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Error) {
-	query, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		return "", fault.InvalidRequest("invalid_request", "The Gemini query is malformed.", nil)
-	}
-	for name, values := range query {
-		if !slices.Contains(append([]string{"key"}, allowedQuery...), name) || len(values) != 1 || values[0] == "" {
-			return "", fault.InvalidRequest("invalid_request", "The Gemini query has an unsupported or repeated setting.", nil)
-		}
-	}
-	forms := 0
-	token := ""
-	if values := r.Header.Values("Authorization"); len(values) > 0 {
-		forms++
-		if len(values) != 1 {
-			return "", fault.InvalidRequest("invalid_request", "Provide one Gemini API key.", nil)
-		}
-		token = ingress.BearerToken(r)
-	}
-	if values := r.Header.Values("X-Goog-Api-Key"); len(values) > 0 {
-		forms++
-		if len(values) != 1 || values[0] == "" {
-			return "", fault.InvalidRequest("invalid_request", "Provide one Gemini API key.", nil)
-		}
-		token = strings.TrimSpace(values[0])
-	}
-	if values := query["key"]; len(values) > 0 {
-		forms++
-		token = strings.TrimSpace(values[0])
-	}
-	if forms > 1 {
-		return "", fault.InvalidRequest("invalid_request", "Provide the Gemini API key in one location.", nil)
-	}
-	if forms == 0 || token == "" {
-		return "", fault.AuthenticationError("invalid_api_key", "Provide a Gemini API key.")
-	}
-	return token, nil
 }
 
 // GeminiUsageDetails maps a Live frame's modality detail arrays onto the usage shares they price through.

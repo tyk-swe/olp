@@ -105,3 +105,11 @@ func (sw *StreamWriter) Finish(failure *Error, cancelled bool) int {
 	sw.Emit([]byte(frame))
 	return http.StatusOK
 }
+
+func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
+	WriteSurfaceError(w, Overloaded, RequestSurface(r))
+}
+
+func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
+	WriteSurfaceError(w, NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
+}

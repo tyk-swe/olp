@@ -36,7 +36,7 @@ func (s surface) videoJobCall(ctx context.Context, x *kernel.Call, record *jobs.
 	}
 	reservation, limited, skip := s.admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "", "", 0)
 	if skip {
-		return s.jobRefused(fact, kernel.AttemptFailureFor(kernel.ClassLimitsUnavailable))
+		return s.jobRefused(fact, classedFailure(kernel.ClassLimitsUnavailable))
 	}
 	if limited != nil {
 		return s.jobRefused(fact, kernel.RateLimitedTarget(limited))
@@ -45,7 +45,7 @@ func (s surface) videoJobCall(ctx context.Context, x *kernel.Call, record *jobs.
 	defer func() { reservation.Settle(ctx, dispatched, nil) }()
 	if _, deleting := job.(media.VideoDelete); deleting {
 		if _, err := s.deps.Store.BeginDeletion(ctx, record.ID, jobs.Unfenced); err != nil {
-			return s.jobRefused(fact, kernel.AttemptFailureFor(kernel.ClassConnect))
+			return s.jobRefused(fact, classedFailure(kernel.ClassConnect))
 		}
 	}
 	attemptCtx, trace := x.StartAttemptTrace(ctx, string(plan.target.Config.Kind), record.ProviderRevisionID, record.UpstreamModel)
@@ -85,7 +85,7 @@ func videoJobFact(record *jobs.Record, now time.Time) events.AttemptFact {
 func (s surface) planVideoJob(ctx context.Context, x *kernel.Call, record *jobs.Record, job media.JobCall, started events.AttemptFact) (videoJobPlan, events.AttemptFact, *kernel.AttemptFailure) {
 	resolved, err := s.deps.Jobs.Target(ctx, *record)
 	if err != nil {
-		return videoJobPlan{}, started, kernel.AttemptFailureFor(kernel.ClassConnect)
+		return videoJobPlan{}, started, classedFailure(kernel.ClassConnect)
 	}
 	credited := videoCredentialFact(x, resolved.Provider, started)
 	target, refusal := videoJobTarget(x, record, resolved)
@@ -96,11 +96,11 @@ func (s surface) planVideoJob(ctx context.Context, x *kernel.Call, record *jobs.
 	fact.VendorID = resolved.Provider.VendorID
 	call, encodeFailure := media.EncodeJob(job, target.Config)
 	if encodeFailure != nil {
-		return videoJobPlan{}, fact, kernel.AttemptFailureFor(kernel.ClassProtocol)
+		return videoJobPlan{}, fact, classedFailure(kernel.ClassProtocol)
 	}
 	template, err := videoJobContract(record, target, job)
 	if err != nil {
-		return videoJobPlan{}, fact, kernel.AttemptFailureFor(kernel.ClassProtocol)
+		return videoJobPlan{}, fact, classedFailure(kernel.ClassProtocol)
 	}
 	provider, slot := currentVideoLimits(x, resolved.Provider, resolved.Slot)
 	fact.SlotID = slot.ID
@@ -120,7 +120,7 @@ func videoCredentialFact(x *kernel.Call, provider routing.Provider, started even
 func videoJobTarget(x *kernel.Call, record *jobs.Record, resolved jobs.Resolved) (jobs.Resolved, *kernel.AttemptFailure) {
 	provider := resolved.Provider
 	if e := x.CheckCallerTarget(&provider, record.UpstreamModel); e != nil {
-		return jobs.Resolved{}, kernel.AttemptFailureFor(kernel.ClassCredential)
+		return jobs.Resolved{}, classedFailure(kernel.ClassCredential)
 	}
 	sensitive := &egress.Sensitive{}
 	target := resolved
@@ -130,7 +130,7 @@ func videoJobTarget(x *kernel.Call, record *jobs.Record, resolved jobs.Resolved)
 	}
 	secret, err := x.BindCallerSecret(provider.ID, record.UpstreamModel)
 	if err != nil {
-		return jobs.Resolved{}, kernel.AttemptFailureFor(kernel.ClassCredential)
+		return jobs.Resolved{}, classedFailure(kernel.ClassCredential)
 	}
 	sensitive.Add(string(secret))
 	target.Secret, target.CallerCredential = secret, true

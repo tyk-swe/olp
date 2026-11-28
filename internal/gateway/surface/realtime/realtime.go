@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/gateway/duplexrelay"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -94,7 +95,7 @@ func (s surface) admitRealtimeCaller(x *kernel.Call, r *http.Request) (keyauthor
 	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open realtime sessions.")
 	}
-	if !kernel.RealtimeUpgrade(r) {
+	if !duplexrelay.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "This endpoint requires a WebSocket upgrade request.", nil)
 	}
 	token := ingress.BearerToken(r)

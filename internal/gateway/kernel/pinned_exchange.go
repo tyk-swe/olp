@@ -11,7 +11,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/events"
-	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/limits/admission"
 	"github.com/tyk-swe/olp/internal/platform/staging"
@@ -45,10 +44,6 @@ func (e *PinnedExchange) ObserveUsage(observed *wire.Usage, complete bool) {
 
 func (e *PinnedExchange) RecordEvidence() {
 	e.recordEvidence()
-}
-
-func AttemptClassFault(class string) *fault.Error {
-	return (&AttemptFailure{class: class}).Fault()
 }
 
 func (s *Server) PinnedPost(ctx context.Context, x *Call, p *Pin, endpoint string, body []byte, contentType, accept string, decodeError func([]byte) *wire.UpstreamError) (*PinnedResponse, *AttemptFailure) {

@@ -77,12 +77,6 @@ func (s *Server) SessionCall(w http.ResponseWriter, r *http.Request, family wire
 
 func (x *Call) Priority() string { return x.priority }
 
-func (x *Call) EndUserDigest() string { return x.endUserDigest }
-
-func (x *Call) AttributionValues() map[string]string { return x.attribution }
-
-func (x *Call) ClientIP() string { return x.request.clientIP }
-
 func (x *Call) SessionEstimate() { x.estimate = ResourceEstimate }
 
 func (x *Call) LastAttemptFact() *events.AttemptFact {
@@ -147,10 +141,6 @@ func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 
 func ClassFailure(class string) *fault.Error {
 	return (&AttemptFailure{class: class}).Fault()
-}
-
-func AttemptFailureFor(class string) *AttemptFailure {
-	return &AttemptFailure{class: class}
 }
 
 func (x *Call) Sensitive() egress.Sensitive { return x.sensitive }

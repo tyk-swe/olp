@@ -58,7 +58,7 @@ func projectStoredResponseFrame(frame []byte, projection ResponseProjection, str
 	}
 	var mapped oif.Document
 	if strict {
-		mapped, err = projection.Project(doc, "/response")
+		mapped, err = projection.project(doc, "/response")
 	} else {
 		local, _ := json.Marshal(projection.LocalID)
 		changes := []oif.Change{{Pointer: "/response/id", Value: string(local), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}

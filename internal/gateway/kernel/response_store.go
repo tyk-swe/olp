@@ -92,7 +92,7 @@ func (s *Server) storeStrictResponse(ctx context.Context, x *Call, fact *events.
 	if previous := x.previousResponse(); previous != nil {
 		projection.PreviousUpstream, projection.PreviousLocal = previous.UpstreamID, previous.ID
 	}
-	mapped, err := projection.Project(doc, "")
+	mapped, err := projection.project(doc, "")
 	if err != nil {
 		return nil, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unbound response identity.")
 	}

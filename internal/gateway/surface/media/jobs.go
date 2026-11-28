@@ -141,12 +141,12 @@ func (s surface) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	update, ok := jobs.Observe(mediaVideo(result), s.kernel.Now())
 	if !ok {
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassProtocol))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassProtocol))
 		return
 	}
 	updated, err := s.deps.Store.Refresh(ctx, record.ID, jobs.Unfenced, update)
 	if err != nil {
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassConnect))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassConnect))
 		return
 	}
 	var body []byte
@@ -157,7 +157,7 @@ func (s surface) videoGet(w http.ResponseWriter, r *http.Request) {
 		body, renderFailure = media.EncodeVideoObject(mediaVideo(result), updated.ID, updated.RouteSlug)
 	}
 	if renderFailure != nil {
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassProtocol))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassProtocol))
 		return
 	}
 	delivered := s.deliverMediaJSON(w, x, http.StatusOK, true, body)
@@ -189,7 +189,7 @@ func (s surface) videoContent(w http.ResponseWriter, r *http.Request) {
 	}
 	artifact := mediaArtifact(result.Payload)
 	if artifact == nil {
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassProtocol))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassProtocol))
 		return
 	}
 	delivered := s.streamMediaArtifact(w, x, http.StatusOK, true, artifact)
@@ -225,7 +225,7 @@ func (s surface) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if finalized.Lifecycle != jobs.Deleted {
 		s.deps.Jobs.RecordGap()
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassConnect))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassConnect))
 		return
 	}
 	if record.StrictContract && result == nil {
@@ -234,7 +234,7 @@ func (s surface) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	body, renderFailure := videoDeletion(record, upstreamID, result)
 	if renderFailure != nil {
-		s.failMediaOutcome(x, w, kernel.AttemptFailureFor(kernel.ClassProtocol))
+		s.failMediaOutcome(x, w, classedFailure(kernel.ClassProtocol))
 		return
 	}
 	delivered := s.deliverMediaJSON(w, x, http.StatusOK, result != nil, body)
@@ -354,7 +354,7 @@ func videoUndeleted(result *transport.Result, failure *kernel.AttemptFailure) *k
 	}
 	receipt := mediaDeleted(result)
 	if receipt == nil {
-		return kernel.AttemptFailureFor(kernel.ClassProtocol)
+		return classedFailure(kernel.ClassProtocol)
 	}
 	if !receipt.Deleted {
 		return kernel.NewAttemptFailure(kernel.AttemptFailureSpec{Class: kernel.ClassUpstreamClient, Status: http.StatusBadGateway})
@@ -414,4 +414,8 @@ func cursorUUID(value *uuid.UUID) *string {
 	}
 	s := value.String()
 	return &s
+}
+
+func classedFailure(class string) *kernel.AttemptFailure {
+	return kernel.NewAttemptFailure(kernel.AttemptFailureSpec{Class: class})
 }

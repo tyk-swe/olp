@@ -212,8 +212,6 @@ func New(deps Dependencies, cfg Config) *Server {
 
 // AdmissionPool exposes the process-local inference admission pool the
 // metrics endpoint renders.
-func (s *Server) AdmissionPool() *concurrency.Pool { return s.Gate.Pool() }
-
 // RunFleetHealth shares this gateway's circuit transitions with the fleet
 // and follows the fleet's, until ctx ends. Without shared state it returns at
 // once, and local circuits alone decide.

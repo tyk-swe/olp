@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contracts/duplex"
 	"github.com/tyk-swe/olp/internal/domain/bodylimit"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
+	"github.com/tyk-swe/olp/internal/gateway/duplexrelay"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -137,7 +138,7 @@ func (s surface) admitDuplexCaller(x *kernel.Call, r *http.Request) (keyauthorit
 	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open duplex sessions.")
 	}
-	if !kernel.RealtimeUpgrade(r) {
+	if !duplexrelay.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "Native duplex sessions require a WebSocket upgrade.", nil)
 	}
 	token := ingress.BearerToken(r)
@@ -259,7 +260,7 @@ func (t turn) dispatchSetup(ctx context.Context, client *websocket.Conn, p *kern
 		return upstream, nil, invalidSetup
 	}
 	t.x.MarkDispatched()
-	if err := kernel.WriteDuplexFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
+	if err := duplexrelay.WriteFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
 		markFactUncertain(t.x, kernel.ClassAmbiguous)
 		return upstream, nil, &closeError{fault: fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The duplex setup outcome is unknown."), code: websocket.StatusInternalError, reason: "setup uncertain"}
 	}
@@ -371,7 +372,7 @@ func awaitSetupAck(ctx context.Context, upstream, client kernel.DuplexPeer, obse
 	if err != nil || !frame.SetupComplete {
 		return errDuplexProtocol
 	}
-	return kernel.WriteDuplexFrame(ctx, client, kind, ack)
+	return duplexrelay.WriteFrame(ctx, client, kind, ack)
 }
 
 func markFactUncertain(x *kernel.Call, class string) {
