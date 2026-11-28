@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -58,14 +58,49 @@ test('secrets helper provisions private files idempotently and respects env over
     'unset'
   ]);
   assert.equal(statSync(dir).mode & 0o777, 0o700);
-  for (const name of ['auth.key', 'bootstrap.token', 'master.json']) {
-    assert.equal(statSync(join(dir, name)).mode & 0o777, 0o600);
+  const paths = first.slice(0, 3);
+  for (const path of paths) {
+    assert.equal(statSync(path).mode & 0o777, 0o600);
   }
-  const initialAuth = readFileSync(join(dir, 'auth.key'), 'utf8');
+  const initialContents = paths.map((path) => readFileSync(path));
 
   run();
-  assert.equal(readFileSync(join(dir, 'auth.key'), 'utf8'), initialAuth);
+  for (const [index, path] of paths.entries()) {
+    assert.ok(readFileSync(path).equals(initialContents[index]), `${path} was overwritten`);
+  }
 
   const overridden = run({ OLP_AUTH_HMAC_KEY_FILE: '/custom/auth.key' });
   assert.equal(overridden[0], '/custom/auth.key');
+});
+
+test('sourcing the secrets helper rejects non-regular files without setting secret paths', (t) => {
+  const scratch = mkdtempSync(join(tmpdir(), 'olp-secrets-test-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const target = join(scratch, 'regular-file');
+  writeFileSync(target, 'test fixture');
+
+  const cases = [
+    ['dangling symlink', 'auth.key', (path) => symlinkSync(join(scratch, 'missing'), path)],
+    ['symlink to a file', 'master.json', (path) => symlinkSync(target, path)],
+    ['directory', 'bootstrap.token', (path) => mkdirSync(path)]
+  ];
+
+  for (const [name, filename, create] of cases) {
+    const dir = join(scratch, name);
+    mkdirSync(dir);
+    const path = join(dir, filename);
+    create(path);
+
+    const result = spawnSync('bash', ['-c', `
+      source scripts/secrets.sh "$1"
+      status=$?
+      printf '%s\\n' "\${OLP_AUTH_HMAC_KEY_FILE-unset}" "\${OLP_BOOTSTRAP_TOKEN_FILE-unset}" "\${OLP_MASTER_KEY_FILE-unset}"
+      exit "$status"
+    `, '_', dir], { cwd: repoRoot, env: { PATH: process.env.PATH }, encoding: 'utf8' });
+
+    assert.ok(result.status > 0, `${name} did not return a nonzero status`);
+    assert.equal(result.stdout, 'unset\nunset\nunset\n', name);
+    assert.ok(result.stderr.includes(path), result.stderr);
+    assert.match(result.stderr, /expected a regular file/, name);
+  }
 });
