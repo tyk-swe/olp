@@ -11,7 +11,7 @@ import (
 )
 
 func (m Management) registerInference(mux *http.ServeMux) {
-	(&retrieval.Server{Access: m.Access}).Register(mux)
+	retrieval.NewAPI(m.Access).Register(mux)
 	playgroundAPI := playground.NewAPI(m.serving.gateway)
 	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
 	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
