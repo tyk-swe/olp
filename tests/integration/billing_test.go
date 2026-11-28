@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing/imports"
+	"github.com/tyk-swe/olp/internal/billing/source"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -168,6 +169,43 @@ func wantBillingStatus(t *testing.T, got billingImportStatus, errorCode string, 
 }
 
 func day(at time.Time) string { return at.Format(time.DateOnly) }
+
+func TestReplacingAndRemovingABillingImportDiscardTheStoredCredential(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newBillingFixture(t, "openai", `{"kind":"openai"}`)
+	const scope = `{"project_ids":["proj_abc123"]}`
+	f.enable(t, "openai_costs", scope, "sk-admin-billing-fixture-0123456789")
+	src, ok := source.Lookup("openai_costs")
+	if !ok {
+		t.Fatal("the OpenAI costs source is not registered")
+	}
+	parsed, err := src.Scope(json.RawMessage(scope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := src.Secret("sk-admin-billing-fixture-rotated-0123456789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := storedSecrets(t, f.pool, secrets.BillingCredential)
+	if err := pgx.BeginFunc(ctx, f.pool, func(tx pgx.Tx) error {
+		_, err := imports.Save(ctx, tx, imports.Vault{Keys: f.keys, Installation: f.installation}, f.providerID,
+			imports.Desired{Enabled: true, Scope: parsed, Credential: &rotated}, f.ownerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if replaced := storedSecrets(t, f.pool, secrets.BillingCredential); len(first) != 1 || len(replaced) != 1 || replaced[0] == first[0] {
+		t.Fatalf("billing secrets went from %v to %v, want only the replacement", first, replaced)
+	}
+	if err := pgx.BeginFunc(ctx, f.pool, func(tx pgx.Tx) error { return imports.Remove(ctx, tx, f.providerID) }); err != nil {
+		t.Fatal(err)
+	}
+	if left := storedSecrets(t, f.pool, secrets.BillingCredential); len(left) != 0 {
+		t.Fatalf("removing the import kept billing secrets %v", left)
+	}
+}
 
 func TestBillingImportStoresEachInvoicedDayAndRefreshesTheLastWeek(t *testing.T) {
 	t.Parallel()

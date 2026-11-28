@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -126,6 +127,35 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, query string, args ...any) {
 	}
 }
 
+func placeholderSecret(t *testing.T, pool *pgxpool.Pool, purpose secrets.SealPurpose) string {
+	t.Helper()
+	id := uuid.NewString()
+	mustExec(t, pool, `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at) VALUES($1,$2,1,'\x00',now()+interval '1 hour')`, id, purpose)
+	return id
+}
+
+func secretStored(t *testing.T, pool *pgxpool.Pool, id string) bool {
+	t.Helper()
+	var stored bool
+	if err := pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.secrets WHERE id=$1)", id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	return stored
+}
+
+func storedSecrets(t *testing.T, pool *pgxpool.Pool, purpose secrets.SealPurpose) []string {
+	t.Helper()
+	rows, err := pool.Query(t.Context(), "SELECT id::text FROM olp.secrets WHERE purpose=$1", purpose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored
+}
+
 func notificationKeys(t *testing.T, pool *pgxpool.Pool) (*secrets.KeyRing, string) {
 	t.Helper()
 	var installation string
@@ -147,9 +177,10 @@ type managementClient struct {
 	sessionID string
 	token     string
 	csrf      string
+	cookies   []*http.Cookie
 }
 
-func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register func(*http.ServeMux, *access.Server)) *managementClient {
+func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register func(*http.ServeMux, *access.Server), configure ...func(access.Config) access.Config) *managementClient {
 	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
@@ -157,10 +188,14 @@ func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register 
 	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
 		t.Fatal(err)
 	}
-	accessServer := access.New(access.Config{
+	config := access.Config{
 		Pool: pool, Installation: installation, Origin: "https://test.example",
 		Auth: auth, Keys: keys, Log: slog.New(slog.DiscardHandler),
-	})
+	}
+	for _, apply := range configure {
+		config = apply(config)
+	}
+	accessServer := access.New(config)
 	mux := http.NewServeMux()
 	register(mux, accessServer)
 	server := httptest.NewServer(mux)
@@ -209,6 +244,9 @@ func (c *managementClient) tryCall(ctx context.Context, method, path, ifMatch, b
 		r.Header.Set("If-Match", ifMatch)
 	}
 	r.AddCookie(&http.Cookie{Name: access.SessionCookie, Value: c.token})
+	for _, cookie := range c.cookies {
+		r.AddCookie(cookie)
+	}
 	response, err := c.server.Client().Do(r)
 	if err != nil {
 		return apiResult{}, err

@@ -25,6 +25,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/egress"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -50,6 +51,27 @@ func TestSavedDestinationTestAcrossReplicas(t *testing.T) {
 		t.Parallel()
 		checkDestinationTestPermissions(t, pool, fixture, first)
 	})
+}
+
+func TestRotatingAndDeletingADestinationDiscardItsSigningSecret(t *testing.T) {
+	t.Parallel()
+	pool, _, owner, _ := testNotificationReplicas(t)
+	saved := expectStatus(t, "save destination", owner.call(t, "POST", "/api/v1/notifications/destinations", "",
+		`{"name":"rotated webhook","url":"https://example.test","secret":"first-signing-key"}`), http.StatusCreated)
+	var destination struct{ ID string }
+	if err := json.Unmarshal(saved.body, &destination); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/notifications/destinations/" + destination.ID
+	first := storedSecrets(t, pool, secrets.NotificationSecret)
+	rotated := expectStatus(t, "rotate secret", owner.call(t, "PATCH", path, saved.etag, `{"secret":"second-signing-key"}`), http.StatusOK)
+	if second := storedSecrets(t, pool, secrets.NotificationSecret); len(first) != 1 || len(second) != 1 || second[0] == first[0] {
+		t.Fatalf("signing secrets went from %v to %v, want only the replacement", first, second)
+	}
+	expectStatus(t, "delete destination", owner.call(t, "DELETE", path, rotated.etag, ""), http.StatusNoContent)
+	if left := storedSecrets(t, pool, secrets.NotificationSecret); len(left) != 0 {
+		t.Fatalf("deleting the destination kept signing secrets %v", left)
+	}
 }
 
 func exerciseWebhookTest(t *testing.T, pool *pgxpool.Pool, fixture usageFixture, first, second *managementClient, ending string) {

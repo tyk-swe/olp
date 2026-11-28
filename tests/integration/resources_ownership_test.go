@@ -207,6 +207,47 @@ func TestDurableContractsAreSealedForTheirOwner(t *testing.T) {
 	}
 }
 
+func TestAContinuationAndItsSealedPayloadAreWrittenTogether(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool, _ := harness.Database(t)
+	fixture := newUsageFixture(t, pool)
+	keys, installation := notificationKeys(t, pool)
+	auth := secrets.NewAuthKey([]byte(strings.Repeat("k", 32)), installation)
+	if err := access.PrepareInstallation(ctx, pool, installation, auth, keys); err != nil {
+		t.Fatal(err)
+	}
+	store := resources.NewEncrypted(pool, installation, keys)
+	version, expires := "turn-contract", time.Now().Add(time.Hour)
+	submission := resources.SubmissionID(time.Now(), uuid.New())
+	turn := fixture.resource(resources.KindContinuation, fixture.keyID, "")
+	turn.ContractVersion, turn.ExpiresAt, turn.SubmissionID = &version, &expires, &submission
+	mustExec(t, pool, `CREATE FUNCTION public.refuse_secret() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''secret storage unavailable''; END'`)
+	refuseSecrets := func() {
+		mustExec(t, pool, `CREATE TRIGGER refuse_secret BEFORE INSERT OR UPDATE ON olp.secrets FOR EACH ROW EXECUTE FUNCTION public.refuse_secret()`)
+	}
+	acceptSecrets := func() { mustExec(t, pool, `DROP TRIGGER refuse_secret ON olp.secrets`) }
+
+	refuseSecrets()
+	if _, _, err := store.ClaimForDispatch(ctx, turn, []byte(`{"turn":"asked"}`)); err == nil {
+		t.Fatal("claimed a turn whose payload could not be stored")
+	}
+	acceptSecrets()
+	claimed, created, err := store.ClaimForDispatch(ctx, turn, []byte(`{"turn":"asked"}`))
+	if err != nil || !created {
+		t.Fatalf("claiming after the payload write failed: created=%t, %v", created, err)
+	}
+
+	refuseSecrets()
+	if err := store.CompleteContinuation(ctx, claimed, []byte(`{"turn":"answered"}`)); err == nil {
+		t.Fatal("completed a turn whose payload could not be stored")
+	}
+	acceptSecrets()
+	if err := store.CompleteContinuation(ctx, claimed, []byte(`{"turn":"answered"}`)); err != nil {
+		t.Fatalf("completing after the payload write failed: %v", err)
+	}
+}
+
 func TestStoredCreationKeepsOneIdentityAcrossReplayAndChildren(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

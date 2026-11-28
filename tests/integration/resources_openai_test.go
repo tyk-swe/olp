@@ -18,9 +18,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/gateway/events"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -356,6 +358,65 @@ func TestStrictBatchKeepsItsOriginalInputWhenTheProviderReusesAFileID(t *testing
 	}
 	if got := g.call(t, "owner", "GET", "/v1/batches/"+batch.ID, "", "", 200); got.InputFileID != file.ID {
 		t.Fatalf("batch input changed to %q, want the original gateway ID %q", got.InputFileID, file.ID)
+	}
+}
+
+func TestStrictBatchContractsAreKeptOnlyWhileABatchCanStillUseThem(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "strict-batch-contracts", "batch-model"
+	var answer atomic.Int32
+	answer.Store(http.StatusOK)
+	upstream := &retainedUpstream{replies: openAIReplies, status: func(request string) int {
+		if request == "POST /batches" {
+			return int(answer.Load())
+		}
+		return http.StatusOK
+	}}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "azure_openai", profile: "azure-v1-chat", version: "/openai/v1", fidelity: routing.FidelityStrict,
+		operations: []string{"generation", "batch"}, upstream: http.StripPrefix("/openai", upstream),
+	})
+	g.key(t, "owner")
+	line := `{"custom_id":"one","method":"POST","url":"/v1/chat/completions","body":{"model":"` + model + `","messages":[{"role":"user","content":"hi"}]}}`
+	form := "--b\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\nbatch\r\n--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"batch.jsonl\"\r\nContent-Type: application/jsonl\r\n\r\n" + line + "\n\r\n--b--\r\n"
+	file := g.call(t, "owner", "POST", "/v1/files", "multipart/form-data; boundary=b", form, 200)
+	submit := func(providerStatus, want int) int {
+		t.Helper()
+		before := len(storedSecrets(t, pool, secrets.ProviderContinuation))
+		answer.Store(int32(providerStatus))
+		headers := map[string]string{"Authorization": "Bearer owner", "Content-Type": "application/json"}
+		g.send(t, "POST", "/v1/batches", headers, fmt.Sprintf(`{"input_file_id":%q,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"provider_status":"%d"}}`, file.ID, providerStatus), want)
+		return len(storedSecrets(t, pool, secrets.ProviderContinuation)) - before
+	}
+	closeUncertain := func() uuid.UUID {
+		t.Helper()
+		mustExec(t, pool, "UPDATE olp.batch_settlements SET next_attempt_at=now()-interval '1 minute' WHERE closed_at IS NULL")
+		store := batches.NewStore(pool)
+		claimed, err := store.Claim(t.Context(), time.Now(), 10)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("claimed %d open settlements, want 1: %v", len(claimed), err)
+		}
+		if _, err := store.Close(t.Context(), claimed[0], batches.Closing{Decision: batches.Decision{State: batches.StateUncertain}}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		return claimed[0].ResourceID
+	}
+
+	if added := submit(http.StatusBadRequest, http.StatusBadGateway); added != 0 {
+		t.Fatalf("a refused submission left %d staged contracts, want none", added)
+	}
+	if added := submit(http.StatusInternalServerError, http.StatusBadGateway); added != 1 {
+		t.Fatalf("a submission with an unknown outcome holds %d staged contracts, want 1", added)
+	}
+	if abandoned := closeUncertain(); secretStored(t, pool, abandoned.String()) {
+		t.Fatal("closing a submission that never became a batch kept its contract")
+	}
+	if added := submit(http.StatusOK, http.StatusOK); added != 1 {
+		t.Fatalf("an accepted batch holds %d contracts, want 1", added)
+	}
+	if accepted := closeUncertain(); !secretStored(t, pool, accepted.String()) {
+		t.Fatal("closing an accepted batch discarded the contract its resource still reads")
 	}
 }
 
