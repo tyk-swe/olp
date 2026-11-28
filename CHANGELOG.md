@@ -39,6 +39,10 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Changed
 
+- The agent activity lists, investigations, pending agent spend and linked spans
+  page with Previous and Next. The project filter on runs, tasks and
+  investigations keeps its choice while projects reload, and the MCP server
+  editor marks every invalid field before it sends anything.
 - Console screens that depend on your project memberships fetch them again when
   they open or regain focus. The activity and investigation pages retry an
   unanswered read once, and the SCIM page shares the project list with the other
