@@ -49,18 +49,24 @@ var probeRequests = map[string]struct {
 	"rerank":     {wire.Rerank, `{"model":%q,"query":"rerank probe","documents":["first document","second document"]}`},
 }
 
+type Prober struct {
+	Kernel    *kernel.Server
+	Runtime   kernel.Runtime
+	Admission *quota.Admission
+}
+
 // Run probes every target whose connection enables probing, each
 // once per its interval across the fleet, until ctx ends. Every pass is
 // reported to checkpoint. Probes need shared state to divide work and share
 // results, so without it this returns at once.
-func Run(ctx context.Context, s *kernel.Server, checkpoint func(ctx context.Context, probed int, err error)) {
-	if !s.Deps.Admission.Ready() {
+func (p Prober) Run(ctx context.Context, checkpoint func(ctx context.Context, probed int, err error)) {
+	if !p.Admission.Ready() {
 		return
 	}
 	ticker := time.NewTicker(probeTick)
 	defer ticker.Stop()
 	for {
-		probed, err := probeDue(ctx, s)
+		probed, err := p.probeDue(ctx)
 		if ctx.Err() != nil {
 			return
 		}
@@ -74,12 +80,12 @@ func Run(ctx context.Context, s *kernel.Server, checkpoint func(ctx context.Cont
 }
 
 // probeDue probes the targets whose fleet-wide claim this replica wins.
-func probeDue(ctx context.Context, s *kernel.Server) (int, error) {
-	release := s.Deps.Runtime.Release()
+func (p Prober) probeDue(ctx context.Context) (int, error) {
+	release := p.Runtime.Release()
 	if release == nil || release.Snapshot() == nil {
 		return 0, nil
 	}
-	limiter := s.Deps.Admission.Fleet()
+	limiter := p.Admission.Fleet()
 	probed := 0
 	for _, target := range probeTargets(release.Snapshot()) {
 		call, cancel := context.WithTimeout(ctx, quota.ReserveTimeout)
@@ -91,12 +97,12 @@ func probeDue(ctx context.Context, s *kernel.Server) (int, error) {
 		if !claimed {
 			continue
 		}
-		result, ok := probe(ctx, s, release, target)
+		result, ok := probe(ctx, p.Kernel, release, target)
 		if !ok {
 			continue
 		}
 		probed++
-		if err := shareProbe(ctx, s, limiter, target, result); err != nil {
+		if err := shareProbe(ctx, p.Kernel, limiter, target, result); err != nil {
 			return probed, err
 		}
 	}

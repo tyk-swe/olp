@@ -11,7 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tyk-swe/olp/internal/billing/reconciliation"
 	"github.com/tyk-swe/olp/internal/catalog"
-	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/platform/concurrency"
@@ -210,7 +209,7 @@ func (r *running) startWorkers() {
 		r.probesStopped = stopped
 		go r.supervise(func() {
 			defer close(stopped)
-			healthprobes.Run(r.probes, prober, probeCheckpoint(stores.pool, r.log, c.Region))
+			prober.Run(r.probes, probeCheckpoint(stores.pool, r.log, c.Region))
 		})()
 	}
 }

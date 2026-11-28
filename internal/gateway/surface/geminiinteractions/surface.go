@@ -7,15 +7,20 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 const profile = "gemini-interactions"
 
-type surface struct{ kernel *kernel.Server }
+type surface struct {
+	kernel   *kernel.Server
+	store    *resources.Store
+	resolver *resources.Resolver
+}
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
-	s := surface{kernel: k}
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, resolver *resources.Resolver) {
+	s := surface{kernel: k, store: store, resolver: resolver}
 	mux.HandleFunc("POST /gemini/v1beta/interactions", s.create)
 	mux.HandleFunc("GET /gemini/v1beta/interactions/{id}", s.resource)
 	mux.HandleFunc("DELETE /gemini/v1beta/interactions/{id}", s.resource)
@@ -68,7 +73,7 @@ func (t turn) supports(provider *routing.Provider, model string) bool {
 }
 
 func (s surface) stateConfigured() bool {
-	return s.kernel.Deps.Resources != nil && s.kernel.Deps.Resources.Encrypted() && s.kernel.Deps.Resolver != nil
+	return s.store != nil && s.store.Encrypted() && s.resolver != nil
 }
 
 func (s surface) responseLimit() int64 {

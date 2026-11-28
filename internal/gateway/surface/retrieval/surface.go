@@ -6,19 +6,23 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/resources"
 )
 
-type surface struct{ kernel *kernel.Server }
-
-func Handler(k *kernel.Server) http.HandlerFunc {
-	return surface{kernel: k}.query
+type surface struct {
+	kernel *kernel.Server
+	store  *resources.Store
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
-	if k.Deps.Resources == nil {
+func Handler(k *kernel.Server, store *resources.Store) http.HandlerFunc {
+	return surface{kernel: k, store: store}.query
+}
+
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store) {
+	if store == nil {
 		return
 	}
-	mux.HandleFunc("POST /v1/retrieval/{binding_id}/query", Handler(k))
+	mux.HandleFunc("POST /v1/retrieval/{binding_id}/query", Handler(k, store))
 }
 
 type turn struct {

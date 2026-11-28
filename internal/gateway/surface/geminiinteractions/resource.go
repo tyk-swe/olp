@@ -134,7 +134,7 @@ func (t turn) retrievalControls() (controls, *fault.Error) {
 
 func (t turn) storedInteraction() (stored, *fault.Error) {
 	id := t.r.PathValue("id")
-	resource, upstream, err := t.kernel.Deps.Resources.ReadInteractionContract(t.r.Context(), t.authority.ID, id)
+	resource, upstream, err := t.store.ReadInteractionContract(t.r.Context(), t.authority.ID, id)
 	if errors.Is(err, resources.ErrNotFound) {
 		return stored{}, unknownInteraction()
 	}
@@ -186,7 +186,7 @@ func (t turn) forget(ctx context.Context, response *kernel.PinnedResponse, inter
 		response.Exchange.Complete(kernel.ClassSuccess)
 	}
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
-	err := t.kernel.Deps.Resources.DeleteInteractionContract(commitCtx, t.authority.ID, interaction.id)
+	err := t.store.DeleteInteractionContract(commitCtx, t.authority.ID, interaction.id)
 	stopCommit()
 	if err != nil {
 		return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The deleted Interaction could not be tombstoned.")

@@ -158,7 +158,7 @@ func (s surface) batchPin(ctx context.Context, x *kernel.Call, authority keyauth
 		p, err := s.kernel.NativeStatePin(ctx, x, route)
 		return p, route, nil, err
 	}
-	file, err := s.kernel.Deps.Resources.Get(ctx, resources.KindGeminiFile, authority.ID, input.LocalFileID)
+	file, err := s.store.Get(ctx, resources.KindGeminiFile, authority.ID, input.LocalFileID)
 	if err != nil {
 		return nil, nil, nil, fault.NotFoundError("not_found", "No Gemini file with this identifier exists for this key.")
 	}

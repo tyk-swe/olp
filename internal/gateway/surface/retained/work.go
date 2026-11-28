@@ -139,7 +139,7 @@ func (q retainedWorkRequest) target() (retainedWorkTarget, *fault.Error) {
 // current new-work restrictions rather than the historical retrieval contract
 // that created the binding.
 func (q retainedWorkRequest) storeTarget() (retainedWorkTarget, *fault.Error) {
-	resource, getErr := q.server.kernel.Deps.Resources.Get(q.r.Context(), q.work.storeKind, q.x.KeyID(), q.r.PathValue("id"))
+	resource, getErr := q.server.store.Get(q.r.Context(), q.work.storeKind, q.x.KeyID(), q.r.PathValue("id"))
 	if getErr != nil {
 		return retainedWorkTarget{}, retainedMissing()
 	}

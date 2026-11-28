@@ -34,7 +34,7 @@ func (s surface) videoJobCall(ctx context.Context, x *kernel.Call, record *jobs.
 	if refusal != nil {
 		return s.jobRefused(fact, refusal)
 	}
-	reservation, limited, skip := s.kernel.Deps.Admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "", "", 0)
+	reservation, limited, skip := s.admission.ReserveTarget(ctx, &plan.provider, &plan.slot, quota.TokenDemand{}, plan.target.Timeout+jobs.LeaseSlack, "", "", 0)
 	if skip {
 		return s.jobRefused(fact, kernel.AttemptFailureFor(kernel.ClassLimitsUnavailable))
 	}
@@ -217,7 +217,7 @@ func strictVideoResult(template *mediacontract.Template, job media.JobCall, reco
 
 func (s surface) videoJobBroken(timed events.AttemptFact, result *transport.Result, trace *telemetry.AttemptTrace) (*transport.Result, *kernel.AttemptFailure, events.AttemptFact) {
 	if artifact := mediaArtifact(result.Payload); artifact != nil {
-		if err := s.kernel.Deps.Staging.Remove(artifact.Handle); err != nil {
+		if err := s.spool.Remove(artifact.Handle); err != nil {
 			s.kernel.Log.Warn("staged video content cleanup failed", "error", err)
 		}
 	}

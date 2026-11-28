@@ -150,7 +150,7 @@ func (s surface) declared(w http.ResponseWriter, r *http.Request) (declaredUploa
 	if err != nil {
 		return declaredUpload{}, err
 	}
-	if !s.kernel.Deps.Resources.Encrypted() {
+	if !s.store.Encrypted() {
 		return declaredUpload{}, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "Gemini upload sessions require encrypted resource storage.")
 	}
 	return declaredUpload{length: length, contentType: r.Header.Get("X-Goog-Upload-Header-Content-Type"), displayName: displayName, named: named}, nil
@@ -191,7 +191,7 @@ func (s surface) storeSession(ctx context.Context, authority keyauthority.Author
 	id := uuid.Must(uuid.NewV7())
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
-	resource, err := s.kernel.Deps.Resources.PutGeminiUploadSession(commitCtx, &resources.Resource{
+	resource, err := s.store.PutGeminiUploadSession(commitCtx, &resources.Resource{
 		UUID: id, Kind: resources.KindGeminiUpload, APIKeyID: authority.ID, RouteSlug: route.Slug,
 		ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID,
 		TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID,

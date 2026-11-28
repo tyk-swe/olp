@@ -61,10 +61,10 @@ func (t turn) binding() (*retrieval.Binding, *fault.Error) {
 	if len(t.r.URL.Query()) > 0 {
 		return nil, fault.InvalidRequest("invalid_parameter", "Retrieval does not accept query parameters.", nil)
 	}
-	if t.kernel.Deps.Resources == nil {
+	if t.store == nil {
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Retrieval bindings are unavailable.")
 	}
-	tx, readErr := t.kernel.Deps.Resources.Begin(t.r.Context())
+	tx, readErr := t.store.Begin(t.r.Context())
 	if readErr != nil {
 		return nil, fault.ServerError(503, "provider_state_unavailable", "Retrieval bindings are unavailable.")
 	}

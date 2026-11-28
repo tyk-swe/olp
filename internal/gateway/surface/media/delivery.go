@@ -128,7 +128,7 @@ func (s surface) removeImages(images *media.ImageResult) {
 		if image.Handle == nil {
 			continue
 		}
-		if err := s.kernel.Deps.Staging.Remove(*image.Handle); err != nil {
+		if err := s.spool.Remove(*image.Handle); err != nil {
 			s.kernel.Log.Warn("staged media image cleanup failed", "error", err)
 		}
 	}
@@ -283,7 +283,7 @@ func (s surface) writeImageResult(w http.ResponseWriter, x *kernel.Call, status 
 }
 
 func (s surface) streamBase64(w io.Writer, handle staging.Handle) error {
-	opened, err := s.kernel.Deps.Staging.Open(handle)
+	opened, err := s.spool.Open(handle)
 	if err != nil {
 		return err
 	}
@@ -297,14 +297,14 @@ func (s surface) streamBase64(w io.Writer, handle staging.Handle) error {
 }
 
 func (s surface) streamMediaArtifact(w http.ResponseWriter, x *kernel.Call, status int, hasUpstreamResult bool, artifact *staging.Artifact) delivery {
-	opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
+	opened, err := s.spool.Open(artifact.Handle)
 	if err != nil {
-		_ = s.kernel.Deps.Staging.Remove(artifact.Handle)
+		_ = s.spool.Remove(artifact.Handle)
 		e := fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged media could not be read.")
 		fault.WriteSurfaceError(w, e, "openai")
 		return delivery{outcome: kernel.Outcome{Err: e}, status: e.Status}
 	}
-	defer s.kernel.Deps.Staging.Remove(artifact.Handle)
+	defer func() { _ = s.spool.Remove(artifact.Handle) }()
 	defer opened.File.Close()
 	if artifact.ContentLength > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(artifact.ContentLength, 10))

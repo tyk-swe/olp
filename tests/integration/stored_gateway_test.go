@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
@@ -136,7 +137,7 @@ type storedGateway struct {
 	runtime *listedRuntime
 	mux     *http.ServeMux
 	server  *httptest.Server
-	kernel  *kernel.Server
+	prober  healthprobes.Prober
 	fleet   *fleet.State
 	limiter *admission.Limiter
 
@@ -275,7 +276,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 	mediaDeps := surfacemedia.Deps{Transport: mediaTransport, Store: jobStore, Jobs: jobs.New(jobs.Deps{
 		Store: jobStore, Transport: mediaTransport, Credentials: g.runtime, Gaps: &atomic.Uint64{}, Log: quiet, Now: time.Now,
 	})}
-	server := kernel.New(kernel.Dependencies{
+	dependencies := kernel.Dependencies{
 		WorkflowTools: workflow.WorkflowTools, WorkflowRuns: workflow.WorkflowRuns, Debits: workflow.Debits,
 		Runtime:   g.runtime,
 		Sink:      plan.sink,
@@ -289,10 +290,11 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Batches:   batches.NewStore(pool),
 		Staging:   spool,
 		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
-	}, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
-	g.kernel = server
+	}
+	server := kernel.New(dependencies, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
+	g.prober = healthprobes.Prober{Kernel: server, Runtime: g.runtime, Admission: dependencies.Admission}
 	g.mux = http.NewServeMux()
-	gateway.Register(server, g.mux, gateway.WithMedia(mediaDeps))
+	gateway.Register(server, g.mux, dependencies, gateway.WithMedia(mediaDeps))
 	g.server = httptest.NewServer(plan.served(g.mux))
 	t.Cleanup(g.server.Close)
 	return g

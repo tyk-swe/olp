@@ -199,7 +199,7 @@ func (s surface) strictBatchAdmission(ctx context.Context, x *kernel.Call, autho
 	if refusal := strictBatchTargetRefusal(p); refusal != nil {
 		return refusal
 	}
-	if kernel.DurableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.kernel.Deps.Resources.Encrypted() {
+	if kernel.DurableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.store.Encrypted() {
 		return fault.InvalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", new("input_file_id"))
 	}
 	if e := s.kernel.AuthorizeDurable(ctx, x, authority, file, contract, "batch", kernel.RetainedNewWork); e != nil {

@@ -7,15 +7,21 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/keyauthority"
+	"github.com/tyk-swe/olp/internal/platform/staging"
+	"github.com/tyk-swe/olp/internal/resources"
 )
 
-type surface struct{ kernel *kernel.Server }
+type surface struct {
+	kernel *kernel.Server
+	store  *resources.Store
+	spool  *staging.Spool
+}
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
-	if k.Deps.Resources == nil || k.Deps.Staging == nil {
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool) {
+	if store == nil || spool == nil {
 		return
 	}
-	s := surface{kernel: k}
+	s := surface{kernel: k, store: store, spool: spool}
 	mux.HandleFunc("POST /anthropic/v1/files", s.uploadFile)
 	mux.HandleFunc("GET /anthropic/v1/files", s.listFiles)
 	mux.HandleFunc("GET /anthropic/v1/files/{id}", s.getFile)

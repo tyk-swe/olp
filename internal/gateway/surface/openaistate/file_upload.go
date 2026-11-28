@@ -52,6 +52,7 @@ type providerFile struct {
 
 type batchFileUpload struct {
 	server    *kernel.Server
+	store     *resources.Store
 	x         *kernel.Call
 	authority keyauthority.Authority
 	route     *routing.Route
@@ -133,7 +134,7 @@ func (s surface) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *kern
 		s.kernel.Refuse(x, w, fault.InvalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil))
 		return
 	}
-	if x.Strict() && !s.kernel.Deps.Resources.Encrypted() {
+	if x.Strict() && !s.store.Encrypted() {
 		s.kernel.Refuse(x, w, kernel.ProviderStateForbidden())
 		return
 	}
@@ -150,7 +151,7 @@ func (s surface) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *kern
 		return
 	}
 	adapter, _ := p.Provider.Connector().FilesBatchesAdapter()
-	u := batchFileUpload{server: s.kernel, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
+	u := batchFileUpload{server: s.kernel, store: s.store, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
 	sending, e := u.translated(r.Context())
 	if e != nil {
 		s.kernel.ReleaseHold(r.Context(), p.Hold)
@@ -192,7 +193,7 @@ func (s surface) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *kern
 }
 
 func (s surface) unstage(part *staging.Part, warning string) {
-	if err := s.kernel.Deps.Staging.Remove(part.Handle); err != nil {
+	if err := s.spool.Remove(part.Handle); err != nil {
 		s.kernel.Log.Warn(warning, "error", err)
 	}
 }
@@ -327,7 +328,7 @@ func (u batchFileUpload) keep(ctx context.Context, manifest kernel.BatchManifest
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
 	if !u.x.Strict() {
-		kept, err := s.Deps.Resources.Put(commitCtx, u.resource(resources.KindFile, sent.upstreamID, state, metadata, expires, nil))
+		kept, err := u.store.Put(commitCtx, u.resource(resources.KindFile, sent.upstreamID, state, metadata, expires, nil))
 		if err != nil {
 			return nil, unstoredFileMapping()
 		}
@@ -340,7 +341,7 @@ func (u batchFileUpload) keep(ctx context.Context, manifest kernel.BatchManifest
 		return nil, kernel.DurableError(err)
 	}
 	strict := u.resource(resources.KindStrictFile, sent.upstreamID, state, kernel.DurableMetadata(p.Model), s.DurableExpiry(expires), &version)
-	kept, err := s.Deps.Resources.PutDurableContract(commitCtx, strict, payload)
+	kept, err := u.store.PutDurableContract(commitCtx, strict, payload)
 	if err != nil {
 		return nil, unstoredFileMapping()
 	}

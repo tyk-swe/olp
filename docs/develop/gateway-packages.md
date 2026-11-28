@@ -50,16 +50,20 @@ Each gateway package below `gateway` lists the gateway packages it may import in
 an `imports.txt` beside its code, one per line, and an empty file allows none.
 `scripts/check-lint.sh` fails on an import the file does not list and on any
 such package without the file, so a new gateway package declares its imports
-when it is added. The last column above describes those files. Most surface
-packages follow `surface/anthropicstate`, exporting one
-`Register(k *kernel.Server, mux *http.ServeMux)`, keeping handlers on an
-unexported `surface` type that holds the kernel, and registering in
-`internal/gateway/gateway.go`. Three surfaces take extra collaborators or wire
-into management instead. `retained.Register(k *kernel.Server, mux *http.ServeMux, retrievalQuery http.HandlerFunc)`
-takes the retrieval query handler for vector store search.
-`media.Register(k *kernel.Server, mux *http.ServeMux, deps *Deps)` takes its
-`*media.Deps` bundle through `gateway.WithMedia`.
-`playground.NewAPI(k *kernel.Server) *API` builds the playground API whose
+when it is added. The last column above describes those files.
+
+Most surface packages follow `surface/anthropicstate`, exporting one `Register`
+that takes the kernel, the mux and each collaborator the surface calls itself,
+as `anthropicstate.Register(k, mux, store, spool)` takes the resource store and
+the staging spool. Handlers stay on an unexported `surface` type that holds the
+kernel and those collaborators, and a surface with nothing more to call takes
+only `k` and `mux`. `gateway.Register` receives the `kernel.Dependencies` that
+built the kernel and passes each surface its typed fields in
+`internal/gateway/gateway.go`, so a new surface does not read them from
+`Server.Deps`. `retained.Register` also takes the retrieval query handler for
+vector store search, and `media.Register` takes the `*media.Deps` bundle that
+arrives through `gateway.WithMedia`. The playground wires into management
+instead, where `playground.NewAPI(k *kernel.Server) *API` builds the API whose
 `Handle` and `Stream` handlers `cmd/olp` mounts on the management API mux.
 
 The kernel never names a surface or a vendor flag for one. A surface that needs

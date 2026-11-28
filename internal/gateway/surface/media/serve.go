@@ -201,7 +201,7 @@ func (s surface) cleanupUploads(request *media.Request) {
 		return
 	}
 	for _, handle := range request.Uploads() {
-		if err := s.kernel.Deps.Staging.Remove(handle); err != nil {
+		if err := s.spool.Remove(handle); err != nil {
 			s.kernel.Log.Warn("media upload cleanup failed", "error", err)
 		}
 	}

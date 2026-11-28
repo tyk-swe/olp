@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/quota"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/media/jobs"
 	"github.com/tyk-swe/olp/internal/media/transport"
@@ -21,15 +22,17 @@ type Deps struct {
 }
 
 type surface struct {
-	kernel *kernel.Server
-	deps   *Deps
+	kernel    *kernel.Server
+	deps      *Deps
+	spool     *staging.Spool
+	admission *quota.Admission
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux, deps *Deps) {
+func Register(k *kernel.Server, mux *http.ServeMux, deps *Deps, spool *staging.Spool, admission *quota.Admission) {
 	if deps == nil {
 		return
 	}
-	s := surface{kernel: k, deps: deps}
+	s := surface{kernel: k, deps: deps, spool: spool, admission: admission}
 	mux.HandleFunc("POST /v1/images/generations", s.jsonHandler(media.DecodeImageGeneration))
 	mux.HandleFunc("POST /v1/images/edits", s.formHandler(media.DefaultImageUploadLimit, 33, media.DecodeImageEdit))
 	mux.HandleFunc("POST /v1/images/variations", s.formHandler(media.DefaultImageUploadLimit, 1, media.DecodeImageVariation))

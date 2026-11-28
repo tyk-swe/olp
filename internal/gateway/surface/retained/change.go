@@ -79,7 +79,7 @@ func (q retainedRequest) owned() (*resources.Resource, *fault.Error) {
 		}
 		return q.parent, nil
 	}
-	lifecycle, err := q.server.kernel.Deps.Resources.OpenOwned(q.r.Context(), q.endpoint.Kind, q.x.KeyID(), q.r.PathValue("id"))
+	lifecycle, err := q.server.store.OpenOwned(q.r.Context(), q.endpoint.Kind, q.x.KeyID(), q.r.PathValue("id"))
 	if err != nil {
 		return nil, retainedMissing()
 	}
@@ -163,7 +163,7 @@ func (s surface) fenceRetainedMutation(ctx context.Context, r *http.Request, e r
 	}
 	payload := append([]byte(e.Method+":"+e.Pattern+":"+resource.ID+":"+r.URL.RawQuery+":"), body...)
 	digest := sha256.Sum256(payload)
-	lifecycle, err := s.kernel.Deps.Resources.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
+	lifecycle, err := s.store.BeginMutation(ctx, resource, resources.Submission{Operation: e.Operation + ":" + e.Action, Key: key, Digest: digest[:]})
 	if err != nil {
 		if errors.Is(err, resources.ErrSubmissionConflict) {
 			return nil, fault.ServerError(409, "idempotency_conflict", "This mutation identity already exists or conflicts with its original request.")

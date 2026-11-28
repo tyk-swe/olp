@@ -169,7 +169,7 @@ func (l retainedListing) fill(ctx context.Context, from retainedScan, target int
 func (l retainedListing) advance(ctx context.Context, from retainedScan, target int) (retainedScan, *fault.Error) {
 	scan := from
 	if len(scan.pending) == 0 {
-		rows, err := l.server.kernel.Deps.Resources.ListLifecycleOrdered(ctx, l.endpoint.Kind, l.x.KeyID(), 101, scan.cursor, l.query.ascending, l.query.route)
+		rows, err := l.server.store.ListLifecycleOrdered(ctx, l.endpoint.Kind, l.x.KeyID(), 101, scan.cursor, l.query.ascending, l.query.route)
 		if errors.Is(err, resources.ErrNotFound) {
 			return scan, fault.InvalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil)
 		}
@@ -323,7 +323,7 @@ func (l retainedListing) ask(ctx context.Context, entry kernel.RetainedListEntry
 func (l retainedListing) forget(ctx context.Context, resource *resources.Resource) *fault.Error {
 	commitCtx, commitCancel := kernel.ResourceCommitContext(ctx)
 	defer commitCancel()
-	if err := l.server.kernel.Deps.Resources.Tombstone(commitCtx, resource.ID); err != nil {
+	if err := l.server.store.Tombstone(commitCtx, resource.ID); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled.")
 	}
 	return nil
@@ -378,7 +378,7 @@ func (l retainedListing) commit(ctx context.Context, resource *resources.Resourc
 	if err := s.kernel.PersistRetainedResult(commitCtx, resource, object, accepted.source); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
-	if err := s.kernel.Deps.Resources.RecordRetainedObservation(commitCtx, resource, accepted.observation, nil); err != nil {
+	if err := s.store.RecordRetainedObservation(commitCtx, resource, accepted.observation, nil); err != nil {
 		return fault.ServerError(503, "provider_state_unavailable", "Resource billing metadata could not be committed.")
 	}
 	return nil

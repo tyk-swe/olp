@@ -91,7 +91,7 @@ func (l agentListing) rows() ([]*resources.Resource, bool, *fault.Error) {
 	if refusal != nil {
 		return nil, false, refusal
 	}
-	rows, err := l.server.kernel.Deps.Resources.ListLifecycle(l.r.Context(), l.endpoint.Kind, l.x.KeyID(), size+1, query.Get("page_token"))
+	rows, err := l.server.store.ListLifecycle(l.r.Context(), l.endpoint.Kind, l.x.KeyID(), size+1, query.Get("page_token"))
 	if errors.Is(err, resources.ErrNotFound) {
 		return nil, false, fault.InvalidRequest("invalid_parameter", "The page token is unavailable for this owner.", nil)
 	}
@@ -167,7 +167,7 @@ func (l agentListing) reserve(ctx context.Context, ready []agentListed, overall 
 		if admitted[entry.route.Slug] {
 			continue
 		}
-		lease, err := s.kernel.Deps.Admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, kernel.ResourceEstimate, overall, quota.CostReservation{}, &costChecked)
+		lease, err := s.admission.ReserveRouteLimits(ctx, &authority, entry.route.Slug, kernel.ResourceEstimate, overall, quota.CostReservation{}, &costChecked)
 		if err != nil {
 			return err
 		}
@@ -230,7 +230,7 @@ func (l agentListing) unread(ctx context.Context, resource *resources.Resource, 
 	}
 	commitCtx, cancel := kernel.ResourceCommitContext(ctx)
 	defer cancel()
-	if err := l.server.kernel.Deps.Resources.Tombstone(commitCtx, resource.ID); err != nil {
+	if err := l.server.store.Tombstone(commitCtx, resource.ID); err != nil {
 		return agentItem{}, fault.ServerError(503, "provider_state_unavailable", "The deleted resource could not be reconciled.")
 	}
 	return agentItem{lost: true}, nil

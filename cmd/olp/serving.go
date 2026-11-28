@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/grants/personal"
@@ -69,7 +70,7 @@ type agentPlane struct {
 
 type serving struct {
 	gateway    *kernel.Server
-	prober     *kernel.Server
+	prober     *healthprobes.Prober
 	accounting *delivery.Delivery
 	overlaps   *apikeys.OverlapRecorder
 	agents     agentPlane
@@ -89,10 +90,10 @@ func newServing(f foundation) (serving, error) {
 	if err != nil {
 		return serving{}, err
 	}
-	gw = f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
+	gw, deps := f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, overlaps: overlaps, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
-		gateway.Register(gw, f.public, gateway.WithMedia(surfacemedia.Deps{
+		gateway.Register(gw, f.public, deps, gateway.WithMedia(surfacemedia.Deps{
 			Transport: f.media.transport,
 			Jobs:      f.media.service,
 			Store:     jobs.NewStore(stores.pool),
@@ -108,9 +109,9 @@ func (f foundation) overlapRecorder() *apikeys.OverlapRecorder {
 	return apikeys.NewOverlapRecorder(f.stores.pool, f.log)
 }
 
-func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder, runs kernel.WorkflowRunStore, tools kernel.WorkflowToolRunner) *kernel.Server {
+func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder, runs kernel.WorkflowRunStore, tools kernel.WorkflowToolRunner) (*kernel.Server, kernel.Dependencies) {
 	if !f.config.Mode.Management() && !f.config.Mode.Inference() {
-		return nil
+		return nil, kernel.Dependencies{}
 	}
 	deps := assembly.deps
 	if f.config.Mode.Inference() {
@@ -123,14 +124,16 @@ func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.D
 			deps.WorkflowTools = tools
 		}
 	}
-	return kernel.New(f.accounted(deps, accounting), assembly.config)
+	accounted := f.accounted(deps, accounting)
+	return kernel.New(accounted, assembly.config), accounted
 }
 
-func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *kernel.Server {
+func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *healthprobes.Prober {
 	if assembly.probeDeps.Admission == nil {
 		return nil
 	}
-	return kernel.New(f.accounted(assembly.probeDeps, accounting), assembly.probeConfig)
+	deps := f.accounted(assembly.probeDeps, accounting)
+	return &healthprobes.Prober{Kernel: kernel.New(deps, assembly.probeConfig), Runtime: deps.Runtime, Admission: deps.Admission}
 }
 
 func (f foundation) agentPlane() agentPlane {
