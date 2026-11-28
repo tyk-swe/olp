@@ -96,6 +96,11 @@ func keyEvent(action, id string) access.Event {
 	return access.Event{Action: action, Resource: "api_key", ID: id}
 }
 
+func SetETag(ctx context.Context, tx pgx.Tx, id, etag string) error {
+	_, err := tx.Exec(ctx, "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
+	return err
+}
+
 func (a *API) createAPIKey(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	input := keyInput{KeyPolicy: keyauthority.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{}}}
 	if err := httpkit.Decode(r, &input); err != nil {
