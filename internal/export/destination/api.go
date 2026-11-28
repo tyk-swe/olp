@@ -97,52 +97,62 @@ type createRequest struct {
 	Enabled     *bool           `json:"enabled"`
 }
 
+type sinkValues struct {
+	name     string
+	filter   Filter
+	settings []byte
+	enabled  bool
+}
+
 func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	ctx := r.Context()
 	var input createRequest
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	projectID, err := parseProject(input.ProjectID)
+	projectID, err := ParseProjectID(input.ProjectID)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	filter, err := a.filter(ctx, a.server.Pool, input.Filter, projectID)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	k, err := lookup(input.Type, input.Format)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	name := strings.TrimSpace(input.Name)
-	if err := checkName(name); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := checkStreams(k, input.Streams); err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := a.checkTarget(k, input.Destination, filter); err != nil {
-		return httpkit.Reply{}, err
-	}
-	spec, err := k.parse(input.Type, input.Settings)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err := checkSpec(ctx, a.server.Pool, spec, nil, projectID); err != nil {
-		return httpkit.Reply{}, err
-	}
-	enabled := input.Enabled == nil || *input.Enabled
-	if err := checkCredential(spec, input.Credential, enabled, present(input.Credential)); err != nil {
-		return httpkit.Reply{}, err
-	}
-	settings, err := json.Marshal(spec)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
-		return struct{}{}, RequireScope(ctx, a.server, tx, p, projectID)
-	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
+	return access.Mutate(a.server, r, input, func(tx pgx.Tx, p authz.Principal) (sinkValues, error) {
+		if err := RequireScope(ctx, a.server, tx, p, projectID); err != nil {
+			return sinkValues{}, err
+		}
+		filter, err := a.filter(ctx, tx, input.Filter, projectID)
+		if err != nil {
+			return sinkValues{}, err
+		}
+		k, err := lookup(input.Type, input.Format)
+		if err != nil {
+			return sinkValues{}, err
+		}
+		name := strings.TrimSpace(input.Name)
+		if err := checkName(name); err != nil {
+			return sinkValues{}, err
+		}
+		if err := checkStreams(k, input.Streams); err != nil {
+			return sinkValues{}, err
+		}
+		if err := a.checkTarget(k, input.Destination, filter); err != nil {
+			return sinkValues{}, err
+		}
+		spec, err := k.parse(input.Type, input.Settings)
+		if err != nil {
+			return sinkValues{}, err
+		}
+		if err := checkSpec(ctx, tx, spec, nil, projectID); err != nil {
+			return sinkValues{}, err
+		}
+		enabled := input.Enabled == nil || *input.Enabled
+		if err := checkCredential(spec, input.Credential, enabled, present(input.Credential)); err != nil {
+			return sinkValues{}, err
+		}
+		settings, err := json.Marshal(spec)
+		if err != nil {
+			return sinkValues{}, err
+		}
+		return sinkValues{name: name, filter: filter, settings: settings, enabled: enabled}, nil
+	}, func(tx pgx.Tx, p authz.Principal, values sinkValues) (httpkit.Reply, access.Event, error) {
 		var count int64
 		if err := tx.QueryRow(ctx, countSinksSQL).Scan(&count); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -151,7 +161,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", fmt.Sprintf("This installation already has %d export sinks.", maxSinks))
 		}
 		id, etag := ids.New(), ids.New()
-		if _, err := tx.Exec(ctx, createSinkSQL, id, name, projectID, input.Type, input.Destination, input.Streams, input.Format, filter, settings, enabled, etag, p.UserID()); err != nil {
+		if _, err := tx.Exec(ctx, createSinkSQL, id, values.name, projectID, input.Type, input.Destination, input.Streams, input.Format, values.filter, values.settings, values.enabled, etag, p.UserID()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err := a.replaceCredential(ctx, tx, id, nil, input.Credential); err != nil {
@@ -284,7 +294,7 @@ func (a *API) gaps(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	return httpkit.ListReplyBy(gaps, page, func(g Gap) string { return g.ID }), nil
 }
 
-func parseProject(raw *string) (*string, error) {
+func ParseProjectID(raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
 	}
