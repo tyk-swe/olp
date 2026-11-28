@@ -31,9 +31,10 @@ type CreationResult struct {
 }
 
 type Submission struct {
-	Operation string
-	Key       string
-	Digest    []byte
+	Operation    string
+	Key          string
+	Digest       []byte
+	LegacyDigest []byte
 }
 
 type lifecycleAction uint8
@@ -58,7 +59,7 @@ type preparedLifecycle struct {
 }
 
 func (s *Store) BeginCreate(ctx context.Context, candidate *Resource, submission Submission) (*Lifecycle, error) {
-	prepared, err := s.prepareLifecycle(ctx, candidate, submission.Operation, submission.Key, submission.Digest)
+	prepared, err := s.prepareLifecycle(ctx, candidate, submission)
 	if err != nil {
 		return nil, err
 	}
@@ -181,30 +182,32 @@ func (l *Lifecycle) PrepareCreated(result CreationResult) (*PreparedCreation, er
 	return &PreparedCreation{resource: &resource, children: children, store: l.store}, nil
 }
 
-func (s *Store) LookupLifecycle(ctx context.Context, owner, operation, key string, digest []byte) (*Resource, error) {
-	return lookupLifecycle(ctx, s.pool, owner, operation, key, digest)
+func (s *Store) LookupLifecycle(ctx context.Context, owner string, submission Submission) (*Resource, error) {
+	return lookupLifecycle(ctx, s.pool, owner, submission)
 }
 
-func lookupLifecycle(ctx context.Context, query resourceRowQuerier, owner, operation, key string, digest []byte) (*Resource, error) {
+func lookupLifecycle(ctx context.Context, query resourceRowQuerier, owner string, submission Submission) (*Resource, error) {
+	key, digest := submission.Key, submission.Digest
 	if len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return nil, ErrSubmissionConflict
 	}
 	var id uuid.UUID
 	var priorDigest []byte
-	err := query.QueryRow(ctx, `SELECT resource_id,request_digest FROM olp.retained_submissions WHERE api_key_id=$1 AND operation=$2 AND submission_key=$3`, owner, operation, key).Scan(&id, &priorDigest)
+	err := query.QueryRow(ctx, `SELECT resource_id,request_digest FROM olp.retained_submissions WHERE api_key_id=$1 AND operation=$2 AND submission_key=$3`, owner, submission.Operation, key).Scan(&id, &priorDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(priorDigest, digest) {
+	if !bytes.Equal(priorDigest, digest) && !bytes.Equal(priorDigest, submission.LegacyDigest) {
 		return nil, ErrSubmissionConflict
 	}
 	return scan(query.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources WHERE id=$1 AND api_key_id=$2`, id, owner))
 }
 
-func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, operation, key string, digest []byte) (preparedLifecycle, error) {
+func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, submission Submission) (preparedLifecycle, error) {
+	operation, key, digest := submission.Operation, submission.Key, submission.Digest
 	if resource == nil || len(key) < 1 || len(key) > 128 || len(digest) != 32 {
 		return preparedLifecycle{}, ErrSubmissionConflict
 	}
@@ -212,7 +215,7 @@ func (s *Store) prepareLifecycle(ctx context.Context, resource *Resource, operat
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, resource.APIKeyID+":"+operation+":"+key); err != nil {
 			return preparedLifecycle{}, err
 		}
-		prior, err := lookupLifecycle(ctx, tx, resource.APIKeyID, operation, key, digest)
+		prior, err := lookupLifecycle(ctx, tx, resource.APIKeyID, submission)
 		if err == nil {
 			return preparedLifecycle{resource: prior, fresh: false}, nil
 		}

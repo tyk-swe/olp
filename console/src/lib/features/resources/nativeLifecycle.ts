@@ -244,7 +244,8 @@ function requestBody(
   if (total > nativeResourceByteLimit)
     throw new Error('Uploads are limited to 4 MiB in this console.');
   const form = new FormData();
-  for (const [name, field] of Object.entries(value)) {
+  for (const name of Object.keys(value).sort()) {
+    const field = value[name];
     if (name === 'file' || name === 'files[]' || typeof field !== 'string')
       throw new Error(
         'Multipart metadata must contain string fields; choose files using the file picker.'

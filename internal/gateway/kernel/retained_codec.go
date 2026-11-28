@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -41,22 +42,24 @@ func RetainedProjectionError(exchange *PinnedExchange, err error) *fault.Error {
 	return fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The provider response contained an unbound resource identity.")
 }
 
-func (s *Server) RetainedBodyDigest(e retainedapi.Endpoint, slug string, body []byte, contentType string) ([]byte, *fault.Error) {
+func (s *Server) RetainedBodyDigest(e retainedapi.Endpoint, slug string, body []byte, contentType string) (digest, legacyDigest []byte, failure *fault.Error) {
 	if !strings.HasPrefix(contentType, "multipart/") {
-		return s.RetainedSubmissionDigest(e, slug, body)
+		digest, failure := s.RetainedSubmissionDigest(e, slug, body)
+		return digest, nil, failure
 	}
 	digester := s.Deps.Digester
 	if digester == nil {
-		return nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
+		return nil, nil, fault.ServerError(503, "authority_unavailable", "Resource submission identity is unavailable.")
 	}
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+		return nil, nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 	type partContent struct {
 		Header map[string][]string
 		Body   []byte
+		field  string
 	}
 	var parts []partContent
 	for {
@@ -65,19 +68,38 @@ func (s *Server) RetainedBodyDigest(e retainedapi.Endpoint, slug string, body []
 			break
 		}
 		if readErr != nil {
-			return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+			return nil, nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
 		}
 		data, err := io.ReadAll(part)
 		if err != nil {
-			return nil, ingress.BodyReadError(err)
+			return nil, nil, ingress.BodyReadError(err)
 		}
-		parts = append(parts, partContent{Header: part.Header, Body: data})
+		parts = append(parts, partContent{Header: part.Header, Body: data, field: multipartMetadataField(part)})
 	}
-	canonical, err := json.Marshal(parts)
-	if err != nil {
-		return nil, fault.InvalidRequest("invalid_request", "Invalid multipart upload.", nil)
+	compare := func(a, b partContent) int {
+		if a.field == "" || b.field == "" {
+			return strings.Compare(b.field, a.field)
+		}
+		return strings.Compare(a.field, b.field)
 	}
-	return digester.Digest(secrets.RetainedSubmissionDigest, e.Operation+"\x00"+e.Kind+"\x00"+slug+"\x00"+string(canonical)), nil
+	digestParts := func(ordered []partContent) []byte {
+		encoded, _ := json.Marshal(ordered)
+		return digester.Digest(secrets.RetainedSubmissionDigest, e.Operation+"\x00"+e.Kind+"\x00"+slug+"\x00"+string(encoded))
+	}
+	if slices.IsSortedFunc(parts, compare) {
+		return digestParts(parts), nil, nil
+	}
+	canonical := slices.SortedStableFunc(slices.Values(parts), compare)
+	return digestParts(canonical), digestParts(parts), nil
+}
+
+func multipartMetadataField(part *multipart.Part) string {
+	disposition, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	name := params["name"]
+	if _, hasFilename := params["filename"]; err != nil || disposition != "form-data" || hasFilename || name == "file" || name == "files[]" {
+		return ""
+	}
+	return name
 }
 
 // samePin reports whether two resources share one serving pin.
