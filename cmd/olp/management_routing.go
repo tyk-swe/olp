@@ -10,32 +10,38 @@ import (
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routes/modelcatalog"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func (m Management) registerRouting(mux *http.ServeMux) *routes.Server {
-	(&release.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
+	(&release.DelegationManagement{Access: m.Access, Manager: m.core.rt}).Register(mux)
 	release.RegisterGenerations(m.Access, mux)
-	cacheadmin.NewAPI(m.Access, m.ResponseCache).Register(mux)
-	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, AuthenticateKey: m.catalogAuthority, Origin: m.Access.Origin}).Register(mux)
+	cacheadmin.NewAPI(m.Access, m.core.responseCache).Register(mux)
+	(&modelcatalog.Server{Access: m.Access, Runtime: m.core.rt, AuthenticateKey: m.catalogAuthority, Origin: m.Access.Origin}).Register(mux)
 	routeServer := &routes.Server{
-		Access: m.Access, InlineMedia: m.Gateway.InlineMediaLimits(),
-		Workflows: m.Gateway.WorkflowResolver(), WorkflowRelease: m.Runtime.Release,
-		Inputs: m.Runtime.RoutingInputs, Region: m.Runtime.Region(),
-		UnconfinedPlugins: m.Unconfined != nil, Catalog: m.Catalog,
-	}
-	if m.Limits != nil {
-		routeServer.Supply = quota.NewAdmission(m.Limits.Limiter, m.Limits.Fleet, nil, m.Log)
-		routeServer.Fleet = m.Limits.Fleet
+		Access: m.Access, InlineMedia: m.serving.gateway.InlineMediaLimits(),
+		Workflows: m.serving.gateway.WorkflowResolver(), WorkflowRelease: m.core.rt.Release,
+		Inputs: m.core.rt.RoutingInputs, Region: m.core.rt.Region(),
+		UnconfinedPlugins: m.core.unconfined != nil, Catalog: m.documents.catalog,
+		Supply: m.routeSupply(), Fleet: m.fleetHealth(),
 	}
 	routeServer.Register(mux)
 	return routeServer
 }
 
+func (m Management) routeSupply() routing.SupplyReader {
+	shared := m.stores.shared
+	if shared == nil {
+		return nil
+	}
+	return quota.NewAdmission(shared.Limiter, shared.Fleet, nil, m.log)
+}
+
 func (m Management) catalogAuthority(r *http.Request) (keyauthority.Authority, error) {
-	if m.Gateway == nil {
+	if m.serving.gateway == nil {
 		return keyauthority.Authority{}, problem.Fail(503, "authority_unavailable", "Key authority is unavailable.")
 	}
-	authority, failure := m.Gateway.Gate.Authenticate(r, "models_read")
+	authority, failure := m.serving.gateway.Gate.Authenticate(r, "models_read")
 	if failure != nil {
 		return keyauthority.Authority{}, problem.Fail(failure.Status, failure.Code, failure.Message)
 	}

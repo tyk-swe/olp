@@ -12,10 +12,10 @@ import (
 
 func (m Management) registerInference(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
-	playgroundAPI := playground.NewAPI(m.Gateway)
+	playgroundAPI := playground.NewAPI(m.serving.gateway)
 	playgroundLimits := []access.RouteOption{access.MaxBody(playground.BodyLimit), access.Deadline(playground.Timeout)}
 	m.Access.Route(mux, "POST /api/v1/playground", playgroundAPI.Handle, playgroundLimits...)
 	m.Access.Stream(mux, "POST /api/v1/playground/stream", playgroundAPI.Stream, playgroundLimits...)
-	(&jobsmanage.API{Access: m.Access, Jobs: m.Media, Spool: m.Spool, Log: m.Log}).Register(mux)
+	(&jobsmanage.API{Access: m.Access, Jobs: m.media.service, Spool: m.media.spool, Log: m.log}).Register(mux)
 	resourcesmanage.New(m.Access).Register(mux)
 }

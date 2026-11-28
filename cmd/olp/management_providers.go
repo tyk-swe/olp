@@ -13,17 +13,17 @@ import (
 
 func (m Management) registerProviders(mux *http.ServeMux, activated func(context.Context, pgx.Tx, string, string) error) *providers.Server {
 	providerServer := providers.New(providers.Deps{
-		Access: m.Access, Egress: m.Egress, Getenv: os.Getenv, ExternalSecrets: secretstore.New(*m.Egress, os.Getenv),
-		Unconfined: m.Unconfined, Log: m.Log, Plugins: m.PluginHost, Catalog: m.Catalog,
+		Access: m.Access, Egress: m.core.policy, Getenv: os.Getenv, ExternalSecrets: secretstore.New(*m.core.policy, os.Getenv),
+		Unconfined: m.core.unconfined, Log: m.log, Plugins: m.core.pluginHost, Catalog: m.documents.catalog,
 		Activated: activated,
 		Quotas: func() providers.QuotaSource {
-			if m.Limits == nil {
+			if m.stores.shared == nil {
 				return nil
 			}
-			return m.Limits.Fleet
+			return m.stores.shared.Fleet
 		}(),
 	})
 	providerServer.Register(mux)
-	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined, Index: m.PluginIndex}).Register(mux)
+	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.core.pluginHost, Unconfined: m.core.unconfined, Index: m.documents.pluginIndex}).Register(mux)
 	return providerServer
 }
