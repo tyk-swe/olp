@@ -128,8 +128,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be committed."))
 		return
 	}
-	resource := lifecycle.Resource()
-	w.Header().Set("X-OLP-Resource-ID", resource.ID)
+	w.Header().Set("X-OLP-Resource-ID", lifecycle.Resource().ID)
 	if lifecycle.Existing() {
 		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
@@ -145,7 +144,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	}
 	defer s.SettleFence(r.Context(), lifecycle.Close)
 	status = s.RetainedDispatch(w, r.WithContext(ctx), RetainedDispatchRequest{
-		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
+		Call: x, Pin: p, Endpoint: e, Resource: lifecycle.Resource(), URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
 	})
 }
 
