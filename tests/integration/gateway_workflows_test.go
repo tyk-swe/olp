@@ -20,6 +20,7 @@ import (
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/agents/a2a"
@@ -31,6 +32,8 @@ import (
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -130,6 +133,121 @@ func seedA2ACancellation(t *testing.T, f usageFixture, actor, task1, upstream1, 
 		actor, f.projectID, f.ownerID, publication, revision, dispatch1, dispatch2, f.keyID, task1, upstream1, task2, upstream2)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTaskCallbacksStopAtTheContinuationLimitAndAccountOnlyForAdmittedCalls(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	installation, err := database.Installation(t.Context(), pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := secrets.NewAuthKey(make([]byte, 32), installation)
+	f := taskCallbackFixture{
+		owner: uuid.NewString(), project: uuid.NewString(), key: uuid.NewString(), toolset: uuid.NewString(), toolsetRevision: uuid.NewString(),
+		opening:      taskCallbackIDs{token: "olpt_opening", dispatch: uuid.NewString()},
+		continuation: taskCallbackIDs{token: "olpt_continuation", dispatch: uuid.NewString(), task: uuid.NewString()},
+		idle:         taskCallbackIDs{token: "olpt_idle", dispatch: uuid.NewString(), task: uuid.NewString()},
+	}
+	f.seed(t, pool, auth)
+	manager := release.NewManager(release.ManagerConfig{Pool: pool, Installation: installation, Auth: auth, Log: slog.New(slog.DiscardHandler), Hostname: "task-callbacks", CountTaskCallback: tasks.CountCallback})
+	if err := manager.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"admission " + f.continuation.dispatch + " 0", "admission " + f.idle.dispatch + " 0", "task " + f.continuation.task + " 2 2", "task " + f.idle.task + " 0 0", "admission " + f.opening.dispatch + " 2"}
+	for _, callback := range []taskCallbackIDs{f.opening, f.continuation} {
+		authority, err := manager.AuthenticateTaskCapability(t.Context(), callback.token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admit := func(accounting string) error {
+			return manager.AdmitTaskCapabilityAttempt(t.Context(), *authority, "tools", f.toolset, f.toolsetRevision, &f.project, accounting)
+		}
+		recorded, refused := uuid.NewString(), uuid.NewString()
+		if first, repeated := admit(recorded), admit(recorded); first != nil || repeated != nil {
+			t.Fatalf("callbacks within the limit = %v, then %v", first, repeated)
+		}
+		if err := admit(refused); !errors.Is(err, release.ErrTaskAttemptLimit) {
+			t.Fatalf("callback past the limit = %v", err)
+		}
+		want = append(want, "accounting "+callback.dispatch+" tools "+recorded)
+	}
+	idle, err := manager.AuthenticateTaskCapability(t.Context(), f.idle.token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ended := range []string{"state='completed'", "deadline_at=now()-interval '1 second'"} {
+		mustExec(t, pool, `UPDATE olp.a2a_tasks SET state='active',deadline_at=now()+interval '1 hour' WHERE id=$1`, f.idle.task)
+		ending, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ending.Rollback(context.WithoutCancel(t.Context())) }()
+		if _, err := ending.Exec(t.Context(), "UPDATE olp.a2a_tasks SET "+ended+" WHERE id=$1", f.idle.task); err != nil {
+			t.Fatal(err)
+		}
+		admitted := make(chan error, 1)
+		go func() {
+			admitted <- manager.AdmitTaskCapabilityAttempt(t.Context(), *idle, "tools", f.toolset, f.toolsetRevision, &f.project, uuid.NewString())
+		}()
+		harness.Eventually(t, "the callback waiting on the ending task", 5*time.Second, func() (bool, string) {
+			var blocked bool
+			if err := pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1::integer=ANY(pg_blocking_pids(pid)))`, int32(ending.Conn().PgConn().PID())).Scan(&blocked); err != nil {
+				t.Fatal(err)
+			}
+			return blocked, "the callback has not reached the task row"
+		})
+		if err := ending.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-admitted; !errors.Is(err, release.ErrTaskAttemptLimit) {
+			t.Fatalf("callback for a task that ended with %s = %v", ended, err)
+		}
+	}
+	var stored []string
+	if err := pool.QueryRow(t.Context(), `SELECT array_agg(line) FROM (
+		SELECT format('admission %s %s',dispatch_id,callback_attempts) AS line FROM olp.a2a_task_admissions
+		UNION ALL SELECT format('task %s %s %s',id,continuations,callback_attempts) FROM olp.a2a_tasks
+		UNION ALL SELECT format('accounting %s %s %s',dispatch_id,kind,accounting_id) FROM olp.a2a_task_callback_accounting) AS lines`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(stored)
+	slices.Sort(want)
+	if !slices.Equal(stored, want) {
+		t.Fatalf("stored callback counts=%q, want %q", stored, want)
+	}
+}
+
+type taskCallbackIDs struct{ token, dispatch, task string }
+
+type taskCallbackFixture struct {
+	owner, project, key, toolset, toolsetRevision string
+	opening, continuation, idle                   taskCallbackIDs
+}
+
+func (f taskCallbackFixture) seed(t *testing.T, pool *pgxpool.Pool, auth *secrets.AuthKey) {
+	t.Helper()
+	publication, revision := uuid.NewString(), uuid.NewString()
+	mustExec(t, pool, `INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1::uuid,$1::text||'@example.test','Task owner','owner',$1::uuid)`, f.owner)
+	mustExec(t, pool, `INSERT INTO olp.projects(id,name,etag,created_by) VALUES($1::uuid,'Callbacks',$1::uuid,$2)`, f.project, f.owner)
+	mustExec(t, pool, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id)
+		VALUES($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Agent caller',$2,jsonb_build_object('scopes','["agents","tools"]'::jsonb,'allowed_agents',jsonb_build_array($4::text),'allowed_toolsets',jsonb_build_array($5::text)),$1::uuid,$3)`,
+		f.key, f.owner, f.project, publication, f.toolset)
+	mustExec(t, pool, `INSERT INTO olp.agent_publications(id,project_id,kind,name,draft,etag,created_by) VALUES($1::uuid,$2,'agent','Callback agent','{}',$1::uuid,$3)`, publication, f.project, f.owner)
+	mustExec(t, pool, `INSERT INTO olp.agent_publication_revisions(id,publication_id,project_id,kind,definition,digest,created_by)
+		VALUES($1,$2,$3::uuid,'agent',jsonb_build_object('project_id',$3::uuid,'agent',jsonb_build_object('toolset_revisions',jsonb_build_array($4::text),'max_task_continuations',2)),repeat('0',64),$5)`,
+		revision, publication, f.project, f.toolsetRevision, f.owner)
+	for _, callback := range []taskCallbackIDs{f.opening, f.continuation, f.idle} {
+		mustExec(t, pool, `INSERT INTO olp.execution_debits(id,api_key_id,project_id,kind,state,affinity,intent_digest,claim_id,currency,cost_bound,charge_bound,prepared_until,dispatched_at)
+			VALUES($1::uuid,$2,$3,'agent','dispatched','{}',decode(repeat('00',32),'hex'),$1::uuid,'USD',0,0,now(),now())`, callback.dispatch, f.key, f.project)
+		if callback.task != "" {
+			mustExec(t, pool, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,state) VALUES($1::uuid,$2,$3,$4,$5,$6,$1::text,'active')`,
+				callback.task, f.key, f.project, publication, revision, callback.dispatch)
+		}
+		mustExec(t, pool, `INSERT INTO olp.a2a_task_admissions(dispatch_id,api_key_id,task_id) VALUES($1,$2,NULLIF($3,'')::uuid)`, callback.dispatch, f.key, callback.task)
+		mustExec(t, pool, `INSERT INTO olp.a2a_task_capabilities(dispatch_id,token_digest,publication_id,revision_id,task_id,expires_at) VALUES($1,$2,$3,$4,NULLIF($5,'')::uuid,now()+interval '1 hour')`,
+			callback.dispatch, auth.Digest(secrets.TaskCapabilityDigest, callback.token), publication, revision, callback.task)
 	}
 }
 

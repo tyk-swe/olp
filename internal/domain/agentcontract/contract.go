@@ -53,6 +53,10 @@ type Draft struct {
 	Agent     *Definition         `json:"agent,omitempty"`
 	Prompt    *prompts.Definition `json:"prompt,omitempty"`
 }
+type CallbackAttempt struct {
+	DispatchID, TaskID, Kind, AccountingID string
+	Limit                                  int
+}
 type Publication struct {
 	ID         string  `json:"id"`
 	Kind       string  `json:"kind"`

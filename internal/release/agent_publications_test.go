@@ -85,6 +85,8 @@ type taskStoreFixture struct {
 	row      taskRow
 	beginErr error
 	tx       *taskTxFixture
+	refused  bool
+	countErr error
 }
 
 func (f *taskStoreFixture) QueryRow(context.Context, string, ...any) pgx.Row { return f.row }
@@ -115,8 +117,11 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 	definition := agentcontract.Draft{Agent: &agentcontract.Definition{RouteRevisions: []string{"route-revision"}, ToolsetRevisions: []string{"toolset-revision"}, MaxTaskContinuations: &maximum}}
 	owner := keyauthority.Authority{ID: "owner", ProjectID: &project, Policy: keyauthority.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
 	newFixture := func() (*Manager, *taskStoreFixture) {
-		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition, "", ""}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
-		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: store, authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]keyauthority.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
+		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition, "", ""}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}}}}
+		count := func(context.Context, pgx.Tx, agentcontract.CallbackAttempt) (bool, error) {
+			return !store.refused, store.countErr
+		}
+		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: store, countTaskCallback: count, authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]keyauthority.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
 		return manager, store
 	}
 	t.Run("owner and pinned resources", func(t *testing.T) {
@@ -206,7 +211,8 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 		{name: "foreign tool revision", scope: "tools", resource: "toolset", revision: "other", want: problem.Forbidden()},
 		{name: "foreign route revision", scope: "inference", resource: "route", revision: "other", want: problem.Forbidden()},
 		{name: "unsupported scope", scope: "agents", resource: publication, revision: revision, want: problem.Forbidden()},
-		{name: "limit exhausted", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[1].err = pgx.ErrNoRows }, want: ErrTaskAttemptLimit},
+		{name: "limit exhausted", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.refused = true }, want: ErrTaskAttemptLimit},
+		{name: "count unavailable", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.countErr = errors.New("unavailable") }, want: ErrStaleAuthority},
 		{name: "store unavailable", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.beginErr = errors.New("unavailable") }, want: ErrStaleAuthority},
 		{name: "task ended", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[0].err = pgx.ErrNoRows }, want: ErrInvalidKey},
 		{name: "commit failed", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.commitErr = errors.New("unavailable") }, want: ErrStaleAuthority},

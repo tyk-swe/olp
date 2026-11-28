@@ -145,6 +145,7 @@ type ManagerConfig struct {
 	Log                    *slog.Logger
 	Hostname               string
 	Region                 string
+	CountTaskCallback      TaskCallbackCounter
 	ExternalSecrets        ExternalSecrets
 	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
@@ -173,6 +174,8 @@ type Manager struct {
 	grantRefreshed func(providerID, credentialID string)
 
 	syncSharedQuotas func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
+
+	countTaskCallback TaskCallbackCounter
 
 	mu        sync.RWMutex
 	taskStore taskCapabilityDatabase
@@ -211,7 +214,7 @@ func NewManager(config ManagerConfig) *Manager {
 		externalSecrets: config.ExternalSecrets, mounted: cloneMounted(config.Mounted),
 		prepareGuardrailPlugin: config.PrepareGuardrailPlugin, syncSharedQuotas: config.SyncSharedQuotas,
 		release: emptyRelease(), stop: make(chan struct{}), taskCtx: tasks,
-		cancelTask: cancel, stopped: make(chan struct{}),
+		cancelTask: cancel, stopped: make(chan struct{}), countTaskCallback: config.CountTaskCallback,
 		instanceID:       completeness.GatewayInstance(config.Hostname),
 		refreshRequested: map[string]int64{},
 	}
