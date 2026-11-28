@@ -3,7 +3,13 @@ import { flushSync } from 'svelte';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
+import {
+  findButton,
+  findControl,
+  mountWithState,
+  reportedError,
+  setFieldValue
+} from '#test/mount.js';
 import { agentKeys } from './agentKeys';
 import type { MCPCatalogPreview, MCPServer } from './api';
 import MCPServerEditor from './MCPServerEditor.svelte';
@@ -154,6 +160,10 @@ it.each(['streamable_http', 'stdio'])(
           ...server,
           transport,
           endpoint: transport === 'stdio' ? '' : server.endpoint,
+          stdio:
+            transport === 'stdio'
+              ? { executable: 'tools', digest: 'a'.repeat(64) }
+              : null,
           etag: 'certified',
           has_credential: transport !== 'stdio'
         });
@@ -166,9 +176,9 @@ it.each(['streamable_http', 'stdio'])(
       onsaved: saved
     });
     function fill(label: string, value: string) {
-      const field = [...target.querySelectorAll('label')]
-        .find((item) => item.textContent?.trim().startsWith(label))
-        ?.querySelector('input,select');
+      const field = [...target.querySelectorAll('label')].find((item) =>
+        item.textContent?.trim().startsWith(label)
+      )?.control;
       if (!(
         field instanceof HTMLInputElement || field instanceof HTMLSelectElement
       ))
@@ -284,11 +294,11 @@ it.each(['OAuth', 'Entra', 'delegation'] as const)(
         : mode === 'Entra'
           ? 'Entra delegated issuer'
           : 'Require individual grants';
-    const control = [...target.querySelectorAll('label')]
-      .find((item) => item.textContent?.replace(/\s+/g, ' ').trim() === label)
-      ?.querySelector('input');
-    expect(control).toBeDefined();
-    if (!control) return;
+    const control = [...target.querySelectorAll('label')].find(
+      (item) => item.textContent?.replace(/\s+/g, ' ').trim() === label
+    )?.control;
+    expect(control).toBeInstanceOf(HTMLInputElement);
+    if (!(control instanceof HTMLInputElement)) return;
     if (mode === 'Entra') {
       setFieldValue(control, '');
     } else {
@@ -398,6 +408,202 @@ it.each(['save', 'conflict', 'retire'] as const)(
     );
   }
 );
+
+it('marks every invalid field and sends nothing until they are fixed', async () => {
+  const writes = vi.fn<(body: unknown) => void>();
+  const saved = vi.fn();
+  serve(
+    async (request) => {
+      writes(await request.json());
+      return json(server);
+    },
+    ['read', 'configure']
+  );
+  const { target } = mountWithState(
+    MCPServerEditor,
+    {
+      current: null,
+      projects: [{ id: 'project', name: 'Project' }],
+      onsaved: saved
+    },
+    { attach: true }
+  );
+  const checkboxes = () => [
+    ...target.querySelectorAll<HTMLInputElement>(
+      'fieldset input[type=checkbox]'
+    )
+  ];
+  for (const checkbox of checkboxes()) checkbox.click();
+  flushSync();
+  const invalid = [
+    ['Name', '   ', 'Enter a name.'],
+    ['Endpoint', 'tools', 'Enter a full URL.'],
+    [
+      'Price per call',
+      'free',
+      'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
+    ],
+    [
+      'Calls per minute',
+      '0',
+      'Calls per minute must be a whole number from 1 to 60000.'
+    ],
+    [
+      'Concurrent calls',
+      '2000',
+      'Max concurrency must be a whole number from 1 to 1024.'
+    ],
+    [
+      'Calls per minute per key',
+      '',
+      'Per-key calls per minute must be a whole number from 1 to 60000.'
+    ],
+    [
+      'Concurrent calls per key',
+      '1.5',
+      'Per-key max concurrency must be a whole number from 1 to 1024.'
+    ],
+    ['Client ID', '', 'Enter the client ID.'],
+    ['Audience', '', 'Enter the audience.'],
+    ['Scopes separated by spaces', '  ', 'Enter at least one scope.'],
+    ['Authorization endpoint', 'authorize', 'Enter a full URL.'],
+    ['Token endpoint', '', 'Enter a full URL.'],
+    ['Device authorization endpoint', 'device', 'Enter a full URL.'],
+    ['Issuer', '', 'Enter a full URL.']
+  ] as const;
+  for (const [label, value] of invalid)
+    setFieldValue(findControl(target, label), value);
+
+  target.querySelector('form')?.requestSubmit();
+
+  await eventually(() =>
+    expect(document.activeElement).toBe(findControl(target, 'Name'))
+  );
+  for (const [label, , message] of invalid)
+    expect(reportedError(findControl(target, label))).toBe(message);
+  const project = target.querySelector('select') as HTMLSelectElement;
+  expect(reportedError(project)).toBe('Choose a project.');
+  expect(writes).not.toHaveBeenCalled();
+
+  for (const checkbox of checkboxes()) checkbox.click();
+  flushSync();
+  setFieldValue(project, 'project');
+  for (const [label, value] of [
+    ['Name', 'Tools'],
+    ['Endpoint', 'https://tools.example.test/mcp'],
+    ['Price per call', ' 0.5 '],
+    ['Calls per minute', '30'],
+    ['Concurrent calls', '4'],
+    ['Calls per minute per key', '10'],
+    ['Concurrent calls per key', '2']
+  ])
+    setFieldValue(findControl(target, label), value);
+  target.querySelector('form')?.requestSubmit();
+
+  await eventually(() => expect(saved).toHaveBeenCalledOnce());
+  expect(writes).toHaveBeenCalledOnce();
+  expect(writes.mock.calls[0][0]).toMatchObject({
+    unit_price: '0.5',
+    calls_per_minute: 30,
+    max_concurrency: 4,
+    per_key_calls_per_minute: 10,
+    per_key_max_concurrency: 2
+  });
+});
+
+it('marks a new stdio registration without an executable or digest', () => {
+  const { target } = mountWithState(
+    MCPServerEditor,
+    { current: null, projects: [], onsaved: vi.fn() },
+    { attach: true }
+  );
+  setFieldValue(target.querySelectorAll('select')[1], 'stdio');
+  setFieldValue(findControl(target, 'Executable SHA256'), 'ABC');
+
+  target.querySelector('form')?.requestSubmit();
+  flushSync();
+
+  expect(reportedError(findControl(target, 'Approved executable'))).toBe(
+    'Enter the approved executable.'
+  );
+  expect(reportedError(findControl(target, 'Executable SHA256'))).toBe(
+    'Enter 64 lowercase hexadecimal characters.'
+  );
+});
+
+it('marks the certified tool whose price is not a decimal', () => {
+  const tools = ['search', 'fetch'].map((name) => ({
+    name,
+    description: name,
+    input_schema: {}
+  }));
+  const { target } = mountWithState(
+    MCPServerEditor,
+    {
+      current: { ...server, catalog: { ...server.catalog, tools } },
+      projects: [],
+      onsaved: vi.fn()
+    },
+    { attach: true }
+  );
+  setFieldValue(findControl(target, 'fetch price'), '1,5');
+
+  target.querySelector('form')?.requestSubmit();
+  flushSync();
+
+  expect(reportedError(findControl(target, 'fetch price'))).toBe(
+    'Use a non-negative decimal price for fetch.'
+  );
+  expect(reportedError(findControl(target, 'search price'))).toBeUndefined();
+});
+
+it.each([
+  ['endpoint', 'Endpoint'],
+  ['credential', 'Bearer credential'],
+  ['per_key_max_concurrency', 'Concurrent calls per key'],
+  ['oauth.entra_obo.issuer', 'Entra delegated issuer'],
+  ['entra_client_secret', 'Entra client secret']
+])('shows a save refused for %s on its field', async (field, label) => {
+  serve(
+    () =>
+      json(
+        {
+          type: 'https://openllmproxy.dev/problems/validation_failed',
+          title: 'Validation failed',
+          detail: 'Fix the field.',
+          status: 422,
+          errors: { [field]: [{ code: 'invalid', message: 'Not allowed.' }] }
+        },
+        422
+      ),
+    ['read', 'configure']
+  );
+  const { target } = mountWithState(
+    MCPServerEditor,
+    {
+      current: {
+        ...server,
+        oauth: {
+          client_id: 'client',
+          audience: 'tools',
+          scopes: ['tools.read'],
+          token_endpoint: 'https://auth.example.test/token'
+        }
+      },
+      projects: [],
+      onsaved: vi.fn()
+    },
+    { attach: true }
+  );
+
+  target.querySelector('form')?.requestSubmit();
+
+  await eventually(() =>
+    expect(document.activeElement).toBe(findControl(target, label))
+  );
+  expect(reportedError(findControl(target, label))).toBe('Not allowed.');
+  expect(target.querySelector('[role=alert]')).toBeNull();
+});
 
 it('allows a new bearer credential after removing the previous one without leaving the editor', async () => {
   const writes = vi.fn<(request: Request) => void>();

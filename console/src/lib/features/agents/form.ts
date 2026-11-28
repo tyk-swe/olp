@@ -6,6 +6,7 @@ import type {
   Publication,
   ToolPin
 } from './api';
+import { validated, type Validation } from '#lib/editing/validation.js';
 
 export type ServerPricingForm = {
   unitPrice: string;
@@ -26,90 +27,98 @@ export function serverPricingForm(server: MCPServer): ServerPricingForm {
     perKeyMaxConcurrency: String(server.per_key_max_concurrency)
   };
 }
+export type ServerPricingField =
+  Exclude<keyof ServerPricingForm, 'toolPrices'> | `toolPrice:${string}`;
+type CatalogTools = readonly { name: string }[];
+type ServerPricing = Pick<
+  MCPServerUpdate,
+  | 'unit_price'
+  | 'tool_prices'
+  | 'calls_per_minute'
+  | 'max_concurrency'
+  | 'per_key_calls_per_minute'
+  | 'per_key_max_concurrency'
+>;
+function unitPriceError(price: string) {
+  return !price || pricePattern.test(price)
+    ? undefined
+    : 'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.';
+}
+function toolPriceError(name: string, price: string, tools: CatalogTools) {
+  if (!price) return undefined;
+  if (!tools.some((tool) => tool.name === name))
+    return `Price only certified tools. ${name} is not in the catalog.`;
+  return pricePattern.test(price)
+    ? undefined
+    : `Use a non-negative decimal price for ${name}.`;
+}
+function limitError(raw: string, ceiling: number, label: string) {
+  const value = Number(raw);
+  return /^[0-9]+$/.test(raw.trim()) && value >= 1 && value <= ceiling
+    ? undefined
+    : `${label} must be a whole number from 1 to ${ceiling}.`;
+}
+export function validateServerPricing(
+  tools: CatalogTools,
+  form: ServerPricingForm
+): Validation<ServerPricing, ServerPricingField> {
+  const unitPrice = form.unitPrice.trim();
+  const toolPrices = Object.entries(form.toolPrices).map(
+    ([name, raw]) => [name, raw.trim()] as const
+  );
+  return validated<ServerPricing, ServerPricingField>(
+    {
+      unitPrice: unitPriceError(unitPrice),
+      ...Object.fromEntries(
+        toolPrices.map(([name, price]) => [
+          `toolPrice:${name}`,
+          toolPriceError(name, price, tools)
+        ])
+      ),
+      callsPerMinute: limitError(
+        form.callsPerMinute,
+        60000,
+        'Calls per minute'
+      ),
+      maxConcurrency: limitError(form.maxConcurrency, 1024, 'Max concurrency'),
+      perKeyCallsPerMinute: limitError(
+        form.perKeyCallsPerMinute,
+        60000,
+        'Per-key calls per minute'
+      ),
+      perKeyMaxConcurrency: limitError(
+        form.perKeyMaxConcurrency,
+        1024,
+        'Per-key max concurrency'
+      )
+    },
+    () => ({
+      unit_price: unitPrice || null,
+      tool_prices: Object.fromEntries(toolPrices.filter(([, price]) => price)),
+      calls_per_minute: Number(form.callsPerMinute),
+      max_concurrency: Number(form.maxConcurrency),
+      per_key_calls_per_minute: Number(form.perKeyCallsPerMinute),
+      per_key_max_concurrency: Number(form.perKeyMaxConcurrency)
+    })
+  );
+}
 export type ServerPricingResult =
   { ok: true; input: MCPServerUpdate } | { ok: false; message: string };
-type LimitResult = { ok: true; value: number } | { ok: false; message: string };
-function pricingLimit(
-  raw: string,
-  ceiling: number,
-  label: string
-): LimitResult {
-  const value = Number(raw);
-  if (!/^[0-9]+$/.test(raw.trim()) || value < 1 || value > ceiling)
-    return {
-      ok: false,
-      message: `${label} must be a whole number from 1 to ${ceiling}.`
-    };
-  return { ok: true, value };
-}
 export function serverPricingInput(
   server: Pick<MCPServer, 'name' | 'enabled' | 'endpoint'> & {
-    catalog: { tools: readonly { name: string }[] };
+    catalog: { tools: CatalogTools };
   },
   form: ServerPricingForm
 ): ServerPricingResult {
-  const unitPrice = form.unitPrice.trim();
-  if (unitPrice !== '' && !pricePattern.test(unitPrice))
-    return {
-      ok: false,
-      message:
-        'Use a non-negative decimal unit price, 0 for free, or blank for unpriced.'
-    };
-  const toolPrices: Record<string, string> = {};
-  for (const [name, raw] of Object.entries(form.toolPrices)) {
-    const price = raw.trim();
-    if (price === '') continue;
-    if (!server.catalog.tools.some((tool) => tool.name === name))
-      return {
-        ok: false,
-        message: `Price only certified tools. ${name} is not in the catalog.`
-      };
-    if (!pricePattern.test(price))
-      return {
-        ok: false,
-        message: `Use a non-negative decimal price for ${name}.`
-      };
-    toolPrices[name] = price;
+  const prices = validateServerPricing(server.catalog.tools, form);
+  if (!prices.ok) {
+    const [message = ''] = Object.values(prices.fieldErrors).filter(
+      (error) => error !== undefined
+    );
+    return { ok: false, message };
   }
-  const limits = {
-    calls_per_minute: pricingLimit(
-      form.callsPerMinute,
-      60000,
-      'Calls per minute'
-    ),
-    max_concurrency: pricingLimit(form.maxConcurrency, 1024, 'Max concurrency'),
-    per_key_calls_per_minute: pricingLimit(
-      form.perKeyCallsPerMinute,
-      60000,
-      'Per-key calls per minute'
-    ),
-    per_key_max_concurrency: pricingLimit(
-      form.perKeyMaxConcurrency,
-      1024,
-      'Per-key max concurrency'
-    )
-  };
-  for (const limit of Object.values(limits)) {
-    if (!limit.ok) return limit;
-  }
-  return {
-    ok: true,
-    input: {
-      name: server.name,
-      endpoint: server.endpoint,
-      enabled: server.enabled,
-      unit_price: unitPrice === '' ? null : unitPrice,
-      tool_prices: toolPrices,
-      calls_per_minute: (limits.calls_per_minute as { value: number }).value,
-      max_concurrency: (limits.max_concurrency as { value: number }).value,
-      per_key_calls_per_minute: (
-        limits.per_key_calls_per_minute as { value: number }
-      ).value,
-      per_key_max_concurrency: (
-        limits.per_key_max_concurrency as { value: number }
-      ).value
-    }
-  };
+  const { name, endpoint, enabled } = server;
+  return { ok: true, input: { name, endpoint, enabled, ...prices.value } };
 }
 
 export type PublicationForm = {

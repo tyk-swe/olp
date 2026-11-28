@@ -1,24 +1,25 @@
 <script lang="ts">
-  import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { writable } from 'svelte/store';
-  import { errorMessage } from '#lib/management/http.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listTasks } from './api';
   import { agentKeys } from './agentKeys';
+  import ListPager from './ListPager.svelte';
+  import { loadingWhileFetching } from './listQuery';
+  import ProjectFilter from './ProjectFilter.svelte';
 
-  const filters = writable<{ project: string; cursor?: string }>({
-    project: ''
-  });
+  let projectID = $state('');
+  const pagination = $state(emptyCursorHistory());
   const projects = createQuery(projectQueries.memberships);
   const tasks = createQuery(() => ({
-    queryKey: agentKeys.tasks($filters.project, $filters.cursor),
-    queryFn: () => listTasks($filters.project, $filters.cursor),
+    queryKey: agentKeys.tasks(projectID, pagination.cursor),
+    queryFn: () => listTasks(projectID, pagination.cursor),
     staleTime: 0,
     gcTime: 0,
     retry: false
@@ -26,44 +27,19 @@
 </script>
 
 <PageTitle title="A2A tasks" />
-<form
-  class="filter-bar"
-  onsubmit={(event) => {
-    event.preventDefault();
-    const project = new FormData(event.currentTarget).get('project');
-    filters.set({ project: typeof project === 'string' ? project : '' });
+<ProjectFilter
+  {projects}
+  onFilter={(value) => {
+    projectID = value;
+    resetCursor(pagination);
   }}
+/>
+<QueryView
+  query={loadingWhileFetching(tasks)}
+  loading="Loading tasks…"
+  emptyWhen={!tasks.data?.items.length}
 >
-  <label class="form-field">
-    Project
-    <select name="project">
-      <option value="">All authorized projects</option>
-      {#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as value (value.id)}
-        <option value={value.id}>{value.name}</option>
-      {/each}
-    </select>
-  </label>
-  <button class="button button-secondary" type="submit">Filter</button>
-</form>
-{#if projects.error}
-  <Callout tone="danger">{errorMessage(projects.error)}</Callout>
-{/if}
-{#if tasks.error}
-  <Callout tone="danger">
-    {errorMessage(tasks.error)}
-    {#snippet actions()}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => tasks.refetch()}
-      >
-        Retry
-      </button>{/snippet}
-  </Callout>
-{:else if tasks.isFetching}
-  <div class="loading-state" role="status">Loading tasks…</div>
-{:else if !tasks.data?.items.length}
-  <EmptyState title="No tasks in this view" />
-{:else}
+  {#snippet empty()}<EmptyState title="No tasks in this view" />{/snippet}
   <ScrollTable label="A2A tasks">
     <table class="data-table">
       <thead>
@@ -74,7 +50,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each tasks.data.items as task (task.id)}
+        {#each tasks.data?.items ?? [] as task (task.id)}
           <tr>
             <td>
               <a class="table-link" href={resolve(`activity/tasks/${task.id}`)}>
@@ -93,35 +69,5 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
-<nav class="page-actions list-pager" aria-label="Task pages">
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!$filters.cursor || tasks.isFetching}
-    onclick={() =>
-      filters.update((current) => ({ ...current, cursor: undefined }))}
-  >
-    Newest
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!!tasks.error || !tasks.data?.nextCursor || tasks.isFetching}
-    onclick={() =>
-      filters.update((current) => ({
-        ...current,
-        cursor: tasks.data?.nextCursor ?? undefined
-      }))}
-  >
-    Older
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={tasks.isFetching}
-    onclick={() => tasks.refetch()}
-  >
-    Refresh
-  </button>
-</nav>
+</QueryView>
+<ListPager {pagination} query={tasks} label="Task pages" />

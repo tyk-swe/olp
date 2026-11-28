@@ -3,16 +3,18 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { listExposures } from './api';
   import { agentKeys } from './agentKeys';
+  import ListPager from './ListPager.svelte';
   let key = $state('');
   let filter = $state('');
-  let cursor = $state<string | undefined>();
+  const pagination = $state(emptyCursorHistory());
   const exposure = createQuery(() => ({
-    queryKey: agentKeys.exposures(filter, cursor),
-    queryFn: () => listExposures(filter, cursor)
+    queryKey: agentKeys.exposures(filter, pagination.cursor),
+    queryFn: () => listExposures(filter, pagination.cursor)
   }));
 </script>
 
@@ -22,7 +24,7 @@
   onsubmit={(event) => {
     event.preventDefault();
     filter = key.trim();
-    cursor = undefined;
+    resetCursor(pagination);
   }}
 >
   <label class="form-field">
@@ -67,27 +69,4 @@
     </table>
   </ScrollTable>
 </QueryView>
-<nav class="page-actions list-pager" aria-label="Provisional exposure pages">
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!cursor || exposure.isFetching}
-    onclick={() => (cursor = undefined)}
-  >
-    Newest
-  </button><button
-    class="button button-secondary"
-    type="button"
-    disabled={!exposure.data?.nextCursor || exposure.isFetching}
-    onclick={() => (cursor = exposure.data?.nextCursor ?? undefined)}
-  >
-    Older
-  </button><button
-    class="button button-secondary"
-    type="button"
-    disabled={exposure.isFetching}
-    onclick={() => exposure.refetch()}
-  >
-    Refresh
-  </button>
-</nav>
+<ListPager {pagination} query={exposure} label="Provisional exposure pages" />

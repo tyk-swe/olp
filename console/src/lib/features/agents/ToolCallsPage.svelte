@@ -3,30 +3,30 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
+  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
-  import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { agentKeys } from './agentKeys';
   import { listToolCalls } from './api';
+  import ListPager from './ListPager.svelte';
 
-  const filters = writable<{
-    project: string;
-    key: string;
-    cursor?: string;
-  }>({ project: '', key: '' });
+  let project = $state('');
+  let key = $state('');
+  let applied = $state.raw({ project: '', key: '' });
+  const pagination = $state(emptyCursorHistory());
   const projects = createQuery(projectQueries.all);
   const calls = createQuery(() => ({
     queryKey: agentKeys.toolCalls(
-      $filters.project,
-      $filters.key,
-      $filters.cursor
+      applied.project,
+      applied.key,
+      pagination.cursor
     ),
     queryFn: () =>
-      listToolCalls($filters.project, $filters.key, $filters.cursor)
+      listToolCalls(applied.project, applied.key, pagination.cursor)
   }));
 </script>
 
@@ -35,18 +35,13 @@
   class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const project = form.get('project');
-    const key = form.get('key');
-    filters.set({
-      project: typeof project === 'string' ? project : '',
-      key: typeof key === 'string' ? key.trim() : ''
-    });
+    applied = { project, key: key.trim() };
+    resetCursor(pagination);
   }}
 >
   <label class="form-field">
     Project
-    <select name="project">
+    <select bind:value={project}>
       <option value="">All authorized projects</option>
       {#each projects.data ?? [] as value (value.id)}
         <option value={value.id}>{value.name}</option>
@@ -55,7 +50,10 @@
   </label>
   <label class="form-field">
     API key UUID (optional)
-    <input name="key" pattern={'[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}'} />
+    <input
+      bind:value={key}
+      pattern={'[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}'}
+    />
   </label>
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
@@ -155,34 +153,4 @@
     </table>
   </ScrollTable>
 </QueryView>
-<nav class="page-actions list-pager" aria-label="Tool call pages">
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!$filters.cursor || calls.isFetching}
-    onclick={() =>
-      filters.update((current) => ({ ...current, cursor: undefined }))}
-  >
-    Newest
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!calls.data?.nextCursor || calls.isFetching}
-    onclick={() =>
-      filters.update((current) => ({
-        ...current,
-        cursor: calls.data?.nextCursor ?? undefined
-      }))}
-  >
-    Older
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={calls.isFetching}
-    onclick={() => calls.refetch()}
-  >
-    Refresh
-  </button>
-</nav>
+<ListPager {pagination} query={calls} label="Tool call pages" />

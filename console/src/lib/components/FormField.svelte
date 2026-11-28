@@ -10,10 +10,12 @@
   let {
     label,
     error,
+    full = false,
     control
   }: {
     label: string;
     error: string | undefined;
+    full?: boolean;
     control: Snippet<[ControlAttributes]>;
   } = $props();
 
@@ -21,7 +23,7 @@
   const errorId = `${id}-error`;
 </script>
 
-<div class="form-field">
+<div class="form-field" class:full>
   <label for={id}>{label}</label>
   {@render control({
     id,

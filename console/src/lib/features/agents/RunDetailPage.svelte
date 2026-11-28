@@ -3,19 +3,20 @@
   import PageHeader from '#lib/components/PageHeader.svelte';
   import { formatDate, stateLabel } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
+  import { emptyCursorHistory } from '#lib/listing/pagination.js';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { getRun, listRunSpans } from './api';
   import { agentKeys } from './agentKeys';
+  import ListPager from './ListPager.svelte';
 
   let { runID }: { runID: string } = $props();
   const selectedStepID = $derived(page.url.searchParams.get('step_id'));
   const selectedSpanID = $derived(page.url.searchParams.get('span_id'));
-  const cursor = writable<string | undefined>(undefined);
+  const pagination = $state(emptyCursorHistory());
   const access = useRole();
   const run = createQuery(() => ({
     queryKey: agentKeys.run(runID),
@@ -25,8 +26,8 @@
     retry: false
   }));
   const spans = createQuery(() => ({
-    queryKey: agentKeys.runSpans(runID, $cursor),
-    queryFn: () => listRunSpans(runID, $cursor),
+    queryKey: agentKeys.runSpans(runID, pagination.cursor),
+    queryFn: () => listRunSpans(runID, pagination.cursor),
     staleTime: 0,
     gcTime: 0,
     retry: false
@@ -268,32 +269,7 @@
         </table>
       </ScrollTable>
     {/if}
-    <nav class="page-actions list-pager" aria-label="Span pages">
-      <button
-        class="button button-secondary"
-        type="button"
-        disabled={!$cursor || spans.isFetching}
-        onclick={() => cursor.set(undefined)}
-      >
-        Newest
-      </button>
-      <button
-        class="button button-secondary"
-        type="button"
-        disabled={!!spans.error || !spans.data?.nextCursor || spans.isFetching}
-        onclick={() => cursor.set(spans.data?.nextCursor ?? undefined)}
-      >
-        Older
-      </button>
-      <button
-        class="button button-secondary"
-        type="button"
-        disabled={spans.isFetching}
-        onclick={() => spans.refetch()}
-      >
-        Refresh
-      </button>
-    </nav>
+    <ListPager {pagination} query={spans} label="Span pages" />
   </section>
 {/if}
 
