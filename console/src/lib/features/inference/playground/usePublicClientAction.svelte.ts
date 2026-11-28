@@ -1,5 +1,6 @@
 import { onDestroy } from 'svelte';
 import { useAction } from '#lib/editing/action.svelte.js';
+import { formProblem } from '#lib/editing/validation.js';
 import { errorMessage } from '#lib/management/http.js';
 
 export function usePublicClientAction(
@@ -27,8 +28,8 @@ export function usePublicClientAction(
     get error() {
       return action.error;
     },
-    setError(message: string) {
-      action.error = message;
+    refuse(message: string) {
+      action.check(formProblem(message));
     },
     clearError() {
       action.reset();

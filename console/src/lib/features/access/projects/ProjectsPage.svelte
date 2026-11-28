@@ -28,7 +28,7 @@
 
   function startCreate() {
     name = '';
-    creation.error = '';
+    creation.dismiss();
     creating = true;
   }
 

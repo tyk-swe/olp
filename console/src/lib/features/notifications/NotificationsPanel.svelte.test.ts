@@ -12,7 +12,9 @@ import {
   submitForm
 } from '#test/mount.js';
 import NotificationDeliveries from './NotificationDeliveries.svelte';
+import NotificationDestinations from './NotificationDestinations.svelte';
 import NotificationDestinationTest from './NotificationDestinationTest.svelte';
+import NotificationRules from './NotificationRules.svelte';
 import NotificationsPanel from './NotificationsPanel.svelte';
 import RuleSilenceEditor from './RuleSilenceEditor.svelte';
 import type {
@@ -217,6 +219,130 @@ describe('rule silence', () => {
         ends_at: '2001-01-02T11:00:00.000Z'
       }
     });
+  });
+});
+
+describe('saved row edits', () => {
+  const props = { canManage: true, installationWide: true, canDelete: false };
+  const input = (target: ParentNode, label: string) =>
+    target.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const refusal = (field: string, message: string) =>
+    json(
+      {
+        title: 'Validation failed',
+        status: 422,
+        detail: message,
+        errors: { [field]: [{ code: 'validation_failed', message }] }
+      },
+      422
+    );
+  const edit = async (target: ParentNode) => {
+    const button = await eventually(() => {
+      const found = findButton(target, 'Edit');
+      expect(found).toBeDefined();
+      return found!;
+    });
+    button.click();
+    await eventually(() => expect(findButton(target, 'Save')).toBeDefined());
+  };
+
+  it('reports a refused rule edit at the inputs that hold it', async () => {
+    const writes = vi.fn<(request: Request) => void>();
+    serve(
+      (request) => {
+        const { pathname } = new URL(request.url);
+        if (request.method === 'PATCH') {
+          writes(request);
+          return refusal('name', 'A rule with this name already exists.');
+        }
+        return json({
+          items: pathname.endsWith('/notifications/rules')
+            ? [
+                {
+                  ...rule,
+                  event: 'provider.error_rate',
+                  configuration: {
+                    threshold: 0.5,
+                    recovery_threshold: 0.2,
+                    window_seconds: 300,
+                    minimum_samples: 10,
+                    cooldown_seconds: 600
+                  }
+                }
+              ]
+            : pathname.endsWith('/notifications/destinations')
+              ? [destination]
+              : []
+        });
+      },
+      ['read', 'keys', 'settings']
+    );
+    const { target } = mountWithState(NotificationRules, props, {
+      attach: true
+    });
+    await edit(target);
+    const windowInput = input(target, 'Window seconds');
+    const samples = input(target, 'Minimum samples');
+
+    setFieldValue(windowInput, 'soon');
+    setFieldValue(samples, 'few');
+    findButton(target, 'Save')?.click();
+    await eventually(() => expect(document.activeElement).toBe(windowInput));
+    expect(reportedError(windowInput)).toBe(
+      'Window seconds must be a whole number.'
+    );
+    expect(reportedError(samples)).toBe(
+      'Minimum samples must be a whole number.'
+    );
+    expect(writes).not.toHaveBeenCalled();
+
+    setFieldValue(windowInput, '300');
+    setFieldValue(samples, '10');
+    findButton(target, 'Save')?.click();
+    const name = input(target, 'Rule name');
+    await eventually(() =>
+      expect(reportedError(name)).toBe('A rule with this name already exists.')
+    );
+    await eventually(() => expect(document.activeElement).toBe(name));
+    expect(reportedError(windowInput)).toBeUndefined();
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('reports a refused destination edit at the inputs that hold it', async () => {
+    const writes = vi.fn<(request: Request) => void>();
+    serve(
+      (request) => {
+        if (request.method === 'PATCH') {
+          writes(request);
+          return refusal('url', 'Use a public HTTPS address.');
+        }
+        return json({ items: [{ ...destination, type: 'email' }] });
+      },
+      ['read', 'keys', 'settings']
+    );
+    const { target } = mountWithState(NotificationDestinations, props, {
+      attach: true
+    });
+    await edit(target);
+    const secret = input(target, 'Replacement secret');
+    const url = input(target, 'Destination URL');
+
+    setFieldValue(secret, '{"username":"olive"}');
+    findButton(target, 'Save')?.click();
+    await eventually(() => expect(document.activeElement).toBe(secret));
+    expect(reportedError(secret)).toBe(
+      'SMTP credentials must contain a username and password.'
+    );
+    expect(writes).not.toHaveBeenCalled();
+
+    setFieldValue(secret, '');
+    findButton(target, 'Save')?.click();
+    await eventually(() =>
+      expect(reportedError(url)).toBe('Use a public HTTPS address.')
+    );
+    await eventually(() => expect(document.activeElement).toBe(url));
+    expect(reportedError(secret)).toBeUndefined();
+    expect(target.querySelector('[role="alert"]')).toBeNull();
   });
 });
 

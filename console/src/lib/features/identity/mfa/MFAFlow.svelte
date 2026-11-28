@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { formProblem } from '#lib/editing/validation.js';
   import { enrollMFA, verifyMFA } from './api';
   import { webauthnCredential } from './webauthn';
   import type {
@@ -49,7 +50,7 @@
     event?.preventDefault();
     const token = current?.challenge ?? challenge?.challenge;
     if (!token || !selected) {
-      mfa.error = 'Start verification again.';
+      mfa.check(formProblem('Start verification again.'));
       return;
     }
     await mfa.run(

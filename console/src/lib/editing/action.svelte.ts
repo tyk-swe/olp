@@ -63,6 +63,10 @@ export function useAction<Field extends string = never>(
           fieldErrors = {};
           conflict = false;
         });
+  function dismiss() {
+    error = '';
+    fieldErrors = {};
+  }
   return {
     get busy() {
       return activeKey !== null;
@@ -82,15 +86,15 @@ export function useAction<Field extends string = never>(
     get conflict() {
       return conflict;
     },
+    dismiss,
     reset() {
-      error = '';
-      fieldErrors = {};
+      dismiss();
       conflict = false;
     },
     check<Value>(
       validation: Validation<Value, Field>
     ): validation is Valid<Value> {
-      error = '';
+      error = validation.ok ? '' : (validation.formError ?? '');
       fieldErrors = validation.ok ? {} : validation.fieldErrors;
       return validation.ok;
     },
@@ -157,6 +161,7 @@ export function useMutation<Field extends string = never>(
     get conflict() {
       return action.conflict;
     },
+    dismiss: action.dismiss,
     reset() {
       action.reset();
       intent.reset();

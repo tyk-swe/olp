@@ -19,7 +19,6 @@
     type PricingSourceSnapshot
   } from '#lib/features/usage/pricingSources.js';
   import { pricingKeys } from '#lib/features/usage/pricingKeys.js';
-  import type { PriceDraft } from '#lib/features/usage/pricing.js';
   import { formatDate } from '#lib/format.js';
   import {
     sourceAddress,
@@ -27,13 +26,18 @@
   } from '#lib/features/usage/pricingSourcePresentation.js';
 
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import {
+    publicationServerFields,
+    validatePublication,
+    type PublicationField
+  } from './publicationDraft';
   import PricingSourceCreateForm from './PricingSourceCreateForm.svelte';
   import PricingSourceEditForm from './PricingSourceEditForm.svelte';
   import PricingSourceSnapshots from './PricingSourceSnapshots.svelte';
 
   const create = useMutation();
-  const publish = useMutation();
+  const publish = useMutation<PublicationField>();
   const editAction = useAction();
   const toggleAction = useAction();
   const refreshAction = useAction();
@@ -74,6 +78,7 @@
   let publishId = $state('');
   let publishEffectiveAt = $state('');
   let publishOverrides = $state('');
+  let panel = $state<HTMLElement>();
 
   const busy = $derived(
     editAction.key || toggleAction.key || refreshAction.key || publish.key || ''
@@ -86,11 +91,11 @@
       publish.error
   );
   function clearErrors() {
-    create.error = '';
-    editAction.error = '';
-    toggleAction.error = '';
-    refreshAction.error = '';
-    publish.error = '';
+    create.dismiss();
+    editAction.reset();
+    toggleAction.reset();
+    refreshAction.reset();
+    publish.dismiss();
   }
 
   function startEdit(source: PricingSource) {
@@ -209,32 +214,17 @@
     clearErrors();
   }
 
+  async function focusProblem() {
+    if (panel) await focusFormError(panel);
+  }
+
   async function submitPublish(snapshot: PricingSourceSnapshot) {
     if (!canEdit || busy) return;
-    let overrides: PriceDraft[] | undefined;
-    if (publishOverrides.trim()) {
-      const parsed = captureResult(() => {
-        const value: unknown = JSON.parse(publishOverrides);
-        if (!Array.isArray(value)) throw new Error('not an array');
-        return value as PriceDraft[];
-      });
-      if (!parsed.ok) {
-        publish.error = 'Overrides must be a JSON array of price entries.';
-        return;
-      }
-      overrides = parsed.value;
-    }
+    const checked = validatePublication(publishEffectiveAt, publishOverrides);
+    if (!publish.check(checked)) return focusProblem();
     notice = '';
-    await publish.submit(
-      {
-        snapshot: { id: snapshot.id },
-        input: {
-          effective_at: publishEffectiveAt
-            ? new Date(publishEffectiveAt).toISOString()
-            : null,
-          overrides
-        }
-      },
+    const accepted = await publish.submit(
+      { snapshot: { id: snapshot.id }, input: checked.value },
       (submission, requestId) =>
         publishPricingSnapshot(
           submission.snapshot,
@@ -251,16 +241,22 @@
       },
       {
         key: snapshot.id,
+        serverFields: publicationServerFields,
         failure: (cause, stage) =>
           stage === 'accept'
             ? `${notice} Refresh failed. ${errorMessage(cause)}`
             : errorMessage(cause, 'The snapshot could not be published.')
       }
     );
+    if (!accepted) await focusProblem();
   }
 </script>
 
-<section class="settings-section" aria-labelledby="pricing-sources-title">
+<section
+  class="settings-section"
+  aria-labelledby="pricing-sources-title"
+  bind:this={panel}
+>
   <div class="section-heading">
     <div>
       <h2 class="sr-only" id="pricing-sources-title">Pricing sources</h2>
@@ -364,6 +360,7 @@
               {publishId}
               bind:publishEffectiveAt
               bind:publishOverrides
+              errors={publish.fieldErrors}
               onStartPublish={startPublish}
               onSubmitPublish={submitPublish}
               onCancelPublish={() => (publishId = '')}

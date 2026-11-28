@@ -4,7 +4,6 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
-  import { validRouteSlug } from '#lib/routeIdentity.js';
   import { currentBudgetLimit } from '../budgetLimit.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -18,16 +17,23 @@
   import { type BudgetGroup } from '#lib/domain/budget-groups/api.js';
   import { budgetGroupKeys } from '#lib/domain/budget-groups/budgetGroupKeys.js';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
-  import { limitsError } from '../limitForm';
-
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import BudgetGroupCreateDialog from './BudgetGroupCreateDialog.svelte';
+  import {
+    budgetGroupDraft,
+    budgetGroupRowServerFields,
+    budgetGroupServerFields,
+    validateBudgetGroupChange,
+    type BudgetGroupField
+  } from './budgetGroupDraft';
   import QueryView from '#lib/components/QueryView.svelte';
   import { budgetGroupQueries } from '#lib/domain/budget-groups/queries.js';
 
-  const create = useMutation();
-  const edit = useAction();
+  const create = useMutation<BudgetGroupField>();
+  const edit = useAction<BudgetGroupField>();
+  const id = $props.id();
 
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
@@ -47,31 +53,12 @@
 
   let editingId = $state('');
   let editingGroup = $state.raw<BudgetGroup | null>(null);
-  let editName = $state('');
-  let editBasis = $state('cost');
-  let editDaily = $state('');
-  let editMonthly = $state('');
-  let editWeekly = $state('');
-  let editTemplate = $state('');
-  const editRates = $state({
-    requests_per_minute: '',
-    tokens_per_minute: '',
-    max_concurrency: ''
-  });
-
-  function optionalDecimal(value: string): string | null {
-    return value.trim() || null;
-  }
+  let editDraft = $state(budgetGroupDraft());
+  let table = $state<HTMLTableElement>();
 
   usePrincipalLifetime(() => {
-    editingId =
-      editName =
-      editDaily =
-      editMonthly =
-      editWeekly =
-      editTemplate =
-        '';
-    for (const field of rateFields) editRates[field] = '';
+    editingId = '';
+    editDraft = budgetGroupDraft();
     editingGroup = null;
   });
 
@@ -79,14 +66,8 @@
     if (edit.busy) return;
     editingGroup = group;
     editingId = group.id;
-    editName = group.name;
-    editDaily = group.daily_cost_limit ?? '';
-    editBasis = group.cost_basis ?? 'cost';
-    editMonthly = group.monthly_cost_limit ?? '';
-    editWeekly = group.weekly_cost_limit ?? '';
-    editTemplate = group.limit_template ?? '';
-    for (const f of rateFields) editRates[f] = group[f]?.toString() ?? '';
-    edit.error = '';
+    editDraft = budgetGroupDraft(group);
+    edit.reset();
   }
 
   function submitCreate(input: Parameters<typeof createBudgetGroup>[0]) {
@@ -105,60 +86,23 @@
         failure: (cause, stage) =>
           stage === 'accept'
             ? `Budget group created, but refreshing failed. ${errorMessage(cause)}`
-            : errorMessage(cause, 'The budget group could not be created.')
+            : errorMessage(cause, 'The budget group could not be created.'),
+        serverFields: budgetGroupServerFields
       }
     );
   }
 
   async function submitEdit(group: BudgetGroup) {
-    if (!canManage || edit.busy || !editName.trim()) return;
+    if (!canManage || edit.busy || !editDraft.name.trim()) return;
     const current = editingGroup;
     if (!current || current.id !== group.id) return;
-    if (
-      !editTemplate.trim() &&
-      !Object.values(editRates).some(Boolean) &&
-      !editDaily.trim() &&
-      !editMonthly.trim() &&
-      !editWeekly.trim()
-    ) {
-      edit.error = 'Set a limit or reference a project template.';
+    const checked = validateBudgetGroupChange($state.snapshot(editDraft));
+    if (!edit.check(checked)) {
+      if (table) await focusFormError(table);
       return;
     }
-    const validation =
-      limitsError({
-        ...editRates,
-        cost_basis: editBasis as 'cost' | 'charge',
-        daily_cost_limit: editDaily,
-        weekly_cost_limit: editWeekly,
-        monthly_cost_limit: editMonthly
-      }) ||
-      (editTemplate &&
-      (!group.project_id || !validRouteSlug(editTemplate.trim()))
-        ? 'Use a template from this group’s project.'
-        : '');
-    if (validation) {
-      edit.error = validation;
-      return;
-    }
-    await edit.run(
-      () =>
-        updateBudgetGroup(current, {
-          name: editName.trim(),
-          cost_basis: editBasis as 'cost' | 'charge',
-          daily_cost_limit: optionalDecimal(editDaily),
-          weekly_cost_limit: optionalDecimal(editWeekly),
-          monthly_cost_limit: optionalDecimal(editMonthly),
-          limit_template: editTemplate.trim() || null,
-          requests_per_minute: editRates.requests_per_minute
-            ? Number(editRates.requests_per_minute)
-            : null,
-          tokens_per_minute: editRates.tokens_per_minute
-            ? Number(editRates.tokens_per_minute)
-            : null,
-          max_concurrency: editRates.max_concurrency
-            ? Number(editRates.max_concurrency)
-            : null
-        }),
+    const saved = await edit.run(
+      () => updateBudgetGroup(current, checked.value),
       async () => {
         editingId = '';
         editingGroup = null;
@@ -172,11 +116,32 @@
         failure: (cause, stage) =>
           stage === 'accept'
             ? `Budget group updated, but refreshing failed. ${errorMessage(cause)}`
-            : errorMessage(cause, 'The budget group could not be updated.')
+            : errorMessage(cause, 'The budget group could not be updated.'),
+        serverFields: budgetGroupRowServerFields
       }
     );
+    if (!saved && table) await focusFormError(table);
   }
 </script>
+
+{#snippet rowField(
+  field:
+    'name' | 'daily_cost_limit' | 'weekly_cost_limit' | 'monthly_cost_limit',
+  label: string
+)}
+  {@const error = edit.fieldErrors[field]}
+  {@const errorId = `${id}-${field}-error`}
+  <input
+    aria-label={label}
+    inputmode={field === 'name' ? undefined : 'decimal'}
+    required={field === 'name'}
+    bind:value={editDraft[field]}
+    disabled={edit.busy}
+    aria-invalid={error ? 'true' : undefined}
+    aria-describedby={error ? errorId : undefined}
+  />
+  {#if error}<p class="field-error" id={errorId}>{error}</p>{/if}
+{/snippet}
 
 <section class="groups-panel" aria-labelledby="budget-groups-heading">
   <div class="toolbar">
@@ -190,7 +155,7 @@
           class="button button-primary"
           type="button"
           onclick={() => {
-            create.error = '';
+            create.dismiss();
             creating = true;
           }}
         >
@@ -205,8 +170,7 @@
 
   {#if creating}
     <BudgetGroupCreateDialog
-      busy={create.busy}
-      bind:error={create.error}
+      action={create}
       onClose={() => (creating = false)}
       onSubmit={submitCreate}
     />
@@ -224,7 +188,7 @@
       </EmptyState>
     {/snippet}
     <ScrollTable label="Budget groups">
-      <table class="data-table">
+      <table class="data-table" bind:this={table}>
         <thead>
           <tr>
             <th scope="col">Name</th><th scope="col">Project</th><th
@@ -244,38 +208,18 @@
           {#each items as group (group.id)}
             {#if editingId === group.id}
               <tr>
-                <td>
-                  <input
-                    aria-label="Group name"
-                    bind:value={editName}
-                    disabled={edit.busy}
-                    required
-                  />
-                </td><td>{group.project_name ?? 'Installation-wide'}</td><td>
-                  <input
-                    aria-label="Daily cost limit"
-                    inputmode="decimal"
-                    bind:value={editDaily}
-                    disabled={edit.busy}
-                  />
+                <td>{@render rowField('name', 'Group name')}</td><td>
+                  {group.project_name ?? 'Installation-wide'}
                 </td><td>
-                  <input
-                    aria-label="Weekly cost limit"
-                    inputmode="decimal"
-                    bind:value={editWeekly}
-                    disabled={edit.busy}
-                  />
+                  {@render rowField('daily_cost_limit', 'Daily cost limit')}
                 </td><td>
-                  <input
-                    aria-label="Monthly cost limit"
-                    inputmode="decimal"
-                    bind:value={editMonthly}
-                    disabled={edit.busy}
-                  />
+                  {@render rowField('weekly_cost_limit', 'Weekly cost limit')}
+                </td><td>
+                  {@render rowField('monthly_cost_limit', 'Monthly cost limit')}
                 </td><td>
                   <select
                     aria-label="Budget basis"
-                    bind:value={editBasis}
+                    bind:value={editDraft.cost_basis}
                     disabled={edit.busy}
                   >
                     <option value="cost">Provider cost</option><option

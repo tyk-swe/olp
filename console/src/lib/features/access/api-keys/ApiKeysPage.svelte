@@ -27,6 +27,7 @@
   import { isApiKeyUsable } from './apiKeyLifecycle';
 
   import { useMutation } from '#lib/editing/action.svelte.js';
+  import { formProblem } from '#lib/editing/validation.js';
   import type { Component } from 'svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
@@ -88,7 +89,7 @@
   function edit(key: ApiKey) {
     policyDirty = policyBusy = false;
     editing = key;
-    write.error = '';
+    write.dismiss();
   }
 
   function cancelEdit() {
@@ -110,7 +111,11 @@
       ])
     );
     if (!refreshed.ok && current())
-      write.error = `API key saved, but refreshing failed. ${errorMessage(refreshed.error)}`;
+      write.check(
+        formProblem(
+          `API key saved, but refreshing failed. ${errorMessage(refreshed.error)}`
+        )
+      );
   }
 
   function submit(command: ApiKeyPolicyCommand, route?: string) {
@@ -201,7 +206,7 @@
       if (keyId && !write.error) void goto(resolve('keys'));
     }}
     onCancel={cancelEdit}
-    onClearError={() => (write.error = '')}
+    onClearError={() => write.dismiss()}
   />
 {:else}
   <ApiKeyInventory

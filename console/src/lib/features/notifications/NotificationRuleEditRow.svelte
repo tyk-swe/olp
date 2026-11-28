@@ -2,7 +2,8 @@
   import RuleSilenceEditor from './RuleSilenceEditor.svelte';
   import { notificationEvents } from './ruleDraft';
   import type { NotificationDestination, NotificationRule } from './api';
-  import type { RuleConfigurationDraft } from './ruleDraft';
+  import type { RuleConfigurationDraft, RuleField } from './ruleDraft';
+  import type { FieldErrors } from '#lib/editing/validation.js';
 
   let {
     rule,
@@ -11,6 +12,7 @@
     configuration = $bindable(),
     destinations,
     busy,
+    errors,
     editingRule,
     onSave,
     onCancel,
@@ -24,6 +26,7 @@
     configuration: RuleConfigurationDraft;
     destinations: NotificationDestination[];
     busy: boolean;
+    errors: FieldErrors<RuleField>;
     editingRule: NotificationRule | null;
     onSave: () => void;
     onCancel: () => void;
@@ -31,22 +34,42 @@
     subjectLabel: (rule: NotificationRule) => string;
     windowLabel: (windowKind: NotificationRule['window_kind']) => string;
   } = $props();
+
+  const id = $props.id();
+  function reported(field: RuleField) {
+    return errors[field]
+      ? {
+          'aria-invalid': 'true' as const,
+          'aria-describedby': `${id}-${field}`
+        }
+      : {};
+  }
 </script>
+
+{#snippet problemAt(field: RuleField)}
+  {#if errors[field]}<p class="field-error" id="{id}-{field}">
+      {errors[field]}
+    </p>{/if}
+{/snippet}
 
 <tr>
   <td>
     <input
+      {...reported('name')}
       aria-label="Rule name"
       bind:value={name}
       disabled={busy}
       required
-    /><br /><small>{rule.project_name ?? 'Installation-wide'}</small>
+    />{@render problemAt('name')}<br /><small>
+      {rule.project_name ?? 'Installation-wide'}
+    </small>
   </td><td>{notificationEvents[rule.event].label}</td><td>
     {subjectLabel(rule)}
   </td><td>{windowLabel(rule.window_kind)}</td><td>
     <div class="form-grid">
       {#each notificationEvents[rule.event].fields as field (field.key)}
         <input
+          {...reported(field.key)}
           aria-label={field.label}
           inputmode={field.inputmode}
           value={configuration.values[field.key] ?? ''}
@@ -80,14 +103,22 @@
           </option><option value="monthly">Monthly</option>
         </select>{/if}
     </div>
+    {#each notificationEvents[rule.event].fields as field (field.key)}
+      {@render problemAt(field.key)}
+    {/each}
   </td><td>
-    <select aria-label="Destination" bind:value={destinationId} disabled={busy}>
+    <select
+      {...reported('destinationId')}
+      aria-label="Destination"
+      bind:value={destinationId}
+      disabled={busy}
+    >
       {#each destinations.filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
           value={destination.id}
         >
           {destination.name}
         </option>{/each}
-    </select>
+    </select>{@render problemAt('destinationId')}
   </td><td>{rule.enabled ? 'Yes' : 'No'}</td><td>
     <button
       class="text-button"

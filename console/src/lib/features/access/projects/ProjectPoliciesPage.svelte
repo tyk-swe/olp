@@ -131,8 +131,8 @@
                 type="button"
                 onclick={() => {
                   renameValue = selected.name;
-                  rename.error = '';
-                  removal.error = '';
+                  rename.reset();
+                  removal.dismiss();
                   renaming = true;
                 }}
               >

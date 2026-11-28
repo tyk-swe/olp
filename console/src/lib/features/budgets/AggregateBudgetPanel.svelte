@@ -1,5 +1,8 @@
 <script lang="ts">
+  import FormField from '#lib/components/FormField.svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import { hasChanges } from '#lib/editing/unsavedChanges.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -10,6 +13,13 @@
     type AggregateBudget,
     type BudgetPolicy
   } from './api';
+  import {
+    aggregateBudgetDraft,
+    aggregateBudgetPolicy,
+    aggregateBudgetServerFields,
+    validateAggregateBudget,
+    type AggregateBudgetField
+  } from './aggregateBudgetDraft';
   import { aggregateBudgetKeys } from './aggregateBudgetKeys';
 
   let {
@@ -29,9 +39,7 @@
         ? 'Project budget'
         : 'Installation budget'
   );
-  const prefix = $derived(
-    `aggregate-${organizationId ?? projectId ?? 'installation'}`
-  );
+  const basisId = $props.id();
   const budgetKey = $derived(
     aggregateBudgetKeys.detail(organizationId ?? projectId ?? 'installation')
   );
@@ -39,35 +47,21 @@
     queryKey: budgetKey,
     queryFn: ({ signal }) => getBudget(projectId, signal, organizationId)
   }));
-  let basis = $state('cost');
-  let daily = $state('');
-  let monthly = $state('');
-  let weekly = $state('');
+  let draft = $state(aggregateBudgetDraft());
   let etag = $state('');
-  let saved = $state('');
-  const action = useAction();
-  function input(): BudgetPolicy | null {
-    return daily || weekly || monthly
-      ? {
-          daily_cost_limit: daily || null,
-          monthly_cost_limit: monthly || null,
-          weekly_cost_limit: weekly || null,
-          cost_basis: basis as 'cost' | 'charge'
-        }
-      : null;
-  }
+  let saved = $state.raw<BudgetPolicy | null>(null);
+  const action = useAction<AggregateBudgetField>();
   function load(value: AggregateBudget) {
-    basis = value.policy?.cost_basis ?? 'cost';
-    daily = value.policy?.daily_cost_limit ?? '';
-    monthly = value.policy?.monthly_cost_limit ?? '';
-    weekly = value.policy?.weekly_cost_limit ?? '';
+    draft = aggregateBudgetDraft(value.policy);
     etag = value.etag;
-    saved = JSON.stringify(input());
+    saved = aggregateBudgetPolicy(draft);
   }
   $effect(() => {
     if (
       query.data &&
-      (!etag || (query.data.etag !== etag && JSON.stringify(input()) === saved))
+      (!etag ||
+        (query.data.etag !== etag &&
+          !hasChanges(saved, aggregateBudgetPolicy(draft))))
     )
       load(query.data);
   });
@@ -75,33 +69,28 @@
     const result = await query.refetch();
     if (result.data) {
       load(result.data);
-      action.error = '';
+      action.reset();
     }
   }
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (action.busy || !editable) return;
-    action.error = '';
-    if (
-      [daily, weekly, monthly].some(
-        (value) =>
-          value &&
-          (!/^\d{1,12}(\.\d{1,12})?$/.test(value) || Number(value) <= 0)
-      )
-    ) {
-      action.error =
-        'Budgets must be positive USD amounts with at most 12 digits before and after the decimal point.';
-      return;
-    }
-    await action.run(
-      () => putBudget(projectId, etag, input(), organizationId),
+    const checked = validateAggregateBudget(draft);
+    if (!action.check(checked)) return focusFormError(form);
+    const accepted = await action.run(
+      () => putBudget(projectId, etag, checked.value, organizationId),
       async (value) => {
         client.setQueryData(budgetKey, value);
         load(value);
         await client.invalidateQueries({ queryKey: projectKeys.root });
         notify(`${title} saved.`);
-      }
+      },
+      { serverFields: aggregateBudgetServerFields }
     );
+    if (!accepted) await focusFormError(form);
   }
 </script>
 
@@ -123,8 +112,8 @@
     <form onsubmit={submit}>
       <fieldset disabled={action.busy || !editable}>
         <div class="form-field">
-          <label for={`${prefix}-basis`}>Budget basis</label>
-          <select id={`${prefix}-basis`} bind:value={basis}>
+          <label for={basisId}>Budget basis</label>
+          <select id={basisId} bind:value={draft.cost_basis}>
             <option value="cost">Provider cost</option>
             <option value="charge">Consumer charge</option>
           </select>
@@ -134,42 +123,54 @@
             {:else}Enforced on provider cost.{/if}
           </small>
         </div>
-        <div class="form-field">
-          <label for={`${prefix}-daily`}>Daily cost limit (USD)</label>
-          <input
-            id={`${prefix}-daily`}
-            inputmode="decimal"
-            placeholder="Unlimited"
-            bind:value={daily}
-          />
-          <small>
-            {query.data?.usage.daily.accrued ?? '0'} USD accrued this day.
-          </small>
-        </div>
-        <div class="form-field">
-          <label for={`${prefix}-weekly`}>Weekly cost limit (USD)</label>
-          <input
-            id={`${prefix}-weekly`}
-            inputmode="decimal"
-            placeholder="Unlimited"
-            bind:value={weekly}
-          />
-          <small>
-            {query.data?.usage.weekly?.accrued ?? '0'} USD accrued this ISO week.
-          </small>
-        </div>
-        <div class="form-field">
-          <label for={`${prefix}-monthly`}>Monthly cost limit (USD)</label>
-          <input
-            id={`${prefix}-monthly`}
-            inputmode="decimal"
-            placeholder="Unlimited"
-            bind:value={monthly}
-          />
-          <small>
-            {query.data?.usage.monthly.accrued ?? '0'} USD accrued this month.
-          </small>
-        </div>
+        <FormField
+          label="Daily cost limit (USD)"
+          error={action.fieldErrors.daily_cost_limit}
+        >
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              inputmode="decimal"
+              placeholder="Unlimited"
+              bind:value={draft.daily_cost_limit}
+            />
+            <small>
+              {query.data?.usage.daily.accrued ?? '0'} USD accrued this day.
+            </small>
+          {/snippet}
+        </FormField>
+        <FormField
+          label="Weekly cost limit (USD)"
+          error={action.fieldErrors.weekly_cost_limit}
+        >
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              inputmode="decimal"
+              placeholder="Unlimited"
+              bind:value={draft.weekly_cost_limit}
+            />
+            <small>
+              {query.data?.usage.weekly?.accrued ?? '0'} USD accrued this ISO week.
+            </small>
+          {/snippet}
+        </FormField>
+        <FormField
+          label="Monthly cost limit (USD)"
+          error={action.fieldErrors.monthly_cost_limit}
+        >
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              inputmode="decimal"
+              placeholder="Unlimited"
+              bind:value={draft.monthly_cost_limit}
+            />
+            <small>
+              {query.data?.usage.monthly.accrued ?? '0'} USD accrued this month.
+            </small>
+          {/snippet}
+        </FormField>
       </fieldset>
       <p class="section-help">
         Blank limits remove the cap without resetting spend. Windows currently
@@ -177,7 +178,12 @@
         Unpriced attempts accrue no USD; {query.data?.usage.unpriced_attempts ??
           0} this month.
       </p>
-      {#if action.error}<p class="inline-problem" role="alert">
+      {#if action.error}<p
+          class="inline-problem"
+          role="alert"
+          tabindex="-1"
+          data-error-summary
+        >
           {action.error}
         </p>{/if}
 

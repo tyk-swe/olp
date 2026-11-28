@@ -4,7 +4,12 @@ import { toasts } from '#lib/components/toasts.svelte.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
+import {
+  findButton,
+  mountWithState,
+  reportedError,
+  setFieldValue
+} from '#test/mount.js';
 import type { RetrievalBinding } from './api';
 import RetrievalBindings from './RetrievalBindings.svelte';
 
@@ -32,6 +37,7 @@ function mountBindings(
 ) {
   serve(handler, operations);
   const { target } = mountWithState(RetrievalBindings, undefined, {
+    attach: true,
     configureClient: (client) =>
       client.setDefaultOptions({ queries: { retry: false } })
   });
@@ -42,9 +48,9 @@ function mountBindings(
     const label = [...target.querySelectorAll('label')].find((item) =>
       item.textContent?.trim().startsWith(labelPrefix)
     );
-    const control = label?.querySelector<T>('input, textarea');
+    const control = label?.control;
     expect(control).toBeDefined();
-    return control!;
+    return control as T;
   };
   return { target, button, fieldByLabel };
 }
@@ -102,31 +108,72 @@ it('validates field mappings and duplicate key grants before calling the API', a
   );
   setFieldValue(fieldByLabel('Backend resource'), 'KB999');
   setFieldValue(fieldByLabel('Field mappings (JSON)'), '{"unknown":"x"}');
-
-  target
-    .querySelector('form')
-    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  flushSync();
-
-  expect(writes).not.toHaveBeenCalled();
-  expect(target.querySelector('[role="alert"]')?.textContent).toContain(
-    'Unknown field mapping key "unknown".'
-  );
-
-  setFieldValue(fieldByLabel('Field mappings (JSON)'), '{}');
   setFieldValue(
     fieldByLabel('API-key grants'),
     '00000000-0000-4000-8000-000000000014\n00000000-0000-4000-8000-000000000014'
   );
+
   target
     .querySelector('form')
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   flushSync();
 
   expect(writes).not.toHaveBeenCalled();
-  expect(target.querySelector('[role="alert"]')?.textContent).toContain(
+  expect(reportedError(fieldByLabel('Field mappings (JSON)'))).toBe(
+    'Unknown field mapping key "unknown".'
+  );
+  expect(reportedError(fieldByLabel('API-key grants'))).toBe(
     'Each API-key grant must appear once.'
   );
+
+  setFieldValue(fieldByLabel('Field mappings (JSON)'), '{}');
+  target
+    .querySelector('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  flushSync();
+
+  expect(writes).not.toHaveBeenCalled();
+  expect(reportedError(fieldByLabel('Field mappings (JSON)'))).toBeUndefined();
+  expect(reportedError(fieldByLabel('API-key grants'))).toBe(
+    'Each API-key grant must appear once.'
+  );
+});
+
+it('reports a refused value at the input the server names', async () => {
+  const { target, button, fieldByLabel } = mountBindings((request) =>
+    request.method === 'GET'
+      ? json({ items: [], next_cursor: null })
+      : json(
+          {
+            title: 'Invalid request',
+            status: 422,
+            errors: {
+              target_id: [
+                { code: 'invalid', message: 'Choose one route target.' }
+              ]
+            }
+          },
+          422
+        )
+  );
+
+  await eventually(() =>
+    expect(target.textContent).toContain(
+      'No cloud retrieval bindings are configured.'
+    )
+  );
+  button('Add binding')?.click();
+  flushSync();
+  target
+    .querySelector('form')
+    ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+  await eventually(() =>
+    expect(reportedError(fieldByLabel('Target ID'))).toBe(
+      'Choose one route target.'
+    )
+  );
+  expect(target.querySelector('[role="alert"]')).toBeNull();
 });
 
 it('handles save conflicts with ConflictNotice, reloads the latest version, and saves cleanly', async () => {

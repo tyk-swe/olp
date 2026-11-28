@@ -1,3 +1,4 @@
+import type { FieldErrors } from '#lib/editing/validation.js';
 import type { components } from '#lib/management/schema.js';
 type AdmissionLimits = components['schemas']['EndUserLimits'];
 export const limitFields = [
@@ -8,10 +9,8 @@ export const limitFields = [
   { key: 'weekly_cost_limit', label: 'Weekly budget (USD)', numeric: false },
   { key: 'monthly_cost_limit', label: 'Monthly budget (USD)', numeric: false }
 ] as const;
-export type LimitForm = Record<
-  (typeof limitFields)[number]['key'] | 'cost_basis',
-  string
->;
+export type LimitKey = (typeof limitFields)[number]['key'];
+export type LimitForm = Record<LimitKey | 'cost_basis', string>;
 export function limitForm(limits?: AdmissionLimits): LimitForm {
   return {
     ...Object.fromEntries(
@@ -33,17 +32,31 @@ export function limitsInput(form: LimitForm): AdmissionLimits {
   };
 }
 
+function limitError(
+  { key, numeric }: (typeof limitFields)[number],
+  value: string
+) {
+  if (!value) return undefined;
+  if (!numeric)
+    return /^\d{1,12}(?:\.\d{1,12})?$/.test(value) && /[1-9]/.test(value)
+      ? undefined
+      : 'Budgets must be positive decimals with at most 12 digits before and after the decimal point.';
+  const maximum =
+    key === 'tokens_per_minute' ? Number.MAX_SAFE_INTEGER : 2147483647;
+  return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= maximum
+    ? undefined
+    : 'Rate and concurrency limits must be positive whole numbers within the supported range.';
+}
+
+export function limitErrors(limits: LimitForm): FieldErrors<LimitKey> {
+  return Object.fromEntries(
+    limitFields.map((field) => [
+      field.key,
+      limitError(field, limits[field.key].trim())
+    ])
+  );
+}
+
 export function limitsError(limits: LimitForm): string {
-  for (const { key, numeric } of limitFields) {
-    const value = limits[key].trim();
-    if (!value) continue;
-    if (numeric) {
-      const maximum =
-        key === 'tokens_per_minute' ? Number.MAX_SAFE_INTEGER : 2147483647;
-      if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > maximum)
-        return 'Rate and concurrency limits must be positive whole numbers within the supported range.';
-    } else if (!/^\d{1,12}(?:\.\d{1,12})?$/.test(value) || !/[1-9]/.test(value))
-      return 'Budgets must be positive decimals with at most 12 digits before and after the decimal point.';
-  }
-  return '';
+  return Object.values(limitErrors(limits)).find(Boolean) ?? '';
 }

@@ -266,13 +266,14 @@ request ID on retry until the input changes or the write commits.
 
 An action is principal-scoped by default, so a principal change or unmount
 retires it. Lifecycle-authorized sign-in and sign-out pass `'authentication'`
-to stay alive through their own transition, ending only at unmount. `reset()`
-clears the reported errors and conflict, and a mutation's `reset()` also drops
-the saved retry intent. Reads that can fail return the problem as a value
-through `captureResult` or `readResult` in `src/lib/editing/result.ts` rather
-than throwing through the component. Other logic that can fail, such as parsing
-what the user typed, belongs in a `.ts` module that returns the problem as a
-value, like `src/lib/editing/json.ts`.
+to stay alive through their own transition, ending only at unmount.
+`dismiss()` clears the reported errors, and `reset()` also clears the conflict.
+A mutation's `reset()` drops the saved retry intent as well, so use `dismiss()`
+when the user may still retry the same input. Reads that can fail return the
+problem as a value through `captureResult` or `readResult` in
+`src/lib/editing/result.ts` rather than throwing through the component. Other
+logic that can fail, such as parsing what the user typed, belongs in a `.ts`
+module that returns the problem as a value, like `src/lib/editing/json.ts`.
 
 ### Edit forms
 
@@ -284,14 +285,16 @@ function in a `.ts` module that returns a `Validation` from
 `src/lib/editing/validation.ts`, which is either `{ ok: true, value }` with the
 request body or `{ ok: false, fieldErrors }` keyed by the form's own field
 names. `validated(fieldErrors, value)` builds one and calls `value` only when no
-field has an error.
+field has an error. `formProblem(message)` builds a refusal that belongs to no
+single field.
 
 The component names those fields in `useMutation<SinkField>()`, passes the
 result to `action.check`, and writes `value` only when `check` returns `true`.
 To report a refused request on the same inputs, pass `serverFields` in
 `feedback`, a map from the API's field names to the form's. `action.error` is
-the message for the whole form, and it is empty when every field the server
-named is in the map. A form never assigns `action.error`.
+the message for the whole form. It holds the `formProblem` message after a
+failed check, and it is empty when every field the server named is in the map. A
+form never assigns `action.error`.
 
 `FormField.svelte` renders a labelled control with its error and hands the
 control the `id` and ARIA attributes to spread. Set `novalidate` on the form so

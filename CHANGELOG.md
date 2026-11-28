@@ -39,6 +39,10 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Changed
 
+- The budget, notification, sign-in, retrieval binding, price publication and
+  route fixture forms show each error under the input that caused it and move
+  focus there. An aggregate budget accepts an amount padded with spaces, and a
+  new budget group no longer sends a rate typed as only spaces as 0.
 - The provider wizard shows a missing or refused connection value under its own field and moves focus to it, and an empty manual model declaration reports at the identifier box.
 - The agent activity lists, investigations, pending agent spend and linked spans
   page with Previous and Next. The project filter on runs, tasks and

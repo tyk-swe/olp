@@ -38,6 +38,7 @@
   } from '#lib/features/identity/profile/api.js';
   import { captureResult } from '#lib/editing/result.js';
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { formProblem } from '#lib/editing/validation.js';
   import { useProfileIdentity } from './profileIdentity.svelte.js';
   import ActiveSessionsPanel from '#lib/features/identity/profile/ActiveSessionsPanel.svelte';
   import LocalPasswordPanel from '#lib/features/identity/profile/LocalPasswordPanel.svelte';
@@ -91,7 +92,7 @@
     refreshSecurityData,
     markEnrollmentVerified,
     clearMessages: () => {
-      passwords.error = '';
+      passwords.reset();
       message = '';
     },
     setMessage: (value) => {
@@ -110,8 +111,12 @@
   });
 
   onMount(() => {
-    identity.identity.error = oidcFailureMessage(
-      new URLSearchParams(window.location.search).get('oidc_error')
+    identity.identity.check(
+      formProblem(
+        oidcFailureMessage(
+          new URLSearchParams(window.location.search).get('oidc_error')
+        )
+      )
     );
     const callback = parseRecentAuthenticationCallback(window.location.search);
     if (callback) {
@@ -142,8 +147,11 @@
       enrollmentVerificationExpiry = undefined;
       enrollmentVerified = false;
       if (message === ENROLLMENT_VERIFIED_MESSAGE) message = '';
-      passwords.error =
-        'Identity verification expired. Verify your linked identity again.';
+      passwords.check(
+        formProblem(
+          'Identity verification expired. Verify your linked identity again.'
+        )
+      );
     }, ENROLLMENT_VERIFICATION_TTL_MS);
   }
 
@@ -208,8 +216,11 @@
     if (!profile.data) return;
     message = '';
     if (passwordEnrollmentNeeded && !enrollmentVerified) {
-      passwords.error =
-        'Verify your linked identity before adding a local password.';
+      passwords.check(
+        formProblem(
+          'Verify your linked identity before adding a local password.'
+        )
+      );
       return;
     }
     let enrollmentSubmitted = false;

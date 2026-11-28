@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { formProblem, validated } from '#lib/editing/validation.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import {
     checkRouteFixtures,
@@ -17,7 +18,7 @@
     draftEtag: string;
     disabled: boolean;
   } = $props();
-  const action = useAction();
+  const action = useAction<'file'>();
   let file = $state<File | null>(null);
   let report = $state<RouteFixtureReport | null>(null);
   const describe = (code: string) =>
@@ -30,13 +31,16 @@
 
   function selectFile(selected: File | null) {
     report = null;
-    if (selected && selected.size > 256 * 1024) {
-      file = null;
-      action.error = 'Use a JSON file of at most 256 KiB.';
-      return;
-    }
-    file = selected;
-    action.error = '';
+    const checked = validated(
+      {
+        file:
+          selected && selected.size > 256 * 1024
+            ? 'Use a JSON file of at most 256 KiB.'
+            : undefined
+      },
+      () => selected
+    );
+    file = action.check(checked) ? checked.value : null;
   }
 
   function compare() {
@@ -47,8 +51,11 @@
       () => checkRouteFixtures(draftId, selected),
       (result) => {
         if (result.draft_etag !== draftEtag) {
-          action.error =
-            'The saved draft changed. Reload it before comparing fixtures.';
+          action.check(
+            formProblem(
+              'The saved draft changed. Reload it before comparing fixtures.'
+            )
+          );
           return;
         }
         report = result;
@@ -76,7 +83,10 @@
         id="route-fixture-file"
         type="file"
         accept=".json,application/json"
-        aria-describedby="fixture-file-help"
+        aria-invalid={action.fieldErrors.file ? 'true' : undefined}
+        aria-describedby={action.fieldErrors.file
+          ? 'fixture-file-problem fixture-file-help'
+          : 'fixture-file-help'}
         disabled={action.busy}
         onchange={(event) => selectFile(event.currentTarget.files?.[0] ?? null)}
       />
@@ -90,6 +100,13 @@
       {action.busy ? 'Comparing…' : 'Compare fixtures'}
     </button>
   </div>
+  {#if action.fieldErrors.file}<p
+      class="field-error"
+      id="fixture-file-problem"
+      role="alert"
+    >
+      {action.fieldErrors.file}
+    </p>{/if}
   {#if disabled && !action.busy}<p role="status">
       Save draft and routing policy changes before comparing.
     </p>{/if}

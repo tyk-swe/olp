@@ -97,6 +97,7 @@ it('compares the selected local file and shows the assertion and omitted classif
   expect(target.querySelector('[role=alert]')?.textContent).toContain(
     '256 KiB'
   );
+  expect(picker.getAttribute('aria-invalid')).toBe('true');
   expect(button.disabled).toBe(true);
   expect(compare).not.toHaveBeenCalled();
 
@@ -107,6 +108,7 @@ it('compares the selected local file and shows the assertion and omitted classif
   select(file);
   expect(compare).not.toHaveBeenCalled();
   expect(target.querySelector('[role=alert]')).toBeNull();
+  expect(picker.getAttribute('aria-invalid')).toBeNull();
   expect(button.disabled).toBe(false);
   button.click();
 

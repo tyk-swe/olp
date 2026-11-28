@@ -10,6 +10,7 @@
   import { notificationKeys } from './notificationKeys';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import QueryView from '#lib/components/QueryView.svelte';
   import NotificationDestinationDialog from './NotificationDestinationDialog.svelte';
   import {
@@ -26,11 +27,12 @@
   } from './presentation';
   import {
     createDestinationInput,
+    destinationRowServerFields,
     editDestinationDraft,
     newDestinationDraft,
-    parseDestinationSecret,
-    updateDestinationInput,
-    type DestinationDraft
+    validateDestinationChange,
+    type DestinationDraft,
+    type DestinationField
   } from './destinationDraft';
   const queryClient = useQueryClient();
   let {
@@ -46,7 +48,7 @@
     });
   let creating = $state(false);
   const create = useMutation();
-  const edit = useAction();
+  const edit = useAction<DestinationField>();
   const toggle = useAction();
   const problem = $derived(create.error || edit.error || toggle.error);
   const destinations = createQuery(() => ({
@@ -82,6 +84,16 @@
   let editDestination = $state.raw<NotificationDestination | null>(null);
   let editDestSecret = $state('');
   let editDestClear = $state(false);
+  let table = $state<HTMLTableElement>();
+  const id = $props.id();
+  function reported(field: DestinationField) {
+    return edit.fieldErrors[field]
+      ? {
+          'aria-invalid': 'true' as const,
+          'aria-describedby': `${id}-${field}`
+        }
+      : {};
+  }
 
   function startDestEdit(destination: NotificationDestination) {
     if (edit.busy || !canChange(destination)) return;
@@ -90,7 +102,7 @@
     editDraft = editDestinationDraft(destination);
     editDestSecret = '';
     editDestClear = false;
-    edit.error = '';
+    edit.reset();
   }
 
   async function saveDestination(destination: NotificationDestination) {
@@ -103,21 +115,14 @@
       return;
     const current = editDestination;
     if (!current || current.id !== destination.id) return;
-    const parsed = parseDestinationSecret(
-      editDraft.type,
+    const checked = validateDestinationChange(
+      editDraft,
       editDestSecret,
       editDestClear
     );
-    if (parsed.kind === 'invalid') {
-      edit.error = parsed.message;
-      return;
-    }
-    await edit.run(
-      () =>
-        updateNotificationDestination(
-          current,
-          updateDestinationInput(editDraft, parsed.change)
-        ),
+    if (!edit.check(checked)) return focusTable();
+    const saved = await edit.run(
+      () => updateNotificationDestination(current, checked.value),
       async () => {
         editDestId = '';
         editDestination = null;
@@ -134,9 +139,15 @@
         failure: (cause, stage) =>
           stage === 'accept'
             ? `Destination updated, but refreshing failed. ${errorMessage(cause)}`
-            : errorMessage(cause, 'The destination could not be updated.')
+            : errorMessage(cause, 'The destination could not be updated.'),
+        serverFields: destinationRowServerFields
       }
     );
+    if (!saved) await focusTable();
+  }
+
+  async function focusTable() {
+    if (table) await focusFormError(table);
   }
 
   async function toggleDestination(destination: NotificationDestination) {
@@ -164,6 +175,12 @@
   });
 </script>
 
+{#snippet problemAt(field: DestinationField)}
+  {#if edit.fieldErrors[field]}<p class="field-error" id="{id}-{field}">
+      {edit.fieldErrors[field]}
+    </p>{/if}
+{/snippet}
+
 {#if problem && !creating}<Callout tone="danger">{problem}</Callout>{/if}
 
 {#if canManage}<div class="toolbar">
@@ -175,7 +192,7 @@
         class="button button-primary"
         type="button"
         onclick={() => {
-          create.error = '';
+          create.dismiss();
           creating = true;
         }}
       >
@@ -206,7 +223,7 @@
     </EmptyState>
   {/snippet}
   <ScrollTable label="Notification destinations">
-    <table class="data-table">
+    <table class="data-table" bind:this={table}>
       <thead>
         <tr>
           <th scope="col">Name</th><th scope="col">Type</th><th scope="col">
@@ -226,23 +243,26 @@
             <tr>
               <td>
                 <input
+                  {...reported('name')}
                   aria-label="Destination name"
                   bind:value={editDraft.name}
                   disabled={edit.busy}
                   required
-                />
+                />{@render problemAt('name')}
               </td><td>{destination.type ?? 'webhook'}</td><td>
                 <input
+                  {...reported('url')}
                   aria-label="Destination URL"
                   type="url"
                   bind:value={editDraft.url}
                   disabled={edit.busy}
                   required
-                />
+                />{@render problemAt('url')}
               </td><td>
                 {destination.project_name ?? 'Installation-wide'}
               </td><td>
                 <input
+                  {...reported('secret')}
                   aria-label="Replacement secret"
                   bind:value={editDestSecret}
                   disabled={edit.busy}
@@ -253,7 +273,9 @@
                       : destination.type === 'email'
                         ? '{"username":"…","password":"…"}'
                         : 'Keep current'}
-                />{#if !secretRequired(destination.type ?? 'webhook') || !destination.enabled}<label
+                />{@render problemAt(
+                  'secret'
+                )}{#if !secretRequired(destination.type ?? 'webhook') || !destination.enabled}<label
                     class="inline-check"
                   >
                     <input

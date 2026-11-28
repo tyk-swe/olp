@@ -12,16 +12,19 @@
   } from '#lib/session/api.js';
   import { login as passwordLogin } from '#lib/session/authentication.js';
   import { oidcFailureMessage } from '#lib/features/identity/login/oidcFailure.js';
+  import FormField from '#lib/components/FormField.svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { readResult } from '#lib/editing/result.js';
   import { errorMessage } from '#lib/management/http.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { relativeReturnTo } from '#lib/session/relativeReturnTo.js';
   import SetupFrame from '#lib/shell/SetupFrame.svelte';
+  import { validateLogin, type LoginField } from './loginForm';
 
   let email = $state('');
   let password = $state('');
-  const login = useAction(undefined, 'authentication');
+  const login = useAction<LoginField>(undefined, 'authentication');
   const busy = $derived(login.key === 'password');
   const ssoBusy = $derived(login.key === 'sso');
   let capabilitiesLoading = $state(true);
@@ -51,23 +54,18 @@
     return `/api/v1/oidc/login?return_to=${encodeURIComponent(destination())}`;
   }
 
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (login.busy) return;
-    login.error = '';
-    if (!capabilities.local_login_enabled) {
-      login.error =
-        'Password-based sign-in is not available for this installation.';
-      return;
-    }
-    if (!email.trim() || !password) {
-      login.error = 'Enter your email and password.';
-      return;
-    }
+    const checked = validateLogin(email, password);
+    if (!login.check(checked)) return focusFormError(form);
     await login.run(
       () =>
         authLifecycle.authenticate((signal) =>
-          passwordLogin(email.trim(), password, signal)
+          passwordLogin(checked.value.email, checked.value.password, signal)
         ),
       async () => {
         // eslint-disable-next-line svelte/no-navigation-without-resolve -- destination() validates local paths and rejects login loops.
@@ -80,7 +78,6 @@
   async function beginSso(event: MouseEvent) {
     event.preventDefault();
     if (login.busy || !capabilities.oidc_login_enabled) return;
-    login.error = '';
     await login.run(
       () => beginOidcLogin(destination(), publicAuthController.signal),
       (authorizationUrl) => {
@@ -92,7 +89,6 @@
 
   async function samlLogin() {
     if (login.busy) return;
-    login.error = '';
     await login.run(
       () => beginSAMLLogin(destination(), publicAuthController.signal),
       (authorizationUrl) => {
@@ -163,22 +159,28 @@
 
   {#if capabilities.local_login_enabled}
     <form onsubmit={submit} novalidate>
-      <label for="login-email">Email</label>
-      <input
-        id="login-email"
-        type="email"
-        autocomplete="username"
-        bind:value={email}
-        disabled={busy || ssoBusy}
-      />
-      <label for="login-password">Password</label>
-      <input
-        id="login-password"
-        type="password"
-        autocomplete="current-password"
-        bind:value={password}
-        disabled={busy || ssoBusy}
-      />
+      <FormField label="Email" error={login.fieldErrors.email}>
+        {#snippet control(attributes)}
+          <input
+            {...attributes}
+            type="email"
+            autocomplete="username"
+            bind:value={email}
+            disabled={busy || ssoBusy}
+          />
+        {/snippet}
+      </FormField>
+      <FormField label="Password" error={login.fieldErrors.password}>
+        {#snippet control(attributes)}
+          <input
+            {...attributes}
+            type="password"
+            autocomplete="current-password"
+            bind:value={password}
+            disabled={busy || ssoBusy}
+          />
+        {/snippet}
+      </FormField>
       <button
         class="button button-primary"
         type="submit"
@@ -236,13 +238,10 @@
   }
   form {
     display: grid;
-    gap: 0.5rem;
-  }
-  label {
+    gap: 0.9rem;
     margin-top: 0.4rem;
-    font-weight: 500;
   }
-  input {
+  form input {
     min-height: 2.5rem;
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--border);
@@ -251,11 +250,11 @@
     color: var(--foreground);
     transition: border-color var(--motion);
   }
-  input:hover:not(:disabled) {
+  form input:hover:not(:disabled) {
     border-color: var(--border-strong);
   }
   form .button {
-    margin-top: 0.85rem;
+    margin-top: 0.45rem;
   }
   .form-alert {
     margin-bottom: 1rem;

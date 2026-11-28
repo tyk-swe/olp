@@ -50,7 +50,7 @@
     reset();
     const built = nativeChatRequest(requestText, route);
     if (!built.ok) {
-      client.setError(built.error);
+      client.refuse(built.error);
       return;
     }
     const request = built.value;
@@ -73,7 +73,7 @@
       }))
     );
     if (!built.ok) {
-      client.setError(built.error);
+      client.refuse(built.error);
       return;
     }
     const request = built.value;
