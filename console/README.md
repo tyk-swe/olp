@@ -228,8 +228,10 @@ has no `index.ts`.
 A factory decides the key, the call and the cache policy together, so two
 screens cannot disagree about how fresh the same data is. Pass it to
 `createQuery`, and spread it only to add what belongs to one screen, such as
-`enabled` or `select`. Never override `staleTime`, `gcTime` or `retry` at a call
-site.
+`enabled` or `select`. A screen never overrides `staleTime`, `gcTime` or
+`retry`. The one exception is a `fetchQuery` that decides what a write does and
+so has to see what the server holds now, such as the live grant check in the
+provider wizard, which passes `staleTime: 0`.
 
 `projectQueries.memberships` is never served from cache, because memberships
 decide what the signed-in user is offered. That makes a refresh happen often,
