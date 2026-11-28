@@ -1,5 +1,6 @@
 version: "2"
 run:
+  allow-parallel-runners: true
   build-tags: [integration, e2e, qualification, qualificationlive]
 linters:
   default: none

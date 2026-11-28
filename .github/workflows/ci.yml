@@ -204,7 +204,6 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --dir console api:generate
       - run: make test-unit-console
   test-integration:
     needs: changes

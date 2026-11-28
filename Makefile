@@ -25,13 +25,16 @@ setup: ## Install dependencies and the local watcher, then generate contracts
 	go mod download
 	pnpm install --frozen-lockfile
 	GOBIN="$(CURDIR)/.local/bin" go install github.com/air-verse/air@$(AIR_VERSION)
+	pnpm --dir console exec playwright install chromium
 	$(MAKE) api
 
 dev: ## Start services, automatically reloaded Go, and Vite
 	./scripts/dev.sh
 
-check: ## Check contracts, Go, console, and the unit tier without rewriting source
+check: ## Check contracts, docs, Helm, Go, console, and the unit tier without rewriting source
 	$(MAKE) check-contracts
+	$(MAKE) check-docs
+	$(MAKE) check-helm
 	$(MAKE) check-go
 	$(MAKE) check-console
 	$(MAKE) test-unit
@@ -115,11 +118,11 @@ qualify-code-live: ## Run the code mode live qualification lanes against real ve
 	./scripts/qualification-live.sh
 
 ##@ Services and maintenance
-dev-stop: ## Stop development containers and preserve data
-	docker compose -f deploy/compose.dev.yaml stop
+dev-stop: ## Stop this checkout's development containers and preserve data
+	source scripts/dev-env.sh && docker compose -f deploy/compose.dev.yaml stop
 
-dev-reset: ## Delete development containers and data after stopping make dev
-	docker compose -f deploy/compose.dev.yaml down --volumes
+dev-reset: ## Delete this checkout's development containers and data after stopping make dev
+	source scripts/dev-env.sh && docker compose -f deploy/compose.dev.yaml down --volumes
 
 build-go: ## Build the native Go binary from generated contracts
 	mkdir -p .local/bin

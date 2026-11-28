@@ -23,6 +23,7 @@ case ${1:-} in
     ;;
   console)
     shift
+    pnpm --dir console api:generate
     timed_suite 'unit console' 30 console_tests "$@"
     ;;
   *)

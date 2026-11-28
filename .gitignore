@@ -35,6 +35,7 @@ Thumbs.db
 *.tsbuildinfo
 /.codex/runtime/
 /.claude/settings.local.json
+/.claude/worktrees/
 
 /console/src/lib/management/schema.d.ts
 /console/src/lib/management/requirements.ts
