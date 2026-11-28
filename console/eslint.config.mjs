@@ -88,7 +88,8 @@ export default [
       'build/**',
       'node_modules/**',
       'src/lib/management/schema.d.ts',
-      'src/lib/management/requirements.ts'
+      'src/lib/management/requirements.ts',
+      'src/lib/management/enums.ts'
     ]
   },
   ...svelte.configs['flat/recommended'],
