@@ -67,9 +67,10 @@ current.
 <!-- /operations -->
 
 `internal/access/testdata/authorization.golden.json` records which caller
-archetypes every machine-accessible route admits. In the unit tier,
-`TestManagementAuthorizationGoldenMatrix` verifies that golden matrix in process
-against the contract requirements and authorization policy. Against a real
+archetypes the management authorization policy admits for every route, including
+anonymous callers and callers with an inference key. In the unit tier,
+`TestManagementAuthorizationGoldenMatrix` verifies that the matrix covers exactly
+the routes in the contract and matches their admission rules. Against a real
 process, `tests/e2e/sweep_test.go` runs the owner read sweep
 (`TestManagementReadsAnswerWithoutServerErrors`) and the cross-project isolation
 sweep (`TestManagementIsolationSweep`) across every secured `GET` route.
