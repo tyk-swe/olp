@@ -16,7 +16,7 @@ those contracts shape requests, and the
 lists every reviewed vendor. A custom native endpoint still requires live
 certification and does not inherit the official OpenAI media discovery contract.
 
-The [gateway](../develop/architecture.md) applies shared admission and response
+The [gateway](../develop/request-path.md) applies shared admission and response
 bounds to these surfaces. Current protocol, connector, SDK, and media tests are
 described in [tests/README.md](../../tests/README.md).
 
@@ -414,7 +414,7 @@ Because these contracts have no provider-enforced output bound, token-capped
 keys, budget groups, end users, routes, providers, and slots, along with
 USD-capped keys, routes, providers, slots, and budget hierarchies, are refused
 with `400 unbounded_work_budget` before dispatch. A
-[caller-paid](../develop/architecture.md#caller-paid-budget-policy) route waives
+[caller-paid](../develop/accounting.md#caller-paid-budget-policy) route waives
 only the USD caps, and only for caller-credential targets, while token caps
 still apply. Route simulation and key inspection report the same
 `unbounded_work_budget` diagnostic, including inherited hierarchy budgets and
@@ -444,7 +444,7 @@ documents, annotations, `confidence_scores_granularity`, `include_blocks`, and
 any other field are refused with `400` before dispatch. Results require `model`,
 `pages[].index`, `pages[].markdown`, and `usage_info.pages_processed`, which
 meters as media units. OCR follows the
-[unbounded-work-budget](../develop/architecture.md) refusal rules of Decisions,
+[unbounded-work-budget](../develop/accounting.md#unbounded-work-and-incomplete-accounting) refusal rules of Decisions,
 so token and non-exempt cost caps refuse with `400 unbounded_work_budget` before
 dispatch, waived only for caller-paid cost-exempt routes.
 

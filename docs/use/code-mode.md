@@ -1424,7 +1424,7 @@ The route editor's optional `max_body_bytes` is published with each subscription
 route revision. It lowers the installation and protocol cap for both encoded and
 decoded HTTP bodies and individual client WebSocket messages. Oversized requests
 are refused before durable generation admission or provider dispatch. See
-[per-route request sizes](../develop/architecture.md#per-route-request-sizes).
+[per-route request sizes](../develop/request-path.md#per-route-request-sizes).
 
 Workload JWTs use the same explicit pool assignment and current project authority
 as static principals. Their verified claim digest survives fresh-policy admission,
