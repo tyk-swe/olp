@@ -1,0 +1,2 @@
+managed_export_deliveries
+managed_export_sinks

@@ -17,7 +17,7 @@ and arm64. macOS and musl are unqualified.
 | `make setup` | Install modules, the pnpm workspace, the Playwright browser and a local Air watcher, then generate contracts |
 | `make dev` | Start this checkout's services, automatically reloaded Go and Vite |
 | `make check` | Check contract freshness, Go, console, docs, Helm and the unit tier without rewriting tracked files |
-| `make check-go` | Check migration numbers, Go formatting, vet, and pinned static analysis |
+| `make check-go` | Check migration numbers, table ownership, Go formatting, vet, and pinned static analysis |
 | `make check-console` | Generate ignored console types, then check formatting, types, and ESLint |
 | `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
 | `make test` | Every test tier with the cheapest first, in [tests/README.md](tests/README.md) |
@@ -71,6 +71,8 @@ to rebuild and resume serving. A migration failure leaves the backend stopped.
 Fix the migration and save it to retry. Applied migrations remain immutable.
 Number a new migration above the highest one on `origin/main`, or `make check-go`
 fails. Set `MIGRATIONS_BASE` to compare against another ref.
+A new table also needs one owning module, and only that module writes it, as
+[table ownership](docs/develop/architecture.md#table-ownership) describes.
 
 `make dev` creates missing private secrets and initializes the schema. Existing
 secrets and data survive restarts. Each checkout runs its own stack. The primary

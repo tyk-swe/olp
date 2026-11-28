@@ -296,6 +296,32 @@ it. `funlen` caps functions at 100 lines and `revive` caps files at 500 lines of
 code outside tests and generated `.gen.go` files. Split code by behavior rather
 than by line count.
 
+### Table ownership
+
+Every table in the `olp` schema has one owning module, a directory directly
+under `internal/` whose `tables.txt` lists the table by name, one per line. The
+change that creates a table adds it to one of these files. Any module may read
+any table, and only the owner writes it. A module that needs a row of another
+module's table changed calls a function the owner exports that takes the
+caller's `pgx.Tx`, and `cmd/olp` injects that function when a direct import
+would form a cycle.
+
+`make check-go` runs `scripts/check-tables.sh`, which reads the tables from the
+migrations. It fails when a table has no owner or two, when an entry names a
+table the migrations do not create, and when non-test Go code outside the owner
+writes a table with `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE` or `COPY`,
+or names it in a `pgx.Identifier`.
+
+`scripts/check-tables.baseline` holds the cross-module writes that predate the
+check. Each line is a module, a table and the number of writes, and those writes
+are the only ones the check lets through. The numbers only go down. A new write
+fails the check, and so does a line that allows more than the code writes, so the
+change that moves SQL into the owner also lowers or deletes its line.
+
+The check searches Go source text for table names written with the `olp.`
+schema. It cannot see a name assembled at run time or writes made by database
+functions, triggers and views, so review those by hand.
+
 ## Adding a management endpoint
 
 Copy `internal/guardrails/credential/api.go`. It is the reference for every
