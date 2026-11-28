@@ -186,7 +186,7 @@
   errorTitle="People didn’t load"
   failure={errorMessage(users.error)}
   retryLabel="Try again"
-  emptyWhen={!users.data?.items.length}
+  emptyWhen={!users.data?.items.length && pagination.history.length === 0}
 >
   {#snippet empty()}
     <EmptyState title="No one here yet">

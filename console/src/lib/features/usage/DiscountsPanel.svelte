@@ -201,7 +201,7 @@
     loading="Loading discounts…"
     failure={errorMessage(discounts.error)}
     retryLabel="Try again"
-    emptyWhen={(discounts.data?.items ?? []).length === 0}
+    emptyWhen={!discounts.data?.items.length && pagination.history.length === 0}
   >
     {#snippet empty()}
       <EmptyState title="No discounts yet">
