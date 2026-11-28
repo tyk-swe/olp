@@ -20,7 +20,15 @@ Don't assume that the existing code is correct or the right way of doing things 
 
 In descending order of importance
 
-The test tiers, their budgets and the rules for every test are in `tests/AGENTS.md`. They apply to every test in the repository, including the unit tests that sit beside the code outside `tests/`. Not every agent tool loads a nested file by itself, so read that file before you add a feature, fix a bug, or write or change any test
+Tests run in three tiers, each with its own command and a budget on the time spent running tests. `make test-unit` needs only the toolchain and runs every untagged Go test plus the console Vitest projects. `make test-integration` runs `tests/integration` against real PostgreSQL and Valkey. `make test-e2e` drives the real binary over HTTP from `tests/e2e` and the built console in a browser from `console/tests/e2e`. The budgets and the full rules live in `tests/README.md`. Put a test in the cheapest tier that can catch the failure. When adding new features, add meaningful tests for them. Don't add tests that don't check anything substantial. I'd rather have no signal whether the code is working than tests that don't fail when code is broken. A kept test would fail before the feature was added and succeed only when the feature is fully working. There is no coverage or mutation gate, and speed comes from the budgets, from tests that run in parallel on their own state, and from keeping each tier small
+
+Same thing for bug fixes. The tests should make it so that this specific bug can never happen again without failing tests (i.e., regression). A new test must leave its suite inside the budget with headroom. When a suite gets tight, move the test down a tier, make it faster, or displace a weaker test, and state the timed result in the change. A test file that no tier runs is a defect because nothing runs it
+
+Never test structure or implementation details of code, only function of it. A test should catch a change that breaks behavior by accident. If the only way it can fail is someone deliberately undoing the change, don't write it
+
+A test must only fail when project code changes. Never pin facts we don't own (a vendor's price, a third party's field, an upstream default, today's date) as literals or as "X must be absent". Assert the invariant our code guarantees instead, e.g. two rows agree, a value is within range, a field is derived from another. If an outside fact is truly load-bearing, cite its source and date next to the assertion so a reader can tell stale from broken
+
+Match the existing test file and naming convention in the directory you touch. For bug fixes, extend the existing mapped test file rather than creating a new one. Only create a new test file for a new feature that has no mapped test yet, following that directory's naming convention. One focused regression test beats many shallow ones
 
 When creating PRs, target the repository's current default branch for both internal and external / OSS contributions. Check it instead of assuming a branch name or relying on cached `origin/HEAD`
 

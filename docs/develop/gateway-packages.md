@@ -28,7 +28,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/anthropicbeta` | validating and forwarding `Anthropic-Beta` headers across compatible route targets | `fault` |
 | `gateway/duplexrelay` | shared bidirectional WebSocket relay loop, bounded upstream writer, delegation reauth and abnormal teardown | `fault`, `ingress` |
 | `gateway/managedbatch` | managed batch JSONL line translation, manifest metadata and Gemini batch record and result codecs | `fault` |
-| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, native and generation dispatch, and retained steps such as retained dispatch, page admission and result projection | the 15 top-level gateway packages above (excluding `codeforward/coderesearch` and `codeforward/codexwire`) |
+| `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, native and generation dispatch, and retained steps such as retained dispatch, page admission and result projection | every top-level gateway package above except `duplexrelay` |
 | `gateway/healthprobes` | the health probe worker, which picks opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
 | `gateway/surface/bedrock` | Bedrock Converse and Invoke under `/bedrock/model/{model}` | `fault`, `kernel` |
