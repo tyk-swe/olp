@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { components } from '#lib/management/schema.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { confirmMFA } from '#lib/session/mfaPrompt.svelte.js';
+import { beginOidcLink } from '#lib/features/identity/oidc/api.js';
+import {
+  beginSAMLLink,
+  beginSAMLLogin
+} from '#lib/features/identity/saml/api.js';
 import {
   authenticationCapabilities,
   beginOidcLogin,
@@ -106,16 +111,37 @@ describe('session API', () => {
     );
   });
 
-  it.each([null, '/relative', 'javascript:alert(1)', 'ftp://example.test'])(
-    'rejects an invalid authorization URL',
-    async (authorization_url) => {
-      serve(() => json({ authorization_url }));
-      await expect(beginOidcLogin('/')).rejects.toMatchObject({
-        problem: {
-          status: 502,
-          title: 'The OIDC authorization response is invalid'
-        }
-      });
+  it.each([
+    { path: '/api/v1/oidc/login', begin: () => beginOidcLogin('/') },
+    { path: '/api/v1/saml/login', begin: () => beginSAMLLogin('/') },
+    { path: '/api/v1/oidc/link', begin: beginOidcLink },
+    { path: '/api/v1/profile/saml/link', begin: beginSAMLLink }
+  ])(
+    'only returns absolute HTTP(S) authorization URLs for $path',
+    async ({ path, begin }) => {
+      for (const authorization_url of [
+        'http://localhost:8081/authorize?state=example',
+        'https://identity.example.test/authorize?state=example'
+      ]) {
+        serve((request) => {
+          expect(request.method).toBe('POST');
+          expect(new URL(request.url).pathname).toBe(path);
+          return json({ authorization_url });
+        });
+        await expect(begin()).resolves.toBe(authorization_url);
+      }
+      for (const authorization_url of [
+        null,
+        '/relative',
+        '//identity.example.test/authorize',
+        'https://',
+        'ftp://example.test'
+      ]) {
+        serve(() => json({ authorization_url }));
+        await expect(begin()).rejects.toMatchObject({
+          problem: { status: 502, type: 'urn:olp:problem:invalid-api-response' }
+        });
+      }
     }
   );
 

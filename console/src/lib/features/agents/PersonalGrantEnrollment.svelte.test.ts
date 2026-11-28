@@ -184,6 +184,70 @@ it('shows the latest personal grant result after saving authorization settings',
   );
 });
 
+it.each([
+  {
+    button: 'Authorize in browser',
+    link: 'Sign in upstream',
+    invalidURL: '/authorize',
+    validURL: 'https://identity.example.test/authorize?state=example',
+    authorization: (authorization_url: string) => ({ authorization_url })
+  },
+  {
+    button: 'Use device authorization',
+    link: 'the authorization page',
+    invalidURL: 'ftp://identity.example.test/device',
+    validURL: 'http://localhost:8081/device',
+    authorization: (verification_url: string) => ({
+      device: { verification_url, user_code: 'EXAMPLE', interval: 5 }
+    })
+  }
+])(
+  'only shows an HTTP(S) link after choosing $button',
+  async ({ button, link, invalidURL, validURL, authorization }) => {
+    const attempts = vi
+      .fn<() => string>()
+      .mockReturnValueOnce(invalidURL)
+      .mockReturnValue(validURL);
+    serve(
+      (request) => {
+        const path = new URL(request.url).pathname;
+        if (path.endsWith('/claim'))
+          return json({ enrollment: { id: 'grant' }, state: 'pending' });
+        if (path.endsWith('/authorize'))
+          return json({ state: 'pending', ...authorization(attempts()) });
+        return json({ items: [] });
+      },
+      ['read', 'configure', 'keys', 'self']
+    );
+    const originalURL = window.location.href;
+    window.history.replaceState(null, '', '#grant.token');
+    onTestFinished(() => window.history.replaceState(null, '', originalURL));
+    const { target } = mountWithState(GrantsPage);
+    const authorizationLink = () =>
+      [...target.querySelectorAll('a')].find(
+        (anchor) => anchor.textContent?.trim() === link
+      );
+
+    await eventually(() =>
+      expect(findButton(target, 'Claim enrollment')).toBeDefined()
+    );
+    findButton(target, 'Claim enrollment')?.click();
+    await eventually(() => expect(findButton(target, button)).toBeDefined());
+    findButton(target, button)?.click();
+    await eventually(() =>
+      expect(target.querySelector('[role="alert"]')?.textContent?.trim()).toBe(
+        'The personal grant authorization response is invalid'
+      )
+    );
+    expect(authorizationLink()).toBeUndefined();
+
+    findButton(target, button)?.click();
+    await eventually(() =>
+      expect(authorizationLink()?.getAttribute('href')).toBe(validURL)
+    );
+  }
+);
+
 it('retains the callback while starting and clearing a separate invitation', async () => {
   const writes = vi.fn();
   serve(

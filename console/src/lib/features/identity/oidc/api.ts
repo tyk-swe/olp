@@ -1,6 +1,10 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
-import { ifMatch, unwrap } from '#lib/management/http.js';
+import {
+  ifMatch,
+  unwrap,
+  unwrapAuthorizationUrl
+} from '#lib/management/http.js';
 
 type Schemas = components['schemas'];
 
@@ -30,5 +34,8 @@ export async function putOidcConfiguration(
 
 export async function beginOidcLink(): Promise<string> {
   const response = await apiClient.POST('/api/v1/oidc/link');
-  return unwrap(response).authorization_url;
+  return unwrapAuthorizationUrl(
+    unwrap(response).authorization_url,
+    'The OIDC authorization response is invalid'
+  );
 }

@@ -6,6 +6,7 @@ import {
   ApiProblem,
   ensureOk,
   unwrap,
+  unwrapAuthorizationUrl,
   unwrapOutcome
 } from '#lib/management/http.js';
 import { isFixedRole, type FixedRole } from '#lib/session/authorization.js';
@@ -85,25 +86,10 @@ export async function beginOidcLogin(
       signal
     })
   );
-  if (typeof value.authorization_url !== 'string') {
-    throw new ApiProblem({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The OIDC authorization response is invalid',
-      status: 502
-    });
-  }
-  try {
-    const authorizationUrl = new URL(value.authorization_url);
-    if (!['https:', 'http:'].includes(authorizationUrl.protocol))
-      throw new Error('invalid scheme');
-    return authorizationUrl.href;
-  } catch {
-    throw new ApiProblem({
-      type: 'urn:olp:problem:invalid-api-response',
-      title: 'The OIDC authorization response is invalid',
-      status: 502
-    });
-  }
+  return unwrapAuthorizationUrl(
+    value.authorization_url,
+    'The OIDC authorization response is invalid'
+  );
 }
 
 export async function currentSession(
