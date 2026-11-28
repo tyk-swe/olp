@@ -1,13 +1,21 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
+  import FormField from '#lib/components/FormField.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import QueryView from '#lib/components/QueryView.svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';
+  import { getSAML, saveSAML, importSAML } from './api';
+  import {
+    samlDraft,
+    samlImportServerFields,
+    samlServerFields,
+    validateSaml,
+    type SamlField
+  } from './samlDraft';
   import { samlKeys } from './samlKeys';
   const access = useRole();
   const roles = FIXED_ROLES.toReversed();
@@ -17,68 +25,62 @@
     queryFn: ({ signal }) => getSAML(signal)
   }));
   const editable = $derived(access.allows('PUT /api/v1/saml/configuration'));
-  let enabled = $state(false),
-    metadata = $state(''),
-    email = $state('email'),
-    groups = $state('groups'),
-    display = $state('name'),
-    defaultRole = $state(''),
-    emailMappings = $state('[]'),
-    groupMappings = $state('[]'),
-    rotate = $state(false),
+  let draft = $state(samlDraft()),
     url = $state(''),
     etag = $state(''),
     loaded = $state(false),
-    notice = $state('');
-  const saml = useAction();
+    notice = $state(''),
+    form = $state<HTMLFormElement>();
+  const saml = useAction<SamlField>();
+  const fallback = 'SAML configuration could not be changed.';
   function load() {
-    const c = query.data;
-    if (c) {
-      enabled = c.enabled;
-      metadata = c.metadata_xml;
-      email = c.email_attribute;
-      groups = c.groups_attribute;
-      display = c.name_attribute;
-      defaultRole = c.default_role ?? '';
-      emailMappings = JSON.stringify(c.email_role_mappings, null, 2);
-      groupMappings = JSON.stringify(c.group_role_mappings, null, 2);
-      etag = c.etag;
-    }
+    const saved = query.data;
+    if (saved) {
+      draft = samlDraft(saved);
+      etag = saved.etag;
+    } else draft.rotate = false;
     loaded = true;
-    rotate = false;
   }
   $effect(() => {
     if (query.isSuccess && !loaded) load();
   });
-  async function save(e: SubmitEvent) {
-    e.preventDefault();
-    const parsed = captureResult((): SAMLWrite => ({
-      enabled,
-      metadata_xml: metadata,
-      email_attribute: email,
-      groups_attribute: groups,
-      name_attribute: display,
-      default_role: (defaultRole || null) as SAMLWrite['default_role'],
-      email_role_mappings: JSON.parse(emailMappings),
-      group_role_mappings: JSON.parse(groupMappings),
-      rotate_signing_key: rotate
-    }));
+  async function focusProblem() {
+    if (form) await focusFormError(form);
+  }
+  async function save(event: SubmitEvent) {
+    event.preventDefault();
     notice = '';
-    if (!parsed.ok) {
-      saml.error = errorMessage(
-        parsed.error,
-        'SAML configuration could not be changed.'
-      );
-      return;
-    }
-    await saml.run(
-      () => saveSAML(parsed.value, etag || undefined),
+    const checked = validateSaml(draft);
+    if (!saml.check(checked)) return focusProblem();
+    const saved = await saml.run(
+      () => saveSAML(checked.value, etag || undefined),
       (data) => {
         client.setQueryData(samlKeys.configuration(), data);
         load();
         notice = 'SAML configuration saved. Pending sign-ins were invalidated.';
       },
-      { fallback: 'SAML configuration could not be changed.' }
+      { fallback, serverFields: samlServerFields }
+    );
+    if (!saved) await focusProblem();
+  }
+  async function importMetadata() {
+    notice = '';
+    const imported = await saml.run(
+      () => importSAML(url),
+      (data) => {
+        draft.metadata = data.metadata_xml;
+        notice = 'Metadata imported. Save to publish trust.';
+      },
+      { fallback, serverFields: samlImportServerFields }
+    );
+    if (!imported) await focusProblem();
+  }
+  function reload() {
+    notice = '';
+    void saml.run(
+      () => query.refetch(),
+      () => load(),
+      { fallback }
     );
   }
 </script>
@@ -96,107 +98,120 @@
     loading="Loading SAML configuration…"
     failure={errorMessage(query.error, 'SAML configuration is unavailable.')}
   >
-    {#if saml.error}<p class="inline-problem" role="alert">
-        {saml.error}
-      </p>{/if}{#if notice}<Callout tone="success">{notice}</Callout>{/if}
-    <form onsubmit={save}>
+    {#if notice}<Callout tone="success">{notice}</Callout>{/if}
+    <form bind:this={form} onsubmit={save}>
+      {#if saml.error}<p
+          class="inline-problem"
+          role="alert"
+          tabindex="-1"
+          data-error-summary
+        >
+          {saml.error}
+        </p>{/if}
       <fieldset disabled={saml.busy || !editable}>
         <legend>Identity provider</legend><label class="check">
-          <input type="checkbox" bind:checked={enabled} />Enable SAML sign-in
+          <input type="checkbox" bind:checked={draft.enabled} />Enable SAML
+          sign-in
         </label>
-        <div class="form-field">
-          <label for="saml-metadata-url">Metadata URL</label><input
-            id="saml-metadata-url"
-            type="url"
-            bind:value={url}
-          /><small>
-            Fetched through identity egress. Review the imported XML before
-            saving.
-          </small>
-        </div>
+        <FormField label="Metadata URL" error={saml.fieldErrors.url}>
+          {#snippet control(attributes)}
+            <input {...attributes} type="url" bind:value={url} />
+            <small>
+              Fetched through identity egress. Review the imported XML before
+              saving.
+            </small>
+          {/snippet}
+        </FormField>
         <button
           class="button button-secondary"
           type="button"
           disabled={!url}
-          onclick={() => {
-            notice = '';
-            void saml.run(
-              () => importSAML(url),
-              (data) => {
-                metadata = data.metadata_xml;
-                notice = 'Metadata imported. Save to publish trust.';
-              },
-              { fallback: 'SAML configuration could not be changed.' }
-            );
-          }}
+          onclick={importMetadata}
         >
           Import metadata
         </button>
-        <div class="form-field">
-          <label for="saml-metadata">
-            Identity provider metadata XML
-          </label><textarea
-            id="saml-metadata"
-            bind:value={metadata}
-            rows="8"
-            required
-            maxlength="1048576"></textarea>
-        </div>
+        <FormField
+          label="Identity provider metadata XML"
+          error={saml.fieldErrors.metadata}
+        >
+          {#snippet control(attributes)}
+            <textarea
+              {...attributes}
+              bind:value={draft.metadata}
+              rows="8"
+              required
+              maxlength="1048576"></textarea>
+          {/snippet}
+        </FormField>
         <div class="fields">
-          {#each [{ id: 'email', label: 'Email attribute' }, { id: 'groups', label: 'Groups attribute' }, { id: 'display', label: 'Display name attribute' }] as item (item.id)}<div
-              class="form-field"
-            >
-              <label for={`saml-${item.id}`}>{item.label}</label><input
-                id={`saml-${item.id}`}
-                value={item.id === 'email'
-                  ? email
-                  : item.id === 'groups'
-                    ? groups
-                    : display}
-                oninput={(e) => {
-                  if (item.id === 'email') email = e.currentTarget.value;
-                  else if (item.id === 'groups') groups = e.currentTarget.value;
-                  else display = e.currentTarget.value;
-                }}
-                required={item.id === 'email'}
+          <FormField label="Email attribute" error={saml.fieldErrors.email}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                bind:value={draft.email}
+                required
                 maxlength="256"
               />
-            </div>{/each}
-        </div>
-        <div class="form-field">
-          <label for="saml-default-role">Default role</label><select
-            id="saml-default-role"
-            bind:value={defaultRole}
+            {/snippet}
+          </FormField>
+          <FormField label="Groups attribute" error={saml.fieldErrors.groups}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                bind:value={draft.groups}
+                maxlength="256"
+              />
+            {/snippet}
+          </FormField>
+          <FormField
+            label="Display name attribute"
+            error={saml.fieldErrors.display}
           >
-            <option value="">
-              Deny unless explicitly mapped
-            </option>{#each roles as role (role)}<option value={role}>
-                {role}
-              </option>{/each}
-          </select>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                bind:value={draft.display}
+                maxlength="256"
+              />
+            {/snippet}
+          </FormField>
         </div>
-        <div class="form-field">
-          <label for="saml-email-mappings">
-            Email role mappings (JSON)
-          </label><textarea
-            id="saml-email-mappings"
-            bind:value={emailMappings}
-            rows="4"></textarea>
-        </div>
-        <div class="form-field">
-          <label for="saml-group-mappings">
-            Group role mappings (JSON)
-          </label><textarea
-            id="saml-group-mappings"
-            bind:value={groupMappings}
-            rows="4"></textarea><small>
-            Use arrays of objects with claim_value and role. Exact email
-            mappings take precedence; the highest matching group role wins.
-            Existing emails require explicit account linking.
-          </small>
-        </div>
+        <FormField label="Default role" error={saml.fieldErrors.defaultRole}>
+          {#snippet control(attributes)}
+            <select {...attributes} bind:value={draft.defaultRole}>
+              <option value="">
+                Deny unless explicitly mapped
+              </option>{#each roles as role (role)}<option value={role}>
+                  {role}
+                </option>{/each}
+            </select>
+          {/snippet}
+        </FormField>
+        <FormField
+          label="Email role mappings (JSON)"
+          error={saml.fieldErrors.emailMappings}
+        >
+          {#snippet control(attributes)}
+            <textarea {...attributes} bind:value={draft.emailMappings} rows="4"
+            ></textarea>
+          {/snippet}
+        </FormField>
+        <FormField
+          label="Group role mappings (JSON)"
+          error={saml.fieldErrors.groupMappings}
+        >
+          {#snippet control(attributes)}
+            <textarea {...attributes} bind:value={draft.groupMappings} rows="4"
+            ></textarea>
+            <small>
+              Use arrays of objects with claim_value and role. Exact email
+              mappings take precedence; the highest matching group role wins.
+              Existing emails require explicit account linking.
+            </small>
+          {/snippet}
+        </FormField>
         {#if query.data}<label class="check">
-            <input type="checkbox" bind:checked={rotate} />Replace
+            <input type="checkbox" bind:checked={draft.rotate} />Replace
             service-provider signing key
           </label><small>
             Coordinate the new public certificate with your identity provider.
@@ -213,16 +228,7 @@
           type="button"
           class="button button-secondary"
           disabled={saml.busy}
-          onclick={() => {
-            notice = '';
-            void saml.run(
-              () => query.refetch(),
-              () => load(),
-              {
-                fallback: 'SAML configuration could not be changed.'
-              }
-            );
-          }}
+          onclick={reload}
         >
           Reload saved configuration
         </button>

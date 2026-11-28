@@ -1,5 +1,7 @@
 <script lang="ts">
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
+  import FormField from '#lib/components/FormField.svelte';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import QueryView from '#lib/components/QueryView.svelte';
@@ -8,7 +10,8 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
-  import { listGroups, saveMapping, type Group, type Mapping } from './api';
+  import { listGroups, saveMapping, type Group } from './api';
+  import { validateMapping, type MappingDraft } from './mappingDraft';
   import { scimKeys } from './scimKeys';
   const access = useRole();
   const client = useQueryClient();
@@ -21,12 +24,10 @@
     access.allows('PUT /api/v1/scim/groups/{scim_id}/mapping')
   );
   let current = $state<Group | null>(null);
-  let role = $state<NonNullable<Mapping['role']> | ''>('');
-  let scope = $state<'assigned' | 'global'>('assigned');
-  let memberships = $state<
-    { id: string; value: string; role: 'manager' | 'viewer' }[]
-  >([]);
-  const write = useAction();
+  let role = $state<MappingDraft['role']>('');
+  let scope = $state<MappingDraft['scope']>('assigned');
+  let memberships = $state<MappingDraft['memberships']>([]);
+  const write = useAction<string>();
   function edit(group: Group) {
     current = group;
     role = group.mapping.role ?? '';
@@ -35,26 +36,17 @@
       ...p,
       id: crypto.randomUUID()
     }));
-    write.error = '';
+    write.reset();
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
     const group = current;
     if (!group || !editable || write.busy) return;
-    if (
-      memberships.some((p) => !p.value) ||
-      new Set(memberships.map((p) => p.value)).size !== memberships.length
-    ) {
-      write.error = 'Choose each project at most once.';
-      return;
-    }
-    await write.run(
-      () =>
-        saveMapping(group, {
-          ...(role ? { role } : {}),
-          accessScope: scope,
-          projects: memberships.map(({ value, role }) => ({ value, role }))
-        }),
+    const checked = validateMapping({ role, scope, memberships });
+    if (!write.check(checked)) return focusFormError(form);
+    const saved = await write.run(
+      () => saveMapping(group, checked.value),
       async (result) => {
         edit(result);
         notify('Group access saved.');
@@ -63,6 +55,7 @@
       },
       { fallback: 'Could not save the group mapping.' }
     );
+    if (!saved) await focusFormError(form);
   }
 </script>
 
@@ -165,18 +158,17 @@
       </div>
       <h3>Inherited project memberships</h3>
       {#each memberships as member (member.id)}<div class="membership">
-          <div class="form-field">
-            <label for={`scim-project-${member.id}`}>Project</label><select
-              id={`scim-project-${member.id}`}
-              bind:value={member.value}
-            >
-              <option value="">Choose a project</option>
+          <FormField label="Project" error={write.fieldErrors[member.id]}>
+            {#snippet control(attributes)}
+              <select {...attributes} bind:value={member.value}>
+                <option value="">Choose a project</option>
 
-              {#each projects.data ?? [] as project (project.id)}
-                <option value={project.id}>{project.name}</option>
-              {/each}
-            </select>
-          </div>
+                {#each projects.data ?? [] as project (project.id)}
+                  <option value={project.id}>{project.name}</option>
+                {/each}
+              </select>
+            {/snippet}
+          </FormField>
           <div class="form-field">
             <label for={`scim-project-role-${member.id}`}>
               Project role
@@ -211,7 +203,12 @@
         Add project membership
       </button>
     </fieldset>
-    {#if write.error}<p class="inline-problem" role="alert">
+    {#if write.error}<p
+        class="inline-problem"
+        role="alert"
+        tabindex="-1"
+        data-error-summary
+      >
         {write.error}
       </p>{/if}
     <div class="actions">
@@ -253,13 +250,17 @@
   .membership {
     display: flex;
     flex-wrap: wrap;
-    align-items: end;
+    align-items: start;
     gap: 1rem;
     margin-bottom: 1rem;
   }
-  .membership .form-field {
+  .membership > :global(.form-field) {
     flex: 1;
     min-width: 12rem;
+  }
+  .membership > button {
+    margin-top: calc(1lh + 0.4rem);
+    line-height: inherit;
   }
   form {
     display: grid;

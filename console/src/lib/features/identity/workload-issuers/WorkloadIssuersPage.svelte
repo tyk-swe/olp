@@ -7,18 +7,17 @@
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import FormField from '#lib/components/FormField.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
-  import { errorMessage } from '#lib/management/http.js';
   import {
-    buildIssuerWrite,
-    defaultIssuerMappings,
     listIssuers,
     saveIssuer,
     issuerInput,
     type Issuer,
     type IssuerWrite
   } from './api';
+  import { issuerDraft, validateIssuer, type IssuerField } from './issuerDraft';
   import { workloadIssuerKeys } from './workloadIssuerKeys';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -36,81 +35,49 @@
     enabled: access.allows('GET /api/v1/workload-issuers')
   }));
   const editable = $derived(access.allows('POST /api/v1/workload-issuers'));
+  const id = $props.id();
+  const signatureAlgorithms: IssuerWrite['algorithms'] = [
+    'RS256',
+    'ES256',
+    'EdDSA'
+  ];
   let editing = $state<Issuer>();
   let opened = $state(false);
-  let name = $state('');
-  let issuer = $state('');
-  let jwks = $state('');
-  let enabled = $state(true);
-  let audiences = $state('');
-  let algorithms = $state<string[]>(['RS256']);
-  let lifetime = $state('3600');
-  let disabledKeys = $state('');
-  let mappings = $state('[]');
+  let draft = $state(issuerDraft());
   let pending = $state<IssuerWrite>();
-  const write = useAction();
+  const write = useAction<IssuerField>();
   const saveIntent = useMutationIntent();
   const disableIntent = useMutationIntent();
   usePrincipalLifetime(() => {
     editing = pending = undefined;
     opened = false;
-    name = issuer = jwks = audiences = disabledKeys = '';
-    enabled = true;
-    algorithms = ['RS256'];
-    lifetime = '3600';
-    mappings = '[]';
+    draft = issuerDraft();
   });
   function open(value?: Issuer) {
     editing = value;
-    name = value?.name ?? '';
-    issuer = value?.issuer ?? '';
-    jwks = value?.jwks_url ?? '';
-    enabled = value?.enabled ?? true;
-    audiences = value?.audiences.join('\n') ?? '';
-    algorithms = [...(value?.algorithms ?? ['RS256'])];
-    lifetime = String(value?.max_lifetime_seconds ?? 3600);
-    disabledKeys = value?.disabled_key_ids.join('\n') ?? '';
-    mappings = JSON.stringify(
-      value?.mappings ?? defaultIssuerMappings,
-      null,
-      2
-    );
+    draft = issuerDraft(value);
     pending = undefined;
-    write.error = '';
+    write.reset();
     saveIntent.reset();
     opened = true;
+  }
+  function lock() {
+    const checked = validateIssuer(draft);
+    if (!write.check(checked)) return;
+    pending = checked.value;
+    return checked.value;
   }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (write.busy || !editable) return;
-    let draft = pending;
-    if (!draft) {
-      const built = captureResult(() =>
-        buildIssuerWrite({
-          name,
-          issuer,
-          jwks,
-          enabled,
-          audiences,
-          algorithms,
-          lifetime,
-          disabledKeys,
-          mappings
-        })
-      );
-      if (!built.ok) {
-        write.error = errorMessage(
-          built.error,
-          'Unable to save the workload issuer.'
-        );
-        return;
-      }
-      pending = built.value;
-      draft = built.value;
-    }
-    await write.run(
+    const form = event.currentTarget as HTMLFormElement;
+    const submitted = pending ?? lock();
+    if (!submitted) return focusFormError(form);
+    const accepted = await write.run(
       () =>
-        saveIntent.submit(draft, (input, id) => saveIssuer(input, id, editing)),
+        saveIntent.submit(submitted, (input, requestId) =>
+          saveIssuer(input, requestId, editing)
+        ),
       async () => {
         opened = false;
         notify(editing ? 'Workload issuer saved' : 'Workload issuer added');
@@ -129,6 +96,7 @@
             : 'Unable to save the workload issuer.')
       }
     );
+    if (!accepted && opened) await focusFormError(form);
   }
   async function disable(value: Issuer) {
     if (write.busy) return;
@@ -185,7 +153,9 @@
       </button>
     </div>{/if}
 </div>
-{#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
+{#if write.error && !opened}<Callout tone="danger">
+    {write.error}
+  </Callout>{/if}
 <QueryView
   {query}
   loading="Loading issuers…"
@@ -256,7 +226,7 @@
         <div class="form-field">
           <label for="issuer-name">Name</label><input
             id="issuer-name"
-            bind:value={name}
+            bind:value={draft.name}
             required
             maxlength="100"
           />
@@ -265,7 +235,7 @@
           <label for="issuer-url">Issuer URL</label><input
             id="issuer-url"
             type="url"
-            bind:value={issuer}
+            bind:value={draft.issuer}
             required
             readonly={Boolean(editing)}
           /><small>
@@ -277,18 +247,20 @@
           <label for="issuer-jwks">JWKS URL</label><input
             id="issuer-jwks"
             type="url"
-            bind:value={jwks}
+            bind:value={draft.jwks}
             required
           /><small>
             Fetched through the separate identity egress policy. Redirects and
             unsafe destinations are refused.
           </small>
         </div>
-        <label><input type="checkbox" bind:checked={enabled} /> Enabled</label>
+        <label>
+          <input type="checkbox" bind:checked={draft.enabled} /> Enabled
+        </label>
         <div class="form-field">
           <label for="issuer-audiences">Accepted audiences</label><textarea
             id="issuer-audiences"
-            bind:value={audiences}
+            bind:value={draft.audiences}
             required
             rows="2"></textarea><small>
             Separate exact audience values with commas or newlines.
@@ -297,46 +269,76 @@
         <fieldset class="algorithms">
           <legend>
             Signature algorithms
-          </legend>{#each ['RS256', 'ES256', 'EdDSA'] as alg (alg)}<label>
-              <input type="checkbox" bind:group={algorithms} value={alg} />
+          </legend>{#each signatureAlgorithms as alg (alg)}<label>
+              <input
+                type="checkbox"
+                bind:group={draft.algorithms}
+                value={alg}
+                aria-invalid={write.fieldErrors.algorithms ? 'true' : undefined}
+                aria-describedby={write.fieldErrors.algorithms
+                  ? `${id}-algorithms`
+                  : undefined}
+              />
               {alg}
             </label>{/each}
+          {#if write.fieldErrors.algorithms}<p
+              class="field-error"
+              id="{id}-algorithms"
+            >
+              {write.fieldErrors.algorithms}
+            </p>{/if}
         </fieldset>
-        <div class="form-field">
-          <label for="issuer-lifetime">
-            Maximum token lifetime (seconds)
-          </label><input
-            id="issuer-lifetime"
-            type="text"
-            inputmode="numeric"
-            bind:value={lifetime}
-            required
-          />
-        </div>
+        <FormField
+          label="Maximum token lifetime (seconds)"
+          error={write.fieldErrors.lifetime}
+        >
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              type="text"
+              inputmode="numeric"
+              bind:value={draft.lifetime}
+              required
+            />
+          {/snippet}
+        </FormField>
         <div class="form-field">
           <label for="issuer-disabled-keys">
             Disabled signing key IDs
           </label><textarea
             id="issuer-disabled-keys"
-            bind:value={disabledKeys}
+            bind:value={draft.disabledKeys}
             rows="2"></textarea>
         </div>
-        <div class="form-field">
-          <label for="issuer-mappings">Claim mappings (JSON)</label><textarea
-            id="issuer-mappings"
-            bind:value={mappings}
-            rows="17"
-            spellcheck="false"></textarea><small>
-            Ordered mappings use exact string matches at JSON pointers. Create
-            the project template and route groups first. The first matching
-            mapping wins. An optional end_user_claim must contain a bounded
-            machine identifier; the gateway retains only its digest.
-          </small>
-        </div>
+        <FormField
+          label="Claim mappings (JSON)"
+          error={write.fieldErrors.mappings}
+        >
+          {#snippet control(attributes)}
+            <textarea
+              {...attributes}
+              bind:value={draft.mappings}
+              rows="17"
+              spellcheck="false"></textarea><small>
+              Ordered mappings use exact string matches at JSON pointers. Create
+              the project template and route groups first. The first matching
+              mapping wins. An optional end_user_claim must contain a bounded
+              machine identifier; the gateway retains only its digest.
+            </small>
+          {/snippet}
+        </FormField>
       </fieldset>
       {#if pending}<p>
           The submitted configuration is locked for a safe retry. Reopen the
           issuer to change it.
+        </p>{/if}
+      {#if write.error}<p
+          class="inline-problem"
+          role="alert"
+          tabindex="-1"
+          data-error-summary
+        >
+          {write.error}
         </p>{/if}
       <div class="actions">
         <button
@@ -377,6 +379,9 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
+  }
+  .algorithms .field-error {
+    flex-basis: 100%;
   }
   .row-actions {
     display: flex;

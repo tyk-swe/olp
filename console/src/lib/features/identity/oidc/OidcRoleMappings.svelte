@@ -1,5 +1,8 @@
 <script lang="ts">
+  import FormField from '#lib/components/FormField.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
+  import type { FieldErrors } from '#lib/editing/validation.js';
+  import type { OidcField } from './oidcDraft';
 
   let {
     emailMappings = $bindable(''),
@@ -8,6 +11,7 @@
     oidcEnabled,
     busy,
     busyKey,
+    errors,
     onLinkIdentity
   }: {
     emailMappings: string;
@@ -16,6 +20,7 @@
     oidcEnabled: boolean;
     busy: boolean;
     busyKey: string;
+    errors: FieldErrors<OidcField>;
     onLinkIdentity: () => void;
   } = $props();
 </script>
@@ -26,20 +31,24 @@
     One mapping per line in <code>claim-value=role</code> form. Email mappings take
     precedence over group mappings and the default.
   </p>
-  <div class="form-field">
-    <label for="email-mappings">Email mappings</label><textarea
-      id="email-mappings"
-      bind:value={emailMappings}
-      disabled={!canManage}
-      placeholder="owner@example.com=owner"></textarea>
-  </div>
-  <div class="form-field">
-    <label for="group-mappings">Group mappings</label><textarea
-      id="group-mappings"
-      bind:value={groupMappings}
-      disabled={!canManage}
-      placeholder="platform-team=operator"></textarea>
-  </div>
+  <FormField label="Email mappings" error={errors.emailMappings}>
+    {#snippet control(attributes)}
+      <textarea
+        {...attributes}
+        bind:value={emailMappings}
+        disabled={!canManage}
+        placeholder="owner@example.com=owner"></textarea>
+    {/snippet}
+  </FormField>
+  <FormField label="Group mappings" error={errors.groupMappings}>
+    {#snippet control(attributes)}
+      <textarea
+        {...attributes}
+        bind:value={groupMappings}
+        disabled={!canManage}
+        placeholder="platform-team=operator"></textarea>
+    {/snippet}
+  </FormField>
   {#if !oidcEnabled}
     <ReadOnlyNote role={undefined}>
       Save with OIDC enabled before linking your identity.

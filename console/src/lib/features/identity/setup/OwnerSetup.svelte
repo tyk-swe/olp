@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { ApiProblem, applyServerFieldErrors } from '#lib/management/http.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import { ApiProblem } from '#lib/management/http.js';
   import { createOwner } from '#lib/features/identity/setup/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import NavIcon from '#lib/components/NavIcon.svelte';
@@ -10,8 +11,8 @@
     PASSWORD_MIN_LENGTH
   } from '#lib/passwordPolicy.js';
   import {
-    type OwnerFormErrors,
     type OwnerFormValues,
+    ownerServerFields,
     validateOwner
   } from '#lib/features/identity/setup/ownerValidation.js';
 
@@ -25,16 +26,8 @@
     confirmPassword: '',
     setupToken: ''
   });
-  let errors = $state<OwnerFormErrors>({});
-  const action = useAction(undefined, 'authentication');
-
-  const serverToFormField: Record<string, keyof OwnerFormValues> = {
-    display_name: 'displayName',
-    installation_name: 'installationName',
-    email: 'email',
-    password: 'password',
-    setup_token: 'setupToken'
-  };
+  const action = useAction<keyof OwnerFormValues>(undefined, 'authentication');
+  const errors = $derived(action.fieldErrors);
 
   function describedBy(field: keyof OwnerFormValues, hint?: string) {
     const parts = [hint, errors[field] ? `${field}-error` : undefined].filter(
@@ -45,12 +38,11 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    action.error = '';
-    errors = validateOwner(values);
-    if (Object.keys(errors).length) return;
+    const form = event.currentTarget as HTMLFormElement;
+    if (!action.check(validateOwner(values))) return focusFormError(form);
 
     const installationName = values.installationName.trim();
-    await action.run(
+    const accepted = await action.run(
       () =>
         authLifecycle.authenticate((signal) =>
           createOwner(
@@ -70,17 +62,14 @@
         ),
       () => onComplete(),
       {
-        failure: (cause) => {
-          if (cause instanceof ApiProblem) {
-            errors = applyServerFieldErrors(cause, serverToFormField);
-            if (!Object.keys(errors).length)
-              return cause.problem.detail ?? cause.problem.title;
-            return '';
-          }
-          return 'The control API could not be reached. Check the service and try again.';
-        }
+        serverFields: ownerServerFields,
+        failure: (cause) =>
+          cause instanceof ApiProblem
+            ? (cause.problem.detail ?? cause.problem.title)
+            : 'The control API could not be reached. Check the service and try again.'
       }
     );
+    if (!accepted) await focusFormError(form);
   }
 
   onDestroy(() => authLifecycle.abortAuthenticationWork());
@@ -95,14 +84,14 @@
   </p>
 </div>
 
-{#if action.error}
-  <div class="form-alert" role="alert" tabindex="-1">
-    <strong>Setup could not continue</strong>
-    <span>{action.error}</span>
-  </div>
-{/if}
-
 <form novalidate onsubmit={submit}>
+  {#if action.error}
+    <div class="form-alert" role="alert" tabindex="-1" data-error-summary>
+      <strong>Setup could not continue</strong>
+      <span>{action.error}</span>
+    </div>
+  {/if}
+
   <div class="field">
     <label for="display-name">Display name</label>
     <input
@@ -270,7 +259,6 @@
   .form-alert {
     display: grid;
     gap: 0.15rem;
-    margin-bottom: 1rem;
     padding: 0.75rem 0.85rem;
     border: 1px solid var(--danger);
     border-radius: var(--radius-control);

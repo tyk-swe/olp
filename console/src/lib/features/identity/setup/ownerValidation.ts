@@ -1,4 +1,5 @@
 import { validateDisplayName } from '#lib/displayNamePolicy.js';
+import { validated } from '#lib/editing/validation.js';
 import { validatePasswordPolicy } from '#lib/passwordPolicy.js';
 
 export type OwnerFormValues = {
@@ -9,9 +10,18 @@ export type OwnerFormValues = {
   confirmPassword: string;
   setupToken: string;
 };
-export type OwnerFormErrors = Partial<Record<keyof OwnerFormValues, string>>;
+type OwnerFormErrors = Partial<Record<keyof OwnerFormValues, string>>;
+export const ownerServerFields: Readonly<
+  Record<string, keyof OwnerFormValues>
+> = {
+  display_name: 'displayName',
+  installation_name: 'installationName',
+  email: 'email',
+  password: 'password',
+  setup_token: 'setupToken'
+};
 
-export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
+export function validateOwner(values: OwnerFormValues) {
   const errors: OwnerFormErrors = {};
   const email = values.email.trim();
   const installationName = values.installationName.trim();
@@ -32,5 +42,5 @@ export function validateOwner(values: OwnerFormValues): OwnerFormErrors {
     validatePasswordPolicy(values.password, values.confirmPassword)
   );
   if (!values.setupToken) errors.setupToken = 'Enter the setup token.';
-  return errors;
+  return validated(errors, () => values);
 }
