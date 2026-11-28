@@ -308,3 +308,11 @@ func failure(err error) error {
 func refused(reason string) error {
 	return problem.Fail(422, "grant_enrollment_failed", "The plugin's grant enrollment returned something OLP can't use: "+reason+".")
 }
+
+func PurgeExpiredEnrollments(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error) {
+	tag, err := tx.Exec(ctx, `WITH expired AS (
+      SELECT ctid FROM olp.grant_enrollments WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.grant_enrollments target USING expired WHERE target.ctid = expired.ctid`, before, limit)
+	return tag.RowsAffected(), err
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/identity"
 	"github.com/tyk-swe/olp/internal/platform/audit"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -66,7 +67,7 @@ type cutoffs struct{ request, usage, audit time.Time }
 // pool because it holds a session advisory lock across many transactions: that
 // connection must never be handed back to another caller while locked, and
 // closing it is what releases the lock.
-func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (MaintenanceReport, error) {
+func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purgeEnrollments Purge) (MaintenanceReport, error) {
 	resource, err := pool.Acquire(ctx)
 	if err != nil {
 		return MaintenanceReport{}, fmt.Errorf("acquire maintenance connection: %w", err)
@@ -104,7 +105,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if report.AuditRows, err = purgeExpiredAudit(ctx, conn, windows.audit); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if err = purgeExpiringRecords(ctx, conn, now, windows, &report); err != nil {
+	if err = purgeExpiringRecords(ctx, conn, now, windows, &report, purgeEnrollments); err != nil {
 		return MaintenanceReport{}, err
 	}
 	return report, nil
@@ -156,6 +157,14 @@ func execBatch(sql string, args ...any) purgeBatch {
 	return func(ctx context.Context, tx pgx.Tx) (int64, error) {
 		tag, err := tx.Exec(ctx, sql, args...)
 		return tag.RowsAffected(), err
+	}
+}
+
+type Purge func(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error)
+
+func expiredBatch(purge Purge, before time.Time) purgeBatch {
+	return func(ctx context.Context, tx pgx.Tx) (int64, error) {
+		return purge(ctx, tx, before, retentionBatch)
 	}
 }
 
@@ -320,83 +329,40 @@ const purgeReceiptsSQL = `WITH expired AS (
     DELETE FROM olp.request_metadata_event_receipts receipt USING expired
      WHERE receipt.ctid = expired.ctid`
 
-const purgeSessionsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.sessions WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.sessions target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeInvitationsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.invitations
-       WHERE expires_at <= $1 AND accepted_at IS NULL AND revoked_at IS NULL
-       LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.invitations target USING expired WHERE target.ctid = expired.ctid`
-
 const purgeReplaysSQL = `WITH expired AS (
       SELECT ctid FROM olp.replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
     )
     DELETE FROM olp.replays target USING expired WHERE target.ctid = expired.ctid`
 
-const purgeSAMLFlowsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.saml_flows WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.saml_flows target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeSAMLAssertionReplaysSQL = `WITH expired AS (
-      SELECT ctid FROM olp.saml_assertion_replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.saml_assertion_replays target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeOIDCFlowsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.oidc_flows WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.oidc_flows target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeGrantEnrollmentsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.grant_enrollments WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.grant_enrollments target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeMFAChallengesSQL = `WITH expired AS (
-      SELECT ctid FROM olp.mfa_challenges WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.mfa_challenges target USING expired WHERE target.ctid = expired.ctid`
-
-const purgeRecentAuthSQL = `WITH expired AS (
-      SELECT ctid FROM olp.recent_auth WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.recent_auth target USING expired WHERE target.ctid = expired.ctid`
-
 // purgeExpiringRecords clears the tables that carry their own expiry. Each
 // table drains in its own committed batches, like the purges above, so one
 // locked row or a cancelled pass cannot roll back a whole pass of reclaimed
 // rows; a later table failing leaves the earlier ones purged.
-func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, windows cutoffs, report *MaintenanceReport) error {
+func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, windows cutoffs, report *MaintenanceReport, purgeEnrollments Purge) error {
 	if err := rollUpRequestMetadataGaps(ctx, conn, windows.usage, report); err != nil {
 		return err
 	}
 	deletes := []struct {
-		into *int64
-		sql  string
-		args []any
+		into  *int64
+		purge purgeBatch
 	}{
-		{&report.EpochRows, purgeEpochsSQL, []any{windows.usage, int64(retentionBatch)}},
-		{&report.ReceiptRows, purgeReceiptsSQL,
-			[]any{int64(usage.ReplayHorizonDays), int64(usage.FutureSkewMinutes), int64(receiptBatch)}},
-		{&report.SessionRows, purgeSessionsSQL, []any{now, int64(retentionBatch)}},
-		{&report.InvitationRows, purgeInvitationsSQL, []any{now, int64(retentionBatch)}},
+		{&report.EpochRows, execBatch(purgeEpochsSQL, windows.usage, int64(retentionBatch))},
+		{&report.ReceiptRows, execBatch(purgeReceiptsSQL,
+			int64(usage.ReplayHorizonDays), int64(usage.FutureSkewMinutes), int64(receiptBatch))},
+		{&report.SessionRows, expiredBatch(identity.PurgeExpiredSessions, now)},
+		{&report.InvitationRows, expiredBatch(identity.PurgeExpiredInvitations, now)},
 		// Replay records first, then the encrypted responses they point at:
 		// deleting the secret would cascade the replay away uncounted.
-		{&report.ReplayRows, purgeReplaysSQL, []any{now, int64(retentionBatch)}},
-		{&report.OIDCFlowRows, purgeSAMLFlowsSQL, []any{now, int64(retentionBatch)}},
-		{&report.OIDCFlowRows, purgeSAMLAssertionReplaysSQL, []any{now, int64(retentionBatch)}},
-		{&report.OIDCFlowRows, purgeOIDCFlowsSQL, []any{now, int64(retentionBatch)}},
+		{&report.ReplayRows, execBatch(purgeReplaysSQL, now, int64(retentionBatch))},
+		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredSAMLFlows, now)},
+		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredSAMLAssertionReplays, now)},
+		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredOIDCFlows, now)},
 		// An expired grant enrollment's row outlives its session state for an
 		// hour, so a late continuation learns that it expired.
-		{&report.GrantEnrollmentRows, purgeGrantEnrollmentsSQL, []any{now.Add(-time.Hour), int64(retentionBatch)}},
+		{&report.GrantEnrollmentRows, expiredBatch(purgeEnrollments, now.Add(-time.Hour))},
 	}
 	for _, statement := range deletes {
-		deleted, err := drainInBatches(ctx, conn, execBatch(statement.sql, statement.args...))
+		deleted, err := drainInBatches(ctx, conn, statement.purge)
 		if err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)
 		}
@@ -405,11 +371,11 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 	// Stored replay responses and re-authentication grants expire with their
 	// owners; both are counted under the records above rather than separately.
 	for _, purge := range []purgeBatch{
-		execBatch(purgeMFAChallengesSQL, now, int64(retentionBatch)),
+		expiredBatch(identity.PurgeExpiredMFAChallenges, now),
 		func(ctx context.Context, tx pgx.Tx) (int64, error) {
 			return secrets.PurgeExpired(ctx, tx, now, retentionBatch)
 		},
-		execBatch(purgeRecentAuthSQL, now, int64(retentionBatch)),
+		expiredBatch(identity.PurgeExpiredRecentAuth, now),
 	} {
 		if _, err := drainInBatches(ctx, conn, purge); err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)
