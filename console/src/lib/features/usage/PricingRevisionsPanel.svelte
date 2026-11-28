@@ -5,14 +5,13 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import PricingRevisionForm from './PricingRevisionForm.svelte';
   import {
     emptyPriceFields,
-    hasAnyPrice,
-    priceRevisionDraft,
+    preparePricingRevision,
+    pricingFormResets,
     type PricingRevisionFormValues,
     extraComponents
   } from './priceEntry';
@@ -31,13 +30,11 @@
   import { pricingKeys } from './pricingKeys';
   import { providerQueries } from '#lib/domain/providers/queries.js';
 
+  const CREATE_FAILED = 'The pricing revision could not be created.';
+
   const create = useMutation();
 
   let problem = $state('');
-  function onFeedback(feedback: { status: string; error: string }) {
-    problem = feedback.error;
-    if (feedback.status && !feedback.error) notify(feedback.status);
-  }
 
   const queryClient = useQueryClient();
   const services = useServiceCapabilities();
@@ -79,31 +76,11 @@
   async function addPricing(event: SubmitEvent) {
     event.preventDefault();
     if (!canEditPricing || create.busy) return;
-    onFeedback({ status: '', error: '' });
-    if (!form.providerKind || !form.model.trim() || !form.operation.trim()) {
-      onFeedback({
-        status: '',
-        error: 'Provider kind, model, and operation are required.'
-      });
-      return;
-    }
+    problem = '';
     const submitted = { ...form };
-    const prepared = captureResult(() => {
-      const price = priceRevisionDraft(submitted);
-      if (!hasAnyPrice(price)) throw new Error('Enter at least one price.');
-      return {
-        effectiveAt: new Date(submitted.effectiveAt).toISOString(),
-        prices: [price]
-      };
-    });
+    const prepared = preparePricingRevision(submitted);
     if (!prepared.ok) {
-      onFeedback({
-        status: '',
-        error: errorMessage(
-          prepared.error,
-          'The pricing revision could not be created.'
-        )
-      });
+      problem = errorMessage(prepared.error, CREATE_FAILED);
       return;
     }
     await create.submit(
@@ -111,53 +88,10 @@
       (input, requestId) =>
         createPricingRevision(input.effectiveAt, input.prices, requestId),
       async () => {
-        onFeedback({
-          status:
-            'Pricing revision created. New usage will use the effective revision.',
-          error: ''
-        });
-        if (form.model === submitted.model) form.model = '';
-        if (form.inputPrice === submitted.inputPrice) form.inputPrice = '';
-        if (form.cachedInputPrice === submitted.cachedInputPrice)
-          form.cachedInputPrice = '';
-        if (form.cacheWritePrice === submitted.cacheWritePrice)
-          form.cacheWritePrice = '';
-        if (form.cacheWrite5mPrice === submitted.cacheWrite5mPrice)
-          form.cacheWrite5mPrice = '';
-        if (form.cacheWrite1hPrice === submitted.cacheWrite1hPrice)
-          form.cacheWrite1hPrice = '';
-        if (form.outputPrice === submitted.outputPrice) form.outputPrice = '';
-        if (form.unitPrice === submitted.unitPrice) form.unitPrice = '';
-        if (form.audioInputPrice === submitted.audioInputPrice)
-          form.audioInputPrice = '';
-        if (form.cachedAudioInputPrice === submitted.cachedAudioInputPrice)
-          form.cachedAudioInputPrice = '';
-        if (form.audioOutputPrice === submitted.audioOutputPrice)
-          form.audioOutputPrice = '';
-        if (form.imageInputPrice === submitted.imageInputPrice)
-          form.imageInputPrice = '';
-        if (form.cachedImageInputPrice === submitted.cachedImageInputPrice)
-          form.cachedImageInputPrice = '';
-        if (form.imageOutputPrice === submitted.imageOutputPrice)
-          form.imageOutputPrice = '';
-        if (form.perRequestPrice === submitted.perRequestPrice)
-          form.perRequestPrice = '';
-        if (form.trainingPrice === submitted.trainingPrice)
-          form.trainingPrice = '';
-        if (form.storagePrice === submitted.storagePrice)
-          form.storagePrice = '';
-        if (form.cacheStoragePrice === submitted.cacheStoragePrice)
-          form.cacheStoragePrice = '';
-        form.containerFees = [];
-        if (form.batchMultiplier === submitted.batchMultiplier)
-          form.batchMultiplier = '';
-        form.toolFees = [];
-        form.tiers = [];
-        form.windowZone = '';
-        form.windowPeriods = [];
-        if (form.providerId === submitted.providerId) form.providerId = '';
-        if (form.effectiveAt === submitted.effectiveAt)
-          form.effectiveAt = dateTimeLocalValue(new Date());
+        notify(
+          'Pricing revision created. New usage will use the effective revision.'
+        );
+        Object.assign(form, pricingFormResets(form, submitted, new Date()));
         resetCursor(pricingPagination);
         // The query observes the first page only once its options update, so
         // mark every cached page stale rather than refetching the current one.
@@ -165,16 +99,10 @@
       },
       {
         failure: (cause, stage) => {
-          onFeedback({
-            status: stage === 'accept' ? 'Pricing revision created.' : '',
-            error:
-              stage === 'accept'
-                ? `Pricing revision created, but refreshing failed. ${errorMessage(cause)}`
-                : errorMessage(
-                    cause,
-                    'The pricing revision could not be created.'
-                  )
-          });
+          problem =
+            stage === 'accept'
+              ? `Pricing revision created, but refreshing failed. ${errorMessage(cause)}`
+              : errorMessage(cause, CREATE_FAILED);
           return '';
         }
       }
