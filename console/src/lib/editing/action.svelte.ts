@@ -1,22 +1,52 @@
 import { onDestroy } from 'svelte';
-import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
+import {
+  applyServerFieldErrors,
+  errorMessage,
+  fieldIssues,
+  isEtagMismatch
+} from '#lib/management/http.js';
 import {
   useMutationIntent,
   usePrincipalLifetime
 } from './mutationIntent.svelte';
+import type { FieldErrors, Valid, Validation } from './validation';
 
-export type ActionFeedback = {
+type Stage = 'send' | 'accept';
+
+export type ActionFeedback<Field extends string = never> = {
   key?: string;
   fallback?: string;
-  failure?: (cause: unknown, stage: 'send' | 'accept') => string;
+  failure?: (cause: unknown, stage: Stage) => string;
+  serverFields?: Readonly<Record<string, Field>>;
 };
 
-export function useAction(
+function describeFailure<Field extends string>(
+  cause: unknown,
+  stage: Stage,
+  { failure, fallback, serverFields }: ActionFeedback<Field>
+) {
+  const message = failure
+    ? failure(cause, stage)
+    : errorMessage(cause, fallback);
+  const fields: Readonly<Record<string, Field>> =
+    stage === 'send' ? (serverFields ?? {}) : {};
+  const issues = fieldIssues(cause);
+  const allOnFields =
+    issues.length > 0 &&
+    issues.every(({ field }) => Object.hasOwn(fields, field));
+  return {
+    error: allOnFields ? '' : message,
+    fieldErrors: applyServerFieldErrors(cause, fields)
+  };
+}
+
+export function useAction<Field extends string = never>(
   refreshOnConflict?: () => Promise<unknown>,
   lifetime: 'principal' | 'authentication' = 'principal'
 ) {
   let activeKey = $state<string | null>(null);
   let error = $state('');
+  let fieldErrors = $state.raw<FieldErrors<Field>>({});
   let conflict = $state(false);
   const capture =
     lifetime === 'authentication'
@@ -30,6 +60,7 @@ export function useAction(
       : usePrincipalLifetime(() => {
           activeKey = null;
           error = '';
+          fieldErrors = {};
           conflict = false;
         });
   return {
@@ -45,24 +76,36 @@ export function useAction(
     set error(value: string) {
       error = value;
     },
+    get fieldErrors() {
+      return fieldErrors;
+    },
     get conflict() {
       return conflict;
     },
     reset() {
       error = '';
+      fieldErrors = {};
       conflict = false;
+    },
+    check<Value>(
+      validation: Validation<Value, Field>
+    ): validation is Valid<Value> {
+      error = '';
+      fieldErrors = validation.ok ? {} : validation.fieldErrors;
+      return validation.ok;
     },
     async run<T>(
       send: () => Promise<T>,
       accept?: (value: T, current: () => boolean) => void | Promise<void>,
-      feedback: ActionFeedback = {}
+      feedback: ActionFeedback<Field> = {}
     ): Promise<boolean> {
       if (activeKey !== null) return false;
       const current = capture();
       activeKey = feedback.key ?? 'submit';
       error = '';
+      fieldErrors = {};
       conflict = false;
-      let stage: 'send' | 'accept' = 'send';
+      let stage: Stage = 'send';
       try {
         const value = await send();
         if (current()) {
@@ -72,9 +115,7 @@ export function useAction(
         return current();
       } catch (cause) {
         if (current()) {
-          error = feedback.failure
-            ? feedback.failure(cause, stage)
-            : errorMessage(cause, feedback.fallback);
+          ({ error, fieldErrors } = describeFailure(cause, stage, feedback));
           if (stage === 'send' && isEtagMismatch(cause)) {
             conflict = true;
             try {
@@ -92,8 +133,10 @@ export function useAction(
   };
 }
 
-export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
-  const action = useAction(refreshOnConflict);
+export function useMutation<Field extends string = never>(
+  refreshOnConflict?: () => Promise<unknown>
+) {
+  const action = useAction<Field>(refreshOnConflict);
   const intent = useMutationIntent();
   return {
     get busy() {
@@ -108,6 +151,9 @@ export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
     set error(value: string) {
       action.error = value;
     },
+    get fieldErrors() {
+      return action.fieldErrors;
+    },
     get conflict() {
       return action.conflict;
     },
@@ -115,12 +161,13 @@ export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
       action.reset();
       intent.reset();
     },
+    check: action.check,
     run: action.run,
     submit<I, R>(
       input: I,
       send: (input: I, requestId: string) => Promise<R>,
       accept?: (value: R, current: () => boolean) => void | Promise<void>,
-      feedback?: ActionFeedback
+      feedback?: ActionFeedback<Field>
     ) {
       return action.run(() => intent.submit(input, send), accept, feedback);
     },
@@ -129,7 +176,7 @@ export function useMutation(refreshOnConflict?: () => Promise<unknown>) {
       build: () => B,
       send: (input: B, requestId: string) => Promise<R>,
       accept?: (value: R, current: () => boolean) => void | Promise<void>,
-      feedback?: ActionFeedback
+      feedback?: ActionFeedback<Field>
     ) {
       return action.run(
         () => intent.submitBuilt(input, build, send),

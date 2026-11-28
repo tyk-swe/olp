@@ -1,4 +1,6 @@
 import { useAction, useMutation } from './action.svelte';
+import { validated } from './validation';
+import { ApiProblem } from '#lib/management/http.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import type { AuthenticatedSession } from '#lib/session/state.js';
 import { expect, it, vi } from 'vitest';
@@ -57,14 +59,18 @@ it('retires a pending send with the old principal so its late resolution neither
       return () => {};
     }
   );
-  const { value: action } = mountState(() => useAction(), { attach: true });
+  const { value: action } = mountState(() => useAction<'name'>(), {
+    attach: true
+  });
   const stale = Promise.withResolvers<string>();
   const staleAccept = vi.fn();
   const staleRun = action.run(() => stale.promise, staleAccept);
   expect(action.busy).toBe(true);
 
+  action.check(validated({ name: 'Enter a name.' }, () => null));
   retire.current?.();
   expect(action.busy).toBe(false);
+  expect(action.fieldErrors).toEqual({});
 
   const fresh = Promise.withResolvers<string>();
   const freshAccept = vi.fn();
@@ -118,4 +124,59 @@ it('keeps an authentication-scoped action busy through its own transition and st
   second.resolve('too late');
   expect(await secondRun).toBe(false);
   expect(secondAccept).not.toHaveBeenCalled();
+});
+
+function refusal(messages: Record<string, string>) {
+  return new ApiProblem({
+    title: 'Validation failed',
+    status: 422,
+    detail: 'The request was refused.',
+    errors: Object.fromEntries(
+      Object.entries(messages).map(([field, message]) => [
+        field,
+        [{ code: 'validation_failed', message }]
+      ])
+    )
+  });
+}
+
+it('reports client and server field errors in one place and keeps a message for what no field shows', async () => {
+  const { value: action } = mountState(() => useAction<'name'>(), {
+    attach: true
+  });
+  const serverFields = { display_name: 'name' } as const;
+  const refuse = (cause: Error) =>
+    action.run(() => Promise.reject(cause), undefined, { serverFields });
+
+  await refuse(refusal({ display_name: 'That name is taken.' }));
+  expect(action.fieldErrors).toEqual({ name: 'That name is taken.' });
+  expect(action.error).toBe('');
+
+  await refuse(refusal({ display_name: 'Taken.', quota: 'Full.' }));
+  expect(action.fieldErrors).toEqual({ name: 'Taken.' });
+  expect(action.error).toBe('The request was refused.');
+
+  const checked = validated({ name: 'Enter a name.' }, () => 'unused');
+  expect(action.check(checked)).toBe(false);
+  expect(action.fieldErrors).toEqual({ name: 'Enter a name.' });
+  expect(action.error).toBe('');
+
+  await refuse(new TypeError('network lost'));
+  expect(action.fieldErrors).toEqual({});
+  expect(action.error).toBe('network lost');
+
+  expect(action.check(validated({ name: undefined }, () => 'typed'))).toBe(
+    true
+  );
+  expect(action.error).toBe('');
+
+  await action.run(
+    () => Promise.resolve(),
+    () => {
+      throw refusal({ display_name: 'From a later request.' });
+    },
+    { serverFields }
+  );
+  expect(action.fieldErrors).toEqual({});
+  expect(action.error).toBe('The request was refused.');
 });

@@ -3,10 +3,18 @@ import { mount, unmount } from 'svelte';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState } from '#test/mount.js';
+import {
+  findButton,
+  findControl,
+  mountWithState,
+  reportedError,
+  setFieldValue,
+  submitForm
+} from '#test/mount.js';
 import NotificationDeliveries from './NotificationDeliveries.svelte';
 import NotificationDestinationTest from './NotificationDestinationTest.svelte';
 import NotificationsPanel from './NotificationsPanel.svelte';
+import RuleSilenceEditor from './RuleSilenceEditor.svelte';
 import type {
   NotificationDelivery,
   NotificationDestination,
@@ -153,6 +161,62 @@ describe('saved destination test', () => {
     );
     expect(send).toHaveBeenCalledTimes(3);
     expect(send.mock.calls[2]).not.toEqual(send.mock.calls[0]);
+  });
+});
+
+describe('rule silence', () => {
+  it('reports a bad window on its inputs, whether the console or the API refuses it', async () => {
+    const writes = vi.fn<(request: Request) => void>();
+    serve(
+      (request) => {
+        writes(request);
+        const message = 'End must be after the start and in the future.';
+        return json(
+          {
+            title: 'Validation failed',
+            status: 422,
+            detail: message,
+            errors: { silence: [{ code: 'validation_failed', message }] }
+          },
+          422
+        );
+      },
+      ['settings']
+    );
+    const { target } = mountWithState(
+      RuleSilenceEditor,
+      { rule, disabled: false, saved: vi.fn() },
+      { attach: true }
+    );
+    const start = findControl(target, 'Start (UTC)');
+    const end = findControl(target, 'End (UTC)');
+
+    submitForm(target);
+    expect(reportedError(start)).toBe('Enter a start time.');
+    expect(reportedError(end)).toBe('Enter an end time.');
+
+    setFieldValue(start, '2001-01-02T10:00');
+    setFieldValue(end, '2001-01-02T09:00');
+    submitForm(target);
+    expect(reportedError(start)).toBeUndefined();
+    expect(reportedError(end)).toBe('Enter an end time after the start time.');
+    expect(writes).not.toHaveBeenCalled();
+
+    setFieldValue(end, '2001-01-02T11:00');
+    submitForm(target);
+    await eventually(() =>
+      expect(reportedError(end)).toBe(
+        'End must be after the start and in the future.'
+      )
+    );
+    await eventually(() => expect(document.activeElement).toBe(end));
+    expect(target.querySelector('[role="alert"]')).toBeNull();
+    expect(await writes.mock.calls[0][0].json()).toEqual({
+      silence: {
+        starts_at: '2001-01-02T10:00:00.000Z',
+        ends_at: '2001-01-02T11:00:00.000Z'
+      }
+    });
   });
 });
 
