@@ -330,6 +330,7 @@ type surfaceHarness struct {
 	mock     *surfaceMock
 	sink     *surfaceEnvelopes
 	gateway  *kernel.Server
+	deps     kernel.Dependencies
 	server   *httptest.Server
 	upstream *httptest.Server
 	returned chan struct{}
@@ -507,14 +508,14 @@ func newSurfaceHarness(t *testing.T, limited bool) *surfaceHarness {
 	}
 	gw := kernel.New(dependencies, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
 	mux := http.NewServeMux()
-	gateway.Register(gw, mux, gateway.WithMedia(mediaDeps))
+	gateway.Register(gw, mux, dependencies, gateway.WithMedia(mediaDeps))
 	returned := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() { returned <- struct{}{} }()
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return &surfaceHarness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, upstream: upstream, returned: returned, ledger: ledger}
+	return &surfaceHarness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, deps: dependencies, server: server, upstream: upstream, returned: returned, ledger: ledger}
 }
 
 func (h *surfaceHarness) price(budgeted bool) {

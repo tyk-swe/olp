@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	kernel.RegisterGateway = func(k *kernel.Server, mux *http.ServeMux) { gateway.Register(k, mux) }
-	kernel.BedrockConverse = bedrock.ConverseHandler
-	kernel.BedrockConverseStream = bedrock.ConverseStreamHandler
+	kernel.RegisterGateway = func(k *kernel.Server, mux *http.ServeMux) { gateway.Register(k, mux, k.Deps) }
+	kernel.BedrockConverse = func(k *kernel.Server) http.HandlerFunc { return bedrock.ConverseHandler(k, k.Deps.Runtime) }
+	kernel.BedrockConverseStream = func(k *kernel.Server) http.HandlerFunc { return bedrock.ConverseStreamHandler(k, k.Deps.Runtime) }
 }

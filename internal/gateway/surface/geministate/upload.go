@@ -76,7 +76,7 @@ func acknowledge(w http.ResponseWriter, x *kernel.Call, offset int64, state stri
 func (s surface) markFailed(ctx context.Context, resource *resources.Resource) {
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
-	if err := s.kernel.Deps.Resources.Update(commitCtx, resource.ID, "failed", nil, nil); err != nil {
+	if err := s.store.Update(commitCtx, resource.ID, "failed", nil, nil); err != nil {
 		s.kernel.Log.Warn("Gemini upload session failure could not be recorded", "resource_id", resource.ID, "error", err)
 	}
 }
@@ -210,7 +210,7 @@ func (s surface) continueUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s surface) session(r *http.Request, authority keyauthority.Authority) (*resources.Resource, uploadCommand, *fault.Error) {
-	session, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
+	session, err := s.store.Get(r.Context(), resources.KindGeminiUpload, authority.ID, r.PathValue("session"))
 	if errors.Is(err, resources.ErrNotFound) {
 		return nil, uploadCommand{}, fault.NotFoundError("not_found", "No upload session with this identifier exists for this key.")
 	}
@@ -288,7 +288,7 @@ func (u upload) stage(ctx context.Context) (chunk, *fault.Error) {
 	if err := controller.SetReadDeadline(chunkDeadline(ctx)); err != nil {
 		return chunk{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini chunk read could not be bounded.")
 	}
-	artifact, err := u.kernel.Deps.Staging.Put(ctx, staging.Upload{
+	artifact, err := u.spool.Put(ctx, staging.Upload{
 		Filename: "gemini-upload-chunk", ContentType: u.state.contentType, Body: u.r.Body,
 		MaximumLength: min(u.state.expected-u.state.offset, u.kernel.Config.MaxMediaBodyBytes),
 	})
@@ -297,7 +297,7 @@ func (u upload) stage(ctx context.Context) (chunk, *fault.Error) {
 	}
 	// Keep failed reads bounded while HTTP/1 drains their remaining body.
 	_ = controller.SetReadDeadline(time.Time{})
-	opened, err := u.kernel.Deps.Staging.Open(artifact.Handle)
+	opened, err := u.spool.Open(artifact.Handle)
 	if err != nil {
 		return chunk{handle: artifact.Handle}, fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini chunk could not be read.")
 	}
@@ -320,12 +320,12 @@ func (s surface) unstage(staged chunk) {
 		staged.file.Close()
 	}
 	if staged.handle != "" {
-		s.kernel.Deps.Staging.Remove(staged.handle)
+		_ = s.spool.Remove(staged.handle)
 	}
 }
 
 func (u upload) send(ctx context.Context, staged chunk) (*kernel.PinnedResponse, *fault.Error) {
-	uploadURL, err := u.kernel.Deps.Resources.ReadGeminiUploadURL(ctx, u.session.UUID)
+	uploadURL, err := u.store.ReadGeminiUploadURL(ctx, u.session.UUID)
 	generationURL, generationErr := u.pin.Provider.Connector().URL(wire.Gemini, u.pin.Model, false)
 	if err != nil || generationErr != nil || kernel.ValidateGeminiUploadURL(uploadURL, generationURL, u.kernel.Egress) != nil {
 		return nil, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini upload session URL is unavailable.")
@@ -348,7 +348,7 @@ func (u upload) advance(ctx context.Context, resp *kernel.PinnedResponse, offset
 	resp.Exchange.Complete(kernel.ClassSuccess)
 	metadata, _ := json.Marshal(map[string]int64{"offset": offset})
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
-	err := u.kernel.Deps.Resources.Update(commitCtx, u.session.ID, "active", metadata, nil)
+	err := u.store.Update(commitCtx, u.session.ID, "active", metadata, nil)
 	stop()
 	if err != nil {
 		u.fail()
@@ -383,7 +383,7 @@ func (u upload) bind(ctx context.Context, resp *kernel.PinnedResponse, offset in
 	}
 	resp.Exchange.Complete(kernel.ClassSuccess)
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
-	created, storeErr := u.kernel.Deps.Resources.FinalizeGeminiUpload(commitCtx, u.authority.ID, u.session.UUID, offset, &resources.Resource{
+	created, storeErr := u.store.FinalizeGeminiUpload(commitCtx, u.authority.ID, u.session.UUID, offset, &resources.Resource{
 		Kind: resources.KindGeminiFile, APIKeyID: u.authority.ID, RouteSlug: u.route.Slug,
 		ProviderID: u.pin.Provider.ID, ProviderRevisionID: u.pin.Provider.RevisionID, RouteRevisionID: u.route.RevisionID,
 		TargetID: u.pin.Target.ID, SlotID: u.pin.Slot.ID, CredentialID: u.pin.Slot.CredentialID,

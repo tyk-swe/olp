@@ -146,7 +146,7 @@ func (s surface) retainedAncestry(r *http.Request, x *kernel.Call, authority key
 	ids := map[string]string{}
 	for i, kind := range e.Ancestors {
 		name := "parent" + strconv.Itoa(i)
-		got, err := s.kernel.Deps.Resources.Get(ctx, kind, x.KeyID(), r.PathValue(name))
+		got, err := s.store.Get(ctx, kind, x.KeyID(), r.PathValue(name))
 		if err != nil {
 			return nil, nil, retainedMissing()
 		}
@@ -162,7 +162,7 @@ func (s surface) retainedAncestry(r *http.Request, x *kernel.Call, authority key
 	if !addressesBatchFile(e) {
 		return parent, ids, nil
 	}
-	store, err := s.kernel.Deps.Resources.GetByUUID(ctx, *parent.ParentID, x.KeyID())
+	store, err := s.store.GetByUUID(ctx, *parent.ParentID, x.KeyID())
 	if err != nil || store.Kind != "vector_store" {
 		return nil, nil, retainedMissing()
 	}

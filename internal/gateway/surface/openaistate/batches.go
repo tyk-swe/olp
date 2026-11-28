@@ -73,7 +73,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra row reports whether another page follows; it is never
 	// authorized or projected.
-	rows, err := s.kernel.Deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
+	rows, err := s.store.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.kernel.Refuse(x, w, kernel.ResourceListError(err, "The batch list could not be read."))
 		return
@@ -191,7 +191,7 @@ func (s surface) batchRefresh(ctx context.Context, x *kernel.Call, res *resource
 		}
 	} else {
 		exchange.Complete(kernel.ClassSuccess)
-		if err := s.kernel.Deps.Resources.Update(commitCtx, res.ID, refreshed.state, refreshed.metadata, nil); err != nil {
+		if err := s.store.Update(commitCtx, res.ID, refreshed.state, refreshed.metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}
 		current.State, current.Metadata = refreshed.state, refreshed.metadata
@@ -297,7 +297,7 @@ func (s surface) commitStrictBatchRefresh(ctx, commitCtx context.Context, exchan
 	if err != nil {
 		return kernel.DurableError(err)
 	}
-	if _, _, err = s.kernel.Deps.Resources.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
+	if _, _, err = s.store.UpdateDurableContract(commitCtx, res.Kind, res.APIKeyID, res.ID, state, payload); err != nil {
 		return kernel.DurableError(err)
 	}
 	return nil

@@ -238,9 +238,9 @@ func (s surface) referencedResources(ctx context.Context, x *kernel.Call, source
 			if localErr != nil {
 				return localErr
 			}
-			bound, err = s.kernel.Deps.Resources.Get(ctx, kind, x.KeyID(), local)
+			bound, err = s.store.Get(ctx, kind, x.KeyID(), local)
 		default:
-			bound, err = s.kernel.Deps.Resources.Get(ctx, kind, x.KeyID(), id)
+			bound, err = s.store.Get(ctx, kind, x.KeyID(), id)
 		}
 		if err != nil {
 			return err
@@ -265,7 +265,7 @@ func (s surface) rewriteRetainedRequest(ctx context.Context, x *kernel.Call, a k
 		return oif.Document{}, errors.New("item_reference inputs are not supported")
 	}
 	rewritten, err := retainedapi.Rewrite(source, kernel.RetainedRequestRefsForSource(e, source), func(kind, id string) (string, error) {
-		if s.kernel.Deps.Resources == nil {
+		if s.store == nil {
 			return "", resources.ErrNotFound
 		}
 		var bound *resources.Resource
@@ -304,7 +304,7 @@ func (s surface) rewriteRetainedRequest(ctx context.Context, x *kernel.Call, a k
 					return "", err
 				}
 			}
-			bound, err = s.kernel.Deps.Resources.Get(ctx, kind, x.KeyID(), local)
+			bound, err = s.store.Get(ctx, kind, x.KeyID(), local)
 			if err == nil {
 				_, _, failure := s.kernel.ResolveResource(ctx, x, a, bound, x.OperationName(), kernel.RetainedNewWork)
 				if failure != nil {
@@ -358,7 +358,7 @@ func (s surface) retainedQuery(ctx context.Context, x *kernel.Call, e retainedap
 			if e.Action != "list" {
 				return nil, fault.InvalidRequest("invalid_parameter", "Cursor is only valid on a collection.", &name)
 			}
-			bound, err := s.kernel.Deps.Resources.Get(ctx, e.Kind, x.KeyID(), v)
+			bound, err := s.store.Get(ctx, e.Kind, x.KeyID(), v)
 			if err != nil || resource == nil || bound.ParentID == nil || *bound.ParentID != resource.UUID || bound.RouteRevisionID != resource.RouteRevisionID || !kernel.SamePin(bound, resource) {
 				return nil, fault.InvalidRequest("invalid_resource_reference", "The cursor is unavailable under this parent.", &name)
 			}

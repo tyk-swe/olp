@@ -187,7 +187,7 @@ func (s surface) deleteResponse(w http.ResponseWriter, r *http.Request) {
 			if failure.Status == http.StatusNotFound {
 				commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 				defer stopCommit()
-				_ = s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID)
+				_ = s.store.Tombstone(commitCtx, res.ID)
 				return fault.NotFoundError("not_found", "No stored response with this identifier exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
@@ -200,7 +200,7 @@ func (s surface) deleteResponse(w http.ResponseWriter, r *http.Request) {
 		// even when the client has gone.
 		commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 		defer stopCommit()
-		if err := s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
+		if err := s.store.Tombstone(commitCtx, res.ID); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The response mapping could not be deleted.")
 		}
 		out, err := kernel.RewriteID(result, "id", res.ID)

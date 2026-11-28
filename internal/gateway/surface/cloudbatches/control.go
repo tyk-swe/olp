@@ -75,7 +75,7 @@ func (s surface) control(w http.ResponseWriter, r *http.Request, cancel bool) {
 	refreshed := record.WithJob(body)
 	commit, release := kernel.ResourceCommitContext(ctx)
 	defer release()
-	if err := s.kernel.Deps.Resources.Update(commit, res.ID, string(job.Status), kernel.MustJSON(refreshed), nil); err != nil {
+	if err := s.store.Update(commit, res.ID, string(job.Status), kernel.MustJSON(refreshed), nil); err != nil {
 		s.fail(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The cloud job refresh could not be committed."))
 		return
 	}
@@ -83,7 +83,7 @@ func (s surface) control(w http.ResponseWriter, r *http.Request, cancel bool) {
 }
 
 func (s surface) stored(r *http.Request, authority keyauthority.Authority) (*resources.Resource, upstream.CloudRecord, connectors.BatchAdapter, *fault.Error) {
-	res, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindCloudBatch, authority.ID, r.PathValue("id"))
+	res, err := s.store.Get(r.Context(), resources.KindCloudBatch, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		return nil, upstream.CloudRecord{}, "", fault.NotFoundError("not_found", "No cloud batch job with this ID exists for this key.")
 	}
@@ -175,7 +175,7 @@ func (s surface) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filtered, continuation, listErr := s.kernel.ListedResourcePage(authority.ID+"/"+dialect, "after", limit, after, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.kernel.Deps.Resources.ListCloudBatches(r.Context(), authority.ID, dialect, count, cursor)
+		batch, err := s.store.ListCloudBatches(r.Context(), authority.ID, dialect, count, cursor)
 		if errors.Is(err, resources.ErrNotFound) {
 			return nil, fault.InvalidRequest("invalid_cursor", "after must identify a local cloud batch job.", new("after"))
 		}

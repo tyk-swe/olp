@@ -89,10 +89,10 @@ func newServing(f foundation) (serving, error) {
 	if err != nil {
 		return serving{}, err
 	}
-	gw = f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
+	gw, deps := f.baseGateway(assembly, accounting, overlaps, inference.workflowRuns, inference.workflowTools)
 	built := serving{gateway: gw, prober: f.prober(assembly, accounting), accounting: accounting, overlaps: overlaps, agents: plane, monitor: inference.monitor}
 	if c.Mode.Inference() {
-		gateway.Register(gw, f.public, gateway.WithMedia(surfacemedia.Deps{
+		gateway.Register(gw, f.public, deps, gateway.WithMedia(surfacemedia.Deps{
 			Transport: f.media.transport,
 			Jobs:      f.media.service,
 			Store:     jobs.NewStore(stores.pool),
@@ -108,9 +108,9 @@ func (f foundation) overlapRecorder() *apikeys.OverlapRecorder {
 	return apikeys.NewOverlapRecorder(f.stores.pool, f.log)
 }
 
-func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder, runs kernel.WorkflowRunStore, tools kernel.WorkflowToolRunner) *kernel.Server {
+func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.Delivery, overlaps *apikeys.OverlapRecorder, runs kernel.WorkflowRunStore, tools kernel.WorkflowToolRunner) (*kernel.Server, kernel.Dependencies) {
 	if !f.config.Mode.Management() && !f.config.Mode.Inference() {
-		return nil
+		return nil, kernel.Dependencies{}
 	}
 	deps := assembly.deps
 	if f.config.Mode.Inference() {
@@ -123,7 +123,8 @@ func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.D
 			deps.WorkflowTools = tools
 		}
 	}
-	return kernel.New(f.accounted(deps, accounting), assembly.config)
+	accounted := f.accounted(deps, accounting)
+	return kernel.New(accounted, assembly.config), accounted
 }
 
 func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *kernel.Server {

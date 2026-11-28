@@ -25,7 +25,7 @@ func (s surface) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = resources.KindGeminiFile, upstreamID
-	if existing, err := s.kernel.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity); err == nil {
+	if existing, err := s.store.GetByUpstreamIncludingDeleted(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -46,11 +46,11 @@ func (s surface) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	}
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
-	created, err := s.kernel.Deps.Resources.Put(commitCtx, resource)
+	created, err := s.store.Put(commitCtx, resource)
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.kernel.Deps.Resources.GetByUpstreamIncludingDeleted(commitCtx, identity); readErr == nil {
+	if existing, readErr := s.store.GetByUpstreamIncludingDeleted(commitCtx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err
@@ -63,7 +63,7 @@ func (s surface) batchCall(w http.ResponseWriter, r *http.Request, use kernel.Re
 	}
 	defer s.kernel.Gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "batches/")
-	resource, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
+	resource, err := s.store.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key."))
 		return
@@ -138,7 +138,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, continuation, listErr := s.kernel.ListedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.kernel.Deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor, false)
+		batch, err := s.store.ListKindsPage(r.Context(), []string{resources.KindGeminiBatch}, authority.ID, count, cursor, false)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
 			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini batch owned by this key.", &param)
@@ -183,7 +183,7 @@ func (s surface) relayBatch(w http.ResponseWriter, r *http.Request, use kernel.R
 		response, failure := s.kernel.PinnedDo(ctx, x, p, method, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, resource.ID)
+				_ = s.store.Tombstone(ctx, resource.ID)
 				return fault.NotFoundError("not_found", "No Gemini batch with this name exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
@@ -216,7 +216,7 @@ func (s surface) relayBatch(w http.ResponseWriter, r *http.Request, use kernel.R
 		if metadataErr != nil {
 			return projectionError(kernel.ErrGeminiBatchFidelity)
 		}
-		if err := s.kernel.Deps.Resources.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
+		if err := s.store.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch refresh could not be committed.")
 		}
 
@@ -264,7 +264,7 @@ func (s surface) deleteBatch(w http.ResponseWriter, r *http.Request) {
 			_ = response.Body.Close()
 			response.Exchange.Complete(kernel.ClassSuccess)
 		}
-		if err := s.kernel.Deps.Resources.Tombstone(ctx, resource.ID); err != nil {
+		if err := s.store.Tombstone(ctx, resource.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch mapping could not be deleted.")
 		}
 

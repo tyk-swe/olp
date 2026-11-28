@@ -42,7 +42,7 @@ func (s surface) listResources(w http.ResponseWriter, r *http.Request, kind stri
 		param = "before_id"
 	}
 	fetch := func(anchor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.kernel.Deps.Resources.ListKindsPage(ctx, []string{kind}, authority.ID, count, anchor, backwards)
+		batch, err := s.store.ListKindsPage(ctx, []string{kind}, authority.ID, count, anchor, backwards)
 		if errors.Is(err, resources.ErrNotFound) {
 			return nil, fault.InvalidRequest("invalid_value", "The cursor must identify a resource owned by this key.", &param)
 		}

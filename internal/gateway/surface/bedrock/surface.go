@@ -6,24 +6,28 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-type surface struct{ kernel *kernel.Server }
-
-func ConverseHandler(k *kernel.Server) http.HandlerFunc {
-	return surface{kernel: k}.converse
+type surface struct {
+	kernel  *kernel.Server
+	runtime kernel.Runtime
 }
 
-func ConverseStreamHandler(k *kernel.Server) http.HandlerFunc {
-	return surface{kernel: k}.converseStream
+func ConverseHandler(k *kernel.Server, runtime kernel.Runtime) http.HandlerFunc {
+	return surface{kernel: k, runtime: runtime}.converse
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
-	if k.Deps.Resources == nil {
+func ConverseStreamHandler(k *kernel.Server, runtime kernel.Runtime) http.HandlerFunc {
+	return surface{kernel: k, runtime: runtime}.converseStream
+}
+
+func Register(k *kernel.Server, mux *http.ServeMux, runtime kernel.Runtime, store *resources.Store) {
+	if store == nil {
 		return
 	}
-	s := surface{kernel: k}
+	s := surface{kernel: k, runtime: runtime}
 	mux.HandleFunc("POST /bedrock/model/{model}/converse", s.converse)
 	mux.HandleFunc("POST /bedrock/model/{model}/converse-stream", s.converseStream)
 	mux.HandleFunc("POST /bedrock/model/{model}/invoke", s.invoke)
@@ -61,7 +65,7 @@ func (s surface) invokeStream(w http.ResponseWriter, r *http.Request) {
 // Strict and cache-enabled Converse routes use the shared prepared invocation
 // and Attempt owner. Its native codec retains AWS event-stream framing.
 func (s surface) preparedConverse(w http.ResponseWriter, r *http.Request) bool {
-	release := s.kernel.Deps.Runtime.Release()
+	release := s.runtime.Release()
 	if release == nil {
 		return false
 	}

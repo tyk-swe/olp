@@ -136,7 +136,7 @@ func (t turn) pinGeneration(ctx context.Context, input geminilifecycle.Interacti
 		})
 		return pin, previous{}, e
 	}
-	parent, upstream, err := t.kernel.Deps.Resources.ReadInteractionContract(ctx, t.authority.ID, input.Previous)
+	parent, upstream, err := t.store.ReadInteractionContract(ctx, t.authority.ID, input.Previous)
 	if errors.Is(err, resources.ErrNotFound) || parent != nil && parent.RouteSlug != input.Model {
 		return nil, previous{}, fault.InvalidRequest("invalid_previous_interaction_id", "The previous Interaction is not owned by this key and route.", new("previous_interaction_id"))
 	}

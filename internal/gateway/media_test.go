@@ -162,7 +162,7 @@ func TestMediaRefusalInferenceCapacity(t *testing.T) {
 				Egress:  &egress.Policy{}, Log: slog.New(slog.DiscardHandler), Sink: sink,
 				Getenv: func(string) string { return "" }, Uploads: staging.NewAdmission(2048),
 			}, kernel.Config{MaxInFlight: 1, MaxBodyBytes: 1024, MaxMediaBodyBytes: 1024})
-			surfacemedia.Register(gw, mux, &surfacemedia.Deps{Store: jobs.NewStore(mediaVideoRows{videoID: videoID, keyID: authority.ID})})
+			surfacemedia.Register(gw, mux, &surfacemedia.Deps{Store: jobs.NewStore(mediaVideoRows{videoID: videoID, keyID: authority.ID})}, nil, nil)
 			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", tc.contentType)
 			req.Header.Set("Authorization", "Bearer "+fullKey)
@@ -358,10 +358,10 @@ func runMediaCase(t *testing.T, tc mediaCase) mediaRecord {
 		mediaDeps := surfacemedia.Deps{Transport: transport.New(transport.Deps{
 			Client: h.gateway.Egress.Client(kernel.UpstreamHeaderTimeout),
 			Auth:   connectors.NewAuth(h.gateway.Egress, func(string) string { return "" }),
-			Egress: h.gateway.Egress, Spool: h.gateway.Deps.Staging, MaxResponseBytes: 1 << 20,
+			Egress: h.gateway.Egress, Spool: h.deps.Staging, MaxResponseBytes: 1 << 20,
 			Log: slog.New(slog.DiscardHandler),
 		})}
-		gateway.Register(h.gateway, mux, gateway.WithMedia(mediaDeps))
+		gateway.Register(h.gateway, mux, h.deps, gateway.WithMedia(mediaDeps))
 		done := make(chan struct{}, 1)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() { done <- struct{}{} }()

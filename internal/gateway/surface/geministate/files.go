@@ -94,7 +94,7 @@ func (s surface) fileCall(w http.ResponseWriter, r *http.Request, use kernel.Ret
 	}
 	defer s.kernel.Gate.Release(r.Context())
 	localID := strings.TrimPrefix(r.PathValue("name"), "files/")
-	res, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
+	res, err := s.store.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No Gemini file with this name exists for this key."))
 		return
@@ -138,7 +138,7 @@ func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.store.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No Gemini file with this name exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
@@ -169,7 +169,7 @@ func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
 			fields["batch_manifest"] = manifest
 			metadata = kernel.MustJSON(fields)
 		}
-		if err := s.kernel.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+		if err := s.store.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file metadata could not be refreshed.")
 		}
 		projected, err := projectFile(body, res.ID, s.kernel.GatewayOrigin(r))
@@ -195,14 +195,14 @@ func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.store.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No Gemini file with this name exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
 		_ = resp.Body.Close()
-		if err := s.kernel.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.store.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini file could not be tombstoned.")
 		}
 		s.kernel.WriteStateJSON(w, x, []byte(`{}`), resp.Exchange)
@@ -222,7 +222,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, continuation, listErr := s.kernel.ListedResourcePage(authority.ID, "pageToken", pageSize, pageToken, func(cursor resources.ListCursor, count int) ([]*resources.Resource, *fault.Error) {
-		batch, err := s.kernel.Deps.Resources.ListKindsPage(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor, false)
+		batch, err := s.store.ListKindsPage(r.Context(), []string{resources.KindGeminiFile}, authority.ID, count, cursor, false)
 		if errors.Is(err, resources.ErrNotFound) {
 			param := "pageToken"
 			return nil, fault.InvalidRequest("invalid_value", "pageToken must identify a Gemini file owned by this key.", &param)
@@ -298,13 +298,13 @@ func (s surface) downloadFile(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := resp.StageBody(ctx, s.kernel.Deps.Staging, "gemini-file", contentType, s.kernel.Config.MaxResponseBytes)
+		artifact, err := resp.StageBody(ctx, s.spool, "gemini-file", contentType, s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The Gemini download exceeded the configured response limit.")
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		defer s.kernel.Deps.Staging.Remove(artifact.Handle)
-		opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
+		defer func() { _ = s.spool.Remove(artifact.Handle) }()
+		opened, err := s.spool.Open(artifact.Handle)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged Gemini download could not be read.")
 		}

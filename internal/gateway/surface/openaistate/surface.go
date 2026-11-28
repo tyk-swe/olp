@@ -3,17 +3,25 @@ package openaistate
 import (
 	"net/http"
 
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/platform/staging"
+	"github.com/tyk-swe/olp/internal/resources"
 )
 
-type surface struct{ kernel *kernel.Server }
+type surface struct {
+	kernel  *kernel.Server
+	store   *resources.Store
+	spool   *staging.Spool
+	batches *batches.Store
+}
 
-func Register(k *kernel.Server, mux *http.ServeMux) {
-	if k.Deps.Resources == nil {
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool, batchStore *batches.Store) {
+	if store == nil {
 		return
 	}
-	s := surface{kernel: k}
-	if k.Deps.Staging != nil {
+	s := surface{kernel: k, store: store, spool: spool, batches: batchStore}
+	if spool != nil {
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)
 		mux.HandleFunc("GET /v1/files/{id}", s.getFile)
@@ -24,7 +32,7 @@ func Register(k *kernel.Server, mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
 		mux.HandleFunc("POST /v1/batches/{id}/cancel", s.cancelBatch)
 	}
-	if k.Deps.Resources.Encrypted() {
+	if store.Encrypted() {
 		mux.HandleFunc("GET /v1/continuations/{id}", s.recoverContinuation)
 		mux.HandleFunc("GET /v1/continuation-submissions/{submission}", s.recoverContinuation)
 	}

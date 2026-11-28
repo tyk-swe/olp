@@ -70,7 +70,7 @@ func (s surface) projectRetainedAgent(ctx context.Context, resource *resources.R
 		identity := resource.NativeIdentity()
 		identity.Kind = kind
 		identity.UpstreamID = id
-		bound, findErr := s.kernel.Deps.Resources.GetByUpstreamIncludingDeleted(ctx, identity)
+		bound, findErr := s.store.GetByUpstreamIncludingDeleted(ctx, identity)
 		if findErr != nil {
 			return "", kernel.RetainedBindingStoreError(findErr)
 		}

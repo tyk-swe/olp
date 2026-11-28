@@ -29,9 +29,9 @@ func (s surface) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 	var payload []byte
 	var err error
 	if submission := r.PathValue("submission"); submission != "" {
-		res, payload, err = s.kernel.Deps.Resources.FindSubmission(r.Context(), authority.ID, submission)
+		res, payload, err = s.store.FindSubmission(r.Context(), authority.ID, submission)
 	} else {
-		res, payload, err = s.kernel.Deps.Resources.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
+		res, payload, err = s.store.ReadContract(r.Context(), resources.KindContinuation, authority.ID, r.PathValue("id"))
 	}
 	if err != nil {
 		s.kernel.Refuse(x, w, fault.NotFoundError("continuation_unavailable", "No unexpired continuation with this identity is available to this key."))

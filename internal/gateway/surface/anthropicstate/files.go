@@ -53,7 +53,7 @@ func (s surface) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	form.Disarm()
-	defer s.kernel.Deps.Staging.Remove(file.Handle)
+	defer func() { _ = s.spool.Remove(file.Handle) }()
 	p, err := s.kernel.NativeStatePin(r.Context(), x, route)
 	if err != nil {
 		s.kernel.Refuse(x, w, err)
@@ -97,7 +97,7 @@ func (s surface) uploadFile(w http.ResponseWriter, r *http.Request) {
 	resp.Exchange.Complete(kernel.ClassSuccess)
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
-	res, putErr := s.kernel.Deps.Resources.Put(commitCtx, &resources.Resource{
+	res, putErr := s.store.Put(commitCtx, &resources.Resource{
 		Kind: resources.KindAnthropicFile, APIKeyID: authority.ID, RouteSlug: route.Slug,
 		ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, RouteRevisionID: route.RevisionID,
 		TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID,
@@ -117,7 +117,7 @@ func (s surface) fileCall(w http.ResponseWriter, r *http.Request, use kernel.Ret
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	res, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
+	res, err := s.store.Get(r.Context(), resources.KindAnthropicFile, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No file with this identifier exists for this key."))
 		return
@@ -158,7 +158,7 @@ func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodGet, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.store.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
@@ -174,7 +174,7 @@ func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
 		}
 		metadata, state, expires := fileMetadata(body, p.Model)
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		if err := s.kernel.Deps.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
+		if err := s.store.Update(ctx, res.ID, state, metadata, expires); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file refresh could not be committed.")
 		}
 		res.Metadata = metadata
@@ -198,14 +198,14 @@ func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.store.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
 		}
 		_ = resp.Body.Close()
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		if err := s.kernel.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.store.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The file mapping could not be deleted.")
 		}
 
@@ -231,13 +231,13 @@ func (s surface) fileContent(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		artifact, err := resp.StageBody(ctx, s.kernel.Deps.Staging, "file-content", contentType, s.kernel.Config.MaxResponseBytes)
+		artifact, err := resp.StageBody(ctx, s.spool, "file-content", contentType, s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		defer s.kernel.Deps.Staging.Remove(artifact.Handle)
-		opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
+		defer func() { _ = s.spool.Remove(artifact.Handle) }()
+		opened, err := s.spool.Open(artifact.Handle)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "media_content_unavailable", "The staged provider file could not be read.")
 		}

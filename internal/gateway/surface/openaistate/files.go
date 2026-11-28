@@ -37,7 +37,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	// One extra row reports whether another page follows; it is never
 	// authorized or projected.
-	rows, err := s.kernel.Deps.Resources.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
+	rows, err := s.store.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
 		s.kernel.Refuse(x, w, kernel.ResourceListError(err, "The file list could not be read."))
 		return
@@ -119,7 +119,7 @@ func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
 			if failure.Status == http.StatusNotFound {
 				commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 				defer stopCommit()
-				if err := s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
+				if err := s.store.Tombstone(commitCtx, res.ID); err != nil {
 					return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The missing file state could not be recorded.")
 				}
 				return fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
@@ -133,7 +133,7 @@ func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, kernel.ErrorBodyLimit))
 		commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 		defer stopCommit()
-		if err := s.kernel.Deps.Resources.Tombstone(commitCtx, res.ID); err != nil {
+		if err := s.store.Tombstone(commitCtx, res.ID); err != nil {
 			return fault.ServerError(http.StatusInternalServerError, "internal_error", "The file mapping could not be deleted.")
 		}
 		writeDeleted(resp.Exchange)
@@ -169,7 +169,7 @@ func (s surface) fileContent(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		spool := s.kernel.Deps.Staging
+		spool := s.spool
 		if spool == nil {
 			resp.Exchange.Interrupt(kernel.ClassProtocol, true)
 			return fault.ServerError(http.StatusServiceUnavailable, "media_content_unavailable", "The bounded file spool is unavailable.")
@@ -279,7 +279,7 @@ func (s surface) detachGeminiResultFile(ctx context.Context, res *resources.Reso
 	name := cmp.Or(record.ResponsesFile, res.UpstreamID)
 	commitCtx, stop := kernel.ResourceCommitContext(ctx)
 	defer stop()
-	detached, err := s.kernel.Deps.Resources.DetachGeminiResultView(commitCtx, res, name)
+	detached, err := s.store.DetachGeminiResultView(commitCtx, res, name)
 	if errors.Is(err, resources.ErrNotFound) {
 		return false, fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 	}
@@ -289,7 +289,7 @@ func (s surface) detachGeminiResultFile(ctx context.Context, res *resources.Reso
 	if detached {
 		return true, nil
 	}
-	pending, err := s.kernel.Deps.Batches.GeminiResultPending(ctx, res, name)
+	pending, err := s.batches.GeminiResultPending(ctx, res, name)
 	if err != nil {
 		return false, fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The result file dependencies could not be read.")
 	}

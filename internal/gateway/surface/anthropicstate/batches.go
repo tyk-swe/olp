@@ -131,7 +131,7 @@ func (s surface) bindFiles(ctx context.Context, keyID, routeSlug string, body []
 	}
 	rewrites := map[string]string{}
 	for _, id := range fileIDs {
-		file, err := s.kernel.Deps.Resources.Get(ctx, resources.KindAnthropicFile, keyID, id)
+		file, err := s.store.Get(ctx, resources.KindAnthropicFile, keyID, id)
 		if err != nil || file.RouteSlug != routeSlug {
 			return nil, fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 		}
@@ -152,7 +152,7 @@ func (s surface) selectPinWithFiles(ctx context.Context, x *kernel.Call, authori
 	ids := uniqueStrings(refs)
 	files := make([]*resources.Resource, 0, len(ids))
 	for _, id := range ids {
-		file, err := s.kernel.Deps.Resources.Get(ctx, resources.KindAnthropicFile, authority.ID, id)
+		file, err := s.store.Get(ctx, resources.KindAnthropicFile, authority.ID, id)
 		if err != nil || file.RouteSlug != route.Slug {
 			return nil, nil, fault.NotFoundError("not_found", "No file with this identifier exists for this key.")
 		}
@@ -184,7 +184,7 @@ func (s surface) batchCall(w http.ResponseWriter, r *http.Request, use kernel.Re
 		return
 	}
 	defer s.kernel.Gate.Release(r.Context())
-	res, err := s.kernel.Deps.Resources.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
+	res, err := s.store.Get(r.Context(), resources.KindAnthropicBatch, authority.ID, r.PathValue("id"))
 	if errors.Is(err, resources.ErrNotFound) {
 		s.kernel.Refuse(x, w, fault.NotFoundError("not_found", "No message batch with this identifier exists for this key."))
 		return
@@ -245,7 +245,7 @@ func (s surface) batchRequest(w http.ResponseWriter, r *http.Request, use kernel
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a mismatched batch identity.")
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		if err := s.kernel.Deps.Resources.Update(ctx, res.ID, view.state, view.metadata, nil); err != nil {
+		if err := s.store.Update(ctx, res.ID, view.state, view.metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch refresh could not be committed.")
 		}
 
@@ -274,7 +274,7 @@ func (s surface) deleteBatch(w http.ResponseWriter, r *http.Request) {
 		resp, failure := s.kernel.PinnedDo(ctx, x, p, http.MethodDelete, endpoint, nil, "")
 		if failure != nil {
 			if failure.Status == http.StatusNotFound {
-				_ = s.kernel.Deps.Resources.Tombstone(ctx, res.ID)
+				_ = s.store.Tombstone(ctx, res.ID)
 				return fault.NotFoundError("not_found", "No message batch with this identifier exists for this key.")
 			}
 			return kernel.UpstreamError(failure)
@@ -285,7 +285,7 @@ func (s surface) deleteBatch(w http.ResponseWriter, r *http.Request) {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		if err := s.kernel.Deps.Resources.Tombstone(ctx, res.ID); err != nil {
+		if err := s.store.Tombstone(ctx, res.ID); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The batch mapping could not be deleted.")
 		}
 
@@ -314,13 +314,13 @@ func (s surface) batchResults(w http.ResponseWriter, r *http.Request) {
 		if contentType == "" {
 			contentType = "application/jsonl"
 		}
-		artifact, err := resp.StageBody(ctx, s.kernel.Deps.Staging, "batch-results", contentType, s.kernel.Config.MaxResponseBytes)
+		artifact, err := resp.StageBody(ctx, s.spool, "batch-results", contentType, s.kernel.Config.MaxResponseBytes)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_response_too_large", "The results exceeded the configured response bound.")
 		}
 		resp.Exchange.Complete(kernel.ClassSuccess)
-		defer s.kernel.Deps.Staging.Remove(artifact.Handle)
-		opened, err := s.kernel.Deps.Staging.Open(artifact.Handle)
+		defer func() { _ = s.spool.Remove(artifact.Handle) }()
+		opened, err := s.spool.Open(artifact.Handle)
 		if err != nil {
 			return fault.ServerError(http.StatusBadGateway, "upstream_error", "The staged results could not be read.")
 		}
