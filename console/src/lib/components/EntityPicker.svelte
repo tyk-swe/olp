@@ -8,7 +8,9 @@
     emptyLabel,
     disabled = false,
     required = false,
-    onchange
+    onchange,
+    'aria-invalid': invalid,
+    'aria-describedby': describedBy
   }: {
     id: string;
     source: EntitySource;
@@ -17,6 +19,8 @@
     disabled?: boolean;
     required?: boolean;
     onchange?: (value: string) => void;
+    'aria-invalid'?: 'true';
+    'aria-describedby'?: string;
   } = $props();
 
   // svelte-ignore state_referenced_locally (an entity picker never changes source after mount)
@@ -33,6 +37,8 @@
     bind:value
     {disabled}
     {required}
+    aria-invalid={invalid}
+    aria-describedby={describedBy}
     placeholder="Paste an ID"
     autocomplete="off"
     spellcheck="false"
@@ -44,6 +50,8 @@
     bind:value
     disabled={disabled || options.isPending}
     {required}
+    aria-invalid={invalid}
+    aria-describedby={describedBy}
     aria-busy={options.isPending}
     onchange={(event) => onchange?.(event.currentTarget.value)}
   >

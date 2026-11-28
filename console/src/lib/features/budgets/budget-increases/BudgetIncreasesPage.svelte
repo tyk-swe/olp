@@ -15,7 +15,13 @@
     type BudgetIncrease,
     type IncreaseInput
   } from './api';
-  import { limitsError, limitForm } from '../limitForm';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import {
+    increaseDraft,
+    increaseServerFields,
+    validateIncrease,
+    type IncreaseField
+  } from './increaseDraft';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
   import BudgetIncreaseForm from './BudgetIncreaseForm.svelte';
@@ -44,27 +50,18 @@
   const canOrganize = $derived(
     access.allows('PATCH /api/v1/organizations/{organization_id}')
   );
-  let kind = $state<IncreaseInput['target']['kind']>('api_key');
-  let resourceId = $state('');
+  let draft = $state(increaseDraft());
   const targetPicker = $derived<{ source: EntitySource; label: string } | null>(
-    kind === 'budget_group'
+    draft.kind === 'budget_group'
       ? { source: budgetGroupOptions, label: 'Budget group' }
-      : kind === 'organization'
+      : draft.kind === 'organization'
         ? { source: organizationOptions, label: 'Organization' }
-        : kind === 'project' ||
-            kind === 'project_end_user' ||
-            kind === 'attribution'
+        : draft.kind === 'project' ||
+            draft.kind === 'project_end_user' ||
+            draft.kind === 'attribution'
           ? { source: projectOptions, label: 'Project' }
           : null
   );
-  let route = $state('');
-  let digest = $state('');
-  let label = $state('');
-  let value = $state('');
-  let window = $state<IncreaseInput['window']>('day');
-  let amount = $state('');
-  let reason = $state('');
-  let expires = $state('');
   let creating = $state(false);
   let submitted = $state<IncreaseInput | null>(null);
   const kinds: { value: IncreaseInput['target']['kind']; label: string }[] = [
@@ -76,60 +73,31 @@
     { value: 'project_end_user', label: 'Project and end user' },
     { value: 'attribution', label: 'Project attribution' }
   ];
-  const increases = useMutation();
+  const increases = useMutation<IncreaseField>();
   const revokes = useAction();
   const busy = $derived(increases.busy || revokes.busy);
   const problem = $derived(increases.error || revokes.error);
   usePrincipalLifetime(() => {
     reset();
-    resourceId =
-      route =
-      digest =
-      label =
-      value =
-      amount =
-      reason =
-      expires =
-        '';
-    kind = 'api_key';
-    window = 'day';
+    draft = increaseDraft();
     before = undefined;
   });
   function reset() {
     submitted = null;
     increases.reset();
   }
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (busy || !canCreate) return;
     if (!submitted) {
-      let problem = limitsError({ ...limitForm(), daily_cost_limit: amount });
-      if (!amount.trim() || !reason.trim())
-        problem = 'Supply a positive USD amount and a reason.';
-      if (expires && Number.isNaN(new Date(expires).getTime()))
-        problem = 'Choose a valid expiry.';
-      if (problem) {
-        increases.error = problem;
-        return;
-      }
-      const target: IncreaseInput['target'] = { kind };
-      if (kind !== 'installation') target.id = resourceId.trim();
-      if (kind === 'key_route') target.route = route.trim();
-      if (kind === 'key_end_user' || kind === 'project_end_user')
-        target.end_user_digest = digest.trim();
-      if (kind === 'attribution') {
-        target.label = label.trim();
-        target.value = value.trim();
-      }
-      submitted = {
-        target,
-        window,
-        amount: amount.trim(),
-        reason: reason.trim(),
-        expires_at: expires ? new Date(expires).toISOString() : null
-      };
+      const checked = validateIncrease($state.snapshot(draft));
+      if (!increases.check(checked)) return focusFormError(form);
+      submitted = checked.value;
     }
-    await increases.submit(
+    const accepted = await increases.submit(
       submitted,
       (input, requestId) => createIncrease(input, requestId),
       async (result) => {
@@ -145,9 +113,11 @@
         failure: (cause, stage) =>
           (stage === 'accept'
             ? 'Increase recorded, but refreshing the view failed: '
-            : '') + errorMessage(cause)
+            : '') + errorMessage(cause),
+        serverFields: increaseServerFields
       }
     );
+    if (!accepted) await focusFormError(form);
   }
   async function revoke(item: BudgetIncrease) {
     if (busy) return;
@@ -190,7 +160,7 @@
         class="button button-primary"
         type="button"
         onclick={() => {
-          increases.error = '';
+          increases.dismiss();
           creating = true;
         }}
       >
@@ -207,16 +177,8 @@
   >
     {#if problem}<Callout tone="danger">{problem}</Callout>{/if}
     <BudgetIncreaseForm
-      bind:kind
-      bind:resourceId
-      bind:route
-      bind:digest
-      bind:label
-      bind:value
-      bind:window
-      bind:amount
-      bind:reason
-      bind:expires
+      bind:draft
+      errors={increases.fieldErrors}
       {busy}
       {submitted}
       {canOrganize}

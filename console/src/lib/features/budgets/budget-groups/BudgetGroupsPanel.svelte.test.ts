@@ -2,7 +2,13 @@ import { expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
+import {
+  findButton,
+  findControl,
+  mountWithState,
+  reportedError,
+  setFieldValue
+} from '#test/mount.js';
 import BudgetGroupsPanel from './BudgetGroupsPanel.svelte';
 
 it('keeps an edited budget group when another group is retired', async () => {
@@ -113,16 +119,11 @@ it.each(['create', 'edit'] as const)(
     button(mode === 'create' ? 'New group' : 'Edit').click();
     flushSync();
     if (mode === 'create') {
-      for (const [id, value] of [
-        ['group-name', 'Created'],
-        ['group-daily', '10']
-      ]) {
-        const input = document.getElementById(id) as HTMLInputElement;
-        setFieldValue(input, value);
-      }
+      setFieldValue(findControl(document, 'Group name'), 'Created');
+      setFieldValue(findControl(document, 'Daily cost limit'), '10');
     }
-    const select = document.querySelector<HTMLSelectElement>(
-      mode === 'create' ? '#group-basis' : '[aria-label="Budget basis"]'
+    const select = [...document.querySelectorAll('select')].find((control) =>
+      control.querySelector('option[value="charge"]')
     )!;
     setFieldValue(select, 'charge', 'change');
     button(mode === 'create' ? 'Create group' : 'Save').click();
@@ -133,3 +134,101 @@ it.each(['create', 'edit'] as const)(
     );
   }
 );
+
+it('reports each refused limit at the input that holds it', async () => {
+  const written = vi.fn();
+  const group = {
+    id: 'group',
+    name: 'Existing',
+    etag: 'version',
+    daily_cost_limit: '10',
+    budget: {
+      cost_basis: 'cost',
+      enforcement_active: true,
+      unpriced_attempts: 0,
+      daily: { accrued: '0', limit: '10', reset_at: '2026-01-01T00:00:00Z' },
+      monthly: { accrued: '0', limit: null, reset_at: '2026-02-01T00:00:00Z' }
+    }
+  };
+  serve(
+    (request) => {
+      if (request.method !== 'GET') {
+        written();
+        const field = request.method === 'POST' ? 'name' : 'weekly_cost_limit';
+        return json(
+          {
+            type: 'about:blank',
+            title: 'Unprocessable Content',
+            status: 422,
+            detail: 'The request was refused.',
+            errors: {
+              [field]: [{ code: 'refused', message: `Refused ${field}.` }]
+            }
+          },
+          422
+        );
+      }
+      if (new URL(request.url).pathname === '/api/v1/budget-groups')
+        return json({ items: [group] });
+      return json({ items: [] });
+    },
+    ['read', 'keys', 'configure']
+  );
+  mountWithState(BudgetGroupsPanel, undefined, { attach: true });
+  const button = (label: string) => findButton(document, label)!;
+  const inRow = (label: string) =>
+    document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+  await eventually(() => expect(button('Edit')).toBeDefined());
+
+  button('Edit').click();
+  flushSync();
+  setFieldValue(inRow('Monthly cost limit'), 'ten');
+  button('Save').click();
+  await eventually(() =>
+    expect(reportedError(inRow('Monthly cost limit'))).toContain(
+      'positive decimals'
+    )
+  );
+  expect(written).not.toHaveBeenCalled();
+  setFieldValue(inRow('Monthly cost limit'), '100');
+  button('Save').click();
+  await eventually(() =>
+    expect(reportedError(inRow('Weekly cost limit'))).toBe(
+      'Refused weekly_cost_limit.'
+    )
+  );
+  button('Cancel').click();
+
+  button('New group').click();
+  flushSync();
+  const inDialog = (label: string) => findControl(document, label);
+  setFieldValue(inDialog('Group name'), 'Created');
+  setFieldValue(inDialog('requests per minute'), '  ');
+  button('Create group').click();
+  await eventually(() =>
+    expect(
+      document.querySelector('dialog [role="alert"]')?.textContent
+    ).toContain('Set a limit or reference a project template.')
+  );
+  expect(written).toHaveBeenCalledOnce();
+
+  setFieldValue(inDialog('requests per minute'), '1.5');
+  setFieldValue(inDialog('Limit template'), 'shared');
+  button('Create group').click();
+  await eventually(() =>
+    expect(reportedError(inDialog('requests per minute'))).toContain(
+      'positive whole numbers'
+    )
+  );
+  expect(reportedError(inDialog('Limit template'))).toBe(
+    'Choose a project and a valid template name.'
+  );
+  expect(written).toHaveBeenCalledOnce();
+
+  setFieldValue(inDialog('requests per minute'), '2');
+  setFieldValue(inDialog('Limit template'), '');
+  button('Create group').click();
+  await eventually(() =>
+    expect(reportedError(inDialog('Group name'))).toBe('Refused name.')
+  );
+});

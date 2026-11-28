@@ -1,5 +1,6 @@
 <script lang="ts" generics="Doc extends { etag: string }, Form, Input">
   import { useAction } from '#lib/editing/action.svelte.js';
+  import { formProblem, type Validation } from '#lib/editing/validation.js';
   import { untrack, type Component, type Snippet } from 'svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -67,17 +68,22 @@
     const result = await policy.refetch();
     if (result.data) {
       load(result.data);
-      action.error = '';
+      action.reset();
     }
+  }
+
+  function checkForm(): Validation<Input, never> {
+    const problem = validate(form);
+    return problem ? formProblem(problem) : { ok: true, value: toInput(form) };
   }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (action.busy || !editable) return;
-    action.error = validate(form);
-    if (action.error) return;
+    const checked = checkForm();
+    if (!action.check(checked)) return;
     await action.run(
-      () => save(etag, toInput(form)),
+      () => save(etag, checked.value),
       async (saved) => {
         client.setQueryData(queryKey, saved);
         load(saved);

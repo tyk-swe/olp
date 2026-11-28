@@ -4,17 +4,23 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';
+  import FormField from '#lib/components/FormField.svelte';
   import { useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     approveIncreaseRequest,
     createIncreaseRequest,
     declineIncreaseRequest,
     listIncreaseRequests,
-    type BudgetIncreaseRequest,
-    type IncreaseRequestInput
+    type BudgetIncreaseRequest
   } from './api';
-  import { limitsError, limitForm } from '../limitForm';
+  import {
+    increaseRequestDraft,
+    increaseRequestServerFields,
+    validateIncreaseRequest,
+    type IncreaseRequestField
+  } from './increaseRequestDraft';
   import { budgetIncreaseKeys } from './budgetIncreaseKeys';
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
@@ -37,43 +43,36 @@
     access.allows('POST /api/v1/budget-increase-requests/{request_id}/approve')
   );
   let creating = $state(false);
-  let projectId = $state('');
-  let window = $state<IncreaseRequestInput['window']>('day');
-  let amount = $state('');
-  let reason = $state('');
+  const draft = $state(increaseRequestDraft());
   const refresh = async () => {
     await client.invalidateQueries({
       queryKey: budgetIncreaseKeys.requestsRoot
     });
     await client.invalidateQueries({ queryKey: budgetIncreaseKeys.root });
   };
-  const create = useMutation(refresh);
+  const create = useMutation<IncreaseRequestField>(refresh);
   const decide = useMutation(refresh);
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!canRequest) return;
-    create.error = limitsError({ ...limitForm(), daily_cost_limit: amount });
-    if (!projectId.trim() || !amount.trim() || !reason.trim())
-      create.error =
-        'Choose a project and supply a positive USD amount and a reason.';
-    if (create.error) return;
-    const body: IncreaseRequestInput = {
-      project_id: projectId.trim(),
-      window,
-      amount: amount.trim(),
-      reason: reason.trim()
-    };
-    await create.submit(
-      body,
+    const checked = validateIncreaseRequest($state.snapshot(draft));
+    if (!create.check(checked)) return focusFormError(form);
+    const accepted = await create.submit(
+      checked.value,
       (input, requestId) => createIncreaseRequest(input, requestId),
       async () => {
         creating = false;
-        amount = '';
-        reason = '';
+        draft.amount = '';
+        draft.reason = '';
         notify('Budget increase requested');
         await refresh();
-      }
+      },
+      { serverFields: increaseRequestServerFields }
     );
+    if (!accepted) await focusFormError(form);
   }
   async function approve(item: BudgetIncreaseRequest) {
     if (
@@ -150,48 +149,52 @@
       onClose={() => (creating = false)}
     >
       {#if create.error}<Callout tone="danger">{create.error}</Callout>{/if}
-      <form onsubmit={submit}>
+      <form novalidate onsubmit={submit}>
         <fieldset disabled={create.busy}>
           <div class="fields">
-            <div class="form-field">
-              <label for="increase-request-project">Project</label>
-              <EntityPicker
-                id="increase-request-project"
-                source={projectOptions}
-                bind:value={projectId}
-                emptyLabel="Choose one"
-                required
-              />
-            </div>
-            <div class="form-field">
-              <label for="increase-request-window">Budget window</label><select
-                id="increase-request-window"
-                bind:value={window}
-              >
-                <option value="day">Day</option><option value="week">
-                  Week
-                </option><option value="month">Month</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label for="increase-request-amount">Additional USD</label><input
-                id="increase-request-amount"
-                bind:value={amount}
-                inputmode="decimal"
-                required
-              />
-            </div>
-            <div class="form-field">
-              <label for="increase-request-reason">Reason</label><input
-                id="increase-request-reason"
-                bind:value={reason}
-                required
-                maxlength="256"
-              /><small>
-                The request binds to the current window and cap, so a changed
-                cap or a new window needs a new request.
-              </small>
-            </div>
+            <FormField label="Project" error={create.fieldErrors.project_id}>
+              {#snippet control(attributes)}
+                <EntityPicker
+                  {...attributes}
+                  source={projectOptions}
+                  bind:value={draft.project_id}
+                  emptyLabel="Choose one"
+                  required
+                />
+              {/snippet}
+            </FormField>
+            <FormField label="Budget window" error={create.fieldErrors.window}>
+              {#snippet control(attributes)}
+                <select {...attributes} bind:value={draft.window}>
+                  <option value="day">Day</option><option value="week">
+                    Week
+                  </option><option value="month">Month</option>
+                </select>
+              {/snippet}
+            </FormField>
+            <FormField label="Additional USD" error={create.fieldErrors.amount}>
+              {#snippet control(attributes)}
+                <input
+                  {...attributes}
+                  bind:value={draft.amount}
+                  inputmode="decimal"
+                  required
+                />
+              {/snippet}
+            </FormField>
+            <FormField label="Reason" error={create.fieldErrors.reason}>
+              {#snippet control(attributes)}
+                <input
+                  {...attributes}
+                  bind:value={draft.reason}
+                  required
+                  maxlength="256"
+                /><small>
+                  The request binds to the current window and cap, so a changed
+                  cap or a new window needs a new request.
+                </small>
+              {/snippet}
+            </FormField>
           </div>
         </fieldset>
         <button
