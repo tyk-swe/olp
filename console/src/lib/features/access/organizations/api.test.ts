@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { components } from '#lib/management/schema.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
-import type {
-  Project,
-  ProjectMember
-} from '#lib/features/access/projects/api.js';
+import type { Project, ProjectMember } from '#lib/domain/projects/api.js';
 import {
   createOrganization,
   createOrganizationProject,

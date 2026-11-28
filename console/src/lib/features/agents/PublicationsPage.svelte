@@ -7,7 +7,7 @@
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     useMutationIntent,
@@ -97,10 +97,7 @@
     queryKey: agentKeys.publication(kind),
     queryFn: () => listPublications(kind)
   }));
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    queryFn: ({ signal }) => listProjects(signal)
-  }));
+  const projects = createQuery(projectQueries.all);
   const servers = createQuery(() => ({
     queryKey: agentKeys.servers(),
     queryFn: listServers,

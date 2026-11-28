@@ -13,15 +13,17 @@
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import {
-    listAllProjectMembers,
-    listProjectMemberPage,
     putProjectMember,
     removeProjectMember,
-    type Project,
-    type ProjectMember,
     type ProjectRole
   } from './api';
-  import { projectKeys } from './projectKeys';
+  import {
+    listProjectMemberPage,
+    type Project,
+    type ProjectMember
+  } from '#lib/domain/projects/api.js';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
 
   let { project }: { project: Project } = $props();
 
@@ -32,10 +34,7 @@
     queryFn: ({ signal }) =>
       listProjectMemberPage(project.id, pagination.cursor, signal)
   }));
-  const allMembers = createQuery(() => ({
-    queryKey: projectKeys.allMembers(project.id),
-    queryFn: ({ signal }) => listAllProjectMembers(project.id, signal)
-  }));
+  const allMembers = createQuery(() => projectQueries.allMembers(project.id));
   const users = createQuery(() => ({
     queryKey: userKeys.roster,
     queryFn: ({ signal }) => listUsers(signal)

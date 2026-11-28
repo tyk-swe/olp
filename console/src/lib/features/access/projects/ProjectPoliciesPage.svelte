@@ -21,21 +21,14 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import { errorMessage, isEtagMismatch } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import {
-    deleteProject,
-    getProject,
-    listProjectMemberships,
-    renameProject
-  } from './api';
+  import { deleteProject, getProject, renameProject } from './api';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import ProjectMembers from './ProjectMembers.svelte';
-  import { projectKeys } from './projectKeys';
   import ProjectEndUserPolicyPanel from './ProjectEndUserPolicyPanel.svelte';
 
   const access = useRole();
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal)
-  }));
+  const projects = createQuery(projectQueries.memberships);
   let { projectId }: { projectId: string } = $props();
   const selected = $derived(
     projects.data?.find((project) => project.id === projectId)

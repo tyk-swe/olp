@@ -24,7 +24,7 @@
     type ManagementToken,
     type ManagementTokenSecret
   } from '#lib/features/identity/tokens/api.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { copyText } from '#lib/clipboard.js';
   import { errorMessage } from '#lib/management/http.js';
   import {
@@ -61,8 +61,7 @@
     enabled: isOwner
   }));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    queryFn: ({ signal }) => listProjects(signal),
+    ...projectQueries.all(),
     enabled: isOwner
   }));
   const projectNames = $derived(

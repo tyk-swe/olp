@@ -8,7 +8,7 @@
     listProviders,
     providerKeys
   } from '#lib/features/providers/index.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import {
     listRoutes,
     selectActiveRoutes,
@@ -69,9 +69,8 @@
     queryFn: ({ signal }) => listProviders(signal)
   }));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listProjects(signal)
+    ...projectQueries.all(),
+    enabled: services.gatewayAvailable
   }));
 
   $effect(() => {

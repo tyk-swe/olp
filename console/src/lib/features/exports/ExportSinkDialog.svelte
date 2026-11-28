@@ -2,11 +2,9 @@
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import {
-    ProjectScopeField,
-    projectOptions,
-    type ProjectMembership
-  } from '#lib/features/access/index.js';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
+  import type { ProjectMembership } from '#lib/domain/projects/api.js';
+  import { projectOptions } from '#lib/domain/projects/projectOptions.js';
   import type { ExportSink } from './api';
   import {
     changeSinkDelivery,

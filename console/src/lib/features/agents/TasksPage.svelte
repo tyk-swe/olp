@@ -8,23 +8,14 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listTasks } from './api';
   import { agentKeys } from './agentKeys';
 
   const filters = writable<{ project: string; cursor?: string }>({
     project: ''
   });
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false
-  }));
+  const projects = createQuery(projectQueries.memberships);
   const tasks = createQuery(() => ({
     queryKey: agentKeys.tasks($filters.project, $filters.cursor),
     queryFn: () => listTasks($filters.project, $filters.cursor),

@@ -7,9 +7,6 @@ import {
   getProjectEndUserPolicy,
   getProjectLimitTemplates,
   getProjectRouteGroups,
-  listAllProjectMembers,
-  listProjectMemberships,
-  listProjects,
   putProjectAttributionBudgets,
   putProjectAttributionPolicy,
   putProjectEndUserPolicy,
@@ -17,10 +14,9 @@ import {
   putProjectMember,
   putProjectRouteGroups,
   removeProjectMember,
-  renameProject,
-  type Project,
-  type ProjectMember
+  renameProject
 } from './api';
+import type { Project, ProjectMember } from '#lib/domain/projects/api.js';
 
 const project: Project = {
   id: 'project-id',
@@ -111,50 +107,6 @@ const policies = [
 ];
 
 describe('project API', () => {
-  it.each([
-    {
-      path: '/api/v1/projects',
-      first: project,
-      second: { ...project, id: 'other-project' },
-      load: () => listProjects()
-    },
-    {
-      path: `${projectPath}/members`,
-      first: member,
-      second: { ...member, user_id: 'other-member' },
-      load: () => listAllProjectMembers(project.id)
-    }
-  ])('loads every page of $path', async ({ path, first, second, load }) => {
-    const handler = vi.fn((request: Request) => {
-      route(request, 'GET', path);
-      const query = new URL(request.url).searchParams;
-      expect(query.get('limit')).toBe('50');
-      return query.has('cursor')
-        ? json({ items: [second] })
-        : json({ items: [first], next_cursor: 'next-page' });
-    });
-    serve(handler, ['read']);
-
-    await expect(load()).resolves.toEqual([first, second]);
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(
-      new URL(handler.mock.calls[1][0].url).searchParams.get('cursor')
-    ).toBe('next-page');
-  });
-
-  it('loads the current principal’s project memberships', async () => {
-    const membership = { id: project.id, name: project.name, role: 'manager' };
-    serve(
-      (request) => {
-        route(request, 'GET', '/api/v1/project-memberships');
-        return json({ items: [membership] });
-      },
-      ['read']
-    );
-
-    await expect(listProjectMemberships()).resolves.toEqual([membership]);
-  });
-
   it('creates projects with the submitted name and idempotency key', async () => {
     serve(
       async (request) => {

@@ -1,9 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import {
@@ -29,8 +26,7 @@
   );
   const readable = $derived(access.allows('GET /api/v1/code/accounts'));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal),
+    ...projectQueries.memberships(),
     enabled: readable
   }));
   let projectId = $state('');

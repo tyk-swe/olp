@@ -37,22 +37,23 @@ Go handlers and run `make api`. Never edit `src/lib/management/schema.d.ts` or
 ## API wiring
 
 `apiClient` lives in `#lib/session/client.ts`, which gives the management
-transport its session authentication, and is imported only by feature API
-modules alongside the session and branding API modules and tests. A slice with
-one API module uses `api.ts`, while larger slices split their API modules by
-domain and register those modules in `eslint.config.mjs`. API modules hold the
-API-call functions and the schema-derived types they return, while pure helpers
-stay in the slice's domain modules.
+transport its session authentication, and is imported only by API modules and
+tests. Every file named `api.ts` under `src/lib` is an API module, and a new
+one takes that name. The branding module in `shell/` and the modules that some
+slices split by resource have other names, so `eslint.config.mjs` lists them
+one by one. API modules hold the API-call functions and the schema-derived types
+they return, while pure helpers stay in other modules of the same folder.
 
 Every call is resolved with `unwrap(fetched)`, `unwrapPage(fetched)` or
 `ensureOk(fetched)` from `#lib/management/http.js`, and every query key comes
-from the slice's `*Keys.ts` module. The browser reaches the inference gateway
-only through `gatewayFetch` in `#lib/management/gateway.ts`, which omits the
-session cookie and refuses redirects. Writes build their `Idempotency-Key` and
-`If-Match` headers with `ifMatch`, `mutationHeaders` or `createHeaders` from
-`#lib/management/http.js`. ESLint enforces the `apiClient`, `fetch` and header
-restrictions, and the `apiClient` rule lives in `eslint/feature-boundary.mjs`
-so it holds for any spelling of the path.
+from a `*Keys.ts` module in the slice or in the [domain layer](#domain-layer).
+The browser reaches the inference gateway only through `gatewayFetch` in
+`#lib/management/gateway.ts`, which omits the session cookie and refuses
+redirects. Writes build their `Idempotency-Key` and `If-Match` headers with
+`ifMatch`, `mutationHeaders` or `createHeaders` from `#lib/management/http.js`.
+ESLint enforces the `apiClient`, `fetch` and header restrictions, and the
+`apiClient` rule lives in `eslint/feature-boundary.mjs` so it holds for any
+spelling of the path.
 
 ## Feature ownership
 
@@ -97,9 +98,10 @@ New code goes in the feature that owns the resource it reads or writes. A new
 resource in an existing family gets its own subfolder in that feature, and a
 new feature folder is for a resource family that no feature owns yet. A
 component with one consumer lives next to that consumer, even when its name
-suggests another feature. Code that two features need stays in the feature
-that owns its resource and is exported from that feature's `index.ts`. A pure
-helper that belongs to no resource, such as `shortDigest` in
+suggests another feature. A read or a picker that two or more features need goes
+into the [domain layer](#domain-layer). Other code that two features need stays
+in the feature that owns its resource and is exported from that feature's
+`index.ts`. A pure helper that belongs to no resource, such as `shortDigest` in
 `src/lib/format.ts`, goes into a shared layer. The shell reads branding itself
 because a shared layer cannot import a feature, which is why `settings` owns
 only the branding write. An `index.ts` lists only what other features import,
@@ -113,7 +115,7 @@ The first five and the feature order resolve alias and relative imports through
 inline `import('...')` types, in both `.ts` and `.svelte` files.
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
-  `listing/`, `components/` and `shell/`) never import from
+  `listing/`, `components/`, `domain/` and `shell/`) never import from
   `src/lib/features/`. "Feature ownership" above says where code that two
   features need goes.
 - A shared layer imports only itself and the layers below it. See "Shared
@@ -194,13 +196,41 @@ itself and the layers listed before it.
    below.
 6. `components/` is the generic UI that knows nothing about the application
    frame. It imports `listing/` and below.
-7. `shell/` is the application frame, which is the sidebar, navigation and
-   section layout. It imports `components/` and below.
+7. `domain/` holds the reads and pickers that features share, one folder per
+   entity. See "Domain layer" below. It imports `components/` and below.
+8. `shell/` is the application frame, which is the sidebar, navigation and
+   section layout. It imports `domain/` and below.
 
-Features and routes sit above all seven and import any of them. The order is
+Features and routes sit above all eight and import any of them. The order is
 the `sharedLayers` list in `eslint.config.mjs`. A new folder under `src/lib`
 ranks above `shell/` until it is added to that list, so no listed layer can
 import it.
+
+## Domain layer
+
+`src/lib/domain/<entity>/` holds what two or more features need to read one
+kind of resource. `domain/projects/` covers projects, project members and the
+signed-in user's project memberships, and it is the example to copy.
+
+| File          | Holds                                                    |
+| ------------- | -------------------------------------------------------- |
+| `api.ts`      | The read calls and the schema-derived types they return  |
+| `*Keys.ts`    | The query keys, including the root a feature nests under |
+| `queries.ts`  | One `queryOptions` factory for each shared query         |
+| Other modules | Pickers and the option sources that `EntityPicker` takes |
+
+Writes stay in the feature that owns the resource, and so does a read that only
+that feature runs. A feature imports domain files directly, so a domain folder
+has no `index.ts`.
+
+A factory decides the key, the call and the cache policy together, so two
+screens cannot disagree about how fresh the same data is. Pass it to
+`createQuery`, and spread it only to add what belongs to one screen, such as
+`enabled` or `select`. Never override `staleTime`, `gcTime` or `retry` at a call
+site.
+
+`projectQueries.memberships` is never served from cache, because memberships
+decide what the signed-in user is offered.
 
 ## Writes
 

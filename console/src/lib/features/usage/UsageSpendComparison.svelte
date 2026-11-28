@@ -1,9 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { formatBudget, formatCost } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -57,10 +54,7 @@
         !['start', 'end', 'project_id'].includes(key) && Boolean(value)
     )
   );
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal)
-  }));
+  const projects = createQuery(projectQueries.memberships);
   const comparison = createQuery(() => {
     const selected = applied;
     return {

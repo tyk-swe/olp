@@ -4,7 +4,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import type { ProjectMembership } from '#lib/features/access/index.js';
+  import type { ProjectMembership } from '#lib/domain/projects/api.js';
   import { observabilityKeys } from './observabilityKeys';
   import {
     useMutationIntent,

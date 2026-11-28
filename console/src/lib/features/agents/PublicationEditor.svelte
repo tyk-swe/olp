@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Project } from '#lib/features/access/index.js';
+  import type { Project } from '#lib/domain/projects/api.js';
   import PublicationPromptFields from './PublicationPromptFields.svelte';
   import PublicationTools from './PublicationTools.svelte';
   import PublicationTrustFields from './PublicationTrustFields.svelte';

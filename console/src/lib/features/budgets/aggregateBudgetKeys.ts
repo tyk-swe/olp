@@ -1,4 +1,4 @@
-import { projectKeys } from '#lib/features/access/index.js';
+import { projectKeys } from '#lib/domain/projects/projectKeys.js';
 
 const root = [...projectKeys.root, 'aggregate-budget'] as const;
 

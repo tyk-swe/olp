@@ -9,7 +9,7 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import {
     listTemplates,
     getTemplate,
@@ -26,10 +26,7 @@
     queryKey: routeKeys.templates(),
     queryFn: listTemplates
   }));
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    queryFn: ({ signal }) => listProjects(signal)
-  }));
+  const projects = createQuery(projectQueries.all);
   let selected = $state('');
   let editorVersion = $state(0);
   let editor = $state<ReturnType<typeof TemplateEditor>>();

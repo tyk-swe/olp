@@ -5,7 +5,8 @@ the gateway. Production Go code lives under `internal/`, public packages live
 under capability-named top-level folders such as `plugin/`, `management/`,
 `inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
 named for the module that owns the behavior rather than for a layer. The console
-mirrors the same feature boundaries under `console/src/lib/features/`.
+mirrors the same feature boundaries under `console/src/lib/features/`, and the
+reads that several console features share live under `console/src/lib/domain/`.
 PostgreSQL migrations live under `internal/platform/database/migrations/`.
 
 | Area | Backend and console owner |
@@ -46,7 +47,9 @@ PostgreSQL migrations live under `internal/platform/database/migrations/`.
 Start from the owner in the table at the top of this guide. Feature behavior
 lives in the feature package with its SQL, transactions, validation and audit
 provenance, and the console screen for it lives in the matching feature under
-`console/src/lib/features/`. A new gateway surface is a package under
+`console/src/lib/features/`. A console read or picker that two or more features
+need goes in the [domain layer](../../console/README.md#domain-layer). A new
+gateway surface is a package under
 `internal/gateway/surface/`, work every surface shares belongs in the kernel,
 and a gateway handler that can be built from its own collaborators belongs in
 its own package under `internal/gateway/`. Each declares its allowed imports in

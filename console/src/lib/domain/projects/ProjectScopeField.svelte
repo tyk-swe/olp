@@ -1,8 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listProjectMemberships } from '#lib/features/access/projects/api.js';
-  import { projectKeys } from '#lib/features/access/projects/projectKeys.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
+  import { projectQueries } from './queries.js';
 
   let {
     value = $bindable(''),
@@ -24,10 +23,7 @@
   const access = useRole();
   const globalScope = $derived(access.user?.access_scope !== 'assigned');
   const offerUnassigned = $derived(unassigned ?? globalScope);
-  const memberships = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal)
-  }));
+  const memberships = createQuery(projectQueries.memberships);
   const writable = $derived(
     (memberships.data ?? []).filter(
       (membership) => globalScope || membership.role === 'manager'

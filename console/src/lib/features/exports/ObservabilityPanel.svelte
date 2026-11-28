@@ -2,10 +2,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { holds } from '#lib/session/authorization.js';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import ExportSinksPanel from './ExportSinksPanel.svelte';
   import CapturePoliciesPanel from './CapturePoliciesPanel.svelte';
   import './observability.css';
@@ -18,10 +15,7 @@
     globalScope && holds(access.user, 'settings')
   );
   const canManageProjects = $derived(access.can('api_keys.manage'));
-  const memberships = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal)
-  }));
+  const memberships = createQuery(projectQueries.memberships);
   const writableProjects = $derived(
     (memberships.data ?? [])
       .filter((m) => m.role === 'manager')

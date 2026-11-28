@@ -5,7 +5,7 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import { getPublication, putPublication } from './api';
-  import { projectKeys } from './projectKeys';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   let { projectId }: { projectId: string } = $props();
   const access = useRole();
   const client = useQueryClient();

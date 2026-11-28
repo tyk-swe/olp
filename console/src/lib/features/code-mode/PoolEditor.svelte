@@ -2,12 +2,8 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import {
-    listApiKeys,
-    apiKeyKeys,
-    listAllProjectMembers,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     saveCodePool,
@@ -51,8 +47,7 @@
     enabled: access.can('api_keys.read')
   }));
   const members = createQuery(() => ({
-    queryKey: projectKeys.allMembers(projectId),
-    queryFn: ({ signal }) => listAllProjectMembers(projectId, signal),
+    ...projectQueries.allMembers(projectId),
     enabled: access.allows('GET /api/v1/projects/{project_id}/members')
   }));
   const projectKeysList = $derived(

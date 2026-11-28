@@ -3,7 +3,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { projectKeys } from '#lib/features/access/index.js';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import {
     getBudget,
     putBudget,

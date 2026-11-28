@@ -1,4 +1,4 @@
-import { projectKeys } from '../projects/projectKeys';
+import { projectKeys } from '#lib/domain/projects/projectKeys.js';
 
 const root = [...projectKeys.root, 'organizations'] as const;
 

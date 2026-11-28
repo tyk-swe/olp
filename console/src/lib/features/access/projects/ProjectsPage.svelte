@@ -13,16 +13,14 @@
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
-  import { createProject, listProjectMemberships } from './api';
-  import { projectKeys } from './projectKeys';
+  import { createProject } from './api';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
 
   const access = useRole();
   const queryClient = useQueryClient();
   const creation = useMutation();
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal)
-  }));
+  const projects = createQuery(projectQueries.memberships);
   const canCreate = $derived(access.allows('POST /api/v1/projects'));
 
   let creating = $state(false);
