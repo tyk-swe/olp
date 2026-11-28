@@ -3,9 +3,42 @@ package vendor
 import (
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestModelArmorTemplateConfiguration(t *testing.T) {
+	const endpoint = "https://modelarmor.example"
+	const regionalTemplate = "projects/guardrail-project/locations/us-central1/templates/prompt-filter"
+	overlongSegment := strings.Repeat("a", 64)
+
+	// Template ID syntax from https://docs.cloud.google.com/model-armor/manage-templates#create-ma-template, checked 2026-11-28.
+	for _, tc := range []struct {
+		name     string
+		template string
+		valid    bool
+	}{
+		{"regional", regionalTemplate, true},
+		{"numeric project and multi-region", "projects/123456789012/locations/us/templates/_Prompt_Filter-1", true},
+		{"template ID at limit", "projects/guardrail-project/locations/us/templates/" + strings.Repeat("a", 63), true},
+		{"incomplete resource", "projects/guardrail-project/locations/us", false},
+		{"wrong collection", "projects/guardrail-project/locations/us/policies/prompt-filter", false},
+		{"empty location", "projects/guardrail-project/locations//templates/prompt-filter", false},
+		{"extra segment", regionalTemplate + "/settings", false},
+		{"space in template ID", "projects/guardrail-project/locations/us/templates/prompt filter", false},
+		{"overlong project", "projects/" + overlongSegment + "/locations/us/templates/prompt-filter", false},
+		{"overlong location", "projects/guardrail-project/locations/" + overlongSegment + "/templates/prompt-filter", false},
+		{"overlong template ID", "projects/guardrail-project/locations/us/templates/" + overlongSegment, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse("model_armor", configuration(endpoint, `"template":`+strconv.Quote(tc.template)))
+			if (err == nil) != tc.valid {
+				t.Fatalf("Parse template %q returned %v, want valid=%t", tc.template, err, tc.valid)
+			}
+		})
+	}
+}
 
 func TestCloudContracts(t *testing.T) {
 	for _, tc := range []struct {
