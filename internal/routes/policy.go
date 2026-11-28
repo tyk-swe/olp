@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/release"
 )
 
@@ -189,7 +190,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (httpkit.Reply, error
 		case "route-draft":
 			_, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET etag=$2,state='draft',updated_at=now() WHERE id=$1", id, etag)
 		case "api-key":
-			_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET etag=$2 WHERE id=$1", id, etag)
+			err = apikeys.SetETag(r.Context(), tx, id, etag)
 		}
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err

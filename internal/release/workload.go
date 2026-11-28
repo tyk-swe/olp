@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/apikeys"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -213,12 +213,7 @@ func (m *Manager) registerWorkload(ctx context.Context, state *authorityState, i
 	if e = tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); e != nil || current != state.id {
 		return keyauthority.Authority{}, ErrStaleAuthority
 	}
-	id := uuid.NewSHA1(uuid.MustParse("f6f67f12-d053-5d5a-8073-0b0b95eb61ce"), []byte(digest)).String()
-	lookup := "wi_" + digest[:32]
-	policy, _ := json.Marshal(keyauthority.WorkloadPolicy(mapping))
-	_, e = tx.Exec(ctx, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id,workload_issuer_id,workload_digest,workload_mapping)
- VALUES($1,$2,$3,$4,$5,$6,$1,$7,$8,$9,$10) ON CONFLICT(workload_digest) WHERE workload_digest IS NOT NULL DO NOTHING`, id, lookup, make([]byte, 32), "Workload "+digest[:12], issuer.Creator, policy, mapping.ProjectID, issuer.ID, digest, mapping.Name)
-	if e != nil {
+	if e = apikeys.EnrollWorkloadKey(ctx, tx, apikeys.WorkloadSubject{IssuerID: issuer.ID, CreatedBy: issuer.Creator, Digest: digest, Mapping: mapping}); e != nil {
 		return keyauthority.Authority{}, ErrStaleAuthority
 	}
 	var a keyauthority.Authority
