@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
-  import type { User } from './api';
+  import type { User } from '#lib/domain/users/api.js';
   import { ROLE_DETAILS, SCOPE_DETAILS } from './roles';
 
   let {

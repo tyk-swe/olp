@@ -1,4 +1,4 @@
-import type { User } from './api';
+import type { User } from '#lib/domain/users/api.js';
 
 export const ROLE_DETAILS: Record<
   User['role'],

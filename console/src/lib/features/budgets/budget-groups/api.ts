@@ -3,36 +3,16 @@ import { apiClient } from '#lib/session/client.js';
 import {
   ensureOk,
   unwrap,
-  unwrapPage,
   createHeaders,
   ifMatch,
   mutationHeaders
 } from '#lib/management/http.js';
-import { type CursorPage } from '#lib/management/http.js';
-import { collectCursorPages } from '#lib/management/pagination.js';
+import type { BudgetGroup } from '#lib/domain/budget-groups/api.js';
 
 type Schemas = components['schemas'];
 
-export type BudgetGroup = Schemas['BudgetGroupDetailResponse'];
 export type CreateBudgetGroupInput = Schemas['CreateBudgetGroupRequest'];
 export type UpdateBudgetGroupInput = Schemas['UpdateBudgetGroupRequest'];
-
-export async function listBudgetGroups(
-  signal?: AbortSignal
-): Promise<BudgetGroup[]> {
-  return collectCursorPages((cursor) => listBudgetGroupPage(cursor, signal));
-}
-
-export async function listBudgetGroupPage(
-  cursor?: string,
-  signal?: AbortSignal
-): Promise<CursorPage<BudgetGroup>> {
-  const response = await apiClient.GET('/api/v1/budget-groups', {
-    params: { query: { limit: 50, cursor } },
-    signal
-  });
-  return unwrapPage(response);
-}
 
 export async function createBudgetGroup(
   input: CreateBudgetGroupInput,

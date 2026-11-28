@@ -2,7 +2,7 @@ import { overviewKeys } from '#lib/features/overview/index.js';
 import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import { networkCredentialPath } from './configurationDraft.svelte';
 import { refreshProviderReceipt } from './providerChanges';
-import { providerKeys } from '#lib/features/providers/providerKeys.js';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
@@ -14,24 +14,24 @@ import {
 } from '#lib/management/http.js';
 import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
 import {
-  getProvider,
   probeProvider,
-  type Provider,
-  type ProviderProbe,
-  type ProviderVendor
+  type ProviderProbe
 } from '#lib/features/providers/providers.js';
+import {
+  getProvider,
+  type Provider,
+  type ProviderVendor
+} from '#lib/domain/providers/api.js';
 import {
   certifyProviderModel,
   declareProviderModels,
   discoverProviderModels,
   getProviderCapabilityOptions,
-  listProviderKinds,
   listProviderModelPage,
   setProviderModel,
   type CapabilityDeclaration,
   type CapabilityCertification
 } from '#lib/features/providers/models.js';
-import { listProviderCredentials } from '#lib/features/providers/credentials.js';
 import type { ProviderProfile } from '#lib/features/providers/providerProfiles.js';
 import type { GrantEnrollment } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
@@ -61,6 +61,7 @@ import {
   type ActivationProgress,
   type ConnectionProgress
 } from './providerWizardConnection';
+import { providerQueries } from '#lib/domain/providers/queries.js';
 
 export class ProviderWizardState {
   private connectionProgress?: ConnectionProgress;
@@ -372,8 +373,7 @@ export class ProviderWizardState {
   private holdsLiveGrant = async (provider: Provider) => {
     if (!provider.draft_credential_id) return false;
     const credentials = await this.queryClient.fetchQuery({
-      queryKey: providerKeys.credentials(provider.id),
-      queryFn: ({ signal }) => listProviderCredentials(provider.id, signal),
+      ...providerQueries.credentials(provider.id),
       staleTime: 0
     });
     return isLiveGrant(
@@ -623,10 +623,7 @@ export class ProviderWizardState {
   }
 
   constructor() {
-    this.providerKinds = createQuery(() => ({
-      queryKey: providerKeys.kinds(),
-      queryFn: ({ signal }) => listProviderKinds(signal)
-    }));
+    this.providerKinds = createQuery(providerQueries.kinds);
     this.wizardModels = createQuery(() => ({
       queryKey: providerKeys.models(
         this.providerId,
@@ -641,8 +638,7 @@ export class ProviderWizardState {
       enabled: Boolean(this.providerId)
     }));
     this.draftCredentials = createQuery(() => ({
-      queryKey: providerKeys.credentials(this.providerId),
-      queryFn: ({ signal }) => listProviderCredentials(this.providerId, signal),
+      ...providerQueries.credentials(this.providerId),
       enabled:
         this.grantRequired && Boolean(this.wizardProvider?.draft_credential_id)
     }));

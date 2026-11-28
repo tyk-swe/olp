@@ -3,8 +3,10 @@
   import ProviderCommitmentEditor from './ProviderCommitmentEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import type { Provider } from '#lib/features/providers/providers.js';
-  import type { ProviderKindCapability } from '#lib/features/providers/models.js';
+  import type {
+    Provider,
+    ProviderKindCapability
+  } from '#lib/domain/providers/api.js';
   import ProviderActivationControls from '#lib/features/providers/ProviderActivationControls.svelte';
   import {
     providerStatus,

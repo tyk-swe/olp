@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatDate } from '#lib/format.js';
-  import type { ApiKey } from './api.js';
+  import type { ApiKey } from '#lib/domain/api-keys/api.js';
 
   let { overlaps }: { overlaps: NonNullable<ApiKey['active_overlaps']> } =
     $props();

@@ -1,12 +1,20 @@
 import { expect, it, onTestFinished, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import {
+  flushSync,
+  getAllContexts,
+  mount,
+  unmount,
+  type Component
+} from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import { formatBudget, formatDate } from '#lib/format.js';
 import { eventually } from '#test/eventually.js';
-import { mountWithState } from '#test/mount.js';
+import { clickButton, mountState, mountWithState } from '#test/mount.js';
+import CostCalculator from './CostCalculator.svelte';
 import ReconciliationPanel from './ReconciliationPanel.svelte';
 import type { ReconciliationReport } from './reconciliation.js';
 import RoutingReportsPage from './RoutingReportsPage.svelte';
+import UnpricedBreakdown from './UnpricedBreakdown.svelte';
 import UsageDetails from './UsageDetails.svelte';
 
 it('shows effective key allowances and the state and reset of a weekly cap', () => {
@@ -192,5 +200,75 @@ it('shows the invoice currencies when a mixed-currency day has no total', async 
   await eventually(() => {
     const invoice = target.querySelector('tbody td:nth-child(3)');
     expect(invoice?.textContent).toBe('Multiple currencies (EUR, USD)');
+  });
+});
+
+it('names providers on reconciliation and unpriced attempts from the list the calculator loaded', async () => {
+  const listing = vi
+    .fn<() => Response | Promise<Response>>(() => new Promise(() => {}))
+    .mockReturnValueOnce(
+      json({ items: [{ id: 'connection', name: 'Primary connection' }] })
+    );
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === '/api/v1/providers') return listing();
+      if (path === '/api/v1/auth/capabilities')
+        return json({ local_login_enabled: true, oidc_login_enabled: false });
+      if (path === '/api/v1/usage/reconciliation')
+        return json({
+          currency: 'USD',
+          totals: [],
+          items: [
+            {
+              provider_id: 'connection',
+              day: '2026-10-10',
+              attributed_cost: '42',
+              provisional: false
+            }
+          ]
+        });
+      if (path === '/api/v1/usage/unpriced-breakdown')
+        return json({
+          items: [
+            {
+              provider_id: 'connection',
+              model: 'model',
+              operation: 'generation',
+              cause: 'no_applicable_price',
+              attempt_count: 1
+            }
+          ]
+        });
+      return json({ items: [] });
+    },
+    ['read', 'usage']
+  );
+  const { value: open } = mountState(({ target }) => {
+    const context = getAllContexts();
+    return <Props extends Record<string, unknown>>(
+      component: Component<Props>,
+      props: Props
+    ) => {
+      const screen = target.appendChild(document.createElement('div'));
+      const mounted = mount(component, { target: screen, context, props });
+      onTestFinished(() => unmount(mounted));
+      return screen;
+    };
+  });
+  const calculator = open(CostCalculator, {});
+  await eventually(() => clickButton(calculator, 'Usage'));
+  await eventually(() =>
+    expect(calculator.textContent).toContain('Primary connection')
+  );
+  const range = {
+    start: '2026-10-10T00:00:00Z',
+    end: '2026-10-11T00:00:00Z'
+  };
+  const reconciliation = open(ReconciliationPanel, range);
+  const unpriced = open(UnpricedBreakdown, { filters: range });
+  await eventually(() => {
+    expect(reconciliation.textContent).toContain('Primary connection');
+    expect(unpriced.textContent).toContain('Primary connection');
   });
 });

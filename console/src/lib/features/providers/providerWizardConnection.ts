@@ -4,13 +4,13 @@ import type { MutationIntent } from '#lib/editing/mutationIntent.js';
 import {
   activateProvider,
   createProvider,
-  updateProvider,
-  type Provider
+  updateProvider
 } from '#lib/features/providers/providers.js';
-import {
-  rotateProviderCredential,
-  type ProviderCredential
-} from '#lib/features/providers/credentials.js';
+import type {
+  Provider,
+  ProviderCredential
+} from '#lib/domain/providers/api.js';
+import { rotateProviderCredential } from '#lib/features/providers/credentials.js';
 
 export type ConnectionInput = Parameters<typeof createProvider>[0];
 

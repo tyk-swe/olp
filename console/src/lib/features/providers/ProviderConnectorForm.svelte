@@ -9,10 +9,9 @@
   import NavIcon from '#lib/components/NavIcon.svelte';
   import { stateLabel } from '#lib/format.js';
   import type { FieldIssue } from '#lib/management/http.js';
-  import { listProviderVendors } from '#lib/features/providers/providers.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import type { ProviderKindCapability } from '#lib/features/providers/models.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
+  import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
   import {
     probeModelPrompt,
     requiresCredential,
@@ -21,6 +20,7 @@
     selectProviderPreset,
     type ProviderDraft
   } from '#lib/features/providers/providerEditor.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let {
     draft = $bindable(),
@@ -46,10 +46,7 @@
     onSubmit: (event: SubmitEvent) => void | Promise<void>;
   } = $props();
 
-  const vendors = createQuery(() => ({
-    queryKey: providerKeys.vendors(),
-    queryFn: ({ signal }) => listProviderVendors(signal)
-  }));
+  const vendors = createQuery(providerQueries.vendors);
   const vendorId = $derived(draft.presetId || draft.options?.vendor_id || '');
   const selectedVendor = $derived(
     vendors.data?.find((vendor) => vendor.id === vendorId)

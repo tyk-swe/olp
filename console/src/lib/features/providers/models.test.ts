@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
-import type { Provider } from './providers';
+import { type Provider, listProviderKinds } from '#lib/domain/providers/api.js';
 import {
   certifyProviderModel,
   compareProviderListing,
   declareProviderModels,
   discoverProviderModels,
   getProviderCapabilityOptions,
-  listProviderKinds,
   listProviderModelInventory,
   listProviderModelInventoryPage,
   listProviderModelPage,

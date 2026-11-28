@@ -11,8 +11,8 @@
     errorMessage,
     serializeIfMatch
   } from '#lib/management/http.js';
-  import { providerKeys } from './providerKeys';
-  import type { Provider } from './providers';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import {
     listProviderModelPage,
     getProviderCapabilityOptions

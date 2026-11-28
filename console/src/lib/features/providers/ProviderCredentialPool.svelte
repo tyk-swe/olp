@@ -10,18 +10,20 @@
   import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import type { Provider } from './providers';
+  import {
+    type Provider,
+    listCredentialSlots,
+    type CredentialSlot as Slot
+  } from '#lib/domain/providers/api.js';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {
     deleteCredentialSlot,
-    listCredentialSlots,
     putCredentialSlot,
-    validateCredentialSlot,
-    type CredentialSlot as Slot
+    validateCredentialSlot
   } from './credentials';
   import { GrantEnrollmentState } from './grantEnrollment.svelte';
   import { parseManualModelNames } from './providerEditor';
-  import { providerKeys } from './providerKeys';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   const saveMutation = useMutation();
   const validateAction = useAction();

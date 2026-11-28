@@ -1,5 +1,6 @@
 import { errorMessage } from '#lib/management/http.js';
-import { updateUser, type User, type UserPatch } from './api';
+import { updateUser, type UserPatch } from './api';
+import { type User } from '#lib/domain/users/api.js';
 
 /** Each member retains its observed ETag and the ordinary API's safety checks.
  * Sequential requests keep partial outcomes clear if authority changes mid-run. */

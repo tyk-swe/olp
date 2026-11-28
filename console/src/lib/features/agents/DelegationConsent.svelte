@@ -4,7 +4,6 @@
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
   import {
     profileKeys,
     getProfile,
@@ -20,11 +19,11 @@
     type DelegationConsent,
     type DelegationConsentRequest
   } from './api';
+  import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
 
   const role = useRole();
   const inventory = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    queryFn: ({ signal }) => listApiKeys(signal),
+    ...apiKeyQueries.all(),
     enabled: role.allows('POST /api/v1/delegation-consents')
   }));
   const profile = createQuery(() => ({

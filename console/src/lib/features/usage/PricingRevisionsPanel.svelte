@@ -26,14 +26,10 @@
   import { dateTimeLocalValue, formatDate } from '#lib/format.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import {
-    listProviderKinds,
-    listProviderVendors,
-    providerKeys
-  } from '#lib/features/providers/index.js';
 
   import { createPricingRevision, listPricing } from './pricing';
   import { pricingKeys } from './pricingKeys';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   const create = useMutation();
 
@@ -59,14 +55,10 @@
   });
   const pricingPagination = $state(emptyCursorHistory());
 
-  const providerVendors = createQuery(() => ({
-    queryKey: providerKeys.vendors(),
-    queryFn: () => listProviderVendors()
-  }));
+  const providerVendors = createQuery(providerQueries.vendors);
   const providerKinds = createQuery(() => ({
-    queryKey: providerKeys.kinds(),
-    enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listProviderKinds(signal)
+    ...providerQueries.kinds(),
+    enabled: services.gatewayAvailable
   }));
 
   $effect(() => {

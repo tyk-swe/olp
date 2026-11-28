@@ -43,6 +43,9 @@ semantic versioning and take their source from root `package.json`. The
   they open or regain focus. The activity and investigation pages retry an
   unanswered read once, and the SCIM page shares the project list with the other
   screens.
+- The reconciliation report and the unpriced attempts table share the cached
+  provider list with the rest of the console. A provider renamed in another tab
+  or through the API can keep its old name there for up to 30 seconds.
 - `GET /api/v1/branding` no longer requires a session, so signed-out pages can
   show the installation identity. `PUT /api/v1/branding` now requires an
   `accent` field. The session response drops `installation_name` and

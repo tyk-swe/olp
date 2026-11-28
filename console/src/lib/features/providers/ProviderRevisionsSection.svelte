@@ -1,6 +1,6 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
@@ -13,7 +13,7 @@
     listProviderRevisionPage,
     type ProviderRevisionDiff
   } from '#lib/features/providers/revisions.js';
-  import { type Provider } from '#lib/features/providers/providers.js';
+  import { type Provider } from '#lib/domain/providers/api.js';
   import { formatDate } from '#lib/format.js';
   import type { ProviderEditor } from './providerEditor.svelte';
 

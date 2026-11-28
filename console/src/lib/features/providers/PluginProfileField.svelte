@@ -9,7 +9,7 @@
     listProviderProfiles,
     type ProviderProfilePlugin
   } from './providerProfiles';
-  import { providerKeys } from './providerKeys';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import {
     selectPluginProfile,
     type ProviderEditValues

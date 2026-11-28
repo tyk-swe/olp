@@ -3,7 +3,7 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
-  import type { Definition } from './api';
+  import type { Definition } from '#lib/domain/guardrails/api.js';
 
   let {
     pending,

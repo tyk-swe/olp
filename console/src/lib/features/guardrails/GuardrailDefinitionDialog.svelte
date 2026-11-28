@@ -10,9 +10,9 @@
   import {
     activateDefinition,
     saveDefinition as saveDefinitionAPI,
-    type Credential,
-    type Definition
+    type Credential
   } from './api';
+  import { type Definition } from '#lib/domain/guardrails/api.js';
   import type { Project } from '#lib/domain/projects/api.js';
 
   let {

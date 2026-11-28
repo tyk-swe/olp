@@ -4,7 +4,7 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import ProviderBulkActions from './ProviderBulkActions.svelte';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   import { overviewKeys } from '#lib/features/overview/index.js';
 
@@ -14,7 +14,7 @@
   import NavIcon from '#lib/components/NavIcon.svelte';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
-  import { listProviderPage } from '#lib/features/providers/providers.js';
+  import { listProviderPage } from '#lib/domain/providers/api.js';
   import {
     cursorPaginationProps,
     resetCursor

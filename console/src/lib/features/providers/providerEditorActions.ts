@@ -9,9 +9,13 @@ import {
   isProviderInUse,
   probeProvider,
   restoreProviderAsDraft,
-  updateProvider,
-  type Provider
+  updateProvider
 } from './providers';
+import type {
+  Provider,
+  ProviderKindCapability,
+  ProviderCredential
+} from '#lib/domain/providers/api.js';
 import {
   certifyProviderModel,
   compareProviderListing,
@@ -19,14 +23,12 @@ import {
   discoverProviderModels,
   setProviderModel,
   type CapabilityDeclaration,
-  type ProviderKindCapability,
   type ProviderModelPage
 } from './models';
 import {
   revokeProviderCredential,
   rotateProviderCredential,
-  type ExternalCredentialReference,
-  type ProviderCredential
+  type ExternalCredentialReference
 } from './credentials';
 import { diffProviderRevisions, restoreProviderRevision } from './revisions';
 import { acceptCatalogSuggestions } from './catalog';
@@ -34,7 +36,7 @@ import {
   createNetworkCredential,
   revokeNetworkCredential
 } from './providerProfiles';
-import { providerKeys } from './providerKeys';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import type { ProviderChangeReceipt } from './providerChanges';
 import {
   buildUpdateProviderInput,

@@ -11,7 +11,7 @@
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
   import { focusErrorSummary } from '#lib/editing/focusError.js';
-  import { providerKeys } from './providerKeys';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
   import ConflictNotice from '#lib/components/ConflictNotice.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';

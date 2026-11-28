@@ -8,7 +8,7 @@ import {
   mutationHeaders
 } from '#lib/management/http.js';
 import { PROVIDER_REVISION_PAGE_SIZE } from '#lib/management/pageSizes.js';
-import type { Provider } from '#lib/features/providers/providers.js';
+import type { Provider } from '#lib/domain/providers/api.js';
 import type { ProviderModel } from '#lib/features/providers/models.js';
 
 type Schemas = components['schemas'];

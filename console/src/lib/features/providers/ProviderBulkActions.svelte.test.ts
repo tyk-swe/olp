@@ -4,7 +4,7 @@ import { json, route, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import { clickButton, findButton, mountWithState } from '#test/mount.js';
 import ProviderBulkActions from './ProviderBulkActions.svelte';
-import type { ProviderSummary } from './providers';
+import type { ProviderSummary } from '#lib/domain/providers/api.js';
 
 const connection: ProviderSummary = {
   id: 'connection-id',

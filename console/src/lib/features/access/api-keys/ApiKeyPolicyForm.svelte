@@ -9,7 +9,7 @@
   import { routeQueries } from '#lib/domain/routes/queries.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import type { ApiKey } from '#lib/features/access/api-keys/api.js';
+  import type { ApiKey } from '#lib/domain/api-keys/api.js';
   import ApiKeyOverlaps from './ApiKeyOverlaps.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
@@ -24,10 +24,7 @@
   import ApiKeyRateFields from './ApiKeyRateFields.svelte';
   import ApiKeySpendingFields from './ApiKeySpendingFields.svelte';
   import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
-  import {
-    listBudgetGroups,
-    budgetGroupKeys
-  } from '#lib/features/budgets/index.js';
+  import { budgetGroupQueries } from '#lib/domain/budget-groups/queries.js';
 
   let {
     editing,
@@ -70,10 +67,7 @@
     ...routeQueries.all(),
     enabled: services.gatewayAvailable
   }));
-  const groups = createQuery(() => ({
-    queryKey: budgetGroupKeys.list(),
-    queryFn: ({ signal }) => listBudgetGroups(signal)
-  }));
+  const groups = createQuery(budgetGroupQueries.all);
 
   const formProject = $derived(
     editing ? (editing.project_id ?? null) : form.projectId || null

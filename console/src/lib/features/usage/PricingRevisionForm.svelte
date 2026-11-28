@@ -3,8 +3,10 @@
   import { providerOptions } from '#lib/features/providers/index.js';
   import PriceFields from './PriceFields.svelte';
   import { operationKinds } from './history/api';
-  import type { ProviderKind } from '#lib/features/providers/index.js';
-  import type { ProviderVendor } from '#lib/features/providers/index.js';
+  import type {
+    ProviderKind,
+    ProviderVendor
+  } from '#lib/domain/providers/api.js';
   import type { PricingRevisionFormValues } from './priceEntry.js';
 
   let {

@@ -26,7 +26,7 @@ vi.mock(import('#lib/features/routes/api.js'), async (importOriginal) => ({
   ...(await importOriginal()),
   simulateRouting: vi.fn().mockResolvedValue([])
 }));
-vi.mock('#lib/features/access/api-keys/api.js', () => ({
+vi.mock('#lib/domain/api-keys/api.js', () => ({
   listApiKeys: vi.fn().mockResolvedValue([])
 }));
 

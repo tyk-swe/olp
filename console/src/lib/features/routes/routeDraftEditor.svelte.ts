@@ -1,7 +1,5 @@
-import {
-  providerKeys,
-  listProviderModelInventory
-} from '#lib/features/providers/index.js';
+import { listProviderModelInventory } from '#lib/features/providers/index.js';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 import { routeQueries } from '#lib/domain/routes/queries.js';
 import { untrack } from 'svelte';

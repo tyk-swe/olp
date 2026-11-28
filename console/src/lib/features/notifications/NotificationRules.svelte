@@ -13,11 +13,6 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import NotificationRuleDialog from './NotificationRuleDialog.svelte';
   import NotificationRuleEditRow from './NotificationRuleEditRow.svelte';
-  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
-  import {
-    listBudgetGroups,
-    budgetGroupKeys
-  } from '#lib/features/budgets/index.js';
   import {
     createNotificationRule,
     deleteNotificationRule,
@@ -36,6 +31,8 @@
     parseRuleConfiguration,
     type RuleConfigurationDraft
   } from './ruleDraft';
+  import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
+  import { budgetGroupQueries } from '#lib/domain/budget-groups/queries.js';
   const queryClient = useQueryClient();
   let {
     canManage,
@@ -61,14 +58,8 @@
     queryKey: notificationKeys.rules(),
     queryFn: ({ signal }) => listNotificationRules(signal)
   }));
-  const apiKeys = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    queryFn: ({ signal }) => listApiKeys(signal)
-  }));
-  const groups = createQuery(() => ({
-    queryKey: budgetGroupKeys.list(),
-    queryFn: ({ signal }) => listBudgetGroups(signal)
-  }));
+  const apiKeys = createQuery(apiKeyQueries.all);
+  const groups = createQuery(budgetGroupQueries.all);
 
   let draft = $state<RuleDraft>(newRuleDraft('budget.threshold'));
   const ruleEvent = $derived(draft.event);

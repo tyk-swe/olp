@@ -2,7 +2,7 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { apiKeyKeys } from '#lib/domain/api-keys/apiKeyKeys.js';
   import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { goto } from '$app/navigation';
@@ -13,11 +13,10 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     createApiKey,
-    getApiKey,
     updateApiKey,
-    type ApiKey,
     type ApiKeySecret
   } from '#lib/features/access/api-keys/api.js';
+  import { getApiKey, type ApiKey } from '#lib/domain/api-keys/api.js';
   import ApiKeyInventory from '#lib/features/access/api-keys/ApiKeyInventory.svelte';
   import ApiKeyPolicyForm from '#lib/features/access/api-keys/ApiKeyPolicyForm.svelte';
   import Callout from '#lib/components/Callout.svelte';

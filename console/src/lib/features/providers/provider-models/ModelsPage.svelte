@@ -4,7 +4,7 @@
   import QueryView from '#lib/components/QueryView.svelte';
   import ModelInventoryTable from './ModelInventoryTable.svelte';
   import { overviewKeys } from '#lib/features/overview/index.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   import { resolve } from '$app/paths';
   import type { Component } from 'svelte';
@@ -17,7 +17,7 @@
     resetCursor
   } from '#lib/listing/pagination.js';
   import { debouncedSearch } from '#lib/listing/search.svelte.js';
-  import { getProvider } from '#lib/features/providers/providers.js';
+  import { getProvider } from '#lib/domain/providers/api.js';
   import {
     listProviderModelInventoryPage,
     setProviderModel,

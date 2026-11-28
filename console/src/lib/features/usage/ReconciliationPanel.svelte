@@ -6,14 +6,11 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { getReconciliation } from '#lib/features/usage/reconciliation.js';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
-  import {
-    listProviders,
-    providerKeys
-  } from '#lib/features/providers/index.js';
   import type {
     ReconciliationItem,
     ReconciliationTotals
   } from '#lib/features/usage/reconciliation.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let { start, end }: { start: string; end: string } = $props();
 
@@ -50,8 +47,7 @@
   }));
 
   const providers = createQuery(() => ({
-    queryKey: providerKeys.summaries,
-    queryFn: ({ signal }) => listProviders(signal),
+    ...providerQueries.all(),
     enabled: canRead
   }));
 

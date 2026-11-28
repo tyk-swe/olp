@@ -1,7 +1,6 @@
 import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { readResult } from '#lib/editing/result.js';
-import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
 import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
 import { routeQueries } from '#lib/domain/routes/queries.js';
 import { simulateRouting } from '#lib/features/routes/index.js';
@@ -30,6 +29,7 @@ import {
   buildPlaygroundRequest,
   parseRoutingPreferences
 } from './validation';
+import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
 
 const defaultToolsJson =
   '[\n  {\n    "name": "get_weather",\n    "description": "Get weather for a city",\n    "input_schema": {\n      "type": "object",\n      "properties": { "city": { "type": "string" } },\n      "required": ["city"]\n    }\n  }\n]';
@@ -81,10 +81,7 @@ export class PlaygroundState {
     ...routeQueries.all(),
     select: selectActiveRoutes
   }));
-  apiKeys = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    queryFn: ({ signal }) => listApiKeys(signal)
-  }));
+  apiKeys = createQuery(apiKeyQueries.all);
   mutation = createMutation(() => ({ mutationFn: runPlayground }));
   selectedRoute = $derived(
     (this.routes.data ?? []).find((route) => route.slug === this.model.trim())

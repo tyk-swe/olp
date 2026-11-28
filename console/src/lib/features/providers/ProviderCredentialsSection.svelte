@@ -5,15 +5,13 @@
   import { captureResult } from '#lib/editing/result.js';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
-  import { providerKeys } from './providerKeys';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import type { Provider } from './providers';
-  import {
-    listProviderCredentials,
-    type ProviderCredential
-  } from './credentials';
-  import type { ProviderKindCapability } from './models';
+  import type {
+    Provider,
+    ProviderCredential,
+    ProviderKindCapability
+  } from '#lib/domain/providers/api.js';
   import type { ProviderEditor } from './providerEditor.svelte';
   import { formatDate } from '#lib/format.js';
   import {
@@ -22,6 +20,7 @@
     requiresCredential,
     requiresGrant
   } from './providerEditor';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
   let {
     current,
     providerSpec,
@@ -36,10 +35,9 @@
   const canManage = $derived(editor.canManage);
   const refreshPending = $derived(editorView.refreshPending);
   const editingLocked = $derived(providerDisabled(current));
-  const credentials = createQuery(() => ({
-    queryKey: providerKeys.credentials(current.id),
-    queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
-  }));
+  const credentials = createQuery(() =>
+    providerQueries.credentials(current.id)
+  );
   let credentialValue = $state('');
   let useExternal = $state(false);
   let externalValue = $state('');

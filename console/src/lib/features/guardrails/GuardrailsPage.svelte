@@ -20,15 +20,15 @@
     listCredentials,
     retireDefinition,
     retirePolicy,
-    listDefinitions,
     listPolicies,
     listAttachments,
-    type Definition,
     type Policy,
     type Entry,
     type Result
   } from './api';
-  import { guardrailKeys } from './guardrailKeys';
+  import { type Definition } from '#lib/domain/guardrails/api.js';
+  import { guardrailKeys } from '#lib/domain/guardrails/guardrailKeys.js';
+  import { guardrailQueries } from '#lib/domain/guardrails/queries.js';
 
   const phases = [
     'input',
@@ -38,10 +38,7 @@
   ] as const satisfies readonly Entry['phase'][];
   const access = useRole();
   const client = useQueryClient();
-  const definitions = createQuery(() => ({
-    queryKey: guardrailKeys.definitions(),
-    queryFn: ({ signal }) => listDefinitions(signal)
-  }));
+  const definitions = createQuery(guardrailQueries.definitions);
   const policies = createQuery(() => ({
     queryKey: guardrailKeys.policies(),
     notifyOnChangeProps: 'all',

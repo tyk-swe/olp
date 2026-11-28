@@ -8,10 +8,10 @@
   import {
     activatePolicy,
     savePolicy as savePolicyAPI,
-    type Definition,
     type Entry,
     type Policy
   } from './api';
+  import { type Definition } from '#lib/domain/guardrails/api.js';
   import type { Project } from '#lib/domain/projects/api.js';
 
   let {

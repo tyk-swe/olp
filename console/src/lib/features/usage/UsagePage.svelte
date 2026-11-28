@@ -13,7 +13,7 @@
     usageSeries,
     usageSummary
   } from '#lib/features/usage/usage.js';
-  import { getApiKey } from '#lib/features/access/index.js';
+  import { getApiKey } from '#lib/domain/api-keys/api.js';
   import UsageDetails from './UsageDetails.svelte';
   import UsageReport from './UsageReport.svelte';
   import UsageFilterForm from './UsageFilterForm.svelte';

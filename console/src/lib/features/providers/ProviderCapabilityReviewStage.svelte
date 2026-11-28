@@ -5,7 +5,7 @@
     CapabilityDeclaration,
     ProviderModel
   } from '#lib/features/providers/models.js';
-  import type { Provider } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import {
     cursorPaginationProps,
     type CursorHistory

@@ -10,7 +10,8 @@ import {
   mountWithState,
   setFieldValue
 } from '#test/mount.js';
-import type { ApiKey, UpdateApiKeyInput } from './api';
+import type { UpdateApiKeyInput } from './api';
+import type { ApiKey } from '#lib/domain/api-keys/api.js';
 import ApiKeysPage from './ApiKeysPage.svelte';
 import RoutingPolicyEditor from '#lib/features/routes/RoutingPolicyEditor.svelte';
 

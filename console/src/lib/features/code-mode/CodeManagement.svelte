@@ -26,7 +26,7 @@
   import {
     listProviders,
     listCredentialSlots
-  } from '#lib/features/providers/index.js';
+  } from '#lib/domain/providers/api.js';
   import ResourceEditor from './ResourceEditor.svelte';
   import CodeAccountList from './CodeAccountList.svelte';
   import CodeBudgetList from './CodeBudgetList.svelte';

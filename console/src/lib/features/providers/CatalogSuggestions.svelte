@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { listCatalogSuggestions } from '#lib/features/providers/catalog.js';
-  import type { Provider } from '#lib/features/providers/providers.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import {
     acceptableSuggestions,
     capabilityHints,

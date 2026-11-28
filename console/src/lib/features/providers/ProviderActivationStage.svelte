@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { Provider } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import {
     activationReady,

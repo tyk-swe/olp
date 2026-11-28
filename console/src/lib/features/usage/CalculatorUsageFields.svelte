@@ -1,6 +1,6 @@
 <script lang="ts">
   import { operationKinds } from './history/api.js';
-  import type { listProviders } from '#lib/features/providers/index.js';
+  import type { listProviders } from '#lib/domain/providers/api.js';
   import type { Project } from '#lib/domain/projects/api.js';
 
   let {

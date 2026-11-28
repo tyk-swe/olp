@@ -8,7 +8,7 @@
   } from '#lib/listing/pagination.js';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import SecretDialog from '#lib/components/SecretDialog.svelte';
-  import { providerKeys } from './providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import {
     getProviderRevision,
     listProviderRevisionModelPage

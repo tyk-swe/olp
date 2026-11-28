@@ -1,6 +1,6 @@
 <script lang="ts">
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
-  import type { CredentialSlot as Slot } from './credentials.js';
+  import type { CredentialSlot as Slot } from '#lib/domain/providers/api.js';
 
   let {
     slot,
