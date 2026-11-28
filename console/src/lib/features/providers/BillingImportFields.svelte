@@ -1,8 +1,14 @@
 <script lang="ts">
-  import type { BillingImportFormValues } from './billingImportForm.js';
+  import FormField from '#lib/components/FormField.svelte';
+  import type { FieldErrors } from '#lib/editing/validation.js';
+  import type {
+    BillingField,
+    BillingImportFormValues
+  } from './billingImportForm.js';
 
   let {
     form,
+    errors,
     kind,
     azure,
     editing,
@@ -14,6 +20,7 @@
     onRemove
   }: {
     form: BillingImportFormValues;
+    errors: FieldErrors<BillingField>;
     kind: string;
     azure: boolean;
     editing: boolean;
@@ -30,40 +37,42 @@
   <fieldset class="submission-fields" disabled={busy}>
     <div class="form-grid">
       {#if kind === 'bedrock'}
-        <div class="form-field">
-          <label for="aws-payer">Payer account ID</label><input
-            id="aws-payer"
-            bind:value={form.payerAccount}
-          />
-        </div>
-        <div class="form-field">
-          <label for="aws-bucket">S3 bucket</label><input
-            id="aws-bucket"
-            bind:value={form.bucket}
-          />
-        </div>
-        <div class="form-field">
-          <label for="aws-prefix">CUR report prefix</label><input
-            id="aws-prefix"
-            bind:value={form.reportPrefix}
-            placeholder="prefix/report-name"
-          />
-        </div>
-        <div class="form-field">
-          <label for="aws-region">S3 region</label><input
-            id="aws-region"
-            bind:value={form.region}
-            placeholder="us-east-1"
-          />
-        </div>
-        <div class="form-field">
-          <label for="aws-linked">Linked account IDs</label><textarea
-            id="aws-linked"
-            rows="3"
-            bind:value={form.linkedAccounts}></textarea><small>
-            One 12-digit ID per line, leave empty for all linked accounts
-          </small>
-        </div>
+        <FormField label="Payer account ID" error={errors.payerAccount}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.payerAccount} />
+          {/snippet}
+        </FormField>
+        <FormField label="S3 bucket" error={errors.bucket}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.bucket} />
+          {/snippet}
+        </FormField>
+        <FormField label="CUR report prefix" error={errors.reportPrefix}>
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              placeholder="prefix/report-name"
+              bind:value={form.reportPrefix}
+            />
+          {/snippet}
+        </FormField>
+        <FormField label="S3 region" error={errors.region}>
+          {#snippet control(attributes)}
+            <input
+              {...attributes}
+              placeholder="us-east-1"
+              bind:value={form.region}
+            />
+          {/snippet}
+        </FormField>
+        <FormField label="Linked account IDs" error={errors.linkedAccounts}>
+          {#snippet control(attributes)}
+            <textarea {...attributes} rows="3" bind:value={form.linkedAccounts}
+            ></textarea><small>
+              One 12-digit ID per line, leave empty for all linked accounts
+            </small>
+          {/snippet}
+        </FormField>
         {#if editing}<div class="form-field">
             <label class="inline-check">
               <input
@@ -86,22 +95,26 @@
             </select>
           </div>
           {#if form.awsAuthMode === 'static'}
-            <div class="form-field">
-              <label for="aws-access">Access key ID</label><input
-                id="aws-access"
-                type="password"
-                autocomplete="off"
-                bind:value={form.accessKeyId}
-              />
-            </div>
-            <div class="form-field">
-              <label for="aws-secret">Secret access key</label><input
-                id="aws-secret"
-                type="password"
-                autocomplete="off"
-                bind:value={form.secretAccessKey}
-              />
-            </div>
+            <FormField label="Access key ID" error={errors.accessKeyId}>
+              {#snippet control(attributes)}
+                <input
+                  {...attributes}
+                  type="password"
+                  autocomplete="off"
+                  bind:value={form.accessKeyId}
+                />
+              {/snippet}
+            </FormField>
+            <FormField label="Secret access key" error={errors.secretAccessKey}>
+              {#snippet control(attributes)}
+                <input
+                  {...attributes}
+                  type="password"
+                  autocomplete="off"
+                  bind:value={form.secretAccessKey}
+                />
+              {/snippet}
+            </FormField>
             <div class="form-field">
               <label for="aws-token">Session token (optional)</label><input
                 id="aws-token"
@@ -117,82 +130,78 @@
           list and read access to this report
         </p>
       {:else if azure}
-        <div class="form-field">
-          <label for="billing-azure-scope">
-            Billing scope resource ID
-          </label><input
-            id="billing-azure-scope"
-            bind:value={form.billingScope}
-          />
-        </div>
-        <div class="form-field">
-          <label for="billing-azure-export">Export name</label><input
-            id="billing-azure-export"
-            bind:value={form.exportName}
-          />
-        </div>
-        <div class="form-field">
-          <label for="billing-azure-account">Storage account</label><input
-            id="billing-azure-account"
-            bind:value={form.storageAccount}
-          />
-        </div>
-        <div class="form-field">
-          <label for="billing-azure-container">Container</label><input
-            id="billing-azure-container"
-            bind:value={form.container}
-          />
-        </div>
+        <FormField
+          label="Billing scope resource ID"
+          error={errors.billingScope}
+        >
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.billingScope} />
+          {/snippet}
+        </FormField>
+        <FormField label="Export name" error={errors.exportName}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.exportName} />
+          {/snippet}
+        </FormField>
+        <FormField label="Storage account" error={errors.storageAccount}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.storageAccount} />
+          {/snippet}
+        </FormField>
+        <FormField label="Container" error={errors.container}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={form.container} />
+          {/snippet}
+        </FormField>
         <div class="form-field">
           <label for="billing-azure-prefix">
             Storage directory prefix
           </label><input id="billing-azure-prefix" bind:value={form.prefix} />
         </div>
-        <div class="form-field">
-          <label for="billing-azure-subscriptions">
-            Subscription IDs
-          </label><textarea
-            id="billing-azure-subscriptions"
-            rows="3"
-            bind:value={form.scopeText}></textarea><small>
-            One ID per line. Empty includes all subscriptions in the export.
-          </small>
-        </div>
-        <div class="form-field">
-          <label for="billing-azure-auth">Azure credential</label>
-          <select id="billing-azure-auth" bind:value={form.authMode}>
-            <option value="">
-              {editing ? 'Keep stored credential' : 'Choose a credential'}
-            </option>
-            <option value="azure_default">Workload identity</option>
-            <option value="azure_client_secret">Client secret</option>
-          </select>
-        </div>
+        <FormField label="Subscription IDs" error={errors.scopeText}>
+          {#snippet control(attributes)}
+            <textarea {...attributes} rows="3" bind:value={form.scopeText}
+            ></textarea><small>
+              One ID per line. Empty includes all subscriptions in the export.
+            </small>
+          {/snippet}
+        </FormField>
+        <FormField label="Azure credential" error={errors.authMode}>
+          {#snippet control(attributes)}
+            <select {...attributes} bind:value={form.authMode}>
+              <option value="">
+                {editing ? 'Keep stored credential' : 'Choose a credential'}
+              </option>
+              <option value="azure_default">Workload identity</option>
+              <option value="azure_client_secret">Client secret</option>
+            </select>
+          {/snippet}
+        </FormField>
         {#if form.authMode === 'azure_client_secret'}
-          <div class="form-field">
-            <label for="billing-azure-tenant">Tenant ID</label><input
-              id="billing-azure-tenant"
-              bind:value={form.tenantId}
-            />
-          </div>
-          <div class="form-field">
-            <label for="billing-azure-client">Client ID</label><input
-              id="billing-azure-client"
-              bind:value={form.clientId}
-            />
-          </div>
-          <div class="form-field">
-            <label for="billing-azure-secret">Client secret</label><input
-              id="billing-azure-secret"
-              type="password"
-              autocomplete="off"
-              bind:value={form.clientSecret}
-            />
-          </div>
+          <FormField label="Tenant ID" error={errors.tenantId}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.tenantId} />
+            {/snippet}
+          </FormField>
+          <FormField label="Client ID" error={errors.clientId}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.clientId} />
+            {/snippet}
+          </FormField>
+          <FormField label="Client secret" error={errors.clientSecret}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                type="password"
+                autocomplete="off"
+                bind:value={form.clientSecret}
+              />
+            {/snippet}
+          </FormField>
         {/if}
       {:else}
-        <div class="form-field">
-          {#if kind === 'vertex_ai'}
+        {#if kind === 'vertex_ai'}
+          <div class="form-field">
             <label for="billing-auth-mode">Billing authentication</label>
             <select
               id="billing-auth-mode"
@@ -207,65 +216,70 @@
               <option value="service_account">Service account key</option>
               <option value="adc">Workload identity</option>
             </select>
-          {/if}
-          {#if kind !== 'vertex_ai' || form.googleAuthMode === 'service_account'}
-            <label for="billing-admin-key">
-              {kind === 'vertex_ai' ? 'Service account JSON' : 'Admin key'}
-            </label>
-            <input
-              id="billing-admin-key"
-              type="password"
-              autocomplete="off"
-              bind:value={form.adminKey}
-              placeholder={kind === 'vertex_ai'
-                ? 'Paste the service account JSON'
-                : editing
-                  ? 'Blank keeps the stored key'
-                  : 'sk-admin-…'}
-            />
-          {/if}
-        </div>
-        {#if kind === 'vertex_ai'}
-          <div class="form-field">
-            <label for="billing-account">Billing account ID</label><input
-              id="billing-account"
-              bind:value={form.billingAccountID}
-            />
-          </div>
-          <div class="form-field">
-            <label for="billing-project">BigQuery project ID</label><input
-              id="billing-project"
-              bind:value={form.bigQueryProjectID}
-            />
-          </div>
-          <div class="form-field">
-            <label for="billing-dataset">Dataset ID</label><input
-              id="billing-dataset"
-              bind:value={form.datasetID}
-            />
-          </div>
-          <div class="form-field">
-            <label for="billing-table">Detailed export table ID</label><input
-              id="billing-table"
-              bind:value={form.tableID}
-            />
           </div>
         {/if}
-        <div class="form-field">
-          <label for="billing-scope">{scopeLabel}</label>
-          <textarea
-            id="billing-scope"
-            rows="3"
-            bind:value={form.scopeText}
-            placeholder={kind === 'vertex_ai'
-              ? 'workload-project'
-              : kind === 'openai'
-                ? 'proj_…'
-                : 'wrkspc_… or default'}></textarea>
-          <small>
-            One ID per line. Leave empty to include all projects or workspaces.
-          </small>
-        </div>
+        {#if kind !== 'vertex_ai' || form.googleAuthMode === 'service_account'}
+          <FormField
+            label={kind === 'vertex_ai' ? 'Service account JSON' : 'Admin key'}
+            error={errors.adminKey}
+          >
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                type="password"
+                autocomplete="off"
+                bind:value={form.adminKey}
+                placeholder={kind === 'vertex_ai'
+                  ? 'Paste the service account JSON'
+                  : editing
+                    ? 'Blank keeps the stored key'
+                    : 'sk-admin-…'}
+              />
+            {/snippet}
+          </FormField>
+        {/if}
+        {#if kind === 'vertex_ai'}
+          <FormField label="Billing account ID" error={errors.billingAccountID}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.billingAccountID} />
+            {/snippet}
+          </FormField>
+          <FormField
+            label="BigQuery project ID"
+            error={errors.bigQueryProjectID}
+          >
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.bigQueryProjectID} />
+            {/snippet}
+          </FormField>
+          <FormField label="Dataset ID" error={errors.datasetID}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.datasetID} />
+            {/snippet}
+          </FormField>
+          <FormField label="Detailed export table ID" error={errors.tableID}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={form.tableID} />
+            {/snippet}
+          </FormField>
+        {/if}
+        <FormField label={scopeLabel} error={errors.scopeText}>
+          {#snippet control(attributes)}
+            <textarea
+              {...attributes}
+              rows="3"
+              bind:value={form.scopeText}
+              placeholder={kind === 'vertex_ai'
+                ? 'workload-project'
+                : kind === 'openai'
+                  ? 'proj_…'
+                  : 'wrkspc_… or default'}></textarea>
+            <small>
+              One ID per line. Leave empty to include all projects or
+              workspaces.
+            </small>
+          {/snippet}
+        </FormField>
       {/if}
       <div class="form-field">
         <label class="inline-check">

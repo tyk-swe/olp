@@ -2,12 +2,17 @@
   import Callout from '#lib/components/Callout.svelte';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
 
   import { useRole } from '#lib/session/useRole.svelte.js';
   import CredentialSlotForm from './CredentialSlotForm.svelte';
-  import { parseExternalReference } from './externalReference';
+  import {
+    newCredentialSlot,
+    slotServerFields,
+    validateSlotReference,
+    type SlotField
+  } from './credentialSlotDraft';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import {
@@ -25,7 +30,7 @@
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
-  const saveMutation = useMutation();
+  const saveMutation = useMutation<SlotField>();
   const validateAction = useAction();
   let {
     provider,
@@ -42,6 +47,7 @@
   } = $props();
   const queryClient = useQueryClient();
 
+  let section = $state<HTMLElement>();
   let error = $state('');
   let notice = $state('');
   /** The grant enrollment an operator is signing in through, and the slot
@@ -103,24 +109,7 @@
     if (!canManage || busy) return;
     clearDraft();
     editingEtag = pool.data?.etag ?? '';
-    editing = slot
-      ? structuredClone(slot)
-      : {
-          id: crypto.randomUUID(),
-          name: '',
-          enabled: true,
-          priority: 0,
-          weight: 1,
-          credential_version_id: null,
-          allowed_models: [],
-          allowed_routes: [],
-          allowed_api_keys: [],
-          requests_per_minute: null,
-          tokens_per_minute: null,
-          input_tokens_per_minute: null,
-          output_tokens_per_minute: null,
-          max_concurrency: null
-        };
+    editing = slot ? structuredClone(slot) : newCredentialSlot();
     secret = '';
     useExternal = false;
     externalValue = '';
@@ -128,17 +117,15 @@
     routes = slot?.allowed_routes?.join(', ') ?? '';
     keys = slot?.allowed_api_keys?.join(', ') ?? '';
   }
+  async function focusProblem() {
+    if (section) await focusFormError(section);
+  }
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (!canManage || busy || !editing || !editingEtag) return;
     notice = '';
-    const external = useExternal
-      ? captureResult(() => parseExternalReference(externalValue))
-      : null;
-    if (external && !external.ok) {
-      saveMutation.error = errorMessage(external.error);
-      return;
-    }
+    const reference = validateSlotReference(useExternal, externalValue);
+    if (!saveMutation.check(reference)) return focusProblem();
     const input = [
       provider.id,
       editingEtag,
@@ -154,10 +141,10 @@
           allowed_api_keys: parseManualModelNames(keys)
         },
         credential: useExternal ? null : secret || null,
-        ...(external?.ok ? { credential_reference: external.value } : {})
+        ...(reference.value ? { credential_reference: reference.value } : {})
       }
     ] as const;
-    await saveMutation.submit(
+    const accepted = await saveMutation.submit(
       input,
       (payload, requestId) => putCredentialSlot(...payload, requestId),
       async (_value, current) => {
@@ -173,9 +160,11 @@
         failure: (e, stage) =>
           stage === 'accept'
             ? `Credential staged, but refreshing failed. ${errorMessage(e)}`
-            : errorMessage(e)
+            : errorMessage(e),
+        serverFields: slotServerFields(grant, useExternal)
       }
     );
+    if (!accepted) await focusProblem();
   }
   async function enroll(slot: Slot) {
     if (!canManage || busy || slot.id == null) return;
@@ -200,7 +189,11 @@
   }
 </script>
 
-<section class="card pool" aria-labelledby="credential-pool-heading">
+<section
+  bind:this={section}
+  class="card pool"
+  aria-labelledby="credential-pool-heading"
+>
   <h2 id="credential-pool-heading">Credential pool</h2>
   {#if grant}<p>
       Every slot signs in to the same upstream account; pool other accounts
@@ -215,6 +208,8 @@
   {#if saveMutation.error || validateAction.error || error}<p
       class="inline-problem"
       role="alert"
+      tabindex="-1"
+      data-error-summary
     >
       {saveMutation.error || validateAction.error || error}
     </p>{/if}
@@ -364,6 +359,7 @@
       bind:models
       bind:routes
       bind:keys
+      errors={saveMutation.fieldErrors}
       busy={Boolean(busy)}
       onSubmit={save}
       onCancel={cancelEdit}

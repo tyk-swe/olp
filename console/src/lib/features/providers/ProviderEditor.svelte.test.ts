@@ -2,7 +2,14 @@ import { expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountState, mountWithState } from '#test/mount.js';
+import {
+  findButton,
+  mountState,
+  mountWithState,
+  reportedError,
+  setFieldValue,
+  submitForm
+} from '#test/mount.js';
 import type { BillingImport } from './billing';
 import BillingImportSection from './BillingImportSection.svelte';
 import { networkCredentialPath } from './configurationDraft.svelte';
@@ -253,4 +260,64 @@ it('clears a billing import delete conflict after loading the new version', asyn
   enabled?.click();
   flushSync();
   expect(findButton(target, 'Run now')).toHaveProperty('disabled', true);
+});
+
+it('reports a refused billing import at the field that holds the problem', async () => {
+  const writes = vi.fn();
+  serve(
+    (request) => {
+      if (request.method === 'GET')
+        return json({ title: 'Not found', status: 404 }, 404);
+      writes();
+      return json(
+        {
+          title: 'Validation failed',
+          status: 422,
+          errors: {
+            'scope.project_ids': [
+              { code: 'invalid', message: 'This project is not billable.' }
+            ]
+          }
+        },
+        422
+      );
+    },
+    ['read', 'configure']
+  );
+  const { target } = mountWithState(
+    BillingImportSection,
+    {
+      provider: {
+        ...provider,
+        configuration: { ...provider.configuration, kind: 'openai' }
+      },
+      canManage: true
+    },
+    { attach: true }
+  );
+  const key = await eventually(() => {
+    const found = target.querySelector<HTMLInputElement>(
+      'input[type="password"]'
+    );
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  const scope = target.querySelector('textarea')!;
+
+  setFieldValue(scope, 'not-a-project');
+  submitForm(target);
+  await eventually(() => expect(document.activeElement).toBe(key));
+  expect(reportedError(key)).toBe(
+    'An admin key is required to create the import.'
+  );
+  expect(reportedError(scope)).toBe('not-a-project is not a valid project ID.');
+  expect(writes).not.toHaveBeenCalled();
+
+  setFieldValue(key, 'sk-admin-fixture');
+  setFieldValue(scope, 'proj_fixture');
+  submitForm(target);
+  await eventually(() => expect(document.activeElement).toBe(scope));
+  expect(reportedError(scope)).toBe('This project is not billable.');
+  expect(reportedError(key)).toBeUndefined();
+  expect(target.querySelector('[role="alert"]')).toBeNull();
 });

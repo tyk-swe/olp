@@ -10,7 +10,7 @@
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { readResult } from '#lib/editing/result.js';
-  import { parseJsonObject } from '#lib/editing/json.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import BillingImportFields from './BillingImportFields.svelte';
 
   import {
@@ -20,12 +20,13 @@
     runBillingImport
   } from '#lib/features/providers/billing.js';
   import {
+    billingImportServerFields,
     clearBillingImportSecrets,
     errorPhrase,
     hydrateBillingImport,
     newBillingImportForm,
-    scopeBody,
-    validateForm
+    validateBillingImport,
+    type BillingField
   } from './billingImportForm.js';
   import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import type { Provider } from '#lib/domain/providers/api.js';
@@ -57,7 +58,7 @@
         : /^wrkspc_[A-Za-z0-9]{1,64}$/
   );
 
-  const saveMutation = useMutation();
+  const saveMutation = useMutation<BillingField>();
   const runMutation = useMutation();
   const removal = useAction();
   const queryClient = useQueryClient();
@@ -68,6 +69,7 @@
   }));
 
   const form = $state(newBillingImportForm());
+  let section = $state<HTMLElement>();
   let reloading = $state(false);
   let reloadError = $state('');
   let initialized = $state(false);
@@ -98,73 +100,17 @@
     }
   });
 
+  async function focusProblem() {
+    if (section) await focusFormError(section);
+  }
+
   async function save() {
     if (!canManage || busy) return;
-    const serviceAccount = parseJsonObject(form.adminKey) ?? undefined;
-    const invalid = validateForm(
-      form,
-      kind,
-      editing,
-      scopePattern,
-      serviceAccount
-    );
-    if (invalid) {
-      saveMutation.error = invalid;
-      return;
-    }
+    const checked = validateBillingImport(form, kind, editing, scopePattern);
+    if (!saveMutation.check(checked)) return focusProblem();
     const etag = detail?.etag ?? provider.etag;
-    const googleCredential =
-      kind === 'vertex_ai'
-        ? form.googleAuthMode === 'keep'
-          ? undefined
-          : form.googleAuthMode === 'adc'
-            ? { auth_mode: 'adc' as const }
-            : {
-                auth_mode: 'service_account' as const,
-                service_account: serviceAccount
-              }
-        : undefined;
-    const input: Parameters<typeof putBillingImport>[2] = {
-      enabled: form.enabled,
-      scope: scopeBody(form, kind),
-      ...(kind === 'bedrock'
-        ? !editing || form.replaceCredential
-          ? {
-              credential:
-                form.awsAuthMode === 'workload'
-                  ? { auth_mode: 'workload' as const }
-                  : {
-                      auth_mode: 'static' as const,
-                      access_key_id: form.accessKeyId.trim(),
-                      secret_access_key: form.secretAccessKey.trim(),
-                      ...(form.sessionToken.trim()
-                        ? { session_token: form.sessionToken.trim() }
-                        : {})
-                    }
-            }
-          : {}
-        : azure && form.authMode
-          ? {
-              credential:
-                form.authMode === 'azure_default'
-                  ? { auth_mode: form.authMode }
-                  : {
-                      auth_mode: form.authMode,
-                      tenant_id: form.tenantId.trim(),
-                      client_id: form.clientId.trim(),
-                      client_secret: form.clientSecret
-                    }
-            }
-          : kind === 'vertex_ai'
-            ? googleCredential
-              ? { credential: googleCredential }
-              : {}
-            : form.adminKey.trim()
-              ? { credential: form.adminKey.trim() }
-              : {})
-    };
-    await saveMutation.submit(
-      input,
+    const accepted = await saveMutation.submit(
+      checked.value,
       (submission, requestId) =>
         putBillingImport(provider.id, etag, submission, requestId),
       async () => {
@@ -183,9 +129,11 @@
         failure: (cause) =>
           isEtagMismatch(cause)
             ? ''
-            : errorMessage(cause, 'The billing import could not be saved.')
+            : errorMessage(cause, 'The billing import could not be saved.'),
+        serverFields: billingImportServerFields(form, kind)
       }
     );
+    if (!accepted) await focusProblem();
   }
 
   async function reload() {
@@ -287,13 +235,24 @@
 </script>
 
 {#if supported}
-  <section class="card billing-import" aria-labelledby="billing-import-heading">
+  <section
+    bind:this={section}
+    class="card billing-import"
+    aria-labelledby="billing-import-heading"
+  >
     <h3 id="billing-import-heading">Billing import</h3>
     <p class="section-help">
       Pull invoiced costs to reconcile attributed usage against billed amounts.
       Billing credentials are separate from inference credentials.
     </p>
-    {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
+    {#if error}<div
+        class="inline-problem"
+        role="alert"
+        tabindex="-1"
+        data-error-summary
+      >
+        {error}
+      </div>{/if}
 
     {#if conflicted}
       <ConflictNotice notice="conflict" onReload={reload} disabled={busy} />
@@ -333,6 +292,7 @@
       {#if canManage}
         <BillingImportFields
           {form}
+          errors={saveMutation.fieldErrors}
           {kind}
           {azure}
           {editing}
