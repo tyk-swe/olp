@@ -294,6 +294,10 @@ func (r *request) accountingID() string {
 	return r.durableID
 }
 
+func (s *Server) mintedRequest(clientIP string, release *release.Release) request {
+	return request{id: ids.New(), minted: true, clientIP: clientIP, startedAt: s.Now(), release: release}
+}
+
 // begin assigns the request identity, pins the release, and sets the
 // headers every inference response carries.
 func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {

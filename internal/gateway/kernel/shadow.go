@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/panics"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -128,43 +127,21 @@ func (s *Server) mirror(x *Call) {
 // no longer written once the caller's response is complete; everything the
 // attempt prepares from it is built afresh.
 func (s *Server) runShadow(parent *Call, attempt routing.Attempt) {
-	id := ids.New()
 	route := parent.Route
-	x := &Call{
-		request: request{
-			id:        id,
-			minted:    true,
-			clientIP:  parent.request.clientIP,
-			startedAt: s.Now(),
-			release:   parent.request.release,
-		},
-		prompt:  parent.prompt,
-		family:  parent.family,
-		ingress: parent.ingress,
-
-		callSemantics: callSemantics{
-			semanticHeaders: parent.semanticHeaders,
-			semanticQuery:   parent.semanticQuery,
-		},
-		actor:       "system",
-		keyID:       parent.keyID,
-		authority:   parent.authority,
-		callPricing: parent.callPricing,
-		attribution: parent.attribution,
-
-		primary: route,
-		mode:    parent.mode,
-
-		callBudget: callBudget{allowance: 1, fixed: true},
-		origin:     usage.OriginShadow,
-		parent:     parent.request.accountingID(),
-		priority:   routing.PriorityLow, routeLeg: routeLeg{affinity: parent.affinity,
-			Route: route,
-
-			policy:   parent.policy,
-			attempts: []routing.Attempt{attempt},
-			budget:   1}, generation: generationCall{parsed: parent.generation.parsed},
-	}
+	x := newCall(s.mintedRequest(parent.request.clientIP, parent.request.release), parent.family,
+		callIdentity{actor: "system", keyID: parent.keyID, authority: parent.authority, attribution: parent.attribution},
+		callLineage{origin: usage.OriginShadow, parent: parent.request.accountingID(), priority: routing.PriorityLow},
+		callWork{
+			prompt:        parent.prompt,
+			ingress:       parent.ingress,
+			mode:          parent.mode,
+			primary:       route,
+			callSemantics: callSemantics{semanticHeaders: parent.semanticHeaders, semanticQuery: parent.semanticQuery},
+			callPricing:   parent.callPricing,
+			callBudget:    callBudget{allowance: 1, fixed: true},
+			routeLeg:      routeLeg{affinity: parent.affinity, Route: route, policy: parent.policy, attempts: []routing.Attempt{attempt}, budget: 1},
+			generation:    generationCall{parsed: parent.generation.parsed},
+		})
 	if x.generation.parsed.Stream {
 		x.generation.emit = func([]byte) error {
 			x.Delivered(s.Now())

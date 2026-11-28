@@ -466,21 +466,23 @@ func (x *Call) attemptCardRevisionForRoute(providerID string, route *routing.Rou
 }
 
 func (x *Call) resolveAttemptCardRevision(providerID string, route *routing.Route, at time.Time) (*rates.RoutingCardRevision, bool) {
-	if x.cardPinned {
-		return x.cardRev, true
+	return x.callPricing.resolveCardRevision(x.authority.ProjectID, x.Snapshot(), providerID, route, at)
+}
+
+func (p callPricing) resolveCardRevision(keyProject *string, snapshot *routing.View, providerID string, route *routing.Route, at time.Time) (*rates.RoutingCardRevision, bool) {
+	if p.cardPinned {
+		return p.cardRev, true
 	}
-	inputs := x.routingInputs
+	inputs := p.routingInputs
 	if inputs == nil {
 		return nil, false
 	}
 	// The consumer is the aggregate-ownership project: the key's, then the
 	// provider's, then the route's — the same precedence accounting applies.
-	project := x.authority.ProjectID
-	if project == nil {
-		if snapshot := x.Snapshot(); snapshot != nil {
-			if provider, ok := snapshot.FindProvider(providerID); ok {
-				project = provider.ProjectID
-			}
+	project := keyProject
+	if project == nil && snapshot != nil {
+		if provider, ok := snapshot.FindProvider(providerID); ok {
+			project = provider.ProjectID
 		}
 	}
 	if project == nil && route != nil {

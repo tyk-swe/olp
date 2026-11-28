@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -131,23 +130,9 @@ func (s *Server) callClassifier(ctx context.Context, parent *Call, c *routing.Cl
 	timeout := time.Duration(min(c.TimeoutMS, route.OverallTimeout)) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	x := &Call{
-		request:       request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
-		actor:         parent.actor,
-		keyID:         parent.keyID,
-		budgetGroupID: parent.budgetGroupID,
-		attribution:   parent.attribution,
-		endUserDigest: parent.endUserDigest,
-		userID:        parent.userID,
-		authority:     parent.authority,
-		callPricing:   parent.callPricing,
-
-		origin:   usage.OriginClassifier,
-		parent:   parent.request.accountingID(),
-		priority: parent.priority, routeLeg: routeLeg{affinity: []byte(parent.keyID),
-
-			Route: &route},
-	}
+	x := newCall(s.mintedRequest(parent.request.clientIP, parent.request.release), noFamily, parent.callIdentity,
+		callLineage{origin: usage.OriginClassifier, parent: parent.request.accountingID(), priority: parent.priority},
+		callWork{callPricing: parent.callPricing, routeLeg: routeLeg{affinity: []byte(parent.keyID), Route: &route}})
 	defer s.SettleAdmission(ctx, x)
 	var answer classification
 	var out *Outcome

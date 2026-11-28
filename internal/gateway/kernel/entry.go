@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"net/http"
-	"net/url"
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -11,10 +10,7 @@ import (
 )
 
 func (s *Server) EnterPrioritized(w http.ResponseWriter, r *http.Request, family wire.Format) (*Call, keyauthority.Authority, bool) {
-	x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
-	x.semanticHeaders = semanticHeaders(r.Header)
-	query, queryErr := url.ParseQuery(r.URL.RawQuery)
-	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
+	x := newCall(s.begin(w, r), family, callIdentity{actor: "api_key"}, callLineage{}, callWork{callSemantics: readSemantics(r)})
 	if !s.Gate.AdmitLater(r.Context()) {
 		s.Refuse(x, w, fault.Overloaded)
 		return x, keyauthority.Authority{}, true

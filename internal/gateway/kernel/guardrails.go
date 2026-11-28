@@ -75,7 +75,7 @@ func guardrailStatus(failure guardrails.Failure) int {
 func (s *Server) bindGuardrails(ctx context.Context, x *Call) *fault.Error {
 	x.guard.metadata = x.request.guardrailMetadata
 	x.guard.engine = s.boundGuardrails(x, x.Snapshot().GuardrailEngine(x.Route.Slug, x.keyID))
-	if x.guard.internal {
+	if x.internalModel {
 		x.guard.engine = x.guard.engine.WithoutModelGuardrails()
 	}
 	if x.guard.engine == nil {
@@ -156,7 +156,7 @@ func (x *Call) guardrailStreamSurface(document oif.Document) error {
 func (x *Call) guardrailStream() (*guardstream.Stream, error) {
 	return guardstream.New(guardstream.Config{
 		Engine: x.guard.engine, Masks: x.guard.masks, Input: x.guard.input,
-		RequestID: x.request.accountingID(), Route: x.Route.Slug, InternalModel: x.guard.internal,
+		RequestID: x.request.accountingID(), Route: x.Route.Slug, InternalModel: x.internalModel,
 		Family: x.family, Window: x.Snapshot().GuardrailWindow(), Strict: x.Strict(),
 		ToolContext: x.guard.ctx, Record: x.guard.record,
 	})
@@ -188,7 +188,7 @@ func (x *Call) evaluateGuardrailInput(ctx context.Context, document oif.Document
 		result, e := x.guard.engine.Unavailable()
 		return guardrailInput{document: document, decisions: result.Decisions}, e
 	}
-	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: surface.Segments, InternalModel: x.guard.internal, WorkflowRecovery: recoverable && x.workflow != nil}
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: surface.Segments, InternalModel: x.internalModel, WorkflowRecovery: recoverable && x.workflow != nil}
 	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
 		for _, segment := range surface.Segments {
 			if segment.Kind == guardrails.ToolResult && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
@@ -214,7 +214,7 @@ func (x *Call) inspectOperationInput(texts []operations.Text) ([]guardrailpolicy
 	for i, t := range texts {
 		segments[i] = guardrails.Segment{ID: "s" + strconv.Itoa(i), Text: t.Value}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: segments, InternalModel: x.guard.internal}, x.guard.masks)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Input, Segments: segments, InternalModel: x.internalModel}, x.guard.masks)
 	x.guard.input = segments
 	return result.Decisions, err
 }
@@ -224,7 +224,7 @@ func (x *Call) inspectOperationOutput(texts []operations.Text) error {
 	for i, text := range texts {
 		segments[i] = guardrails.Segment{ID: "s" + strconv.Itoa(i), Text: text.Value}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: segments, InternalModel: x.guard.internal}, nil)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: segments, InternalModel: x.internalModel}, nil)
 	x.guard.record(result.Decisions)
 	return err
 }
@@ -267,7 +267,7 @@ func (x *Call) inspectGuardrailOutput(body []byte) ([]byte, error) {
 			changed = true
 		}
 	}
-	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: slices.Concat(segments, guardrails.InputProvenance(x.guard.input)), InternalModel: x.guard.internal}, x.guard.masks)
+	result, err := x.guard.engine.Evaluate(x.guard.ctx, guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.Output, Segments: slices.Concat(segments, guardrails.InputProvenance(x.guard.input)), InternalModel: x.internalModel}, x.guard.masks)
 	x.guard.record(result.Decisions)
 	if err != nil {
 		return body, err
@@ -305,7 +305,7 @@ func (s *Server) startParallel(ctx context.Context, x *Call, cancelUpstream cont
 	}
 	evalctx, cancel := context.WithCancel(ctx)
 	p := &parallelGuardrail{result: make(chan guardrailResult, 1), cancel: cancel}
-	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.InputParallel, Segments: slices.Clone(x.guard.input), InternalModel: x.guard.internal}
+	request := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.Route.Slug, Phase: guardrailpolicy.InputParallel, Segments: slices.Clone(x.guard.input), InternalModel: x.internalModel}
 	go func() {
 		defer panics.Recover(s.Log, "parallel guardrail", func(err error) {
 			p.result <- guardrailResult{err: err}

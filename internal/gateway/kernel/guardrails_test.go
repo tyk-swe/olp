@@ -213,7 +213,7 @@ func TestPreparationRetainsFailedGuardrailEvidenceWithoutReevaluation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := &Call{family: wire.Chat, routeLeg: routeLeg{Route: &route}, generation: generationCall{parsed: parsed}}
+	x := &Call{family: wire.Chat, callWork: callWork{routeLeg: routeLeg{Route: &route}, generation: generationCall{parsed: parsed}}}
 	x.request.release = h.rt.release
 	x.authority = h.rt.keys[fullKey]
 	x.keyID = h.keyID

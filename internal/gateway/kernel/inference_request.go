@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -60,15 +59,12 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 }
 
 func (s *Server) newInferenceRequest(w http.ResponseWriter, r *http.Request, family wire.Format, dialect string) inferenceRequest {
-	x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
+	x := newCall(s.begin(w, r), family, callIdentity{actor: "api_key"}, callLineage{}, callWork{callSemantics: readSemantics(r)})
 	if dialect == "" && fault.RequestSurface(r) == "gemini" {
 		// Gemini embeddings match OpenAI embedding capabilities but
 		// speak Gemini on the wire.
 		x.ingress = "gemini"
 	}
-	x.semanticHeaders = semanticHeaders(r.Header)
-	query, err := url.ParseQuery(r.URL.RawQuery)
-	x.semanticQuery, x.semanticQueryInvalid = query, err != nil
 	return inferenceRequest{
 		server: s, w: w, r: r, control: http.NewResponseController(w),
 		family: family, dialect: dialect, x: x, end: &inferenceEnd{status: http.StatusInternalServerError},

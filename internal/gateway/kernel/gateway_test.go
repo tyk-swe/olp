@@ -533,7 +533,7 @@ func TestStrictPreparationKeepsTargetsAndSourcesSeparate(t *testing.T) {
 			route := h.rt.release.Snapshot().Route(routeSlug)
 			target := route.Targets[0]
 			provider := h.rt.release.Snapshot().Provider(target.ProviderID)
-			x := &Call{family: wire.Chat, routeLeg: routeLeg{Route: &route}}
+			x := &Call{family: wire.Chat, callWork: callWork{routeLeg: routeLeg{Route: &route}}}
 			x.request.release = h.rt.release
 			x.authority = h.rt.keys[fullKey]
 			for _, text := range []string{"first", "second"} {

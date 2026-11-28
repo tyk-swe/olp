@@ -63,7 +63,7 @@ func TestWorkflowCostRejectsPartiallyDecodedModelFacts(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				x := &Call{family: wire.Chat, historicalSnapshot: snapshot.ReadOnly(), workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}
+				x := &Call{family: wire.Chat, callWork: callWork{historicalSnapshot: snapshot.ReadOnly(), workflow: &workflowCall{}, unary: &unaryCall{}, generation: generationCall{runLimits: limits.WorkflowBounds{MaxRunCost: new("1")}}}}
 				err := x.workflowModelCost(routing.Attempt{ProviderID: id, UpstreamModel: "model", Price: costPrice()})
 				if tc.want == "" {
 					if err != nil {
@@ -97,9 +97,11 @@ func costExecution(t *testing.T, body string, family wire.Format, budget int, at
 		}
 	}
 	return &Call{
-		family:             family,
-		historicalSnapshot: snapshot.ReadOnly(), routeLeg: routeLeg{Route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
-			attempts: attempts, budget: budget}, generation: generationCall{parsed: request},
+		family: family,
+		callWork: callWork{
+			historicalSnapshot: snapshot.ReadOnly(), routeLeg: routeLeg{Route: &routing.Route{Slug: "team-chat", Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}},
+				attempts: attempts, budget: budget}, generation: generationCall{parsed: request},
+		},
 	}
 }
 
@@ -223,7 +225,7 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 		}, "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			x := &Call{facts: tc.facts, family: wire.Chat}
+			x := &Call{callWork: callWork{facts: tc.facts}, family: wire.Chat}
 			if tc.operation == "embeddings" {
 				x.family = wire.Embeddings
 			}
@@ -262,15 +264,17 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 	videoAttempt := routing.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
 		Price: rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.25")}})}
 	videoExec := &Call{
-		family:             wire.Format("video_create"),
-		request:            request{id: "video-charge", minted: true},
-		historicalSnapshot: x.historicalSnapshot,
-		callPricing: callPricing{
-			cardPinned: true,
-			cardRev:    loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
-			fixedUsage: &FixedUsageBound{
-				Bounded: true,
-				Usage:   usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}},
+		family:  wire.Format("video_create"),
+		request: request{id: "video-charge", minted: true},
+		callWork: callWork{
+			historicalSnapshot: x.historicalSnapshot,
+			callPricing: callPricing{
+				cardPinned: true,
+				cardRev:    loadedCardRevision(t, rates.RoutingCardRevision{Markup: "1.5"}),
+				fixedUsage: &FixedUsageBound{
+					Bounded: true,
+					Usage:   usage.AttemptUsage{Evidence: usage.EvidenceUnobservedComplete, UsageQuantities: usage.UsageQuantities{MediaUnits: &seconds}},
+				},
 			},
 		},
 	}
@@ -355,15 +359,18 @@ func TestRetainedPageOnlyAdmitsCostsForEntriesBeingRead(t *testing.T) {
 	now := time.Now()
 	provider := routing.Provider{ID: uuid.NewString(), Kind: "openai"}
 	x := &Call{
-		actor: "api_key_resource", operationOverride: "fine_tuning",
-		retained:           retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage},
-		request:            request{startedAt: now},
-		historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
-		callPricing: callPricing{
-			routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
-				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
-				*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
-			}},
+		callIdentity: callIdentity{actor: "api_key_resource"},
+		retained:     retainedOperation{use: RetainedHousekeeping, usage: retainedTokenlessUsage},
+		request:      request{startedAt: now},
+		callWork: callWork{
+			operationOverride:  "fine_tuning",
+			historicalSnapshot: (&routing.Snapshot{Providers: map[string]routing.Provider{provider.ID: provider}}).ReadOnly(),
+			callPricing: callPricing{
+				routingInputs: &routinginputs.Inputs{RefreshedAt: now, Prices: []rates.RoutingPrice{
+					*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "free", Operation: "fine_tuning", PerRequest: new("0")}}),
+					*rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{ProviderKind: string(provider.Kind), Model: "paid", Operation: "fine_tuning", PerRequest: new("1")}}),
+				}},
+			},
 		},
 	}
 	s := &Server{Now: func() time.Time { return now }, Deps: Dependencies{Admission: &quota.Admission{

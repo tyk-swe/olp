@@ -254,7 +254,7 @@ func UpstreamError(f *AttemptFailure) *fault.Error {
 }
 
 func (s *Server) StateBegin(w http.ResponseWriter, r *http.Request, family wire.Format) (*Call, keyauthority.Authority, bool) {
-	x := &Call{request: s.begin(w, r), family: family, actor: "api_key"}
+	x := newCall(s.begin(w, r), family, callIdentity{actor: "api_key"}, callLineage{}, callWork{})
 	authority, ok := s.EnterCall(w, r, x, s.authenticateInference)
 	return x, authority, !ok
 }

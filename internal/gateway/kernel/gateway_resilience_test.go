@@ -783,7 +783,7 @@ func TestStagedBodyFailureBlamesTheProviderOnlyWhenItsBodyBreaks(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 			response := &PinnedResponse{
 				Response: &http.Response{Body: io.NopCloser(tc.body)},
 				Exchange: h.gateway.beginPinned(t.Context(), x, testPinnedTarget(h, 0), http.MethodGet),

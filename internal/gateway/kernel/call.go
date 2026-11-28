@@ -32,63 +32,83 @@ import (
 type Call struct {
 	request request
 	family  wire.Format
-	ingress string
-	mode    string
 
-	// Caller identity and authorization.
-	actor         string
-	endUserDigest string
-	keyID         string
-	budgetGroupID *string
-	attribution   map[string]string
-	userID        string
-	authority     keyauthority.Authority
+	callIdentity
+	callLineage
+	callWork
 
 	// Sub-operation attachments.
-	prompt               *usage.PromptReference
-	cache                *responseCacheCall
-	cacheRateLease       *admission.Lease
-	sessionDebit         *sessionDebit
-	workflow             *workflowCall
-	evaluatorGuardrailID string
-	unary                *unaryCall
-	retained             retainedOperation
-	retainedAdmission    *RetainedAdmissionPlan
-	strictServing        func(targetID string) (oif.ServingIdentity, bool)
-
-	// Routing provenance and guardrails.
-	preferences           *routing.Preferences
-	primary               *routing.Route
-	deadline              time.Time
-	authorize             func(*routing.Route) *fault.Error
-	origin                usage.Origin
-	parent                string
-	priority              string
 	guard                 guardrailCall
+	cache                 *responseCacheCall
+	cacheRateLease        *admission.Lease
+	sessionDebit          *sessionDebit
+	retained              retainedOperation
+	retainedAdmission     *RetainedAdmissionPlan
+	strictServing         func(targetID string) (oif.ServingIdentity, bool)
 	workflowRecovery      []guardrails.Segment
 	workflowRecoveryCalls []string
-	operationOverride     string
-	historicalSnapshot    *routing.View
 
 	// Terminal recording state initialized or inspected directly by tests/surfaces.
-	facts   []events.AttemptFact
 	Failure *fault.Error
 
+	callPinning
+	callDelivery
+}
+
+type callIdentity struct {
+	actor         string
+	keyID         string
+	budgetGroupID *string
+	authority     keyauthority.Authority
+	attribution   map[string]string
+	endUserDigest string
+	userID        string
+}
+
+type callLineage struct {
+	origin               usage.Origin
+	parent               string
+	priority             string
+	evaluatorGuardrailID string
+	internalModel        bool
+}
+
+type callWork struct {
+	mode               string
+	ingress            string
+	operationOverride  string
+	prompt             *usage.PromptReference
+	preferences        *routing.Preferences
+	primary            *routing.Route
+	deadline           time.Time
+	authorize          func(*routing.Route) *fault.Error
+	historicalSnapshot *routing.View
+	workflow           *workflowCall
+	unary              *unaryCall
+	facts              []events.AttemptFact
 	callSemantics
 	callPricing
 	callBudget
-	callPinning
-	callDelivery
 	routeLeg
-
 	generation generationCall
 }
+
+func newCall(req request, family wire.Format, caller callIdentity, lineage callLineage, work callWork) *Call {
+	return &Call{request: req, family: family, callIdentity: caller, callLineage: lineage, callWork: work}
+}
+
+const noFamily wire.Format = ""
 
 // callSemantics holds parsed caller headers and query parameters for strict/native routes.
 type callSemantics struct {
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
 	semanticQueryInvalid bool
+}
+
+func readSemantics(r *http.Request) callSemantics {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	return callSemantics{semanticHeaders: semanticHeaders(r.Header), semanticQuery: query, semanticQueryInvalid: err != nil}
 }
 
 // callPricing holds rate-card and routing-input snapshots pinned to the call.
