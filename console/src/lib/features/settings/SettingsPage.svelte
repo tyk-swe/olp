@@ -48,8 +48,8 @@
     queryFn: () => listSettings()
   }));
 
-  let drafts = $state<Record<string, { value: string; etag: string }>>({});
-  let fieldErrors = $state<Record<string, string>>({});
+  const drafts = $state<Record<string, { value: string; etag: string }>>({});
+  const fieldErrors = $state<Record<string, string>>({});
   const saveAction = useAction();
   const savingKey = $derived(saveAction.key);
   let conflictKey = $state('');

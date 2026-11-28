@@ -65,7 +65,7 @@
   let providerId = $state('');
 
   let applied = $state<Omit<ProviderResourceFilters, 'cursor'>>({ limit: 50 });
-  let paging = $state(emptyCursorHistory());
+  const paging = $state(emptyCursorHistory());
 
   const resources = createQuery(() => ({
     queryKey: resourceKeys.page(applied, paging.cursor),

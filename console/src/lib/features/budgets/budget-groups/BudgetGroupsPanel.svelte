@@ -56,7 +56,7 @@
   let editMonthly = $state('');
   let editWeekly = $state('');
   let editTemplate = $state('');
-  let editRates = $state({
+  const editRates = $state({
     requests_per_minute: '',
     tokens_per_minute: '',
     max_concurrency: ''

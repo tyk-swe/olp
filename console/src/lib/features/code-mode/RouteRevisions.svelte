@@ -10,7 +10,7 @@
   import { formatDate } from '#lib/format.js';
   import { codeKeys } from './codeKeys';
   let { id }: { id: string } = $props();
-  let paging = $state(emptyCursorHistory());
+  const paging = $state(emptyCursorHistory());
   const revisions = createQuery(() => ({
     queryKey: codeKeys.revisions(id, paging.cursor),
     queryFn: ({ signal }) => listCodeRevisions(id, paging.cursor, signal)

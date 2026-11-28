@@ -49,7 +49,7 @@
   } = $props();
   const section = $derived(managementSections[kind]);
   let editing = $state<CodeEditing | null>(null);
-  let paging = $state(emptyCursorHistory());
+  const paging = $state(emptyCursorHistory());
   const publishMutation = useMutation();
   let error = $state('');
   let notice = $state('');
