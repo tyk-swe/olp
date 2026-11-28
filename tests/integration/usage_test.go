@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/grants"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -178,7 +177,7 @@ func testSessionAdmissionAfterUsageRetention(t *testing.T, fixture usageFixture)
 		VALUES ('retention.usage_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID); err != nil {
 		t.Fatal(err)
 	}
-	if report, err := retention.RunMaintenance(t.Context(), fixture.pool, time.Now().Add(72*time.Hour), grants.PurgeExpiredEnrollments); err != nil || !report.LockAcquired {
+	if report, err := retention.RunMaintenance(t.Context(), fixture.pool, time.Now().Add(72*time.Hour), maintenancePurges()); err != nil || !report.LockAcquired {
 		t.Fatalf("maintenance: lock=%v error=%v", report.LockAcquired, err)
 	}
 	var facts int
@@ -227,7 +226,7 @@ func testAnchorRetention(t *testing.T, fixture usageFixture) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			report, err := retention.RunMaintenance(ctx, fixture.pool, now, grants.PurgeExpiredEnrollments)
+			report, err := retention.RunMaintenance(ctx, fixture.pool, now, maintenancePurges())
 			if err != nil || !report.LockAcquired {
 				t.Fatalf("maintenance did not finish while an anchor was locked: lock=%v error=%v", report.LockAcquired, err)
 			}
@@ -286,7 +285,7 @@ func testExpiringRecordsSkipLockedRows(t *testing.T, fixture usageFixture) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	report, err := retention.RunMaintenance(ctx, fixture.pool, now, grants.PurgeExpiredEnrollments)
+	report, err := retention.RunMaintenance(ctx, fixture.pool, now, maintenancePurges())
 	if err != nil || !report.LockAcquired {
 		t.Fatalf("maintenance did not finish while an expired session was locked: lock=%v error=%v", report.LockAcquired, err)
 	}
@@ -298,7 +297,7 @@ func testExpiringRecordsSkipLockedRows(t *testing.T, fixture usageFixture) {
 		t.Fatal(err)
 	}
 	sessions[2].retained = false
-	report, err = retention.RunMaintenance(t.Context(), fixture.pool, now, grants.PurgeExpiredEnrollments)
+	report, err = retention.RunMaintenance(t.Context(), fixture.pool, now, maintenancePurges())
 	if err != nil || !report.LockAcquired {
 		t.Fatalf("maintenance after unlock: lock=%v error=%v", report.LockAcquired, err)
 	}
@@ -317,9 +316,16 @@ func testExpiredIdentityAndGrantRecords(t *testing.T, fixture usageFixture) {
 	mustExec(t, fixture.pool, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits)
 		VALUES($1,$2,true,0,'default',true,0,1,'{}','{}')`, slot, fixture.providerID)
 
+	mustExec(t, fixture.pool, `INSERT INTO olp.settings(key,value,etag,updated_by) VALUES('retention.requests_days','3',gen_random_uuid(),$1)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID)
+	requestsCutoff := now.Add(-3 * 24 * time.Hour)
+
 	const byID, byDigest = `id::text=$1`, `digest=sha256(convert_to($1,'UTF8'))`
 	invitation := `INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at)
 		VALUES($1::text::uuid,$1::text||'@example.com','viewer',sha256(convert_to($1::text,'UTF8')),$3,$2)`
+	span := `INSERT INTO olp.trace_spans(id,project_id,api_key_id,principal_digest,trace_id,span_id,started_nanos,ended_nanos,category,status,attributes,received_at)
+		VALUES($1::text::uuid,$3,$4,sha256(convert_to($1::text,'UTF8')),decode(repeat('01',16),'hex'),decode(repeat('02',8),'hex'),0,0,'chat',0,'{}',$2)`
+	spanArgs := []any{fixture.projectID, fixture.keyID}
 	tables := []struct {
 		name, match, insert string
 		args                []any
@@ -338,6 +344,9 @@ func testExpiredIdentityAndGrantRecords(t *testing.T, fixture usageFixture) {
 			VALUES(sha256(convert_to($1::text,'UTF8')),$3,'mfa_manage',$2)`, []any{session}, now},
 		{"grant_enrollments", byID, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at)
 			VALUES($1::text::uuid,$3,$4,'digest','profile',$5,$2)`, []any{fixture.providerID, slot, fixture.ownerID}, now.Add(-time.Hour)},
+		{"replays", `key=$1`, `INSERT INTO olp.replays(actor,key,fingerprint,expires_at)
+			VALUES($3,$1::text,'\x00',$2)`, []any{fixture.ownerID}, now},
+		{"trace_spans", byID, span, spanArgs, requestsCutoff.Add(-time.Microsecond)},
 	}
 	type record struct{ table, match, key, fate string }
 	var records []record
@@ -371,17 +380,18 @@ func testExpiredIdentityAndGrantRecords(t *testing.T, fixture usageFixture) {
 		key := seed("invitations", byID, invitation, []any{fixture.ownerID}, "live", now.Add(-time.Hour))
 		mustExec(t, fixture.pool, "UPDATE olp.invitations SET "+closed+"=now() WHERE id=$1", key)
 	}
+	seed("trace_spans", byID, span, spanArgs, "live", requestsCutoff)
 
 	pass := func(stage string, purged ...string) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		report, err := retention.RunMaintenance(ctx, fixture.pool, now, grants.PurgeExpiredEnrollments)
+		report, err := retention.RunMaintenance(ctx, fixture.pool, now, maintenancePurges())
 		if err != nil || !report.LockAcquired {
 			t.Fatalf("%s: lock=%v error=%v", stage, report.LockAcquired, err)
 		}
-		if report.InvitationRows != 1 || report.OIDCFlowRows != 3 || report.GrantEnrollmentRows != 1 {
-			t.Fatalf("%s: invitations=%d flows=%d enrollments=%d, want 1, 3 and 1", stage, report.InvitationRows, report.OIDCFlowRows, report.GrantEnrollmentRows)
+		if report.InvitationRows != 1 || report.OIDCFlowRows != 3 || report.GrantEnrollmentRows != 1 || report.ReplayRows != 1 {
+			t.Fatalf("%s: invitations=%d flows=%d enrollments=%d replays=%d, want 1, 3, 1 and 1", stage, report.InvitationRows, report.OIDCFlowRows, report.GrantEnrollmentRows, report.ReplayRows)
 		}
 		for _, row := range records {
 			var exists bool
@@ -487,7 +497,7 @@ func testExpiredSecretsAndAudit(t *testing.T, fixture usageFixture) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	report, err := retention.RunMaintenance(ctx, fixture.pool, time.Now().UTC(), grants.PurgeExpiredEnrollments)
+	report, err := retention.RunMaintenance(ctx, fixture.pool, time.Now().UTC(), maintenancePurges())
 	if err != nil || !report.LockAcquired || report.AuditRows != 1 {
 		t.Fatalf("maintenance with an expired audit row: lock=%v audit rows=%d error=%v", report.LockAcquired, report.AuditRows, err)
 	}

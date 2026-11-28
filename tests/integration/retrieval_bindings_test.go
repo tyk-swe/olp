@@ -84,13 +84,14 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	}
 	manager := managementHTTPAs(t, pool, managerID, register)
 	outsider := managementHTTPAs(t, pool, outsiderID, register)
-	authoritySeq := func() int64 {
+	authority := func() (string, int64) {
 		t.Helper()
+		var id string
 		var seq int64
-		if err := pool.QueryRow(ctx, `SELECT authority_sequence FROM olp.installation WHERE singleton`).Scan(&seq); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT authority_id::text,authority_sequence FROM olp.installation WHERE singleton`).Scan(&id, &seq); err != nil {
 			t.Fatal(err)
 		}
-		return seq
+		return id, seq
 	}
 
 	payload := func(name, project string, enabled bool, grants []string, fields retrieval.Fields) string {
@@ -110,15 +111,15 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	expectStatus(t, "", outsider.call(t, "POST", "/api/v1/retrieval-bindings", "", payload("outsider", f.projectID, true, []string{f.keyID}, retrieval.Fields{})), http.StatusNotFound)
 
 	const createKey = "retrieval-create-1"
-	seqBeforeCreate := authoritySeq()
+	idBeforeCreate, seqBeforeCreate := authority()
 	createBody := payload("Primary KB", f.projectID, false, []string{f.keyID, f.keyID}, retrieval.Fields{Metadata: map[string]string{"tenant": "tenant_id"}})
 	created := expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
 	binding := decodeRetrievalBinding(t, created.body)
 	if created.location != "/api/v1/retrieval-bindings/"+binding.ID || binding.ProviderID != bedrockProvider || binding.Revision != 1 || len(binding.KeyGrants) != 1 || binding.KeyGrants[0] != f.keyID {
 		t.Fatalf("unexpected created binding: loc=%q binding=%+v", created.location, binding)
 	}
-	if authoritySeq() <= seqBeforeCreate {
-		t.Fatalf("authority sequence did not advance on create")
+	if id, seq := authority(); id == idBeforeCreate || seq <= seqBeforeCreate {
+		t.Fatalf("authority did not advance on create: id %s -> %s, sequence %d -> %d", idBeforeCreate, id, seqBeforeCreate, seq)
 	}
 
 	replayed := expectStatus(t, "", manager.call(t, "POST", "/api/v1/retrieval-bindings", "", createBody, createKey), http.StatusCreated)
@@ -150,13 +151,13 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	expectStatus(t, "", outsider.call(t, "PUT", path, created.etag, updateBody), http.StatusNotFound)
 
 	const updateKey = "retrieval-update-1"
-	seqBeforeUpdate := authoritySeq()
+	_, seqBeforeUpdate := authority()
 	updated := expectStatus(t, "", manager.call(t, "PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
 	bindingV2 := decodeRetrievalBinding(t, updated.body)
 	if bindingV2.Revision != 2 || !bindingV2.Enabled || bindingV2.Name != "Primary KB v2" || updated.etag == created.etag {
 		t.Fatalf("unexpected updated binding: etag=%q binding=%+v", updated.etag, bindingV2)
 	}
-	if authoritySeq() <= seqBeforeUpdate {
+	if _, seq := authority(); seq <= seqBeforeUpdate {
 		t.Fatalf("authority sequence did not advance on update")
 	}
 	replayedUpdate := expectStatus(t, "", manager.call(t, "PUT", path, created.etag, updateBody, updateKey), http.StatusOK)
@@ -174,10 +175,10 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	}
 	expectStatus(t, "", outsider.call(t, "GET", path+"/revisions/"+binding.RevisionID, "", ""), http.StatusNotFound)
 
-	seqBeforeRetire := authoritySeq()
+	_, seqBeforeRetire := authority()
 	expectStatus(t, "", manager.call(t, "DELETE", path, created.etag, ""), http.StatusPreconditionFailed)
 	expectStatus(t, "", manager.call(t, "DELETE", path, updated.etag, ""), http.StatusNoContent)
-	if authoritySeq() <= seqBeforeRetire {
+	if _, seq := authority(); seq <= seqBeforeRetire {
 		t.Fatalf("authority sequence did not advance on retire")
 	}
 	afterRetireList := expectStatus(t, "", manager.call(t, "GET", "/api/v1/retrieval-bindings", "", ""), http.StatusOK)

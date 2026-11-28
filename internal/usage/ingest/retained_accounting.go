@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -54,10 +55,5 @@ func invalidateRetainedCostProjections(ctx context.Context, tx pgx.Tx, snapshots
 		owners = append(owners, snapshot.OwnerID)
 	}
 	slices.Sort(owners)
-	for _, owner := range slices.Compact(owners) {
-		if _, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_versions(owner_id,version) VALUES($1,1) ON CONFLICT(owner_id) DO UPDATE SET version=olp.execution_debit_versions.version+1`, owner); err != nil {
-			return err
-		}
-	}
-	return nil
+	return debits.BumpOwnerVersionsTx(ctx, tx, slices.Compact(owners))
 }

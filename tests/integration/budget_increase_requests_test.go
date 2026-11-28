@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/budgets"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/projects"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -218,6 +221,37 @@ func TestBudgetIncreaseRequests(t *testing.T) {
 		t.Parallel()
 		testBudgetRequestLimitSplit(t, f)
 	})
+}
+
+func TestInstallationBudgetWritesReplaceTheStoredPolicy(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	owner := managementHTTPAs(t, pool, insertBudgetRequestUser(t, pool, "owner", "global"), func(mux *http.ServeMux, server *access.Server) {
+		projects.New(server).Register(mux)
+	})
+	const path = "/api/v1/budgets/installation"
+	read := func() (string, *keyauthority.BudgetPolicy) {
+		t.Helper()
+		reply := expectStatus(t, "read installation budget", owner.call(t, "GET", path, "", ""), http.StatusOK)
+		var current struct {
+			Policy *keyauthority.BudgetPolicy `json:"policy"`
+		}
+		if err := json.Unmarshal(reply.body, &current); err != nil {
+			t.Fatal(err)
+		}
+		return reply.etag, current.Policy
+	}
+	initial, _ := read()
+	expectStatus(t, "cap installation", owner.call(t, "PUT", path, initial, `{"policy":{"daily_cost_limit":"12.5"}}`), http.StatusOK)
+	capped, policy := read()
+	if capped == initial || policy == nil || policy.DailyCostLimit == nil || !strings.HasPrefix(*policy.DailyCostLimit, "12.5") {
+		t.Fatalf("stored installation budget = %+v with ETag %s after capping at ETag %s", policy, capped, initial)
+	}
+	expectStatus(t, "clear with a stale ETag", owner.call(t, "PUT", path, initial, `{"policy":null}`), http.StatusPreconditionFailed)
+	expectStatus(t, "clear installation budget", owner.call(t, "PUT", path, capped, `{"policy":null}`), http.StatusOK)
+	if cleared, policy := read(); cleared == capped || policy != nil {
+		t.Fatalf("installation budget = %+v with ETag %s after clearing at ETag %s", policy, cleared, capped)
+	}
 }
 
 func testBudgetRequestCombinedCap(t *testing.T, f budgetRequestFixture) {

@@ -62,7 +62,11 @@ func lockOwners(ctx context.Context, tx pgx.Tx, owners []limits.Owner) error {
 }
 
 func bumpOwners(ctx context.Context, tx pgx.Tx, owners []limits.Owner) error {
-	for _, id := range ownerIDs(owners) {
+	return BumpOwnerVersionsTx(ctx, tx, ownerIDs(owners))
+}
+
+func BumpOwnerVersionsTx(ctx context.Context, tx pgx.Tx, owners []string) error {
+	for _, id := range owners {
 		if _, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_versions(owner_id,version) VALUES($1,1) ON CONFLICT(owner_id) DO UPDATE SET version=olp.execution_debit_versions.version+1`, id); err != nil {
 			return err
 		}

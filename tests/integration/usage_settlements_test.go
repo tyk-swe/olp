@@ -128,6 +128,9 @@ func testRetainedUsageEvidence(t *testing.T, fixture usageFixture, resource *res
 	if status, body := post("usage-evidence", evidence("unpinned-model")); status != http.StatusUnprocessableEntity || audited() != 0 {
 		t.Fatalf("evidence for an unpinned model = %d %s with %d audit rows, want 422 and none", status, body, audited())
 	}
+	bystander := uuid.NewString()
+	mustExec(t, pool, `INSERT INTO olp.execution_debit_versions(owner_id,version) VALUES($1,5),($2,5)
+		ON CONFLICT(owner_id) DO UPDATE SET version=excluded.version`, fixture.keyID, bystander)
 	status, body := post("usage-evidence", evidence("fixture-model"))
 	var accepted struct {
 		ID         string `json:"id"`
@@ -142,5 +145,13 @@ func testRetainedUsageEvidence(t *testing.T, fixture usageFixture, resource *res
 	}
 	if stored != 1 || audited() != 1 {
 		t.Fatalf("accepted evidence stored %d rows and %d audit rows, want one of each", stored, audited())
+	}
+	var charged, untouched int64
+	if err := pool.QueryRow(ctx, `SELECT (SELECT version FROM olp.execution_debit_versions WHERE owner_id=$1),
+		(SELECT version FROM olp.execution_debit_versions WHERE owner_id=$2)`, fixture.keyID, bystander).Scan(&charged, &untouched); err != nil {
+		t.Fatal(err)
+	}
+	if charged != 6 || untouched != 5 {
+		t.Fatalf("limiter projection versions after accepted evidence: charged key=%d unrelated owner=%d, want 6 and 5", charged, untouched)
 	}
 }

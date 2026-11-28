@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -168,6 +169,61 @@ func TestSAMLFlowSecretsAreDiscardedWhenTheirSignInOrConfigurationEnds(t *testin
 	if flows := storedSecrets(t, pool, secrets.SAMLFlow); len(flows) != 0 {
 		t.Fatalf("reconfiguring SAML kept flow secrets %v", flows)
 	}
+}
+
+func TestSetupNamesTheInstallationAndAdmitsOneOwner(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	client := managementHTTP(t, pool, func(mux *http.ServeMux, server *access.Server) {
+		identity.New(server, identity.Config{Bootstrap: func() (string, bool) { return "bootstrap-token", true }}).Register(mux)
+	})
+	claim := func(email, installationName string) browserReply {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, client.server.URL+"/api/v1/setup", strings.NewReader(
+			fmt.Sprintf(`{"email":%q,"password":"a first owner password","display_name":"Owner","installation_name":%q}`, email, installationName)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", client.access.Origin)
+		request.Header.Set("X-OLP-Setup-Token", "bootstrap-token")
+		response, err := client.server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return browserReply{status: response.StatusCode, body: body}
+	}
+	installed := func(stage string, setupRequired bool, name string) {
+		t.Helper()
+		reply := expectStatus(t, stage, client.call(t, http.MethodGet, "/api/v1/setup/status", "", ""), http.StatusOK)
+		var status struct {
+			SetupRequired bool `json:"setup_required"`
+		}
+		if err := json.Unmarshal(reply.body, &status); err != nil {
+			t.Fatal(err)
+		}
+		var stored string
+		if err := pool.QueryRow(t.Context(), `SELECT name FROM olp.installation WHERE singleton`).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if status.SetupRequired != setupRequired || name != "" && stored != name {
+			t.Fatalf("%s: setup required=%v name=%q, want %v and %q", stage, status.SetupRequired, stored, setupRequired, name)
+		}
+	}
+	installed("before setup", true, "")
+	if first := claim("owner@example.com", "Renamed proxy"); first.status != http.StatusCreated {
+		t.Fatalf("setup = %d %s, want 201", first.status, first.body)
+	}
+	installed("after setup", false, "Renamed proxy")
+	if second := claim("second@example.com", "Another proxy"); second.status != http.StatusConflict || !strings.Contains(string(second.body), "/setup_complete") {
+		t.Fatalf("second setup = %d %s, want 409 setup_complete", second.status, second.body)
+	}
+	installed("after the refused setup", false, "Renamed proxy")
 }
 
 func identityOwner(t *testing.T, pool *pgxpool.Pool) (string, string) {

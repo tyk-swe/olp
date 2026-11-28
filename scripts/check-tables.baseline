@@ -1,14 +1,7 @@
-internal/access installation 3
 internal/access recent_auth 1
 internal/access settings 1
 internal/export secrets 1
 internal/grants provider_credentials 1
-internal/identity installation 1
 internal/identity settings 2
 internal/plugins provider_grants 1
-internal/release installation 1
 internal/release provider_grants 1
-internal/settings installation 1
-internal/usage execution_debit_versions 1
-internal/usage replays 1
-internal/usage trace_spans 1

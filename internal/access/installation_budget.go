@@ -60,7 +60,7 @@ func SetInstallationBudget(ctx context.Context, tx pgx.Tx, id string, policy *ke
 		return "", err
 	}
 	etag := ids.New()
-	if _, err := tx.Exec(ctx, "UPDATE olp.installation SET budget_policy=NULLIF($2::jsonb,'null'::jsonb),budget_etag=$3 WHERE id=$1", id, encoded, etag); err != nil {
+	if err := database.SetInstallationBudgetPolicy(ctx, tx, id, encoded, etag); err != nil {
 		return "", err
 	}
 	return etag, nil
