@@ -126,6 +126,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
 	t.Run("expiring records skip locked rows", func(t *testing.T) { testExpiringRecordsSkipLockedRows(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
+	t.Run("expired identity and grant records", func(t *testing.T) { testExpiredIdentityAndGrantRecords(t, fixture) })
 	t.Run("expired secrets and audit", func(t *testing.T) { testExpiredSecretsAndAudit(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
 	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
@@ -304,6 +305,98 @@ func testExpiringRecordsSkipLockedRows(t *testing.T, fixture usageFixture) {
 		t.Fatalf("maintenance after unlock purged %d expired sessions, want the previously locked one", report.SessionRows)
 	}
 	retained()
+}
+
+func testExpiredIdentityAndGrantRecords(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	session, slot := uuid.NewString(), uuid.NewString()
+	mustExec(t, fixture.pool, `INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint)
+		VALUES($1::text::uuid,$2,sha256(convert_to($1::text,'UTF8')),$3,'test')`, session, fixture.ownerID, now.Add(time.Hour))
+	mustExec(t, fixture.pool, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits)
+		VALUES($1,$2,true,0,'default',true,0,1,'{}','{}')`, slot, fixture.providerID)
+
+	const byID, byDigest = `id::text=$1`, `digest=sha256(convert_to($1,'UTF8'))`
+	invitation := `INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at)
+		VALUES($1::text::uuid,$1::text||'@example.com','viewer',sha256(convert_to($1::text,'UTF8')),$3,$2)`
+	tables := []struct {
+		name, match, insert string
+		args                []any
+		cutoff              time.Time
+	}{
+		{"invitations", byID, invitation, []any{fixture.ownerID}, now},
+		{"saml_flows", byID, `INSERT INTO olp.saml_flows(id,state_digest,cookie_digest,configuration_etag,request_id,expires_at)
+			VALUES($1::text::uuid,convert_to($1::text,'UTF8'),'\x00',$1::text::uuid,$1::text,$2)`, nil, now},
+		{"saml_assertion_replays", byDigest, `INSERT INTO olp.saml_assertion_replays(digest,expires_at)
+			VALUES(sha256(convert_to($1::text,'UTF8')),$2)`, nil, now},
+		{"oidc_flows", byID, `INSERT INTO olp.oidc_flows(id,state_digest,cookie_digest,configuration_etag,expires_at)
+			VALUES($1::text::uuid,convert_to($1::text,'UTF8'),'\x00',$1::text::uuid,$2)`, nil, now},
+		{"mfa_challenges", byID, `INSERT INTO olp.mfa_challenges(id,digest,user_id,user_etag,mfa_revision,purpose,data,expires_at)
+			VALUES($1::text::uuid,sha256(convert_to($1::text,'UTF8')),$3,$1::text::uuid,$1::text::uuid,'login','{}',$2)`, []any{fixture.ownerID}, now},
+		{"recent_auth", byDigest, `INSERT INTO olp.recent_auth(digest,session_id,purpose,expires_at)
+			VALUES(sha256(convert_to($1::text,'UTF8')),$3,'mfa_manage',$2)`, []any{session}, now},
+		{"grant_enrollments", byID, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at)
+			VALUES($1::text::uuid,$3,$4,'digest','profile',$5,$2)`, []any{fixture.providerID, slot, fixture.ownerID}, now.Add(-time.Hour)},
+	}
+	type record struct{ table, match, key, fate string }
+	var records []record
+	var sealed []string
+	defer func() { mustExec(t, fixture.pool, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])", sealed) }()
+	holder, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(t.Context())) }()
+	seed := func(table, match, insert string, args []any, fate string, expires time.Time) string {
+		t.Helper()
+		key := uuid.NewString()
+		if table == "saml_flows" || table == "oidc_flows" {
+			key = placeholderSecret(t, fixture.pool, secrets.OIDCFlow)
+			sealed = append(sealed, key)
+		}
+		mustExec(t, fixture.pool, insert, append([]any{key, expires}, args...)...)
+		records = append(records, record{table, match, key, fate})
+		return key
+	}
+	for _, table := range tables {
+		seed(table.name, table.match, table.insert, table.args, "due", table.cutoff)
+		seed(table.name, table.match, table.insert, table.args, "live", table.cutoff.Add(30*time.Minute))
+		held := seed(table.name, table.match, table.insert, table.args, "held", table.cutoff.Add(-time.Hour))
+		if _, err := holder.Exec(t.Context(), "SELECT 1 FROM olp."+table.name+" WHERE "+table.match+" FOR UPDATE", held); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, closed := range []string{"accepted_at", "revoked_at"} {
+		key := seed("invitations", byID, invitation, []any{fixture.ownerID}, "live", now.Add(-time.Hour))
+		mustExec(t, fixture.pool, "UPDATE olp.invitations SET "+closed+"=now() WHERE id=$1", key)
+	}
+
+	pass := func(stage string, purged ...string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		report, err := retention.RunMaintenance(ctx, fixture.pool, now)
+		if err != nil || !report.LockAcquired {
+			t.Fatalf("%s: lock=%v error=%v", stage, report.LockAcquired, err)
+		}
+		if report.InvitationRows != 1 || report.OIDCFlowRows != 3 || report.GrantEnrollmentRows != 1 {
+			t.Fatalf("%s: invitations=%d flows=%d enrollments=%d, want 1, 3 and 1", stage, report.InvitationRows, report.OIDCFlowRows, report.GrantEnrollmentRows)
+		}
+		for _, row := range records {
+			var exists bool
+			if err := fixture.pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp."+row.table+" WHERE "+row.match+")", row.key).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists == slices.Contains(purged, row.fate) {
+				t.Errorf("%s: %s %s row exists=%v", stage, row.fate, row.table, exists)
+			}
+		}
+	}
+	pass("while rows are locked", "due")
+	if err := holder.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	pass("after unlock", "due", "held")
 }
 
 func cleanupPublication(t *testing.T, fixture usageFixture, kind string) (string, string) {
