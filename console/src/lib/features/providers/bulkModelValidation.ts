@@ -96,13 +96,11 @@ function modelCapabilities(
     : suggested;
 }
 
-/** The client surface that speaks the provider's dialect natively. */
 async function nativeSurface(configuration: Provider['configuration']) {
   const { kind, profile_id, profile_revision } = configuration;
   if (kind === 'anthropic') return 'anthropic';
   if (kind === 'gemini' || kind === 'vertex_ai') return 'gemini';
   if (kind !== 'plugin') return 'openai';
-  // A plugin profile names its dialect.
   const profile = (await listProviderProfiles()).find(
     (candidate) =>
       candidate.id === profile_id && candidate.revision === profile_revision

@@ -19,16 +19,13 @@ export type ProviderStatusValue = Pick<ProviderReadiness, 'state'> & {
   pending_activation: boolean;
 };
 
-/** Badge class for a provider status line. */
 export type ProviderStatusTone = 'success' | 'warning' | 'danger';
 
-/** The fields of a probe result this summary line reads. */
 export type ProbeSummary = Pick<
   ProviderProbe,
   'probe_type' | 'detail' | 'discovered_models'
 >;
 
-/** Probe result line: the server detail, which probe ran, and models seen. */
 export function probeSummary(probe: ProbeSummary): string {
   const parts = [probe.detail, `${stateLabel(probe.probe_type)} probe`];
   if (probe.discovered_models != null) {
@@ -98,11 +95,9 @@ export function providerDisabled(
   return current.state === 'disabled';
 }
 
-/** Pointer shown wherever an edit control is locked by the disabled state. */
 export const DISABLED_EDIT_NOTE =
   'This provider is disabled. Restore it as a draft to change configuration, rotate credentials, or review models again.';
 
-/** Success line after a disable, naming the generation that published it. */
 export function disableNotice(generation: number | null): string {
   return generation == null
     ? 'Provider disabled. No revision is serving traffic.'

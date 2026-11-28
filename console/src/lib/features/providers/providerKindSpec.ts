@@ -24,8 +24,6 @@ export function requiresCredential(
   );
 }
 
-/** Whether the provider authenticates with a grant, whose credential versions
- * come from grant enrollment rather than a pasted credential. */
 export function requiresGrant(
   spec: ProviderKindCapability,
   authMode: ProviderAuthMode
@@ -86,7 +84,6 @@ export function requiresProbeModel(
   );
 }
 
-/** How the connection form asks for the model a connection test probes. */
 export function probeModelPrompt(kind: ProviderKind): {
   label: string;
   placeholder: string;

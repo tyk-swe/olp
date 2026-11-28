@@ -248,7 +248,6 @@
     min-width: 1.25rem;
     font-variant-numeric: tabular-nums;
   }
-  /* The current step pings and draws a signal rule along its baseline. */
   .steps li.current {
     color: var(--foreground-hover);
   }
