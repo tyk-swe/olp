@@ -25,6 +25,7 @@
   } = $props();
 
   let chartContainer = $state<HTMLDivElement>();
+  let chartScrubber = $state<HTMLInputElement>();
   let chartWidth = $state(640);
   let chartHeight = $state(260);
   let activeIndex = $state<number | null>(null);
@@ -131,9 +132,12 @@
       class="chart"
       onpointerdown={handlePointer}
       onpointermove={handlePointer}
-      onpointerleave={() => (activeIndex = null)}
+      onpointerleave={() => {
+        if (!chartScrubber?.matches(':focus')) activeIndex = null;
+      }}
     >
       <input
+        bind:this={chartScrubber}
         class="chart-scrubber"
         type="range"
         min="0"
