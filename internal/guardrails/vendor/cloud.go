@@ -162,10 +162,19 @@ type modelArmorConfig struct {
 	Template string `json:"template"`
 }
 
-var modelArmorTemplateName = regexp.MustCompile(`^projects/[a-z0-9][a-z0-9-]{0,62}/locations/[a-z0-9][a-z0-9-]{0,62}/templates/[A-Za-z0-9_][A-Za-z0-9_-]{0,62}$`)
+const (
+	modelArmorDomainLabel     = `[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?`
+	maxModelArmorDomainLength = 253
+)
+
+var modelArmorTemplateName = regexp.MustCompile(
+	`^projects/(?:((?:` + modelArmorDomainLabel + `\.)*` + modelArmorDomainLabel + `):)?[a-z0-9][a-z0-9-]{0,62}` +
+		`/locations/[a-z0-9][a-z0-9-]{0,62}/templates/[A-Za-z0-9_][A-Za-z0-9_-]{0,62}$`,
+)
 
 func (c modelArmorConfig) check() error {
-	if !modelArmorTemplateName.MatchString(c.Template) {
+	matches := modelArmorTemplateName.FindStringSubmatch(c.Template)
+	if matches == nil || len(matches[1]) > maxModelArmorDomainLength {
 		return errors.New("Model Armor requires a template resource in the form projects/{project}/locations/{location}/templates/{template}")
 	}
 	return nil

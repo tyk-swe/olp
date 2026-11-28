@@ -21,6 +21,8 @@ func TestModelArmorTemplateConfiguration(t *testing.T) {
 	}{
 		{"regional", regionalTemplate, true},
 		{"numeric project and multi-region", "projects/123456789012/locations/us/templates/_Prompt_Filter-1", true},
+		// Legacy project ID format from https://docs.cloud.google.com/artifact-registry/docs/docker/names#domain, checked 2026-11-28.
+		{"domain-scoped project", "projects/example.com:guardrail-project/locations/us/templates/prompt-filter", true},
 		{"template ID at limit", "projects/guardrail-project/locations/us/templates/" + strings.Repeat("a", 63), true},
 		{"incomplete resource", "projects/guardrail-project/locations/us", false},
 		{"wrong collection", "projects/guardrail-project/locations/us/policies/prompt-filter", false},
@@ -28,6 +30,8 @@ func TestModelArmorTemplateConfiguration(t *testing.T) {
 		{"extra segment", regionalTemplate + "/settings", false},
 		{"space in template ID", "projects/guardrail-project/locations/us/templates/prompt filter", false},
 		{"overlong project", "projects/" + overlongSegment + "/locations/us/templates/prompt-filter", false},
+		{"overlong project domain label", "projects/" + overlongSegment + ".example:guardrail-project/locations/us/templates/prompt-filter", false},
+		{"overlong project domain", "projects/" + strings.Repeat("segment.", 32) + "example:guardrail-project/locations/us/templates/prompt-filter", false},
 		{"overlong location", "projects/guardrail-project/locations/" + overlongSegment + "/templates/prompt-filter", false},
 		{"overlong template ID", "projects/guardrail-project/locations/us/templates/" + overlongSegment, false},
 	} {
