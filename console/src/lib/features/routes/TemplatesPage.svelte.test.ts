@@ -6,7 +6,13 @@ import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState, setFieldValue } from '#test/mount.js';
+import {
+  findButton,
+  mountWithState,
+  reportedError,
+  setFieldValue,
+  submitForm
+} from '#test/mount.js';
 import TemplatesPage from './TemplatesPage.svelte';
 
 it('requires confirmation before publishing template placements and displays skipped reasons', async () => {
@@ -275,4 +281,55 @@ it('keeps an edited template draft when the operator declines to discard it', as
 
   expect(decline).toHaveBeenCalledOnce();
   expect(name().value).toBe('my-draft');
+});
+
+it('reports a refused template at the field that holds the problem', async () => {
+  const writes = vi.fn();
+  serve(
+    (request) => {
+      const path = new URL(request.url).pathname;
+      if (request.method === 'PUT') {
+        writes();
+        return json(
+          {
+            title: 'Validation failed',
+            status: 422,
+            errors: {
+              slug_pattern: [{ code: 'invalid', message: 'Include {model}.' }]
+            }
+          },
+          422
+        );
+      }
+      if (path === '/api/v1/projects') return json({ items: [] });
+      return path.endsWith('/route-templates')
+        ? json({ items: [storedTemplate] })
+        : json(storedTemplate);
+    },
+    ['read', 'configure']
+  );
+  const { target } = mountWithState(TemplatesPage, {}, { attach: true });
+  const button = (name: string) => findButton(target, name);
+  await eventually(() => expect(button('Inspect and edit')).toBeDefined());
+  button('Inspect and edit')?.click();
+  const control = (selector: string) =>
+    target.querySelector<HTMLInputElement>(`form ${selector}`)!;
+  await eventually(() => expect(control('input')?.value).toBe('stored'));
+  const policy = control('textarea');
+  const slug = [...target.querySelectorAll('label')].find(
+    (label) => label.textContent?.trim() === 'Route slug pattern'
+  )!.control as HTMLInputElement;
+
+  setFieldValue(policy, '[1]');
+  submitForm(target);
+  await eventually(() => expect(document.activeElement).toBe(policy));
+  expect(reportedError(policy)).toBe('Routing policy must be a JSON object');
+  expect(writes).not.toHaveBeenCalled();
+
+  setFieldValue(policy, '');
+  submitForm(target);
+  await eventually(() => expect(document.activeElement).toBe(slug));
+  expect(reportedError(slug)).toBe('Include {model}.');
+  expect(reportedError(policy)).toBeUndefined();
+  expect(target.querySelector('form [role="alert"]')).toBeNull();
 });

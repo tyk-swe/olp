@@ -1,17 +1,16 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import FormField from '#lib/components/FormField.svelte';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { useAction } from '#lib/editing/action.svelte.js';
-  import {
-    useMutationIntent,
-    usePrincipalLifetime
-  } from '#lib/editing/mutationIntent.svelte.js';
-  import { nativeObject, parseManagementJSON } from '#lib/nativeJson.js';
+  import { useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { listCredentials, createCredential, deleteCredential } from './api';
+  import { validateCredential } from './credentialDraft';
   import { guardrailKeys } from '#lib/domain/guardrails/guardrailKeys.js';
   let {
     projects,
@@ -22,12 +21,14 @@
     projectID?: string;
     oncreated?: (id: string) => void;
   } = $props();
-  let project = $state(untrack(() => projectID));
-  let name = $state('');
-  let credential = $state('');
+  const draft = $state({
+    project: untrack(() => projectID),
+    name: '',
+    secret: ''
+  });
   const access = useRole();
-  const action = useAction();
-  const intent = useMutationIntent();
+  const action = useMutation<'secret'>();
+  const errors = $derived(action.fieldErrors);
   const client = useQueryClient();
   const credentials = createQuery(() => ({
     queryKey: guardrailKeys.credentials(),
@@ -39,35 +40,28 @@
     )
   );
   const capture = usePrincipalLifetime(() => {
-    credential = '';
+    draft.secret = '';
   });
-  async function submit(event: SubmitEvent) {
+  async function submit(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     const current = capture();
-    await action.run(
-      async () => {
-        const parsed = parseManagementJSON(credential);
-        if (!nativeObject(parsed)) return { ok: false as const };
-        return {
-          ok: true as const,
-          value: await intent.submit(
-            { name, project_id: project, credential: parsed },
-            createCredential
-          )
-        };
-      },
-      async (result) => {
-        if (!result.ok) {
-          action.error = 'Enter a credential JSON object';
-          return;
-        }
-        credential = '';
+    const checked = validateCredential(draft);
+    if (!action.check(checked)) return focusFormError(form);
+    const accepted = await action.submit(
+      checked.value,
+      createCredential,
+      async (created) => {
+        draft.secret = '';
         await client.invalidateQueries({
           queryKey: guardrailKeys.credentials()
         });
-        if (current()) oncreated(result.value.id);
+        if (current()) oncreated(created.id);
       }
     );
+    if (!accepted) await focusFormError(form);
   }
 </script>
 
@@ -131,39 +125,52 @@
   {/if}
   {#if access.allows('POST /api/v1/guardrail-credentials')}
     <form class="form-card credential-form" onsubmit={submit}>
-      <label class="form-field">
-        Project<select
-          required
-          bind:value={project}
-          disabled={Boolean(projectID)}
-        >
-          <option value="">
-            Choose project
-          </option>{#each projects as item (item.id)}<option value={item.id}>
-              {item.name}
-            </option>{/each}
-        </select>
-      </label>
-      <label class="form-field">
-        New credential name<input required bind:value={name} />
-      </label>
-      <label class="form-field full">
-        Secret fields as JSON<textarea
-          required
-          autocomplete="off"
-          spellcheck="false"
-          bind:value={credential}></textarea>
-      </label>
+      <FormField label="Project" error={undefined}>
+        {#snippet control(attributes)}
+          <select
+            {...attributes}
+            required
+            bind:value={draft.project}
+            disabled={Boolean(projectID)}
+          >
+            <option value="">
+              Choose project
+            </option>{#each projects as item (item.id)}<option value={item.id}>
+                {item.name}
+              </option>{/each}
+          </select>
+        {/snippet}
+      </FormField>
+      <FormField label="New credential name" error={undefined}>
+        {#snippet control(attributes)}
+          <input {...attributes} required bind:value={draft.name} />
+        {/snippet}
+      </FormField>
+      <FormField label="Secret fields as JSON" error={errors.secret} full>
+        {#snippet control(attributes)}
+          <textarea
+            {...attributes}
+            required
+            autocomplete="off"
+            spellcheck="false"
+            bind:value={draft.secret}></textarea>
+        {/snippet}
+      </FormField>
       <div class="page-actions">
         <button class="button button-primary" disabled={action.busy}>
           Create credential
         </button>
       </div>
+      {#if action.error}<p
+          class="inline-problem"
+          role="alert"
+          tabindex="-1"
+          data-error-summary
+        >
+          {action.error}
+        </p>{/if}
     </form>
   {/if}
-  {#if action.error}<p class="inline-problem" role="alert">
-      {action.error}
-    </p>{/if}
 </section>
 
 <style>
