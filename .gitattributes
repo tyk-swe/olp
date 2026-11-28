@@ -3,9 +3,10 @@ tests/fixtures/fidelity/*/*.sse whitespace=-blank-at-eof
 
 # Generated files: keep them out of review noise.
 management/management.json linguist-generated=true
-console/src/lib/management/schema.d.ts linguist-generated=true
-console/pnpm-lock.yaml linguist-generated=true
-tests/sdk-smoke/pnpm-lock.yaml linguist-generated=true
+management/operations.gen.json linguist-generated=true
+guardrails/schema.d.ts linguist-generated=true
+*.gen.go linguist-generated=true
+pnpm-lock.yaml linguist-generated=true
 docs/images/*.png -diff
 console/tests/e2e/*-snapshots/*.png -diff
 internal/domain/operations/tokenization/estimate/ranks/*.bin binary linguist-generated=true
