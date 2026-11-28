@@ -41,6 +41,9 @@ const (
 	structure jsonContext = iota
 	call
 	result
+	bedrockResult
+	bedrockResultContent
+	bedrockResultItem
 	literal
 )
 
@@ -174,9 +177,10 @@ func walk(value any, depth int, c jsonContext, text rewrite) (any, error) {
 	case map[string]any:
 		return walkObject(v, depth, c, text)
 	case []any:
+		itemContext := arrayItemContext(c)
 		out := make([]any, len(v))
 		for i, child := range v {
-			rewritten, err := walk(child, depth+1, c, text)
+			rewritten, err := walk(child, depth+1, itemContext, text)
 			if err != nil {
 				return nil, err
 			}
@@ -198,6 +202,17 @@ func walk(value any, depth int, c jsonContext, text rewrite) (any, error) {
 		return scalar(nil, "null", text)
 	}
 	return nil, errRedaction
+}
+
+func arrayItemContext(c jsonContext) jsonContext {
+	switch c {
+	case bedrockResultContent:
+		return bedrockResultItem
+	case bedrockResultItem:
+		return structure
+	default:
+		return c
+	}
 }
 
 func scalar(original any, rendered string, text rewrite) (any, error) {
@@ -260,8 +275,14 @@ func memberContext(c jsonContext, key string, child any) jsonContext {
 		return literal
 	case c == call && (key == "arguments" || key == "input" || key == "args"):
 		return literal
-	case c == result && key == "response", key == "json":
+	case c == result && (key == "response" || key == "json"):
 		return literal
+	case c == bedrockResultItem && key == "json":
+		return literal
+	case c == bedrockResult && key == "content":
+		if _, ok := child.([]any); ok {
+			return bedrockResultContent
+		}
 	case key == "function" || key == "function_call" || key == "functionCall" || key == "toolUse" || key == "tool_calls":
 		if child != nil {
 			return call
@@ -269,6 +290,11 @@ func memberContext(c jsonContext, key string, child any) jsonContext {
 		return structure
 	case key == "functionResponse":
 		return result
+	case key == "toolResult":
+		wrapper, _ := child.(map[string]any)
+		if id, _ := wrapper["toolUseId"].(string); id != "" {
+			return bedrockResult
+		}
 	}
 	return structure
 }

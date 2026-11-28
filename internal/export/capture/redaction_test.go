@@ -51,7 +51,7 @@ func TestRedactScrubsNestedInputOutputAndToolArguments(t *testing.T) {
 		"messages": json.RawMessage(`[{"role":"user","content":"use secret-token and 424242","nested":{"secret-token":"ok","num":424242}},{"type":"function_call","name":"lookup","arguments":"{\"query\":\"secret-token\"}"}]`),
 	}
 	tools := []json.RawMessage{
-		json.RawMessage(`{"type":"tool_use","name":"fetch","arguments":"{\"token\":\"secret-token\"}"}`),
+		json.RawMessage(`{"type":"tool_use","name":"fetch","arguments":"{\"token\":\"secret-token\",\"type\":\"image\"}"}`),
 	}
 	got, err := redact(t.Context(), engine, content{
 		input:  input,
@@ -80,6 +80,71 @@ func TestRedactScrubsNestedInputOutputAndToolArguments(t *testing.T) {
 	encodedArgs, ok := toolCall["arguments"].(string)
 	if !ok || !json.Valid([]byte(encodedArgs)) {
 		t.Fatalf("redacted tool arguments did not remain a JSON-encoded string: %#v", toolCall["arguments"])
+	}
+}
+
+func TestRedactInspectsCallsInsideOrdinaryJSON(t *testing.T) {
+	t.Parallel()
+	engine := testRedactor(t, "fixture-marker")
+	const call = `{"type":"function_call","name":"lookup","arguments":"{\"query\":\"fixture-\\u006darker\"}"}`
+	const toolResult = `{"toolResult":{"toolUseId":"call",`
+	for name, block := range map[string]string{
+		"ordinary json member":                  `{"json":` + call + `}`,
+		"Bedrock response member":               toolResult + `"content":[{"response":` + call + `}]}}`,
+		"Bedrock json outside content":          toolResult + `"json":` + call + `,"content":[{"text":"done"}]}}`,
+		"Bedrock json inside nested array":      toolResult + `"content":[[{"json":` + call + `}]]}}`,
+		"Bedrock json without a tool result ID": `{"toolResult":{"content":[{"json":` + call + `}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := redact(t.Context(), engine, content{
+				input: map[string]json.RawMessage{
+					"messages": json.RawMessage(`[{"role":"user","content":[` + block + `]}]`),
+				},
+			})
+			if err != nil {
+				t.Fatalf("redact returned unexpected error: %v", err)
+			}
+			if raw := got.input["messages"]; !strings.Contains(string(raw), `"{\"query\":\"[REDACTED]\"}"`) {
+				t.Fatalf("call inside ordinary json did not have its arguments decoded and scrubbed: %s", raw)
+			}
+		})
+	}
+}
+
+func TestRedactScrubsLiteralToolResults(t *testing.T) {
+	t.Parallel()
+	engine := testRedactor(t, "fixture-marker")
+	const payload = `{"type":"image","arguments":"inspect fixture-marker"}`
+	for _, tc := range []struct {
+		name  string
+		field string
+		body  string
+	}{
+		{
+			name:  "Gemini function response",
+			field: "contents",
+			body:  `[{"role":"user","parts":[{"functionResponse":{"name":"lookup","response":` + payload + `}}]}]`,
+		},
+		{
+			name:  "Bedrock tool result",
+			field: "messages",
+			body:  `[{"role":"user","content":[{"toolResult":{"toolUseId":"call","content":[{"json":` + payload + `}]}}]}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := redact(t.Context(), engine, content{
+				input: map[string]json.RawMessage{tc.field: json.RawMessage(tc.body)},
+			})
+			if err != nil {
+				t.Fatalf("redact dropped ordinary tool result data: %v", err)
+			}
+			raw := string(got.input[tc.field])
+			if strings.Contains(raw, "fixture-marker") || !strings.Contains(raw, `"arguments":"inspect [REDACTED]"`) || !strings.Contains(raw, `"type":"image"`) {
+				t.Fatalf("tool result fields were not preserved and scrubbed: %s", raw)
+			}
+		})
 	}
 }
 
