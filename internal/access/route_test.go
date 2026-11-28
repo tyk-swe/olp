@@ -1,12 +1,8 @@
 package access
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
 	"testing"
-
-	"github.com/tyk-swe/olp/internal/access/authz"
 )
 
 func TestPresentedInferenceKeyShapes(t *testing.T) {
@@ -42,36 +38,10 @@ func TestPresentedInferenceKeyShapes(t *testing.T) {
 	}
 }
 
-func goldenTokenScopes(t *testing.T, names []string) []authz.Operation {
-	t.Helper()
-	scopes := make([]authz.Operation, len(names))
-	for i, name := range names {
-		op, ok := authz.ParseOperation(name)
-		if !ok {
-			t.Fatalf("unknown token scope %q", name)
-		}
-		scopes[i] = op
-	}
-	return scopes
-}
-
 func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
-	raw, err := os.ReadFile("testdata/authorization.golden.json")
+	matrix := readAuthorizationGolden(t)
+	requirements, err := ContractRequirements()
 	if err != nil {
-		t.Fatal(err)
-	}
-	var matrix struct {
-		Archetypes []struct {
-			Name        string   `json:"name"`
-			Kind        string   `json:"kind"`
-			Role        string   `json:"role"`
-			CreatorRole string   `json:"creator_role"`
-			Global      bool     `json:"global"`
-			Scopes      []string `json:"scopes"`
-		} `json:"archetypes"`
-		Routes map[string]string `json:"routes"`
-	}
-	if err := json.Unmarshal(raw, &matrix); err != nil {
 		t.Fatal(err)
 	}
 	for _, pattern := range []string{"POST /api/v1/providers/{provider_id}/codex-import", "POST /api/v1/providers/{provider_id}/claude-import", "POST /api/v1/providers/{provider_id}/antigravity-import"} {
@@ -79,14 +49,9 @@ func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
 		if !ok || len(row) != len(matrix.Archetypes) {
 			t.Fatal("the import route needs an authorization expectation for every caller")
 		}
-		requirements, err := ContractRequirements()
-		if err != nil {
-			t.Fatal(err)
-		}
 		for index, caller := range matrix.Archetypes {
 			t.Run(caller.Name, func(t *testing.T) {
-				principal := authz.Principal{User: authz.User{Role: caller.Role}, Kind: caller.Kind, AllProjects: caller.Global}.
-					Delegated(goldenTokenScopes(t, caller.Scopes), caller.CreatorRole)
+				principal := caller.principal(t)
 				if admitted := requirements[pattern].Admits(principal) == nil; admitted != (row[index] == 'Y') {
 					t.Fatalf("import authority disagrees with the canonical expectation, admitted=%t", admitted)
 				}
