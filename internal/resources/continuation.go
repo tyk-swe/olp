@@ -106,35 +106,13 @@ func (s *Store) ClaimForDispatch(ctx context.Context, r *Resource, payload []byt
 	if len(prepared.Metadata) == 0 {
 		prepared.Metadata = []byte(`{}`)
 	}
-	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, prepared.UUID.String(), payload)
-	if err != nil {
-		return nil, false, err
-	}
-	out, err := scan(s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
- SELECT id FROM olp.api_keys WHERE id=$3 AND revoked_at IS NULL
-   AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
-), parent AS MATERIALIZED (
- SELECT id FROM olp.provider_resources WHERE id=$15 AND api_key_id=$3
-   AND kind=$2 AND state=$19 AND expires_at>now() FOR SHARE
-), active AS MATERIALIZED (
- SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE
-), inserted AS (
- INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id,target_id)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$21
- FROM owner CROSS JOIN active
- WHERE active.active_key_version=$17
-   AND ($15::uuid IS NULL OR EXISTS(SELECT 1 FROM parent))
- ON CONFLICT(api_key_id,submission_id) WHERE submission_id IS NOT NULL DO NOTHING
- RETURNING `+columns+`
-), stored AS (
- INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at)
- SELECT id,$20,$17,$18,expires_at FROM inserted
- ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
-   ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
-)
-SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
-		prepared.UUID, prepared.Kind, prepared.APIKeyID, prepared.RouteSlug, prepared.ProviderID, prepared.ProviderRevisionID, prepared.RouteRevisionID, prepared.SlotID, prepared.CredentialID, prepared.UpstreamID, prepared.State, prepared.Metadata, prepared.ExpiresAt, prepared.ContractVersion, prepared.ParentID, prepared.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation, prepared.TargetID))
+	out, err := withTxValue(ctx, s.pool, func(tx pgx.Tx) (*Resource, error) {
+		claimed, err := insertClaim(ctx, tx, prepared, s.keys.Active)
+		if err != nil {
+			return nil, err
+		}
+		return claimed, s.keys.Store(ctx, tx, s.installation, claimed.UUID.String(), secrets.ProviderContinuation, payload, claimed.ExpiresAt)
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, claimErr := s.existingClaim(ctx, r)
 		return existing, false, claimErr
@@ -143,6 +121,27 @@ SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
 		return nil, false, err
 	}
 	return out, true, nil
+}
+
+func insertClaim(ctx context.Context, tx pgx.Tx, prepared Resource, keyVersion int) (*Resource, error) {
+	return scan(tx.QueryRow(ctx, `WITH owner AS MATERIALIZED (
+ SELECT id FROM olp.api_keys WHERE id=$3 AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
+), parent AS MATERIALIZED (
+ SELECT id FROM olp.provider_resources WHERE id=$15 AND api_key_id=$3
+   AND kind=$2 AND state=$18 AND expires_at>now() FOR SHARE
+), active AS MATERIALIZED (
+ SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE
+)
+ INSERT INTO olp.provider_resources
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id,target_id)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$19
+ FROM owner CROSS JOIN active
+ WHERE active.active_key_version=$17
+   AND ($15::uuid IS NULL OR EXISTS(SELECT 1 FROM parent))
+ ON CONFLICT(api_key_id,submission_id) WHERE submission_id IS NOT NULL DO NOTHING
+ RETURNING `+columns,
+		prepared.UUID, prepared.Kind, prepared.APIKeyID, prepared.RouteSlug, prepared.ProviderID, prepared.ProviderRevisionID, prepared.RouteRevisionID, prepared.SlotID, prepared.CredentialID, prepared.UpstreamID, prepared.State, prepared.Metadata, prepared.ExpiresAt, prepared.ContractVersion, prepared.ParentID, prepared.SubmissionID, keyVersion, StateReady, prepared.TargetID))
 }
 
 func (s *Store) existingClaim(ctx context.Context, r *Resource) (*Resource, error) {
@@ -193,12 +192,17 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
 	if err := s.validateContract(r, payload); err != nil {
 		return err
 	}
-	ciphertext, err := s.keys.Seal(s.installation, secrets.ProviderContinuation, r.UUID.String(), payload)
-	if err != nil {
-		return err
-	}
-	var owner, active, updated, stored bool
-	err = s.pool.QueryRow(ctx, `WITH owner AS MATERIALIZED (
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := markReady(ctx, tx, r, s.keys.Active); err != nil {
+			return err
+		}
+		return s.keys.Store(ctx, tx, s.installation, r.UUID.String(), secrets.ProviderContinuation, payload, r.ExpiresAt)
+	})
+}
+
+func markReady(ctx context.Context, tx pgx.Tx, r *Resource, keyVersion int) error {
+	var owner, active, updated bool
+	err := tx.QueryRow(ctx, `WITH owner AS MATERIALIZED (
  SELECT id FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL
    AND (expires_at IS NULL OR expires_at>now()) FOR SHARE
 ), active AS MATERIALIZED (
@@ -208,31 +212,20 @@ func (s *Store) CompleteContinuation(ctx context.Context, r *Resource, payload [
  FROM owner,active
  WHERE r.id=$2 AND r.api_key_id=$1 AND r.state=$3 AND r.kind=$5
    AND r.expires_at>now() AND active.active_key_version=$6 RETURNING r.id
-), stored AS (
- INSERT INTO olp.secrets(id,purpose,key_version,ciphertext,expires_at)
- SELECT id,$7,$6,$8,$9 FROM updated
- ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,
-   ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
 )
 SELECT EXISTS(SELECT 1 FROM owner),
        EXISTS(SELECT 1 FROM active WHERE active_key_version=$6),
-       EXISTS(SELECT 1 FROM updated),EXISTS(SELECT 1 FROM stored)`,
-		r.APIKeyID, r.UUID, StateDispatching, StateReady, KindContinuation,
-		s.keys.Active, secrets.ProviderContinuation, ciphertext, r.ExpiresAt).Scan(&owner, &active, &updated, &stored)
-	if err != nil {
+       EXISTS(SELECT 1 FROM updated)`,
+		r.APIKeyID, r.UUID, StateDispatching, StateReady, KindContinuation, keyVersion).Scan(&owner, &active, &updated)
+	switch {
+	case err != nil:
 		return err
-	}
-	if !owner {
+	case !owner:
 		return ErrNotFound
-	}
-	if !active {
+	case !active:
 		return errors.New("reload the active master key before writing secrets")
-	}
-	if !updated {
+	case !updated:
 		return ErrTransition
-	}
-	if !stored {
-		return ErrContract
 	}
 	return nil
 }

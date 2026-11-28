@@ -157,7 +157,7 @@ func (s *samlService) storeSAMLFlow(r *http.Request, tx pgx.Tx, prep preparedSAM
 			}
 		}
 	}
-	if err := pruneExpiredSecrets(r.Context(), tx); err != nil {
+	if err := secrets.DeleteExpired(r.Context(), tx, expiredCleanupLimit); err != nil {
 		return httpkit.Reply{}, err
 	}
 	raw, err := json.Marshal(flow)
@@ -345,11 +345,11 @@ func (s *samlService) completeSAML(r *http.Request) (httpkit.Reply, error) {
 		if !c.Enabled || c.ETag != flow.ETag {
 			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 		}
-		consumed, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID)
+		consumed, err := secrets.DeleteByID(r.Context(), tx, flow.ID)
 		if err != nil {
 			return httpkit.Reply{}, false, err
 		}
-		if consumed.RowsAffected() != 1 {
+		if consumed != 1 {
 			return httpkit.Reply{}, false, problem.Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 		}
 		response, err := s.acceptSAML(r, tx, c, flow)

@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	limitdebits "github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
 	"github.com/tyk-swe/olp/internal/usage/retention"
@@ -124,6 +126,7 @@ func TestCleanupPreservesRetainedAndActiveEvidence(t *testing.T) {
 	t.Run("anchor retention", func(t *testing.T) { testAnchorRetention(t, fixture) })
 	t.Run("expiring records skip locked rows", func(t *testing.T) { testExpiringRecordsSkipLockedRows(t, fixture) })
 	t.Run("identity expiry", func(t *testing.T) { testIdentityExpiry(t, fixture) })
+	t.Run("expired secrets and audit", func(t *testing.T) { testExpiredSecretsAndAudit(t, fixture) })
 	t.Run("workflow recovery", func(t *testing.T) { testWorkflowRecovery(t, fixture) })
 	t.Run("retained settlement failure", func(t *testing.T) { testRetainedSettlementPollFailure(t, fixture) })
 	t.Run("session admission after usage retention", func(t *testing.T) { testSessionAdmissionAfterUsageRetention(t, fixture) })
@@ -369,6 +372,40 @@ func testIdentityExpiry(t *testing.T, fixture usageFixture) {
 	var futureRetained bool
 	if err := fixture.pool.QueryRow(t.Context(), `SELECT count(*)=1 AND bool_and(expires_at>now()) FROM olp.mcp_call_identities WHERE api_key_id=$1`, fixture.keyID).Scan(&futureRetained); err != nil || !futureRetained {
 		t.Fatalf("future identity was not preserved: retained=%v error=%v", futureRetained, err)
+	}
+}
+
+func testExpiredSecretsAndAudit(t *testing.T, fixture usageFixture) {
+	t.Helper()
+	expired, locked, live := placeholderSecret(t, fixture.pool, secrets.MutationReplay), placeholderSecret(t, fixture.pool, secrets.MutationReplay), placeholderSecret(t, fixture.pool, secrets.MutationReplay)
+	defer mustExec(t, fixture.pool, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])", []string{expired, locked, live})
+	mustExec(t, fixture.pool, "UPDATE olp.secrets SET expires_at=now()-interval '1 minute' WHERE id=ANY($1::uuid[])", []string{expired, locked})
+	stale, recent := uuid.NewString(), uuid.NewString()
+	mustExec(t, fixture.pool, `INSERT INTO olp.audit(id,action,resource_type,outcome,occurred_at)
+		VALUES($1,'fixture.stale','fixture','success',now()-interval '4000 days'),($2,'fixture.recent','fixture','success',now())`, stale, recent)
+	holder, err := fixture.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(t.Context())) }()
+	if _, err := holder.Exec(t.Context(), `SELECT id FROM olp.secrets WHERE id=$1 FOR UPDATE`, locked); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	report, err := retention.RunMaintenance(ctx, fixture.pool, time.Now().UTC())
+	if err != nil || !report.LockAcquired || report.AuditRows != 1 {
+		t.Fatalf("maintenance with an expired audit row: lock=%v audit rows=%d error=%v", report.LockAcquired, report.AuditRows, err)
+	}
+	if secretStored(t, fixture.pool, expired) || !secretStored(t, fixture.pool, locked) || !secretStored(t, fixture.pool, live) {
+		t.Fatal("maintenance must purge only the expired secret that nothing holds")
+	}
+	var kept []string
+	if err := fixture.pool.QueryRow(t.Context(), "SELECT array_agg(id::text) FROM olp.audit WHERE id=ANY($1::uuid[])", []string{stale, recent}).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(kept, []string{recent}) {
+		t.Fatalf("maintenance kept audit rows %v, want only the recent one", kept)
 	}
 }
 

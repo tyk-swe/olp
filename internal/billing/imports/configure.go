@@ -134,7 +134,7 @@ func Save(ctx context.Context, tx pgx.Tx, vault Vault, providerID string, desire
 		return "", err
 	}
 	if found && current != nil && *current != credentialID {
-		if err := deleteSecret(ctx, tx, *current); err != nil {
+		if err := secrets.Delete(ctx, tx, secrets.BillingCredential, *current); err != nil {
 			return "", err
 		}
 	}
@@ -157,12 +157,7 @@ func Remove(ctx context.Context, tx pgx.Tx, providerID string) error {
 	if existing.CredentialID == nil {
 		return nil
 	}
-	return deleteSecret(ctx, tx, *existing.CredentialID)
-}
-
-func deleteSecret(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, id, secrets.BillingCredential)
-	return err
+	return secrets.Delete(ctx, tx, secrets.BillingCredential, *existing.CredentialID)
 }
 
 func syncRevision(ctx context.Context, tx pgx.Tx, providerID string, scope source.Scope) error {

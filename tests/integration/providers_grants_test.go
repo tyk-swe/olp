@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -27,9 +26,11 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/grants/personal"
+	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -552,9 +553,9 @@ func TestPersonalDeviceEnrollmentRetriesClientSetup(t *testing.T) {
 		fmt.Fprintf(w, `{"device_code":"test-device","user_code":"test-user","verification_uri":%q,"expires_in":600,"interval":5}`, provider.URL+"/verify")
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
-		exchanges.Add(1)
+		issued := exchanges.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"access_token":"test-access-token","token_type":"Bearer","expires_in":600}`)
+		_, _ = fmt.Fprintf(w, `{"access_token":"test-access-token-%[1]d","refresh_token":"test-refresh-token-%[1]d","token_type":"Bearer","expires_in":600}`, issued)
 	})
 	binding := personal.Binding{
 		ServerID: uuid.NewString(), ProjectID: fixture.projectID, Endpoint: provider.URL + "/mcp",
@@ -600,6 +601,150 @@ func TestPersonalDeviceEnrollmentRetriesClientSetup(t *testing.T) {
 	}
 	if result, err := store.Poll(ctx, handoff.EnrollmentID, fixture.ownerID); err != nil || result.State != personal.Active || exchanges.Load() != 1 {
 		t.Fatalf("retry = %+v, error = %v, token exchanges = %d, want an active grant after one exchange", result, err, exchanges.Load())
+	}
+	var sessions int
+	var accessID, refreshID string
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM olp.secrets WHERE purpose=$1),access_secret_id::text,refresh_secret_id::text FROM olp.mcp_user_grants`,
+		secrets.MCPGrantEnrollment).Scan(&sessions, &accessID, &refreshID); err != nil {
+		t.Fatal(err)
+	}
+	if sessions != 0 {
+		t.Fatalf("the completed enrollment kept %d session secrets", sessions)
+	}
+	mustExec(t, pool, "UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second'")
+	refreshed, err := store.Resolve(ctx, keyauthority.Authority{ID: fixture.keyID, ProjectID: &fixture.projectID},
+		routing.MCPToolsetTool{ServerID: binding.ServerID, Endpoint: binding.Endpoint, OAuth: &binding.OAuth})
+	if err != nil || string(refreshed) != "test-access-token-2" {
+		t.Fatalf("refresh = %q, error = %v, want the second access token", refreshed, err)
+	}
+	if secretStored(t, pool, accessID) || secretStored(t, pool, refreshID) {
+		t.Fatal("the refresh kept a token secret it replaced")
+	}
+}
+
+type seededGrant struct{ credential, token string }
+
+func seedRefreshGrant(t *testing.T, pool *pgxpool.Pool, providerID string, version int) seededGrant {
+	t.Helper()
+	g := seededGrant{credential: uuid.NewString(), token: placeholderSecret(t, pool, secrets.ProviderGrantRefresh)}
+	mustExec(t, pool, `INSERT INTO olp.provider_credentials(id,provider_id,version,principal,plugin_digest,grant_facts) VALUES($1,$2,$3,'account',repeat('0',64),'{}')`,
+		g.credential, providerID, version)
+	mustExec(t, pool, `INSERT INTO olp.provider_grants(credential_id,refresh_token_id) VALUES($1,$2)`, g.credential, g.token)
+	return g
+}
+
+func TestEndingAGrantEnrollmentDiscardsOnlyItsSessionSecret(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	provider := func(t *testing.T) string {
+		t.Helper()
+		id := uuid.NewString()
+		mustExec(t, env.pool, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1::uuid,$1::text,'openai_compatible','draft',$2,$1::uuid,$1::uuid,$3)`,
+			id, providerEndpoint, env.ownerID)
+		return id
+	}
+	enroll := func(t *testing.T, providerID string) grants.Enrollment {
+		t.Helper()
+		id, slotID := uuid.NewString(), uuid.NewString()
+		mustExec(t, env.pool, `INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,restrictions,limits)
+			SELECT $1::uuid,$2::uuid,false,count(*),$1::text,true,0,1,'{}','{}' FROM olp.provider_slots WHERE provider_id=$2::uuid`, slotID, providerID)
+		expires := time.Now().Add(10 * time.Minute)
+		if err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+			if err := env.client.access.Keys.Store(ctx, tx, env.client.access.Installation, id, secrets.GrantEnrollment, []byte("session"), &expires); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at)
+				VALUES($1,$2,$3,repeat('0',64),'fixture-profile',$4,$5)`, id, providerID, slotID, env.ownerID, expires)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return grants.Enrollment{ID: id, ProviderID: providerID, SlotID: slotID, StartedBy: env.ownerID}
+	}
+	endings := []struct {
+		name         string
+		endsProvider bool
+		end          func(*testing.T, pgx.Tx, grants.Enrollment) error
+	}{
+		{name: "claim", end: func(_ *testing.T, tx pgx.Tx, e grants.Enrollment) error {
+			_, err := grants.Claim(ctx, tx, env.client.access, e.ProviderID, e.ID, env.ownerID)
+			return err
+		}},
+		{name: "cancellation", end: func(_ *testing.T, tx pgx.Tx, e grants.Enrollment) error {
+			return grants.Cancel(ctx, tx, e.ProviderID, e.ID, env.ownerID)
+		}},
+		{name: "completion", end: func(t *testing.T, tx pgx.Tx, e grants.Enrollment) error {
+			credentialID := uuid.NewString()
+			if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_credentials(id,provider_id,version) VALUES($1,$2,1)`, credentialID, e.ProviderID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE olp.grant_enrollments SET continued_at=now() WHERE id=$1`, e.ID); err != nil {
+				return err
+			}
+			return e.Complete(ctx, tx, credentialID)
+		}},
+		{name: "slot removal", end: func(_ *testing.T, tx pgx.Tx, e grants.Enrollment) error {
+			return grants.DiscardSlotEnrollments(ctx, tx, e.ProviderID, e.SlotID)
+		}},
+		{name: "provider removal", endsProvider: true, end: func(_ *testing.T, tx pgx.Tx, e grants.Enrollment) error {
+			return grants.DiscardProvider(ctx, tx, e.ProviderID)
+		}},
+	}
+	for _, ending := range endings {
+		t.Run(ending.name, func(t *testing.T) {
+			t.Parallel()
+			providerID, strangerID := provider(t), provider(t)
+			ended, sibling, stranger := enroll(t, providerID), enroll(t, providerID), enroll(t, strangerID)
+			grant, strangerGrant := seedRefreshGrant(t, env.pool, providerID, 2), seedRefreshGrant(t, env.pool, strangerID, 2)
+			if err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error { return ending.end(t, tx, ended) }); err != nil {
+				t.Fatal(err)
+			}
+			if secretStored(t, env.pool, ended.ID) {
+				t.Error("the ended enrollment kept its session secret")
+			}
+			if kept := secretStored(t, env.pool, sibling.ID); kept == ending.endsProvider {
+				t.Errorf("another slot's session secret stored = %t, want %t", kept, !ending.endsProvider)
+			}
+			if !secretStored(t, env.pool, stranger.ID) {
+				t.Error("another provider's enrollment lost its session secret")
+			}
+			if kept := secretStored(t, env.pool, grant.token); kept == ending.endsProvider {
+				t.Errorf("the provider's refresh token stored = %t, want %t", kept, !ending.endsProvider)
+			}
+			if !secretStored(t, env.pool, strangerGrant.token) {
+				t.Error("another provider's grant lost its refresh token")
+			}
+		})
+	}
+}
+
+func TestRevokingAndRetiringAGrantDiscardItsRefreshToken(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	env := newProviderAPITestEnv(t, nil)
+	providerID := uuid.NewString()
+	mustExec(t, env.pool, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by) VALUES($1,'unused-grants','openai_compatible','draft',$2,$1,$1,$3)`,
+		providerID, providerEndpoint, env.ownerID)
+	revoked, unused := seedRefreshGrant(t, env.pool, providerID, 1), seedRefreshGrant(t, env.pool, providerID, 2)
+	if err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error { return grants.Revoke(ctx, tx, revoked.credential) }); err != nil {
+		t.Fatal(err)
+	}
+	if secretStored(t, env.pool, revoked.token) || !secretStored(t, env.pool, unused.token) {
+		t.Fatal("revoking a grant must discard its refresh token and no other")
+	}
+	refresher := &grants.Refresher{Pool: env.pool, Keys: env.client.access.Keys, Installation: env.client.access.Installation,
+		Plugins: plugins.NewHost(nil, nil, env.pool), Egress: &egress.Policy{}, Log: slog.New(slog.DiscardHandler)}
+	if outcome, progress := refresher.Pass(ctx); outcome != workerhealth.OutcomeSuccess || !progress {
+		t.Fatalf("retirement pass = %v, progress = %t", outcome, progress)
+	}
+	if secretStored(t, env.pool, unused.token) {
+		t.Fatal("the retired grant kept its refresh token")
+	}
+	var audited int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM olp.audit WHERE action='provider.grant.retire' AND resource_type='provider_credential' AND resource_id=$1
+		AND outcome='success' AND user_agent_family='olp-worker' AND actor_user_id IS NULL AND actor_management_token_id IS NULL`, unused.credential).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("worker audit rows for the retirement = %d, error = %v", audited, err)
 	}
 }
 

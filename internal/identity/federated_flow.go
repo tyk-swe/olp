@@ -1,7 +1,6 @@
 package identity
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"slices"
@@ -134,11 +133,6 @@ func reauthenticatedLocation(purpose, resourceID string) string {
 		location += "&resource_id=" + url.QueryEscape(resourceID)
 	}
 	return location
-}
-
-func pruneExpiredSecrets(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id IN (SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT $1)", expiredCleanupLimit)
-	return err
 }
 
 func authenticateFlowSession(s *access.Server, r *http.Request, tx pgx.Tx, expectedUserID, expectedSessionID, mismatchCode, mismatchMsg string) (authz.Principal, error) {

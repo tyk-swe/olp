@@ -370,7 +370,7 @@ func (s *mfaService) storeMFAFactorSecret(ctx context.Context, tx pgx.Tx, f mfaF
 	if f.SecretID == nil {
 		return "", "", nil, problem.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
 	}
-	if _, err := tx.Exec(ctx, "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", *f.SecretID); err != nil {
+	if err := secrets.ClearExpiry(ctx, tx, *f.SecretID); err != nil {
 		return "", "", nil, err
 	}
 	return *f.SecretID, "totp", nil, nil

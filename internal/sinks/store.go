@@ -80,8 +80,7 @@ func (c Credentials) Replace(ctx context.Context, tx pgx.Tx, sinkID string, secr
 	if previous == nil {
 		return nil
 	}
-	_, deleteErr := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *previous, secrets.SinkCredential)
-	return deleteErr
+	return secrets.Delete(ctx, tx, secrets.SinkCredential, *previous)
 }
 
 func (c Credentials) store(ctx context.Context, tx pgx.Tx, secret *string) (*string, error) {

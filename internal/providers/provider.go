@@ -237,7 +237,7 @@ func (s *draftService) deleteProvider(r *http.Request, _ authz.Principal) (httpk
 			}
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", secretIDs, secrets.ProviderCredential); err != nil {
+		if err = secrets.Delete(r.Context(), tx, secrets.ProviderCredential, secretIDs...); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {

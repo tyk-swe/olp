@@ -142,8 +142,7 @@ func Claim(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, id, pri
 		return e, err
 	}
 	e.session = string(session)
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
-	return e, err
+	return e, secrets.Delete(ctx, tx, secrets.GrantEnrollment, id)
 }
 
 // Cancel ends a provider's enrollment that the principal started and has not
@@ -156,37 +155,52 @@ func Cancel(ctx context.Context, tx pgx.Tx, providerID, id, principal string) er
 	if tag.RowsAffected() == 0 {
 		return unavailable(ctx, tx, providerID, id, principal)
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
-	return err
+	return secrets.Delete(ctx, tx, secrets.GrantEnrollment, id)
 }
 
 // CancelProviderPending discards unclaimed challenges when their provider's
 // credential boundary changes. Claimed exchanges retain their one-use record;
 // the provider rechecks that boundary before staging their remote result.
 func CancelProviderPending(ctx context.Context, tx pgx.Tx, providerID string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE purpose=$2 AND id IN (
-  SELECT id FROM olp.grant_enrollments WHERE provider_id=$1 AND continued_at IS NULL AND outcome IS NULL)`, providerID, secrets.GrantEnrollment); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, "DELETE FROM olp.grant_enrollments WHERE provider_id=$1 AND continued_at IS NULL AND outcome IS NULL", providerID)
-	return err
+	return discardEnrollmentSecrets(ctx, tx, `DELETE FROM olp.grant_enrollments
+		WHERE provider_id=$1 AND continued_at IS NULL AND outcome IS NULL RETURNING id::text`, providerID)
 }
 
 func DiscardSlotEnrollments(ctx context.Context, tx pgx.Tx, providerID, slotID string) error {
-	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2)", slotID, providerID, secrets.GrantEnrollment)
-	return err
+	return discardEnrollmentSecrets(ctx, tx, "SELECT id::text FROM olp.grant_enrollments WHERE slot_id=$1 AND provider_id=$2", slotID, providerID)
 }
 
 func DiscardEnrollmentsOutside(ctx context.Context, tx pgx.Tx, providerID string, retainedSlots []string) error {
-	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$3 AND id IN (SELECT id FROM olp.grant_enrollments WHERE provider_id=$1 AND NOT (slot_id=ANY($2::uuid[])))", providerID, retainedSlots, secrets.GrantEnrollment)
-	return err
+	return discardEnrollmentSecrets(ctx, tx, "SELECT id::text FROM olp.grant_enrollments WHERE provider_id=$1 AND NOT (slot_id=ANY($2::uuid[]))", providerID, retainedSlots)
 }
 
 func DiscardProvider(ctx context.Context, tx pgx.Tx, providerID string) error {
-	_, err := tx.Exec(ctx, `WITH removed AS (DELETE FROM olp.provider_grants g USING olp.provider_credentials c WHERE c.id=g.credential_id AND c.provider_id=$1 RETURNING g.refresh_token_id)
-DELETE FROM olp.secrets WHERE (purpose=$2 AND id IN (SELECT id FROM olp.grant_enrollments WHERE provider_id=$1))
- OR (purpose=$3 AND id IN (SELECT refresh_token_id FROM removed))`, providerID, secrets.GrantEnrollment, secrets.ProviderGrantRefresh)
-	return err
+	refreshTokens, err := returnedIDs(ctx, tx, `WITH removed AS (DELETE FROM olp.provider_grants g USING olp.provider_credentials c
+		WHERE c.id=g.credential_id AND c.provider_id=$1 RETURNING g.refresh_token_id)
+		SELECT refresh_token_id::text FROM removed WHERE refresh_token_id IS NOT NULL`, providerID)
+	if err != nil {
+		return err
+	}
+	if err := secrets.Delete(ctx, tx, secrets.ProviderGrantRefresh, refreshTokens...); err != nil {
+		return err
+	}
+	return discardEnrollmentSecrets(ctx, tx, "SELECT id::text FROM olp.grant_enrollments WHERE provider_id=$1", providerID)
+}
+
+func discardEnrollmentSecrets(ctx context.Context, tx pgx.Tx, enrollmentIDsSQL string, args ...any) error {
+	enrollmentIDs, err := returnedIDs(ctx, tx, enrollmentIDsSQL, args...)
+	if err != nil {
+		return err
+	}
+	return secrets.Delete(ctx, tx, secrets.GrantEnrollment, enrollmentIDs...)
+}
+
+func returnedIDs(ctx context.Context, tx pgx.Tx, sql string, args ...any) ([]string, error) {
+	rows, err := tx.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // unavailable explains why an enrollment can no longer be continued or
@@ -221,8 +235,7 @@ func (e Enrollment) Complete(ctx context.Context, tx pgx.Tx, credentialID string
 	if tag.RowsAffected() == 0 {
 		return pgx.ErrNoRows
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
-	return err
+	return secrets.Delete(ctx, tx, secrets.GrantEnrollment, e.ID)
 }
 
 // Exchange runs the plugin's step that exchanges what the operator pasted

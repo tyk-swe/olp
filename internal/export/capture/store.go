@@ -43,6 +43,4 @@ const (
 	routeSinkSQL = `SELECT s.id::text,s.type,s.format,s.destination,s.settings,s.credential_id::text FROM olp.capture_policies p
  JOIN olp.export_sinks s ON s.id=p.sink_id WHERE p.id=$1 AND p.etag=$2 AND p.enabled AND ` + capturableSink + `
  AND EXISTS(SELECT 1 FROM olp.capture_configuration WHERE singleton AND enabled) FOR SHARE OF p,s`
-	auditSQL = `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family,project_id)
- VALUES($1,$2,'payload_capture',$3,$4,'other',$5)`
 )

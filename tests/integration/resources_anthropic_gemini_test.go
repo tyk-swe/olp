@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/platform/secrets"
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness"
 )
@@ -195,6 +197,9 @@ func TestGeminiFilesUploadThroughAGatewaySessionHideProviderIdentifiersAndIsolat
 		t.Fatalf("upload session is %q, want a session on the gateway", started.Get("X-Goog-Upload-URL"))
 	}
 	finalize := map[string]string{"X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"}
+	if held := storedSecrets(t, pool, secrets.ProviderUploadSession); len(held) != 1 {
+		t.Fatalf("an open upload holds %d provider sessions, want 1", len(held))
+	}
 	g.send(t, "POST", session, geminiKey("stranger", finalize), "stolen", 404)
 	if sent := upstream.sent("POST /upload/session-" + providerOwned); len(sent) != 0 {
 		t.Fatalf("another key's bytes reached the provider session: %+v", sent)
@@ -205,6 +210,9 @@ func TestGeminiFilesUploadThroughAGatewaySessionHideProviderIdentifiersAndIsolat
 		t.Fatalf("finalized upload = %s, want a file named and addressed by the gateway", raw)
 	}
 	name := uploaded.File.Name
+	if held := storedSecrets(t, pool, secrets.ProviderUploadSession); len(held) != 0 {
+		t.Fatalf("a finalized upload kept %d provider sessions, want none", len(held))
+	}
 	sent := upstream.sent("POST /upload/session-" + providerOwned)
 	if len(sent) != 1 || sent[0].key != "listed-secret" || sent[0].body != "hello" {
 		t.Fatalf("the provider session received %+v, want the owner's bytes under the provider credential", sent)
@@ -360,10 +368,20 @@ func TestGeminiInteractionsHideProviderIdentifiersContinueOnTheirProviderAndIsol
 		t.Fatalf("continuation reached the provider as %+v, want the provider's parent identifier", continued)
 	}
 
+	contracts := len(storedSecrets(t, pool, secrets.ProviderContinuation))
 	g.send(t, "DELETE", interactions+"/"+first.ID, geminiKey("owner", nil), "", 200)
 	g.send(t, "GET", interactions+"/"+first.ID, geminiKey("owner", nil), "", 404)
 	if sent := upstream.sent("DELETE /interactions/interaction-" + providerOwned + "-1"); len(sent) != 1 {
 		t.Fatalf("the provider saw %d deletes, want 1", len(sent))
+	}
+	if held := len(storedSecrets(t, pool, secrets.ProviderContinuation)); held != contracts-1 {
+		t.Fatalf("deleting an interaction left %d of %d contracts, want its own contract discarded", held, contracts)
+	}
+	if reclaimed, err := resources.New(pool).Expire(t.Context(), time.Now().AddDate(1, 0, 0)); err != nil || reclaimed == 0 {
+		t.Fatalf("expiry reclaimed %d resources: %v", reclaimed, err)
+	}
+	if held := storedSecrets(t, pool, secrets.ProviderContinuation); len(held) != 0 {
+		t.Fatalf("reclaiming expired interactions kept %d contracts, want none", len(held))
 	}
 }
 

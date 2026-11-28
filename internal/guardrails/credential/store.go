@@ -70,6 +70,5 @@ func remove(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM olp.guardrail_credentials WHERE id=$1", id); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GuardrailCredential)
-	return err
+	return secrets.Delete(ctx, tx, secrets.GuardrailCredential, id)
 }

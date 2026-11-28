@@ -1,6 +1,14 @@
-package access
+package audit
 
-const auditInsertSQL = `WITH subject AS (
+const insertSQL = `INSERT INTO olp.audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family,project_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+
+const purgeSQL = `WITH expired AS (
+      SELECT ctid FROM olp.audit WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.audit entry USING expired WHERE entry.ctid = expired.ctid`
+
+const insertInResourceProjectSQL = `WITH subject AS (
  SELECT CASE WHEN $6::text~'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN $6::uuid END AS id
  ) INSERT INTO olp.audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family,project_id)
  SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10::uuid,CASE $5

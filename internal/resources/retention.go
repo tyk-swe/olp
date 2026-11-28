@@ -135,7 +135,7 @@ func reclaimExpiredResource(ctx context.Context, tx pgx.Tx, resource expiredReso
 	}
 	_, err = persistPendingUsage(ctx, child, resource.pending, usage.AttemptUsage{Evidence: usage.EvidenceUnobservedUncertain}, now, false)
 	if err == nil {
-		_, err = child.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, resource.id, secrets.ProviderContinuation)
+		err = secrets.Delete(ctx, child, secrets.ProviderContinuation, resource.id.String())
 	}
 	if err == nil {
 		_, err = child.Exec(ctx, `DELETE FROM olp.provider_resources WHERE id=$1`, resource.id)

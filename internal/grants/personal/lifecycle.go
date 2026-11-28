@@ -274,7 +274,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 		if _, err := tx.Exec(record, `UPDATE olp.mcp_grant_enrollments SET session_secret_id=NULL WHERE id=$1`, item.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(record, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, *item.SessionID, secrets.MCPGrantEnrollment); err != nil {
+		if err := secrets.Delete(record, tx, secrets.MCPGrantEnrollment, *item.SessionID); err != nil {
 			return err
 		}
 	}

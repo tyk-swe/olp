@@ -287,6 +287,10 @@ func TestMCPCatalogReviewApproval(t *testing.T) {
 	if fixture.badAuth.Load() != 0 {
 		t.Fatalf("fixture saw %d requests without the stored credential", fixture.badAuth.Load())
 	}
+	expectStatus(t, "retire registration", client.call(t, "DELETE", "/api/v1/mcp-servers/"+saved.ID, fmt.Sprintf("%q", state().etag), ""), http.StatusNoContent)
+	if secretStored(t, pool, credentialID) {
+		t.Fatal("retiring the registration kept its credential")
+	}
 }
 
 func TestMCPManualSettlementPreservesPricingState(t *testing.T) {
