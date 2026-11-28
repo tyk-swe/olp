@@ -5,7 +5,12 @@ export type FieldErrors<Field extends string> = Partial<
 export type Valid<Value> = { ok: true; value: Value };
 
 export type Validation<Value, Field extends string> =
-  Valid<Value> | { ok: false; fieldErrors: FieldErrors<Field> };
+  | Valid<Value>
+  | { ok: false; fieldErrors: FieldErrors<Field>; formError?: string };
+
+export function formProblem(formError: string): Validation<never, never> {
+  return { ok: false, fieldErrors: {}, formError };
+}
 
 export function validated<Value, Field extends string>(
   fieldErrors: FieldErrors<Field>,

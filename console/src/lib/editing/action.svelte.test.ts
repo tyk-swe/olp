@@ -1,5 +1,5 @@
 import { useAction, useMutation } from './action.svelte';
-import { validated } from './validation';
+import { formProblem, validated } from './validation';
 import { ApiProblem } from '#lib/management/http.js';
 import { authLifecycle } from '#lib/session/lifecycle.js';
 import type { AuthenticatedSession } from '#lib/session/state.js';
@@ -139,6 +139,49 @@ function refusal(messages: Record<string, string>) {
     )
   });
 }
+
+it('reports a client message that no field can show until the next check', () => {
+  const { value: action } = mountState(() => useAction<'name'>(), {
+    attach: true
+  });
+
+  expect(action.check(formProblem('Set a name or a template.'))).toBe(false);
+  expect(action.error).toBe('Set a name or a template.');
+  expect(action.fieldErrors).toEqual({});
+
+  action.check(validated({ name: 'Enter a name.' }, () => null));
+  expect(action.error).toBe('');
+});
+
+it('dismisses a reported failure without giving up the retry of the same write', async () => {
+  const { value: mutation } = mountState(() => useMutation<'name'>(), {
+    attach: true
+  });
+  const requestIds: string[] = [];
+  const lose = () =>
+    mutation.submit(
+      'write',
+      (_input, requestId) => {
+        requestIds.push(requestId);
+        return Promise.reject(refusal({ display_name: 'Taken.' }));
+      },
+      undefined,
+      { serverFields: { display_name: 'name' } }
+    );
+
+  await lose();
+  mutation.dismiss();
+  expect(mutation.fieldErrors).toEqual({});
+  await lose();
+  mutation.reset();
+  await lose();
+  expect(requestIds[1]).toBe(requestIds[0]);
+  expect(requestIds[2]).not.toBe(requestIds[1]);
+
+  mutation.check(formProblem('Choose something.'));
+  mutation.dismiss();
+  expect(mutation.error).toBe('');
+});
 
 it('reports client and server field errors in one place and keeps a message for what no field shows', async () => {
   const { value: action } = mountState(() => useAction<'name'>(), {
