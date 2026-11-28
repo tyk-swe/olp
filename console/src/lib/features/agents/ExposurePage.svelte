@@ -28,7 +28,7 @@
   <label class="form-field">
     API key UUID (optional) <input
       bind:value={key}
-      pattern="[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"
+      pattern={'[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}'}
     />
   </label><button class="button button-secondary" type="submit">Filter</button>
 </form>
