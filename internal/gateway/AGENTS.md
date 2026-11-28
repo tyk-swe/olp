@@ -1,0 +1,1 @@
+Inside the gateway, `internal/gateway/kernel` is the shared execution kernel, a package under `internal/gateway/surface/` owns the routes of one surface and calls the kernel through its exported API, and `internal/gateway` only assembles them. The kernel never imports a surface or names a vendor flag for one, and `internal/gateway/surface/anthropicstate` is the example to copy
