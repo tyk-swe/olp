@@ -141,7 +141,7 @@ func (s surface) responseUpstream(ctx context.Context, x *kernel.Call, res *reso
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
-	out, err = s.kernel.MapStoredGenerationResultReferences(commitCtx, x, res, out)
+	out, err = generationrefs.ProjectBody(out, oif.Limits{MaxBytes: int(s.kernel.Config.MaxResponseBytes)}, s.kernel.StoredGenerationResultResolver(commitCtx, x, res))
 	if err != nil {
 		return fault.ServerError(http.StatusBadGateway, "resource_affinity", "The retained provider returned an unowned result reference.")
 	}

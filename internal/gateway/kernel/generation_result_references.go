@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"time"
@@ -62,41 +61,10 @@ func (s *Server) generationResultResolver(ctx context.Context, x *Call, owner re
 	}
 }
 
-func (s *Server) MapStoredGenerationResultReferences(ctx context.Context, x *Call, response *resources.Resource, body []byte) ([]byte, error) {
-	return s.mapGenerationResultReferences(ctx, x, storedResult(response), body)
-}
-
 func (s *Server) mapGenerationResultReferences(ctx context.Context, x *Call, owner resultOwner, body []byte) ([]byte, error) {
-	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)})
-	if err != nil {
-		return nil, err
-	}
-	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, owner))
-	if err != nil {
-		return nil, err
-	}
-	return projected.Bytes(), nil
+	return generationrefs.ProjectBody(body, oif.Limits{MaxBytes: int(s.Config.MaxResponseBytes)}, s.generationResultResolver(ctx, x, owner))
 }
 
 func (s *Server) mapGenerationReferenceFrame(ctx context.Context, x *Call, owner resultOwner, frame []byte) ([]byte, error) {
-	i := bytes.Index(frame, []byte("\ndata: "))
-	if i < 0 {
-		return frame, nil
-	}
-	payload := bytes.TrimSpace(frame[i+7:])
-	if len(payload) == 0 || payload[0] != '{' {
-		return frame, nil
-	}
-	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.Config.MaxEventBytes)})
-	if err != nil {
-		return nil, err
-	}
-	projected, err := generationrefs.ProjectResult(doc, s.generationResultResolver(ctx, x, owner))
-	if err != nil {
-		return nil, err
-	}
-	out := append([]byte(nil), frame[:i+7]...)
-	out = append(out, projected.Bytes()...)
-	out = append(out, '\n', '\n')
-	return out, nil
+	return generationrefs.ProjectFrame(frame, oif.Limits{MaxBytes: int(s.Config.MaxEventBytes)}, s.generationResultResolver(ctx, x, owner))
 }

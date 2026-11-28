@@ -1,6 +1,7 @@
 package generationrefs
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strconv"
@@ -55,6 +56,34 @@ func ProjectResult(source oif.Document, resolve Resolve) (oif.Document, error) {
 		return oif.Document{}, err
 	}
 	return oif.Apply(source, changes)
+}
+
+func ProjectBody(body []byte, limits oif.Limits, resolve Resolve) ([]byte, error) {
+	doc, err := oif.ParseJSON(body, limits)
+	if err != nil {
+		return nil, err
+	}
+	projected, err := ProjectResult(doc, resolve)
+	if err != nil {
+		return nil, err
+	}
+	return projected.Bytes(), nil
+}
+
+func ProjectFrame(frame []byte, limits oif.Limits, resolve Resolve) ([]byte, error) {
+	i := bytes.Index(frame, []byte("\ndata: "))
+	if i < 0 {
+		return frame, nil
+	}
+	payload := bytes.TrimSpace(frame[i+7:])
+	if len(payload) == 0 || payload[0] != '{' {
+		return frame, nil
+	}
+	projected, err := ProjectBody(payload, limits, resolve)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(frame[:i+7], projected, []byte("\n\n")), nil
 }
 
 func (resolve Resolve) result(root oif.Value) ([]oif.Change, error) {
