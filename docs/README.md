@@ -49,7 +49,14 @@ remaining guides cover the implementation contracts behind a change.
 
 | Task | Guide |
 | --- | --- |
-| Find feature owners and understand gateway execution | [Architecture](develop/architecture.md) |
+| Find feature owners and the area guide behind a change | [Architecture](develop/architecture.md) |
+| Follow structure rules and table ownership | [Code structure](develop/code-structure.md) |
+| Add a management endpoint and keep feature contracts | [Management features](develop/management.md) |
+| Place gateway code and declare its imports | [Gateway packages](develop/gateway-packages.md) |
+| Follow a request through admission, headers and diagnostics | [Requests and responses](develop/request-path.md) |
+| Change ordinary, code-mode, media or agent execution | [Execution](develop/execution.md) |
+| Change runtime sources, process modes or publication | [Runtime](develop/runtime.md) |
+| Change limits, budgets, retained accounting or caller credentials | [Limits and accounting](develop/accounting.md) |
 | Review trust, authorization, secret and data boundaries | [Security](develop/security.md) |
 | Author a provider or guardrail plugin | [Plugin authoring](develop/plugin-authoring.md) |
 | Maintain signed model facts, prices and calibration data | [Catalog maintenance](develop/catalog.md) |

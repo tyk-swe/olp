@@ -3,6 +3,7 @@ import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const rootDocs = ['CHANGELOG.md', 'CONTRIBUTING.md', 'README.md', 'SECURITY.md'];
+const moduleMapFile = 'docs/develop/architecture.md';
 
 export const liveProvenClaimPatterns = [
   /\blive-proven only\b/i,
@@ -24,6 +25,27 @@ function defaultListMarkdown(directory) {
     if (entry.isDirectory()) return defaultListMarkdown(child);
     return entry.isFile() && entry.name.endsWith('.md') ? [child] : [];
   });
+}
+
+export function listSubdirectories(directory) {
+  return readdirSync(join(repoRoot, directory), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function findUnmappedDirectories(markdown, listDirectories) {
+  const table = /^\| Area \| Backend and console owner \|\n((?:\|.*(?:\n|$))*)/m.exec(markdown);
+  const rows = table?.[1] ?? '';
+  const modules = [...rows.matchAll(/`internal\/([^/`]+)\/[^`]*`/g)].map((match) => match[1]);
+  const features = [...rows.matchAll(/\bconsole ((?:`[^/`]+\/`(?:,? and |, )?)+)/g)].flatMap(
+    (list) => [...list[1].matchAll(/`([^/`]+)\/`/g)].map((match) => match[1])
+  );
+  const unmapped = (parent, mapped) =>
+    listDirectories(parent)
+      .filter((name) => !mapped.includes(name))
+      .map((name) => `${parent}/${name}/`);
+  return [...unmapped('internal', modules), ...unmapped('console/src/lib/features', features)];
 }
 
 export function listScopedDocs(listDirectory) {
@@ -153,7 +175,7 @@ function resolveLink(source, destination) {
   return { anchor, target };
 }
 
-export function checkDocs(files, read, exists) {
+export function checkDocs(files, read, exists, listDirectories) {
   const errors = [];
   const anchorsByFile = new Map();
 
@@ -204,6 +226,10 @@ export function checkDocs(files, read, exists) {
     }
   }
 
+  for (const directory of findUnmappedDirectories(read(moduleMapFile) ?? '', listDirectories)) {
+    errors.push(`${moduleMapFile}: module map is missing ${directory}`);
+  }
+
   if (errors.length > 0) throw new Error(errors.join('\n'));
   return files.length;
 }
@@ -216,7 +242,8 @@ if (import.meta.main) {
       const fullPath = join(repoRoot, file);
       return existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : undefined;
     },
-    (file) => existsSync(join(repoRoot, file))
+    (file) => existsSync(join(repoRoot, file)),
+    listSubdirectories
   );
   console.log(`Documentation check: ${count} files`);
 }

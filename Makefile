@@ -66,7 +66,7 @@ check-console: ## Prepare console types and check formatting, types, and lint
 check-contracts: ## Check all tracked generated contracts without rewriting them
 	./scripts/check-contracts.sh
 
-check-docs: ## Check documentation links, anchors, handbook index, and style rules
+check-docs: ## Check documentation links, anchors, handbook index, module map, and style rules
 	node scripts/check-docs.mjs
 
 check-helm: ## Validate Helm chart profiles, schema, and monitoring metrics

@@ -72,7 +72,7 @@ Fix the migration and save it to retry. Applied migrations remain immutable.
 Number a new migration above the highest one on `origin/main`, or `make check-go`
 fails. Set `MIGRATIONS_BASE` to compare against another ref.
 A new table also needs one owning module, and only that module writes it, as
-[table ownership](docs/develop/architecture.md#table-ownership) describes.
+[table ownership](docs/develop/code-structure.md#table-ownership) describes.
 
 `make dev` creates missing private secrets and initializes the schema. Existing
 secrets and data survive restarts. Each checkout runs its own stack. The primary
@@ -132,8 +132,8 @@ behavior has no journey of its own. Validate it by running the affected
 functionality directly and record the command and output.
 
 Documentation changes are validated by `make check-docs` (running
-`node scripts/check-docs.mjs`), and the same scoped link, anchor and
-handbook-index contract runs inside `make test-unit-console`.
+`node scripts/check-docs.mjs`), and the same scoped link, anchor,
+handbook-index and module-map contract runs inside `make test-unit-console`.
 
 Use conventional commit subjects and name agent-created branches `tyk-{name}`.
 Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,

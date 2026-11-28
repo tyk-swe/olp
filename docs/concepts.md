@@ -48,7 +48,7 @@ execution stays coherent for the life of that request. Live revocation remains
 independent of pinning. New key-authenticated work refuses to start once its key
 authority has been stale for more than 60 seconds. The publication and authority
 boundary is described in
-[Architecture](develop/architecture.md#runtime-publication-and-authority).
+[Architecture](develop/runtime.md#runtime-publication-and-authority).
 
 ## Organizations, projects and identity
 

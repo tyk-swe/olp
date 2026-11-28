@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { checkDocs, collectAnchors, findLiveProvenClaims, listScopedDocs } from './check-docs.mjs';
+import {
+  checkDocs,
+  collectAnchors,
+  findLiveProvenClaims,
+  listScopedDocs,
+  listSubdirectories
+} from './check-docs.mjs';
 
 const reader =
   (files) =>
@@ -48,7 +54,7 @@ test('broken files, anchors, index entries and em dashes are rejected', () => {
   const files = [...handbook.keys()].filter((file) => file.startsWith('docs/'));
   let message = '';
   try {
-    checkDocs(files, reader(handbook), exists(handbook));
+    checkDocs(files, reader(handbook), exists(handbook), () => []);
   } catch (error) {
     message = error.message;
   }
@@ -60,6 +66,40 @@ test('broken files, anchors, index entries and em dashes are rejected', () => {
   assert.match(message, /broken local link %E0%A4%A\.md/);
   assert.match(message, /contains an em dash/);
   assert.match(message, /missing handbook link for unindexed\.md/);
+});
+
+test('a module or console feature missing from the module map is rejected', () => {
+  const handbook = new Map([
+    [
+      'docs/develop/architecture.md',
+      [
+        '| Area | Backend and console owner |',
+        '| --- | --- |',
+        '| Routes | `internal/routes/` (with `drafts/`), and console `routes/` and `health/` |',
+        '| Spend | `internal/usage/` and console `usage/`, `exports/`, and `budgets/` |',
+        '',
+        '`internal/orphan/` has its screen in console `orphan/`.'
+      ].join('\n')
+    ]
+  ]);
+  const directories = new Map([
+    ['internal', ['orphan', 'routes', 'usage']],
+    [
+      'console/src/lib/features',
+      ['budgets', 'drafts', 'exports', 'health', 'orphan', 'routes', 'usage']
+    ]
+  ]);
+  assert.throws(
+    () =>
+      checkDocs([], reader(handbook), exists(handbook), (directory) => directories.get(directory)),
+    {
+      message: [
+        'docs/develop/architecture.md: module map is missing internal/orphan/',
+        'docs/develop/architecture.md: module map is missing console/src/lib/features/drafts/',
+        'docs/develop/architecture.md: module map is missing console/src/lib/features/orphan/'
+      ].join('\n')
+    }
+  );
 });
 
 test('live-proven claims are rejected in guides and console copy', () => {
@@ -89,7 +129,8 @@ test('the scoped repository documentation passes the documentation contract', ()
     checkDocs(
       files,
       (file) => (existsSync(file) ? readFileSync(file, 'utf8') : undefined),
-      (file) => existsSync(file)
+      (file) => existsSync(file),
+      listSubdirectories
     ),
     files.length
   );

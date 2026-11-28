@@ -51,34 +51,29 @@ halves of `make test-unit`, still run side by side.
 
 ## Unit tier
 
-The unit tier needs no containers, services, network, or provider accounts.
+The unit tier needs no containers, services, network, or provider accounts, so a
+test of code that calls an outside service such as Vault scripts that service.
 Membership is automatic. Every Go `_test.go` file without a build tag runs,
 every file matched by the Vitest `unit` and `svelte` projects runs, and every
 `scripts/*.test.mjs` file runs via `node --test`. Console tests need the
 generated API types. `make test-unit-console` creates them, and
 `pnpm --dir console api:generate` does the same before a direct Vitest run.
 
-The Go unit tests span `cmd/`, `plugin/`, `tests/harness`, and `internal/`
-packages. They cover authorization derivation and its golden file, secret
-sealing and signing, notification validation and signal boundaries, billing and
-usage math, protocol translation, token estimation against its oracle fixtures,
-catalog validation and drift tooling, limits, route planning, code mode
-adapters and forwarding, agent dispatch and continuation ownership, A2A wire
-versions, publication isolation, guardrail detection and previews, MCP
-registration and tool pricing, grant binding, gateway execution kernel and
-surfaces, staging spool behavior, promotion snapshot guards, telemetry metric
-exposition, provider egress policy, SCIM parsing, SAML verification, admission
-queuing, response caching including `internal/gateway/kernel/cache_test.go`,
-secret resolution against a scripted Vault, operator CLI setup, and harness
-startup failure cleanup.
+A Go unit test is a `_test.go` file beside the code it covers, named for that
+file or for the behavior, in `cmd/`, `plugin/`, `tests/harness`, or an
+`internal/` package.
 
-The console unit suite separates pure logic tests (`*.test.ts` in the Node
-`unit` project) from reactive Svelte component tests (`*.svelte.test.ts` in the
-jsdom `svelte` project), backed by shared helpers in `console/tests/unit/support/`
-(imported via `#test/*`). The script unit tests cover documentation checks,
-release version parity, `dev.sh` port wiring, management operation generation,
-configuration promotion review and comment helpers, `restore.sh` URL preflight
-checks, and `secrets.sh` provisioning.
+In the console, a pure logic test is `*.test.ts` and runs in the Node `unit`
+project, and a reactive Svelte component test is `*.svelte.test.ts` and runs in
+the jsdom `svelte` project. Both sit beside their code under `console/src`.
+Tests of the console's own lint rules and check scripts live in
+`console/tests/unit`, and shared helpers in `console/tests/unit/support/` are
+imported via `#test/*`.
+
+A script test is `scripts/<name>.test.mjs`, named for the script it covers. A
+helper that one script uses can be covered by that script's test file, as
+`restore.test.mjs` covers the provisioning in `secrets.sh` and
+`promotion-comment.test.mjs` covers `verify-promotion-review.mjs`.
 
 ## Integration tier
 
@@ -87,27 +82,11 @@ tag against disposable PostgreSQL and Valkey containers. Tests call project
 packages in process, so this is the tier for behavior that only a real
 database or a real Valkey can decide.
 
-The suite is organized by domain across `tests/integration/`, covering
-migrations concurrency and checksum history (`migrations_test.go`), provider
-drafts, revisions, external secrets and grant enrollments (`providers_test.go`,
-`providers_grants_test.go`), retained provider resources across OpenAI,
-Anthropic, Gemini and vector stores (`resources_test.go`,
-`resources_openai_test.go`, `resources_anthropic_gemini_test.go`,
-`resources_vector_stores_test.go`), gateway workflows and health probes
-(`gateway_workflows_test.go`), media and video jobs (`media_jobs_test.go`),
-retrieval bindings (`retrieval_bindings_test.go`), MCP catalog and tool
-settlement (`mcp_catalog_test.go`), usage ingest, retention, rollups,
-comparisons and FOCUS exports (`usage_test.go`, `usage_comparison_test.go`,
-`focus_exports_test.go`), billing imports and money ledger invariants
-(`billing_test.go`, `money_test.go`), metering and export sink delivery
-(`metering_delivery_test.go`), budget increases, limits, shared quotas and
-traces (`budget_increase_requests_test.go`, `limits_test.go`,
-`shared_quota_test.go`, `traces_test.go`), notifications and destination
-testing (`notifications_test.go`, `notification_destination_test.go`,
-`route_latency_silence_test.go`), code mode decisions, capacity, drain,
-cooldowns and allowances (`code_test.go`, `code_capacity_test.go`,
-`code_cooldowns_test.go`), response cache isolation and purge (`cache_test.go`),
-and PostgreSQL-backed SCIM filtering and sorting (`scim_test.go`).
+A test goes in `tests/integration/<area>_test.go`, named for the behavior area it
+covers. An area with more than one file names them `<area>_<part>_test.go`, as
+`providers_test.go` and `providers_grants_test.go` do. Search the directory for
+the behavior before you add a file. Health probe tests sit with the gateway
+workflows in `gateway_workflows_test.go`.
 
 `tests/harness` gives every test its own state. `harness.Database` clones a
 migrated template database, so a test pays for a copy instead of every
@@ -123,28 +102,31 @@ namespace. `harness.StartProcess` runs the built binary on free ports and
 real `olp` binary and drives it over HTTP, so requests cross the same
 composition a deployment runs. Each test starts its own process on its own
 database and ports, and provider calls go to the scripted vendor in
-`tests/harness/vendor`. The suite covers port collision retries and split-mode
-listener boundaries (`harness_test.go`), restricted runtime role grants and
-Valkey-less epoch recovery (`runtime_role_test.go`), route publication to
-durable usage, bootstrap token waiting, origin and CSRF transport checks and
-playground streaming (`journey_test.go`), management write idempotency, ETag
-preconditions and audit trails (`management_writes_test.go`), secured read and
-cross-project isolation sweeps with guardrail and configuration promotion
-journeys (`sweep_test.go`, `guardrail_journey_test.go`,
-`promotion_journey_test.go`), provider, billing, capture, code account, fixture,
-identity, key overlap and pause, and SCIM journeys.
+`tests/harness/vendor`.
+
+A journey through one flow is `tests/e2e/<flow>_journey_test.go`, and a check of
+one behavior that needs the running binary is `<behavior>_test.go`. Some files
+collect tests by what they cross. `journey_test.go` holds the base journeys, such
+as route publication to durable usage, bootstrap token waiting, origin and CSRF
+transport checks, and playground streaming. `harness_test.go` holds process
+startup behavior, such as port collision retries and split-mode listener
+boundaries. Management write idempotency, `ETag` preconditions, and audit trails
+belong in `management_writes_test.go`, and secured read and cross-project
+isolation sweeps belong in `sweep_test.go`. Restricted runtime role grants and
+Valkey-less epoch recovery are in `runtime_role_test.go`.
 
 `make test-e2e-browser` builds the console, starts one `olp all` that serves
 it, and runs the Playwright journeys in `console/tests/e2e` in Chromium. The
 `setup` project is the first journey. It creates the owner through first-run
 setup, connects and activates a provider, publishes a route, and saves the
-signed-in session. The other journeys start from that session and run in
-parallel. They sign in from a fresh browser, test installation bookmarks and
-branding (restoring the original branding afterward), create an API key, call
-the gateway with it until its usage shows up and save a key edit, send unary
-and streamed playground requests, and build a keyword guardrail and try it.
-Journeys build their state through the console and never seed it through the
-API, so the screens a new operator meets first are the ones under test.
+signed-in session. It lives in `setup.ts`, and every other journey goes in a
+`<flow>.spec.ts` file beside it. Those journeys run in parallel and start from
+that session, except the sign-in, bookmark, and installation branding journeys
+in `sign-in.spec.ts`, which start from a fresh browser. The branding journey
+restores the original branding afterward, because the journeys share one
+installation. Journeys build their state through the console and never seed it
+through the API, so the screens a new operator meets first are the ones under
+test.
 
 `make setup` installs the browser, and
 `pnpm --dir console exec playwright install chromium` does the same on its own.

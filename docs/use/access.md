@@ -124,9 +124,9 @@ Budget-group and notification-resource deletion requires an ETag and `Idempotenc
 
 ## Key response metadata
 
-The key policy `response_metadata` is off by default. Set it when creating a key, with `PATCH /api/v1/api-keys/{api_key_id}`, or in the console key form to opt the key into the `X-OLP-Attempts`, `X-OLP-Route-Revision`, `X-OLP-Provider` and `X-OLP-Cost` response headers described in [gateway](../develop/architecture.md#gateway-metadata). Callers address routes rather than upstreams, so the gateway names the provider that served a request only to keys that opt in. The gateway does not scrub what an upstream says about itself. Upstream rejection messages are relayed with credential values redacted regardless of policy and may still name the vendor or model. Rotation keeps the setting, and a change takes effect on each gateway's next authority refresh.
+The key policy `response_metadata` is off by default. Set it when creating a key, with `PATCH /api/v1/api-keys/{api_key_id}`, or in the console key form to opt the key into the `X-OLP-Attempts`, `X-OLP-Route-Revision`, `X-OLP-Provider` and `X-OLP-Cost` response headers described in [gateway](../develop/request-path.md#gateway-metadata). Callers address routes rather than upstreams, so the gateway names the provider that served a request only to keys that opt in. The gateway does not scrub what an upstream says about itself. Upstream rejection messages are relayed with credential values redacted regardless of policy and may still name the vendor or model. Rotation keeps the setting, and a change takes effect on each gateway's next authority refresh.
 
-The remaining-allowance headers need no opt-in. A key with a requests-per-minute or tokens-per-minute limit receives the [rate-limit headers](../develop/architecture.md#rate-limit-headers) of its surface for the dimensions it limits, and a key with neither receives none.
+The remaining-allowance headers need no opt-in. A key with a requests-per-minute or tokens-per-minute limit receives the [rate-limit headers](../develop/request-path.md#rate-limit-headers) of its surface for the dimensions it limits, and a key with neither receives none.
 
 ## Management tokens and provisioning
 
