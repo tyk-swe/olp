@@ -1,17 +1,1 @@
-{
-  "src/lib/features/identity/profile/profileIdentity.svelte.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/lib/features/providers/providerEditorActions.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/lib/features/usage/PricingRevisionsPanel.svelte": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  }
-}
+{}

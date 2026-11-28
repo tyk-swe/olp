@@ -25,7 +25,7 @@ import {
   isEtagMismatch,
   type FieldIssue
 } from '#lib/management/http.js';
-import { listProviderModelPage } from './models';
+import { listProviderModelPage, type CapabilityDeclaration } from './models';
 import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import {
   refreshProviderChange,
@@ -33,11 +33,30 @@ import {
   type ProviderChangeReceipt
 } from './providerChanges';
 import { providerEditValues, type ProviderEditValues } from './providerEditor';
-import {
-  createProviderEditorActions,
-  providerEditorIntentNames
-} from './providerEditorActions';
+import type { ExternalCredentialReference } from './credentials';
+import { networkCredentialPath } from './configurationDraft.svelte';
+import type { ProviderWrite } from './providerWrite';
+import * as lifecycleActions from './providerLifecycleActions';
+import * as credentialActions from './providerCredentialActions';
+import * as modelActions from './providerModelActions';
+import * as revisionActions from './providerRevisionActions';
 import { providerQueries } from '#lib/domain/providers/queries.js';
+import type {
+  Provider,
+  ProviderCredential
+} from '#lib/domain/providers/api.js';
+
+const providerEditorIntentNames = [
+  'activate',
+  'disable',
+  'restore',
+  'revision',
+  'stage',
+  'revoke',
+  'networkCreate',
+  'networkRevoke',
+  'catalog'
+] as const;
 
 function emptyEditValues(): ProviderEditValues {
   return {
@@ -258,49 +277,115 @@ export class ProviderEditor {
       );
   };
 
-  private readonly actions = createProviderEditorActions({
-    queryClient: this.queryClient,
-    intents: this.intents,
-    canManage: () => this.canManage,
-    providerId: () => this.providerId(),
-    current: () => this.current,
-    providerSpec: () => this.providerSpec,
-    pending: () => this.pending,
-    dirty: () => this.sync.dirty,
-    snapshotEtag: () => this.sync.snapshotEtag,
-    editValues: () => this.editValues,
-    editVersion: () => this.editVersion,
-    markDraftSaved: (etag, stillDirty) => {
-      this.sync = markSaved(etag, stillDirty);
-      this.savedDraftEpoch += 1;
-    },
-    setReferenceConflict: (message) => {
-      this.referenceConflict = message;
-    },
-    reportError: this.reportError,
-    touch: this.touch,
-    resetModelPage: this.resetModelPage,
+  private readonly write: ProviderWrite = {
+    writable: () =>
+      this.canManage && !this.pending ? this.current : undefined,
+    canWrite: (provider) =>
+      this.canManage && !this.pending && provider.id === this.providerId(),
     run: this.run,
-    observe: this.observe
-  });
+    observe: this.observe,
+    resetModelPage: this.resetModelPage
+  };
 
-  readonly saveDraft = this.actions.saveDraft;
-  readonly probe = this.actions.probe;
-  readonly activate = this.actions.activate;
-  readonly disable = this.actions.disable;
-  readonly restoreDraft = this.actions.restoreDraft;
-  readonly stageCredential = this.actions.stageCredential;
-  readonly revokeCredential = this.actions.revokeCredential;
-  readonly restoreRevision = this.actions.restoreRevision;
-  readonly compareListing = this.actions.compareListing;
-  readonly compareRevisions = this.actions.compareRevisions;
-  readonly discoverModels = this.actions.discoverModels;
-  readonly declareModels = this.actions.declareModels;
-  readonly reviewModel = this.actions.reviewModel;
-  readonly certifyModel = this.actions.certifyModel;
-  readonly acceptCatalog = this.actions.acceptCatalog;
-  readonly stageNetworkCredential = this.actions.stageNetworkCredential;
-  readonly revokeNetworkCredential = this.actions.revokeNetworkCredential;
+  private readonly markDraftSaved = (etag: string, stillDirty: boolean) => {
+    this.sync = markSaved(etag, stillDirty);
+    this.savedDraftEpoch += 1;
+    this.intents.reset('activate', 'disable', 'restore');
+  };
+
+  private readonly showReferenceConflict = (message: string) => {
+    this.referenceConflict = message;
+  };
+
+  private readonly selectNetworkCredential = (credentialId: string) => {
+    this.editValues.document?.set(networkCredentialPath, credentialId);
+    this.touch();
+  };
+
+  readonly saveDraft = () =>
+    lifecycleActions.saveDraft(this.write, this.queryClient, {
+      spec: this.providerSpec,
+      snapshotEtag: this.sync.snapshotEtag,
+      values: this.editValues,
+      version: () => this.editVersion,
+      onSaved: this.markDraftSaved
+    });
+  readonly probe = () => lifecycleActions.probe(this.write, this.sync.dirty);
+  readonly activate = () =>
+    lifecycleActions.activate(
+      this.write,
+      this.intents.activate,
+      this.sync.dirty
+    );
+  readonly disable = () =>
+    lifecycleActions.disable(
+      this.write,
+      this.intents.disable,
+      this.showReferenceConflict
+    );
+  readonly restoreDraft = () =>
+    lifecycleActions.restoreAsDraft(this.write, this.intents.restore);
+
+  readonly stageCredential = (
+    credential: string | ExternalCredentialReference
+  ) =>
+    credentialActions.stageCredential(
+      this.write,
+      this.intents.stage,
+      credential
+    );
+  readonly revokeCredential = (credential: ProviderCredential) =>
+    credentialActions.revokeCredential(
+      this.write,
+      this.intents.revoke,
+      credential
+    );
+  readonly stageNetworkCredential = (secret: string) =>
+    credentialActions.stageNetworkCredential(
+      this.write,
+      this.intents.networkCreate,
+      secret,
+      this.selectNetworkCredential
+    );
+  readonly revokeNetworkCredential = (credentialId: string) =>
+    credentialActions.retireNetworkCredential(
+      this.write,
+      this.intents.networkRevoke,
+      credentialId
+    );
+
+  readonly compareListing = () => modelActions.compareListing(this.write);
+  readonly discoverModels = () => modelActions.discoverModels(this.write);
+  readonly declareModels = (input: string) =>
+    modelActions.declareModels(this.write, input, this.reportError);
+  readonly reviewModel = (
+    provider: Provider,
+    modelId: string,
+    enabled: boolean,
+    capabilities: CapabilityDeclaration[]
+  ) =>
+    modelActions.reviewModel(this.write, provider, {
+      modelId,
+      enabled,
+      capabilities
+    });
+  readonly certifyModel = (provider: Provider, modelId: string) =>
+    modelActions.certifyModel(this.write, provider, modelId);
+  readonly acceptCatalog = (digest: string, models: string[]) =>
+    modelActions.acceptCatalog(
+      this.write,
+      this.intents.catalog,
+      digest,
+      models
+    );
+
+  readonly restoreRevision = (revisionId: string, revision: number) =>
+    revisionActions.restoreRevision(this.write, this.intents.revision, {
+      revisionId,
+      revision
+    });
+  readonly compareRevisions = (from: string, to: string) =>
+    revisionActions.compareRevisions(this.write, this.current, from, to);
 
   constructor(private readonly providerId: () => string) {
     this.identity = providerId();

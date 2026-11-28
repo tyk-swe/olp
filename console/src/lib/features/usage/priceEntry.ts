@@ -1,4 +1,5 @@
-import { captureResult } from '#lib/editing/result.js';
+import { captureResult, type Result } from '#lib/editing/result.js';
+import { dateTimeLocalValue } from '#lib/format.js';
 import type { PriceDraft, PricingRevision } from './pricing';
 import type { CardPriceDraft } from './rateCards';
 import {
@@ -206,6 +207,53 @@ export function hasAnyPrice(price: PriceDraft): boolean {
     price.image_input_per_million ||
     price.image_output_per_million ||
     price.tool_calls
+  );
+}
+
+export function preparePricingRevision(
+  values: PricingRevisionFormValues
+): Result<{ effectiveAt: string; prices: PriceDraft[] }> {
+  if (!values.providerKind || !values.model.trim() || !values.operation.trim())
+    return {
+      ok: false,
+      error: new Error('Provider kind, model, and operation are required.')
+    };
+  return captureResult(() => {
+    const price = priceRevisionDraft(values);
+    if (!hasAnyPrice(price)) throw new Error('Enter at least one price.');
+    return {
+      effectiveAt: new Date(values.effectiveAt).toISOString(),
+      prices: [price]
+    };
+  });
+}
+
+const CLEARED_EVEN_IF_EDITED: ReadonlySet<string> = new Set([
+  'containerFees',
+  'toolFees',
+  'tiers',
+  'windowZone',
+  'windowPeriods'
+]);
+
+export function pricingFormResets(
+  current: PricingRevisionFormValues,
+  submitted: PricingRevisionFormValues,
+  now: Date
+): Partial<PricingRevisionFormValues> {
+  const blank: Partial<PricingRevisionFormValues> = {
+    ...emptyPriceFields(),
+    model: '',
+    providerId: '',
+    effectiveAt: dateTimeLocalValue(now)
+  };
+  return Object.fromEntries(
+    Object.entries(blank).filter(([key]) => {
+      const field = key as keyof PricingRevisionFormValues;
+      return (
+        CLEARED_EVEN_IF_EDITED.has(field) || current[field] === submitted[field]
+      );
+    })
   );
 }
 
