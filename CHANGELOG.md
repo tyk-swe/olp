@@ -97,6 +97,9 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Fixed
 
+- The New server form on the MCP servers page offers the project list. It
+  could show only the placeholder when the list loaded before the form opened,
+  so the button now waits for the list.
 - A failed background refresh of project memberships no longer discards unsaved
   input on the project settings and code mode pages.
 - Model discovery that records new facts for a model, such as its context

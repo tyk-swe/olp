@@ -65,6 +65,7 @@
       <button
         class="button button-primary"
         type="button"
+        disabled={!projects.data}
         onclick={() => select('')}
       >
         New server
