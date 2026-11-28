@@ -1,8 +1,18 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
-  import { useMutation } from '#lib/editing/action.svelte.js';
+  import FormField from '#lib/components/FormField.svelte';
+  import {
+    useMutation,
+    type ActionFeedback
+  } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { updateNotificationRule, type NotificationRule } from './api';
+  import {
+    silenceServerFields,
+    validateSilence,
+    type SilenceField
+  } from './silenceDraft';
 
   let {
     rule,
@@ -14,7 +24,7 @@
     saved: (rule: NotificationRule) => Promise<void>;
   } = $props();
 
-  const action = useMutation();
+  const action = useMutation<SilenceField>();
   let startsAt = $state('');
   let endsAt = $state('');
   let now = $state(Date.now());
@@ -38,8 +48,11 @@
   const utcLabel = (date: string) =>
     date.replace('T', ' ').replace(/(?:\.0+)?Z$/, ' UTC');
 
-  async function setSilence(window: NotificationRule['silence']) {
-    await action.submit(
+  function setSilence(
+    window: NotificationRule['silence'],
+    feedback?: ActionFeedback<SilenceField>
+  ) {
+    return action.submit(
       { current: rule, patch: { silence: window } },
       ({ current, patch }, key) => updateNotificationRule(current, patch, key),
       async (value) => {
@@ -47,22 +60,22 @@
         startsAt = endsAt = '';
         notify(window ? 'Silence saved.' : 'Silence canceled.');
         await saved(value);
-      }
+      },
+      feedback
     );
   }
 
-  function schedule(event: SubmitEvent) {
+  async function schedule(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
-    const start = new Date(`${startsAt}Z`);
-    const end = new Date(`${endsAt}Z`);
-    if (!(end.valueOf() > start.valueOf())) {
-      action.error = 'Enter an end time after the start time.';
-      return;
-    }
-    void setSilence({
-      starts_at: start.toISOString(),
-      ends_at: end.toISOString()
+    const form = event.currentTarget;
+    const checked = validateSilence(startsAt, endsAt);
+    if (!action.check(checked)) return focusFormError(form);
+    const accepted = await setSilence(checked.value, {
+      serverFields: silenceServerFields
     });
+    if (!accepted) await focusFormError(form);
   }
 </script>
 
@@ -97,32 +110,38 @@
       Cancel silence
     </button>
   {:else}
-    <form class="silence-fields" onsubmit={schedule}>
-      <label class="form-field">
-        Start (UTC)
-        <input
-          type="datetime-local"
-          required
-          bind:value={startsAt}
+    <form class="silence-fields" novalidate onsubmit={schedule}>
+      <FormField label="Start (UTC)" error={action.fieldErrors.startsAt}>
+        {#snippet control(attributes)}
+          <input
+            {...attributes}
+            type="datetime-local"
+            required
+            bind:value={startsAt}
+            disabled={disabled || action.busy}
+          />
+        {/snippet}
+      </FormField>
+      <FormField label="End (UTC)" error={action.fieldErrors.endsAt}>
+        {#snippet control(attributes)}
+          <input
+            {...attributes}
+            type="datetime-local"
+            required
+            bind:value={endsAt}
+            disabled={disabled || action.busy}
+          />
+        {/snippet}
+      </FormField>
+      <div class="page-actions">
+        <button
+          class="button button-primary"
+          type="submit"
           disabled={disabled || action.busy}
-        />
-      </label>
-      <label class="form-field">
-        End (UTC)
-        <input
-          type="datetime-local"
-          required
-          bind:value={endsAt}
-          disabled={disabled || action.busy}
-        />
-      </label>
-      <button
-        class="button button-primary"
-        type="submit"
-        disabled={disabled || action.busy}
-      >
-        Schedule silence
-      </button>
+        >
+          Schedule silence
+        </button>
+      </div>
     </form>
   {/if}
 </section>
@@ -146,5 +165,13 @@
     flex-wrap: wrap;
     align-items: end;
     gap: 0.75rem;
+  }
+
+  .silence-fields {
+    align-items: start;
+  }
+
+  .silence-fields .page-actions {
+    flex-basis: 100%;
   }
 </style>
