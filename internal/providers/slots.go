@@ -6,14 +6,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
+	"github.com/tyk-swe/olp/internal/providers/probe"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -255,4 +259,39 @@ func (s *slotService) slots(r *http.Request, p authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	return s.slotList(r.Context(), s.access.Pool, current)
+}
+
+func (s *slotService) validateSlot(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
+	id, err := httpkit.IDParam(r, "provider_id")
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	slotID, err := httpkit.IDParam(r, "slot_id")
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	input, credential, err := s.prepareSlotValidation(r.Context(), p, id, slotID)
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	defer clear(credential)
+	current, slot, models := input.provider, input.slot, input.models
+	probeErr := validateModelAccess(r.Context(), s.prober, current.target(credential), *slot, models)
+	// Probes run without mutation locks. Only save evidence if its complete
+	// input (credential, transport, restrictions, and models) is still current.
+	result, err := access.Transact(s.access, r, unchangedSince(r.Context(), current, "validation"), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
+		if err := s.storeSlotValidation(r.Context(), tx, current, slot, models, probeErr == nil); err != nil {
+			return httpkit.Reply{}, access.Event{}, err
+		}
+		reply, err := s.slotList(r.Context(), tx, locked)
+		return reply, access.Event{Action: "provider.slot.validate", Resource: "provider_slot", ID: slotID, Failed: probeErr != nil}, err
+	})
+	if err != nil {
+		return httpkit.Reply{}, err
+	}
+	if probeErr != nil {
+		return result, problem.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
+	}
+	clearValidatedCooldowns(r.Context(), s.quota, s.log, id, *slot)
+	return result, nil
 }
