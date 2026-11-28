@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tyk-swe/olp/internal/gateway/traceingest"
-	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/ingest"
@@ -130,7 +128,7 @@ func TestUnpricedBreakdownKeepsAttemptCausesAfterPricesChangeAndUsageRollsUp(t *
 		t.Fatalf("partial rate changed its pin or historical cost/charge: %v %v %v %v", pin, cost, charge, err)
 	}
 
-	maintenance, err := retention.RunMaintenance(ctx, pool, hour.AddDate(0, 0, 91), grants.PurgeExpiredEnrollments, traceingest.PurgeExpiredSpans)
+	maintenance, err := retention.RunMaintenance(ctx, pool, hour.AddDate(0, 0, 91), maintenancePurges())
 	if err != nil || maintenance.UsageRows != 8 {
 		t.Fatalf("roll up fixture: %+v %v", maintenance, err)
 	}
@@ -335,7 +333,7 @@ func checkCallerPaidSpendAfterRollup(t *testing.T, legacy bool, operatorSpend st
 		}
 	}
 	check()
-	if result, err := retention.RunMaintenance(ctx, pool, day.AddDate(0, 0, 91), grants.PurgeExpiredEnrollments, traceingest.PurgeExpiredSpans); err != nil || result.UsageRows != 4 {
+	if result, err := retention.RunMaintenance(ctx, pool, day.AddDate(0, 0, 91), maintenancePurges()); err != nil || result.UsageRows != 4 {
 		t.Fatalf("rollup returned %+v, %v", result, err)
 	}
 	check()

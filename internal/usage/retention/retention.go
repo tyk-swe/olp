@@ -68,7 +68,7 @@ type cutoffs struct{ request, usage, audit time.Time }
 // pool because it holds a session advisory lock across many transactions: that
 // connection must never be handed back to another caller while locked, and
 // closing it is what releases the lock.
-func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purgeEnrollments, purgeTraceSpans Purge) (MaintenanceReport, error) {
+func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purges Purges) (MaintenanceReport, error) {
 	resource, err := pool.Acquire(ctx)
 	if err != nil {
 		return MaintenanceReport{}, fmt.Errorf("acquire maintenance connection: %w", err)
@@ -94,7 +94,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purg
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if _, err = drainInBatches(ctx, conn, expiredBatch(purgeTraceSpans, windows.request)); err != nil {
+	if _, err = drainInBatches(ctx, conn, expiredBatch(purges.TraceSpans, windows.request)); err != nil {
 		return MaintenanceReport{}, err
 	}
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
@@ -106,7 +106,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purg
 	if report.AuditRows, err = purgeExpiredAudit(ctx, conn, windows.audit); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if err = purgeExpiringRecords(ctx, conn, now, windows, &report, purgeEnrollments); err != nil {
+	if err = purgeExpiringRecords(ctx, conn, now, windows, &report, purges.Enrollments); err != nil {
 		return MaintenanceReport{}, err
 	}
 	return report, nil
@@ -162,6 +162,11 @@ func execBatch(sql string, args ...any) purgeBatch {
 }
 
 type Purge func(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error)
+
+type Purges struct {
+	Enrollments Purge
+	TraceSpans  Purge
+}
 
 func expiredBatch(purge Purge, before time.Time) purgeBatch {
 	return func(ctx context.Context, tx pgx.Tx) (int64, error) {

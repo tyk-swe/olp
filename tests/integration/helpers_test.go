@@ -17,8 +17,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/gateway/traceingest"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/usage/retention"
 	"github.com/tyk-swe/olp/tests/harness/vendor"
 )
 
@@ -125,6 +128,10 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, query string, args ...any) {
 	if _, err := pool.Exec(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func maintenancePurges() retention.Purges {
+	return retention.Purges{Enrollments: grants.PurgeExpiredEnrollments, TraceSpans: traceingest.PurgeExpiredSpans}
 }
 
 func placeholderSecret(t *testing.T, pool *pgxpool.Pool, purpose secrets.SealPurpose) string {
