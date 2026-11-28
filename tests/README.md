@@ -14,9 +14,9 @@ tier that can catch the failure it guards against.
 
 `make test-unit` runs both unit suites side by side, `make test-e2e` runs both
 end-to-end suites, and `make test` runs every tier with the cheapest first.
-`make check` runs contract freshness, Go formatting, vet and lint, console
-formatting, types and lint, then the unit tier. CI runs each suite as its own
-job, named after its make target.
+`make check` runs contract freshness, documentation, Helm, migration numbering,
+Go formatting, vet and lint, console formatting, types and lint, then the unit
+tier. CI runs each suite as its own job, named after its make target.
 
 `make check-contracts` generates temporary outputs and compares all tracked
 management, guardrail and inference artifacts with the working tree. It accepts
@@ -43,13 +43,20 @@ the first number passes the second. Go suites run with `-count=1`, so cached
 results never hide growth, and with `-shuffle=on`, so a test that leans on
 another test's leftovers fails early.
 
+Load from a second run inflates every timing, so one machine times one run of a
+suite at a time. `scripts/lib/test.sh` holds a `flock` slot under `/tmp` for each
+suite name while it is timed. A second checkout prints that it is waiting and
+starts its clock when the first one finishes. Different suites, such as the two
+halves of `make test-unit`, still run side by side.
+
 ## Unit tier
 
 The unit tier needs no containers, services, network, or provider accounts.
 Membership is automatic. Every Go `_test.go` file without a build tag runs,
 every file matched by the Vitest `unit` and `svelte` projects runs, and every
 `scripts/*.test.mjs` file runs via `node --test`. Console tests need the
-generated API types, which `pnpm --dir console api:generate` creates.
+generated API types. `make test-unit-console` creates them, and
+`pnpm --dir console api:generate` does the same before a direct Vitest run.
 
 The Go unit tests span `cmd/`, `plugin/`, `tests/harness`, and `internal/`
 packages. They cover authorization derivation and its golden file, secret
@@ -139,9 +146,9 @@ and streamed playground requests, and build a keyword guardrail and try it.
 Journeys build their state through the console and never seed it through the
 API, so the screens a new operator meets first are the ones under test.
 
-Install the browser once locally with
-`pnpm --dir console exec playwright install chromium`. CI installs the headless
-shell and its system dependencies with
+`make setup` installs the browser, and
+`pnpm --dir console exec playwright install chromium` does the same on its own.
+CI installs the headless shell and its system dependencies with
 `pnpm --dir console exec playwright install --with-deps --only-shell chromium`.
 A failed journey leaves a trace under `console/test-results`, and CI uploads it.
 
@@ -222,9 +229,9 @@ before commit `dbce24318`.
 ## Focused runs
 
 Use `make check-go`, `make check-console`, `make check-contracts`, or
-`make check-docs` for focused static validation. Helm (`make check-helm`),
-dependency (`make check-dependencies`), workflow, and release checks run
-separately in CI.
+`make check-docs` for focused static validation. `make check` also runs
+`make check-helm`. Dependency (`make check-dependencies`), workflow, and release
+checks run separately in CI.
 
 Run one package, file or test directly while iterating. Unit tests run with
 `go test -count=1 ./internal/gateway/...`,

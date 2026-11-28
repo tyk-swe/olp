@@ -10,14 +10,28 @@ report_budget() {
   fi
 }
 
+take_test_slot() {
+  local name=$1
+  exec 9>"/tmp/olp-test-slot-$(id -u)-${name// /-}.lock"
+  flock --nonblock 9 && return
+  printf '%s: waiting for another checkout to finish this suite\n' "$name" >&2
+  flock 9
+}
+
+release_test_slot() {
+  exec 9>&-
+}
+
 go_suite() {
   local name=$1 budget=$2
   shift 2
+  take_test_slot "$name"
   local log status=0 began=$SECONDS
   log=$(mktemp)
   test_temp_files+=("$log")
-  go test -mod=readonly -count=1 -shuffle=on "$@" 2>&1 |
-    awk '!/\[no test files\]$/ { print; fflush() }' | tee "$log" || status=$?
+  go test -mod=readonly -count=1 -shuffle=on "$@" 2>&1 9>&- |
+    awk '!/\[no test files\]$/ { print; fflush() }' 9>&- | tee "$log" 9>&- || status=$?
+  release_test_slot
   local package_seconds
   package_seconds=$(awk '($1 == "ok" || $1 == "FAIL") && $3 ~ /^[0-9.]+s$/ { sum += $3 } END { printf "%.1f", sum }' "$log")
   rm -f -- "$log"
@@ -28,8 +42,11 @@ go_suite() {
 timed_suite() {
   local name=$1 budget=$2
   shift 2
-  local began=$SECONDS
-  "$@" || return
+  take_test_slot "$name"
+  local status=0 began=$SECONDS
+  "$@" 9>&- || status=$?
+  release_test_slot
+  [ "$status" -eq 0 ] || return "$status"
   local ran=$((SECONDS - began))
   report_budget "$name" "$budget" "$ran" "$ran"
 }

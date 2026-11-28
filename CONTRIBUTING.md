@@ -8,14 +8,15 @@ linker plus glibc development headers. Running the development stack needs Docke
 Compose and Python 3. Dependency, end-to-end and image scripts use `jq` and
 `curl`, operational scripts need additional tools such as PostgreSQL 18 clients
 and OpenSSL, and the code-mode fixture qualification lanes (`make qualify-code`)
-need `bubblewrap`. Run commands from the repository root. Release platforms are
-native Linux amd64 and arm64. macOS and musl are unqualified.
+need `bubblewrap`. `make check` also needs Helm and Docker for the chart checks.
+Run commands from the repository root. Release platforms are native Linux amd64
+and arm64. macOS and musl are unqualified.
 
 | Command | Purpose |
 | --- | --- |
-| `make setup` | Install modules, the pnpm workspace and a local Air watcher, then generate contracts |
-| `make dev` | Start services, automatically reloaded Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | Check contract freshness, Go, console, and the unit tier without rewriting tracked files |
+| `make setup` | Install modules, the pnpm workspace, the Playwright browser and a local Air watcher, then generate contracts |
+| `make dev` | Start this checkout's services, automatically reloaded Go and Vite |
+| `make check` | Check contract freshness, Go, console, docs, Helm and the unit tier without rewriting tracked files |
 | `make check-go` | Check migration numbers, Go formatting, vet, and pinned static analysis |
 | `make check-console` | Generate ignored console types, then check formatting, types, and ESLint |
 | `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
@@ -31,8 +32,8 @@ native Linux amd64 and arm64. macOS and musl are unqualified.
 | `make catalog` | Rewrite the reference catalog and plugin index in canonical form |
 | `make catalog-sign` | Sign the reference catalog and plugin index with the development key |
 | `make fmt` | Format Go and console source |
-| `make dev-stop` | Stop development containers and preserve data |
-| `make dev-reset` | Delete development containers and volumes, preserving local secrets |
+| `make dev-stop` | Stop this checkout's development containers and preserve data |
+| `make dev-reset` | Delete this checkout's development containers and volumes, preserving local secrets |
 
 `make help` groups targets into four sections, covering Everyday commands,
 Focused checks, Tests, and Services and maintenance. Run `make setup` after
@@ -46,7 +47,7 @@ CI runs `check-go`, `check-console`, `test-unit-go`,
 `contracts`, `helm`, `workflows`, `dependencies`, and `build`,
 each gated on the paths a change touches. The `ci-gate` job fails when any of
 them fails or is cancelled and accepts the ones that were skipped, so it is the
-single check to require on `main`. Helm, dependency and release checks
+single check to require on `main`. Dependency, workflow and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.
 `management/management.json` is the checked-in source of truth. Update it
 alongside handlers and regenerate with `make api`. Never edit generated Go or
@@ -54,7 +55,8 @@ TypeScript files by hand.
 
 ## Local development
 
-After `make setup` and `make dev`, open http://127.0.0.1:5173 and use
+After `make setup` and `make dev`, open the console address that `make dev`
+prints, which is http://127.0.0.1:5173 in the primary checkout, and use
 `.local/secrets/bootstrap.token` to create the first owner. Use this origin
 so management requests pass the origin check. Vite proxies management, OIDC
 callbacks, and the configured inference paths. Console edits hot reload.
@@ -71,11 +73,14 @@ Number a new migration above the highest one on `origin/main`, or `make check-go
 fails. Set `MIGRATIONS_BASE` to compare against another ref.
 
 `make dev` creates missing private secrets and initializes the schema. Existing
-secrets and data survive restarts. One development stack runs at a time. Vite
-requires port 5173 and fails if it is occupied. PostgreSQL, Valkey and response
-cache Valkey use loopback ports 54321, 63791 and 63792. Ctrl-C stops the watcher,
-backend and Vite while leaving containers running for the next start. Stop
-`make dev` before stopping the containers with the following command.
+secrets and data survive restarts. Each checkout runs its own stack. The primary
+checkout serves Vite on port 5173, Go on 8082 and its private listener on 9092,
+and publishes PostgreSQL, Valkey and response cache Valkey on loopback ports
+54321, 63791 and 63792. A linked git worktree gets its own Compose project,
+three application ports derived from its path and service ports that Docker
+picks. `make dev` fails if one of its application ports is occupied. Ctrl-C stops
+the watcher, backend and Vite while leaving containers running for the next start.
+Stop `make dev` before stopping the containers with the following command.
 
 ```sh
 make dev-stop
