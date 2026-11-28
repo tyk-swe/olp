@@ -27,7 +27,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
 | `gateway/anthropicbeta` | validating and forwarding `Anthropic-Beta` headers across compatible route targets | `fault` |
 | `gateway/duplexrelay` | shared bidirectional WebSocket relay loop, bounded upstream writer, delegation reauth and abnormal teardown | `fault`, `ingress` |
-| `gateway/managedbatch` | managed batch JSONL line translation, manifest metadata and Gemini batch record and result codecs | `fault` |
+| `gateway/managedbatch` | managed batch JSONL line translation and line identity digests, manifest metadata and Gemini batch record and result codecs | `fault` |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, native and generation dispatch, and retained steps such as retained dispatch, page admission and result projection | every top-level gateway package above except `duplexrelay` |
 | `gateway/healthprobes` | the health probe worker, which picks opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
 | `gateway/surface/anthropicstate` | Anthropic files and message batches | `fault`, `kernel` |
@@ -35,12 +35,12 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/geminilive` | Gemini Live sessions under `/gemini/ws/` and `/ws/` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota` |
 | `gateway/surface/media` | OpenAI images, audio and video jobs under `/v1/images`, `/v1/audio` and `/v1/videos`, including media execution, delivery and video job lifecycles | `events`, `fault`, `kernel`, `quota` |
 | `gateway/surface/nativeduplex` | Native duplex sessions under `/native/{dialect}/sessions` | `duplexrelay`, `fault`, `ingress`, `kernel` |
-| `gateway/surface/openaistate` | OpenAI files, batches, stored responses and continuations | `fault`, `generationrefs`, `ingress`, `kernel` |
+| `gateway/surface/openaistate` | OpenAI files, batches, stored responses and continuations | `fault`, `generationrefs`, `ingress`, `kernel`, `managedbatch` |
 | `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |
 | `gateway/surface/retrieval` | Cloud retrieval queries under `/v1/retrieval/{binding_id}/query` | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
-| `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel` |
+| `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel`, `managedbatch` |
 | `gateway/surface/guardrails` | Standalone guardrail evaluation under `/v1/guardrails/apply` | `fault`, `kernel` |
 | `gateway/surface/passthrough` | Pass-through routes under `/native/{dialect}/routes/{route}/` | `fault`, `ingress`, `kernel` |
 | `gateway/surface/retained` | Retained provider resources from the `retainedapi` catalog, such as fine-tuning jobs, vector stores, conversations, containers, evals, Anthropic skills, Gemini cached contents and agents, and Vertex tuning jobs, plus `/v1/vector_stores/{id}/search` and `/v1/responses/compact` | `fault`, `ingress`, `kernel`, `quota` |

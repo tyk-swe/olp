@@ -5,25 +5,27 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
 type surface struct {
-	kernel *kernel.Server
-	store  *resources.Store
-	spool  *staging.Spool
+	kernel     *kernel.Server
+	store      *resources.Store
+	spool      *staging.Spool
+	lineDigest func(string) ([]byte, bool)
 }
 
 func Actions(k *kernel.Server, store *resources.Store, spool *staging.Spool) kernel.GeminiActions {
 	return kernel.GeminiActions{"batchGenerateContent": surface{kernel: k, store: store, spool: spool}.createBatch}
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool) {
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool, digester managedbatch.Digester) {
 	if store == nil || spool == nil {
 		return
 	}
-	s := surface{kernel: k, store: store, spool: spool}
+	s := surface{kernel: k, store: store, spool: spool, lineDigest: managedbatch.LineDigest(digester)}
 	mux.HandleFunc("OPTIONS /gemini/upload/", k.Preflight)
 	mux.HandleFunc("OPTIONS /gemini/download/", k.Preflight)
 	mux.HandleFunc("POST /gemini/upload/v1beta/files", s.startUpload)

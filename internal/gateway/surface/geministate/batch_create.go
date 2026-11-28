@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -80,9 +81,9 @@ func bindInputFile(input batchInput, file *resources.Resource) (batchInput, *fau
 		return input, nil
 	}
 	var metadata struct {
-		Manifest kernel.BatchManifest `json:"batch_manifest"`
+		Manifest managedbatch.Manifest `json:"batch_manifest"`
 	}
-	if json.Unmarshal(file.Metadata, &metadata) != nil || metadata.Manifest.Adapter != kernel.GeminiNativeManifest || metadata.Manifest.LineCount < 1 || metadata.Manifest.ManifestDigest == "" {
+	if json.Unmarshal(file.Metadata, &metadata) != nil || metadata.Manifest.Adapter != managedbatch.GeminiNativeManifest || metadata.Manifest.LineCount < 1 || metadata.Manifest.ManifestDigest == "" {
 		return batchInput{}, kernel.PolicyUnavailable("target_capability", "File-backed Gemini batches require qualified JSONL uploaded in one complete final chunk.")
 	}
 	upstreamFile := "files/" + file.UpstreamID

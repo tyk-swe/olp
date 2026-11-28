@@ -5,22 +5,24 @@ import (
 
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
 type surface struct {
-	kernel  *kernel.Server
-	store   *resources.Store
-	spool   *staging.Spool
-	batches *batches.Store
+	kernel     *kernel.Server
+	store      *resources.Store
+	spool      *staging.Spool
+	batches    *batches.Store
+	lineDigest func(string) ([]byte, bool)
 }
 
-func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool, batchStore *batches.Store) {
+func Register(k *kernel.Server, mux *http.ServeMux, store *resources.Store, spool *staging.Spool, batchStore *batches.Store, digester managedbatch.Digester) {
 	if store == nil {
 		return
 	}
-	s := surface{kernel: k, store: store, spool: spool, batches: batchStore}
+	s := surface{kernel: k, store: store, spool: spool, batches: batchStore, lineDigest: managedbatch.LineDigest(digester)}
 	if spool != nil {
 		mux.HandleFunc("POST /v1/files", s.uploadFile)
 		mux.HandleFunc("GET /v1/files", s.listFiles)

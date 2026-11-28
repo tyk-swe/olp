@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -32,6 +33,19 @@ const (
 )
 
 const GeminiNativeManifest connectors.BatchAdapter = "gemini_native"
+
+type Digester interface {
+	Digest(secrets.DigestPurpose, string) []byte
+}
+
+func LineDigest(digester Digester) func(string) ([]byte, bool) {
+	return func(customID string) ([]byte, bool) {
+		if digester == nil {
+			return nil, false
+		}
+		return digester.Digest(secrets.BatchLineDigest, customID), true
+	}
+}
 
 type Manifest struct {
 	Adapter        connectors.BatchAdapter `json:"adapter,omitempty"`

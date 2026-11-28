@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -35,7 +36,7 @@ type providerUpload struct {
 	file     *staging.Part
 	purpose  string
 	extra    map[string]string
-	manifest kernel.BatchManifest
+	manifest managedbatch.Manifest
 }
 
 type strictBatchContract struct {
@@ -51,8 +52,7 @@ type providerFile struct {
 }
 
 type batchFileUpload struct {
-	server    *kernel.Server
-	store     *resources.Store
+	surface
 	x         *kernel.Call
 	authority keyauthority.Authority
 	route     *routing.Route
@@ -151,7 +151,7 @@ func (s surface) uploadBatchFile(w http.ResponseWriter, r *http.Request, x *kern
 		return
 	}
 	adapter, _ := p.Provider.Connector().FilesBatchesAdapter()
-	u := batchFileUpload{server: s.kernel, store: s.store, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
+	u := batchFileUpload{surface: s, x: x, authority: authority, route: route, pin: p, adapter: adapter, fields: fields, source: source}
 	sending, e := u.translated(r.Context())
 	if e != nil {
 		s.kernel.ReleaseHold(r.Context(), p.Hold)
@@ -252,7 +252,7 @@ func (u batchFileUpload) translated(ctx context.Context) (providerUpload, *fault
 	if u.adapter != connectors.BatchOpenAI && len(extra) > 0 {
 		return providerUpload{}, fault.InvalidRequest("unsupported_parameter", "Managed batch uploads require purpose=batch and no extra fields.", new("purpose"))
 	}
-	translated, manifest, e := u.server.TranslateManagedBatchInput(ctx, u.pin, u.route, file, u.adapter)
+	translated, manifest, e := u.translateManagedBatchInput(ctx, u.pin, u.route, file, u.adapter)
 	if e != nil {
 		return providerUpload{}, e
 	}
@@ -270,7 +270,7 @@ func (u batchFileUpload) contract() (strictBatchContract, *fault.Error) {
 	if !ok {
 		return strictBatchContract{}, fault.InvalidRequest("target_capability", "The selected target has no strict batch contract.", nil)
 	}
-	endpoint, items, err := u.server.ValidateBatchInput(u.fields.file, template.Model(), &u.pin.Provider, u.route)
+	endpoint, items, err := u.validateBatchInput(u.fields.file, template.Model(), &u.pin.Provider, u.route)
 	if err != nil {
 		return strictBatchContract{}, fault.InvalidRequest("target_capability", "The batch file has an unqualified item, duplicate identity, or mixed endpoint.", new("file"))
 	}
@@ -278,13 +278,9 @@ func (u batchFileUpload) contract() (strictBatchContract, *fault.Error) {
 }
 
 func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (providerFile, *fault.Error) {
-	s, p := u.server, u.pin
+	s, p := u.kernel, u.pin
 	if u.adapter == connectors.BatchGeminiManaged {
-		body, upstreamID, exchange, failure := s.UploadGeminiManagedFile(ctx, u.x, p, sending.file)
-		if failure != nil {
-			return providerFile{}, kernel.UpstreamError(failure)
-		}
-		return providerFile{body: body, upstreamID: upstreamID, exchange: exchange}, nil
+		return u.uploadGeminiManagedFile(ctx, u.x, p, sending.file)
 	}
 	filePath := "files"
 	if u.adapter == connectors.BatchTogether {
@@ -298,13 +294,13 @@ func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (prov
 	if failure != nil {
 		return providerFile{}, kernel.UpstreamError(failure)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := resp.ReadBody(s.Config.MaxResponseBytes)
 	if err != nil {
 		return providerFile{}, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
 	if u.x.Strict() {
-		_, upstreamID, err := kernel.StrictResult(body, "")
+		_, upstreamID, err := strictResult(body, "")
 		if err != nil {
 			return providerFile{}, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
 		}
@@ -317,9 +313,9 @@ func (u batchFileUpload) send(ctx context.Context, sending providerUpload) (prov
 	return providerFile{body: body, upstreamID: upstreamID, exchange: resp.Exchange}, nil
 }
 
-func (u batchFileUpload) keep(ctx context.Context, manifest kernel.BatchManifest, contract strictBatchContract, sent providerFile) (*resources.Resource, *fault.Error) {
-	s, p := u.server, u.pin
-	provided, state, expires := kernel.FileMetadata(sent.body, p.Model)
+func (u batchFileUpload) keep(ctx context.Context, manifest managedbatch.Manifest, contract strictBatchContract, sent providerFile) (*resources.Resource, *fault.Error) {
+	s, p := u.kernel, u.pin
+	provided, state, expires := retainedFileMetadata(sent.body, p.Model)
 	metadata, err := uploadedFileMetadata(provided, sent.body, u.adapter, manifest)
 	if err != nil {
 		return nil, malformedFileObject()
@@ -374,10 +370,10 @@ func unstoredFileMapping() *fault.Error {
 
 func (u batchFileUpload) object(ctx context.Context, body []byte, kept *resources.Resource) ([]byte, error) {
 	if u.x.Strict() {
-		return kernel.DurableProjection(body, kept.ID, nil)
+		return durableProjection(body, kept.ID, nil)
 	}
 	if u.adapter.Managed() {
-		return u.server.FileObject(ctx, kept)
+		return u.fileObject(ctx, kept)
 	}
 	return kernel.RewriteID(body, "id", kept.ID)
 }

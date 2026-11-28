@@ -1,22 +1,18 @@
 package kernel
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/protocols/openai"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
-	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -60,75 +56,6 @@ func ValidateGeminiUploadURL(uploadURL, providerEndpoint string, egressPolicy in
 		return errors.New("Gemini resumable upload URL is outside egress policy")
 	}
 	return nil
-}
-
-func (s *Server) UploadGeminiManagedFile(ctx context.Context, x *Call, p *Pin, part *staging.Part) ([]byte, string, *PinnedExchange, *AttemptFailure) {
-	endpoint, err := GeminiUploadOrigin(p.Provider.Connector(), p.Model, s.Egress)
-	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassConnect, false)
-	}
-	startHeaders := http.Header{
-		"X-Goog-Upload-Protocol":              {"resumable"},
-		"X-Goog-Upload-Command":               {"start"},
-		"X-Goog-Upload-Header-Content-Length": {strconv.FormatInt(part.Size, 10)},
-		"X-Goog-Upload-Header-Content-Type":   {"application/jsonl"},
-	}
-	displayName, _ := json.Marshal(map[string]any{"file": map[string]string{"display_name": part.Filename}})
-	start, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, endpoint, bytes.NewReader(displayName), int64(len(displayName)), "application/json", "application/json", startHeaders)
-	if failure != nil {
-		return nil, "", nil, failure
-	}
-	uploadURL := start.Header.Get("X-Goog-Upload-URL")
-	generationURL, _ := p.Provider.Connector().URL(wire.Gemini, p.Model, false)
-	if len(start.Header.Values("X-Goog-Upload-URL")) != 1 ||
-		ValidateGeminiUploadURL(uploadURL, generationURL, s.Egress) != nil {
-		_ = start.Body.Close()
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	_ = start.Body.Close()
-	start.Exchange.Complete(ClassSuccess)
-	opened, err := s.Deps.Staging.Open(part.Handle)
-	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	defer opened.File.Close()
-	chunkHeaders := http.Header{
-		"X-Goog-Upload-Command": {"upload, finalize"},
-		"X-Goog-Upload-Offset":  {"0"},
-	}
-	final, failure := s.GeminiPinnedRequest(ctx, x, p, http.MethodPost, uploadURL, PinnedUploadSource{opened.File}, part.Size,
-		"application/jsonl", "application/json", chunkHeaders)
-	if failure != nil {
-		return nil, "", nil, failure
-	}
-	defer final.Body.Close()
-	if final.Header.Get("X-Goog-Upload-Status") != "final" {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	body, err := final.ReadBody(s.Config.MaxResponseBytes)
-	if err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	var result struct {
-		File json.RawMessage `json:"file"`
-	}
-	var FileObject map[string]json.RawMessage
-	if json.Unmarshal(body, &result) != nil || len(result.File) == 0 ||
-		json.Unmarshal(result.File, &FileObject) != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	var name string
-	if json.Unmarshal(FileObject["name"], &name) != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	if _, err := GeminiFileID(name); err != nil {
-		return nil, "", nil, geminiManagedUploadFailure(ClassProtocol, true)
-	}
-	return body, name, final.Exchange, nil
-}
-
-func geminiManagedUploadFailure(class string, dispatched bool) *AttemptFailure {
-	return &AttemptFailure{class: class, Status: http.StatusBadGateway, dispatched: dispatched}
 }
 
 func (s *Server) GeminiPinnedRequest(ctx context.Context, x *Call, p *Pin, method, endpoint string, body io.Reader, length int64, contentType, accept string, headers http.Header) (*PinnedResponse, *AttemptFailure) {

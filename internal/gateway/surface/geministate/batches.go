@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 )
@@ -21,7 +22,7 @@ import (
 func (s surface) mapUpstreamFile(ctx context.Context, owner *resources.Resource, upstreamName string) (*resources.Resource, error) {
 	upstreamID, err := kernel.GeminiFileID(upstreamName)
 	if err != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	identity := owner.NativeIdentity()
 	identity.Kind, identity.UpstreamID = resources.KindGeminiFile, upstreamID
@@ -101,11 +102,11 @@ func (s surface) batchCall(w http.ResponseWriter, r *http.Request, use kernel.Re
 func (s surface) resourceObject(ctx context.Context, resource *resources.Resource, body []byte) ([]byte, error) {
 	names, err := readInputNames(resource)
 	if err != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	batch, err := upstream.DecodeGeminiBatch(body)
 	if err != nil {
-		return nil, kernel.ErrGeminiBatchFidelity
+		return nil, managedbatch.ErrGeminiBatchFidelity
 	}
 	object, err := prepareBatch(body, batch, names)
 	if err != nil {
@@ -210,11 +211,11 @@ func (s surface) relayBatch(w http.ResponseWriter, r *http.Request, use kernel.R
 		names, namesErr := readInputNames(resource)
 		if namesErr != nil {
 			response.Exchange.Interrupt(kernel.ClassProtocol, true)
-			return projectionError(kernel.ErrGeminiBatchFidelity)
+			return projectionError(managedbatch.ErrGeminiBatchFidelity)
 		}
 		object, metadata, metadataErr := settleResult(response.Exchange, body, batch, kernel.ResourceModel(resource), names)
 		if metadataErr != nil {
-			return projectionError(kernel.ErrGeminiBatchFidelity)
+			return projectionError(managedbatch.ErrGeminiBatchFidelity)
 		}
 		if err := s.store.Update(ctx, resource.ID, batch.State, metadata, nil); err != nil {
 			return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch refresh could not be committed.")

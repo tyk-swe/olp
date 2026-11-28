@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/staging"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -39,7 +40,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 	// authorized or projected.
 	rows, err := s.store.ListKinds(r.Context(), kinds, authority.ID, limit+1, after)
 	if err != nil {
-		s.kernel.Refuse(x, w, kernel.ResourceListError(err, "The file list could not be read."))
+		s.kernel.Refuse(x, w, resourceListError(err, "The file list could not be read."))
 		return
 	}
 	hasMore := len(rows) > limit
@@ -66,7 +67,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		obj, err := s.kernel.FileObject(r.Context(), row)
+		obj, err := s.fileObject(r.Context(), row)
 		if err != nil {
 			s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list could not be projected."))
 			return
@@ -74,12 +75,12 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 		items = append(items, obj)
 		ids = append(ids, row.ID)
 	}
-	s.kernel.WriteStateJSON(w, x, kernel.ListBody(items, ids, hasMore))
+	s.kernel.WriteStateJSON(w, x, listBody(items, ids, hasMore))
 }
 
 func (s surface) getFile(w http.ResponseWriter, r *http.Request) {
 	s.fileCall(w, r, kernel.RetainedRetrieval, func(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, res *resources.Resource, p *kernel.Pin, _ *routing.Route) *fault.Error {
-		return s.kernel.GetPinnedFile(ctx, w, x, authority, res, p)
+		return s.getPinnedFile(ctx, w, x, authority, res, p)
 	})
 }
 
@@ -106,7 +107,7 @@ func (s surface) deleteFile(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		path, e := kernel.ProviderFilePath(res, adapter)
+		path, e := providerFilePath(res, adapter)
 		if e != nil {
 			return e
 		}
@@ -148,7 +149,7 @@ func (s surface) fileContent(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		if adapter == connectors.BatchGeminiManaged {
-			return s.kernel.GeminiManagedFileContent(ctx, w, x, res, p)
+			return s.geminiManagedFileContent(ctx, w, x, res, p)
 		}
 		endpoint, err := kernel.ResourceURL(p.Provider.Connector(), p.Model, "files/"+url.PathEscape(res.UpstreamID)+"/content", nil)
 		if err != nil {
@@ -269,7 +270,7 @@ func (s surface) fileCall(w http.ResponseWriter, r *http.Request, use kernel.Ret
 }
 
 func (s surface) detachGeminiResultFile(ctx context.Context, res *resources.Resource) (bool, *fault.Error) {
-	record, err := kernel.DecodeManagedFileRecord(res.Metadata)
+	record, err := managedbatch.DecodeFileRecord(res.Metadata)
 	if err != nil {
 		return false, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The Gemini file mapping is malformed.")
 	}
@@ -299,10 +300,10 @@ func (s surface) detachGeminiResultFile(ctx context.Context, res *resources.Reso
 	return false, nil
 }
 
-func uploadedFileMetadata(metadata json.RawMessage, body []byte, adapter connectors.BatchAdapter, manifest kernel.BatchManifest) (json.RawMessage, error) {
+func uploadedFileMetadata(metadata json.RawMessage, body []byte, adapter connectors.BatchAdapter, manifest managedbatch.Manifest) (json.RawMessage, error) {
 	switch {
 	case adapter.Managed():
-		return kernel.ManagedFileMetadata(metadata, body, adapter, manifest, "input")
+		return managedbatch.FileMetadata(metadata, body, adapter, manifest, "input")
 	case manifest.Adapter == connectors.BatchOpenAI:
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(metadata, &fields); err != nil {

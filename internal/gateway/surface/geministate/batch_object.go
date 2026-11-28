@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/batches/upstream"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -29,17 +30,17 @@ type batchObject struct {
 func prepareBatch(body []byte, batch upstream.GeminiBatch, names inputNames) (batchObject, error) {
 	var object map[string]json.RawMessage
 	if json.Unmarshal(body, &object) != nil || object == nil {
-		return batchObject{}, kernel.ErrGeminiBatchFidelity
+		return batchObject{}, managedbatch.ErrGeminiBatchFidelity
 	}
 	var metadata map[string]json.RawMessage
 	if raw, present := object["metadata"]; present {
 		if json.Unmarshal(raw, &metadata) != nil || metadata == nil {
-			return batchObject{}, kernel.ErrGeminiBatchFidelity
+			return batchObject{}, managedbatch.ErrGeminiBatchFidelity
 		}
 		if rawName, present := metadata["name"]; present {
 			var name string
 			if json.Unmarshal(rawName, &name) != nil || name != "batches/"+batch.ID {
-				return batchObject{}, kernel.ErrGeminiBatchFidelity
+				return batchObject{}, managedbatch.ErrGeminiBatchFidelity
 			}
 		}
 	}
@@ -68,13 +69,13 @@ func projectInput(object map[string]json.RawMessage, names inputNames) error {
 		}
 		var config map[string]json.RawMessage
 		if json.Unmarshal(raw, &config) != nil || config == nil {
-			return kernel.ErrGeminiBatchFidelity
+			return managedbatch.ErrGeminiBatchFidelity
 		}
 		for _, nameField := range []string{"fileName", "file_name"} {
 			if rawName, present := config[nameField]; present {
 				var name string
 				if json.Unmarshal(rawName, &name) != nil || names.Local == "" || name != names.Upstream {
-					return kernel.ErrGeminiBatchFidelity
+					return managedbatch.ErrGeminiBatchFidelity
 				}
 				config[nameField] = kernel.MustJSON(names.Local)
 			}
@@ -93,15 +94,15 @@ func outputNames(object map[string]json.RawMessage) ([]string, error) {
 		}
 		var destination map[string]json.RawMessage
 		if json.Unmarshal(raw, &destination) != nil || destination == nil {
-			return nil, kernel.ErrGeminiBatchFidelity
+			return nil, managedbatch.ErrGeminiBatchFidelity
 		}
 		if rawName, present := destination["responsesFile"]; present {
 			var name string
 			if json.Unmarshal(rawName, &name) != nil {
-				return nil, kernel.ErrGeminiBatchFidelity
+				return nil, managedbatch.ErrGeminiBatchFidelity
 			}
 			if _, err := kernel.GeminiFileID(name); err != nil {
-				return nil, kernel.ErrGeminiBatchFidelity
+				return nil, managedbatch.ErrGeminiBatchFidelity
 			}
 			files = append(files, name)
 		}
@@ -127,7 +128,7 @@ func (b batchObject) project(localID, routeSlug string, outputFiles map[string]s
 				if file, present := destination["responsesFile"]; present {
 					var upstreamName string
 					if json.Unmarshal(file, &upstreamName) != nil || outputFiles[upstreamName] == "" {
-						return nil, kernel.ErrGeminiBatchFidelity
+						return nil, managedbatch.ErrGeminiBatchFidelity
 					}
 					destination["responsesFile"] = kernel.MustJSON(outputFiles[upstreamName])
 				}
@@ -174,7 +175,7 @@ func readInputNames(resource *resources.Resource) (inputNames, error) {
 }
 
 func projectionError(err error) *fault.Error {
-	if errors.Is(err, kernel.ErrGeminiBatchFidelity) {
+	if errors.Is(err, managedbatch.ErrGeminiBatchFidelity) {
 		return fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an unprojectable Gemini batch object.")
 	}
 	return fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Gemini batch object could not be projected.")

@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
+	"github.com/tyk-swe/olp/internal/gateway/managedbatch"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -37,11 +38,11 @@ type batchPlan struct {
 	kind           string
 	endpoint       string
 	body           []byte
-	window         kernel.BatchWindow
+	window         managedbatch.Window
 	expected       *int64
 	serving        oif.ServingIdentity
 	submission     batches.Submission
-	manifest       kernel.BatchManifest
+	manifest       managedbatch.Manifest
 	clientMetadata json.RawMessage
 }
 
@@ -91,7 +92,7 @@ func (s surface) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.kernel.Refuse(x, w, e)
 		return
 	}
-	out, err := s.kernel.BatchObject(r.Context(), resource)
+	out, err := s.batchObject(r.Context(), resource)
 	if err != nil {
 		s.kernel.Refuse(x, w, fault.ServerError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."))
 		return
@@ -108,7 +109,7 @@ func (s surface) batchCreateRequest(w http.ResponseWriter, r *http.Request) (bat
 	if err != nil || source.Root().Kind() != oif.Object {
 		return batchCreateRequest{}, fault.InvalidRequest("invalid_json", "The request body must be one JSON object.", nil)
 	}
-	endpoint, operation, e := kernel.BatchLineOperation(source)
+	endpoint, operation, e := batchLineOperation(source)
 	if e != nil {
 		return batchCreateRequest{}, e
 	}
@@ -132,11 +133,11 @@ func (s surface) batchInputFile(ctx context.Context, owner, localFile string) (*
 }
 
 func (s surface) planBatch(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, request batchCreateRequest, file *resources.Resource, contract *kernel.DurableDocument, p *kernel.Pin, route *routing.Route) (batchPlan, *fault.Error) {
-	window, e := kernel.BatchCompletionWindow(request.source, p.Provider.VendorID)
+	window, e := batchCompletionWindow(request.source, p.Provider.VendorID)
 	if e != nil {
 		return batchPlan{}, e
 	}
-	if e := kernel.BatchEndpointRefusal(p, request.endpoint, "endpoint"); e != nil {
+	if e := batchEndpointRefusal(p, request.endpoint, "endpoint"); e != nil {
 		return batchPlan{}, e
 	}
 	adapter, ok := p.Provider.Connector().FilesBatchesAdapter()
@@ -212,26 +213,26 @@ func (s surface) strictBatchAdmission(ctx context.Context, x *kernel.Call, autho
 }
 
 type storedFileManifest struct {
-	kernel.BatchManifest
-	Qualified *kernel.BatchManifest `json:"batch_manifest"`
+	managedbatch.Manifest
+	Qualified *managedbatch.Manifest `json:"batch_manifest"`
 }
 
-func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (kernel.BatchManifest, *fault.Error) {
+func inputBatchManifest(file *resources.Resource, adapter connectors.BatchAdapter, endpoint string, strict bool) (managedbatch.Manifest, *fault.Error) {
 	if strict || adapter != connectors.BatchOpenAI && !adapter.Managed() {
-		return kernel.BatchManifest{}, nil
+		return managedbatch.Manifest{}, nil
 	}
 	var stored storedFileManifest
 	decodeErr := json.Unmarshal(file.Metadata, &stored)
 	if adapter == connectors.BatchOpenAI {
 		if decodeErr != nil || stored.Qualified == nil || !stored.Qualified.Usable(adapter) || stored.Qualified.Endpoint != endpoint {
-			return kernel.BatchManifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
+			return managedbatch.Manifest{}, fault.InvalidRequest("resource_affinity", "Upload a batch file qualified for this model and endpoint before submitting it.", new("input_file_id"))
 		}
 		return *stored.Qualified, nil
 	}
-	if decodeErr != nil || !stored.BatchManifest.Usable(adapter) {
-		return kernel.BatchManifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
+	if decodeErr != nil || !stored.Manifest.Usable(adapter) {
+		return managedbatch.Manifest{}, fault.NotFoundError("not_found", "The uploaded file has no compatible batch manifest.")
 	}
-	return stored.BatchManifest, nil
+	return stored.Manifest, nil
 }
 
 func (s surface) planStrictBatch(x *kernel.Call, request batchCreateRequest, file *resources.Resource, contract *kernel.DurableDocument, p *kernel.Pin, route *routing.Route, plan batchPlan) (batchPlan, *fault.Error) {
@@ -273,7 +274,7 @@ func planFilesBatch(request batchCreateRequest, file *resources.Resource, p *ker
 		plan.submission = filesSubmission(request, file, plan)
 		return plan, nil
 	}
-	pending, err := kernel.GeminiManagedBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.Model, kernel.NewGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
+	pending, err := managedbatch.GeminiBatchMetadata([]byte(`{"metadata":{"state":"BATCH_STATE_PENDING"}}`), p.Model, managedbatch.NewGeminiRecord(request.localFile, plan.manifest, plan.clientMetadata))
 	if err != nil {
 		return batchPlan{}, fault.ServerError(http.StatusInternalServerError, "internal_error", "The Gemini submission metadata could not be prepared.")
 	}
@@ -297,10 +298,10 @@ func filesBatchBody(request batchCreateRequest, file *resources.Resource, p *ker
 	if plan.adapter == connectors.BatchOpenAI {
 		return openAIBatchBody(request.source, file.UpstreamID, p, plan.window)
 	}
-	return kernel.ManagedBatchRequestBody(request.source, plan.adapter, request.endpoint, plan.window, file.UpstreamID, p.Provider.Connector().Model(p.Model), plan.manifest, plan.id)
+	return managedbatch.RequestBody(request.source, plan.adapter, request.endpoint, plan.window, file.UpstreamID, p.Provider.Connector().Model(p.Model), plan.manifest, plan.id)
 }
 
-func openAIBatchBody(source oif.Document, upstreamFile string, p *kernel.Pin, window kernel.BatchWindow) ([]byte, *fault.Error) {
+func openAIBatchBody(source oif.Document, upstreamFile string, p *kernel.Pin, window managedbatch.Window) ([]byte, *fault.Error) {
 	upstreamWindow := "24h"
 	if _, declared := vendors.BatchWindowFor(p.Provider.VendorID); declared {
 		upstreamWindow = window.Label
@@ -350,7 +351,7 @@ func (s surface) acceptFilesBatch(ctx context.Context, p *kernel.Pin, request ba
 		if err != nil {
 			return kernel.AcceptedBatch{}, s.kernel.BatchSubmissionUnknown(ctx, plan.id, "The provider accepted a batch with an invalid operation name.")
 		}
-		managed, err := kernel.GeminiManagedBatchMetadata(result, p.Model, kernel.NewGeminiManagedRecord(request.localFile, plan.manifest, plan.clientMetadata))
+		managed, err := managedbatch.GeminiBatchMetadata(result, p.Model, managedbatch.NewGeminiRecord(request.localFile, plan.manifest, plan.clientMetadata))
 		if err != nil {
 			return kernel.AcceptedBatch{}, s.kernel.MarkBatchUnknown(ctx, plan.id, fault.ServerError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid Gemini batch object."))
 		}
@@ -371,13 +372,13 @@ func (s surface) acceptFilesBatch(ctx context.Context, p *kernel.Pin, request ba
 		if !valid || err != nil {
 			return kernel.AcceptedBatch{}, s.kernel.BatchSubmissionUnknown(ctx, plan.id, "The provider returned a malformed batch object. The batch may have been accepted.")
 		}
-		return kernel.AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: adoption.Metadata, Expected: kernel.BatchExpectedResults(result)}, nil
+		return kernel.AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: adoption.Metadata, Expected: batchExpectedResults(result)}, nil
 	}
 }
 
 func (s surface) acceptStrictBatch(ctx context.Context, p *kernel.Pin, request batchCreateRequest, plan batchPlan, result []byte) (kernel.AcceptedBatch, *fault.Error) {
-	validated, upstreamID, err := kernel.StrictBatchResult(result, "")
-	if err != nil || !kernel.StrictBatchInputMatches(validated, plan.body) {
+	validated, upstreamID, err := strictBatchResult(result, "")
+	if err != nil || !strictBatchInputMatches(validated, plan.body) {
 		return kernel.AcceptedBatch{}, s.kernel.BatchSubmissionUnknown(ctx, plan.id, "The provider returned an invalid native batch result. The batch may have been accepted.")
 	}
 	adoption, err := upstream.FilesMetadata(connectors.BatchOpenAI, result, p.Model, request.localFile, nil)
@@ -391,5 +392,5 @@ func (s surface) acceptStrictBatch(ctx context.Context, p *kernel.Pin, request b
 	if err != nil {
 		return kernel.AcceptedBatch{}, s.kernel.BatchSubmissionUnknown(ctx, plan.id, "The accepted batch contract could not be encoded.")
 	}
-	return kernel.AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: kernel.DurableMetadata(p.Model), Expected: kernel.BatchExpectedResults(result), Contract: contract}, nil
+	return kernel.AcceptedBatch{UpstreamID: upstreamID, State: adoption.State, Metadata: kernel.DurableMetadata(p.Model), Expected: batchExpectedResults(result), Contract: contract}, nil
 }
