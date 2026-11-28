@@ -142,12 +142,8 @@ func (s *Server) codeRevisions(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
+	items, err := httpkit.QueryJSON(r.Context(), s.Access.Pool, `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
 		FROM olp.code_route_revisions WHERE route_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, id, page.Before, page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, page), err
 }
 

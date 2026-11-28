@@ -44,11 +44,7 @@ func (a *API) increaseRequests(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+increaseRequestJSON+" FROM olp.budget_increase_requests q WHERE q.id<$1 AND ($2 OR q.project_id=ANY($3::uuid[])) ORDER BY q.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+increaseRequestJSON+" FROM olp.budget_increase_requests q WHERE q.id<$1 AND ($2 OR q.project_id=ANY($3::uuid[])) ORDER BY q.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
 

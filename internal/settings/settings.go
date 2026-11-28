@@ -17,12 +17,7 @@ import (
 const settingJSON = `to_jsonb(s)||CASE WHEN s.key='budgets.time_zone' THEN jsonb_build_object('calendar',olp.budget_calendar_status(now())) ELSE '{}'::jsonb END`
 
 func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	var err error
-	rows, err := a.server.Pool.Query(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
 	return httpkit.OK(map[string]any{"items": items}), err
 }
 

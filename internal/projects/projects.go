@@ -28,11 +28,7 @@ func (s *Server) projects(r *http.Request, principal authz.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 AND ($3::uuid IS NULL OR p.organization_id=$3) ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1, nullableOrganizationPath(r))
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 AND ($3::uuid IS NULL OR p.organization_id=$3) ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1, nullableOrganizationPath(r))
 	return httpkit.ListReply(items, p), err
 }
 
@@ -151,11 +147,7 @@ func (s *Server) projectMembers(r *http.Request, principal authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3", id, p.Before, p.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3", id, p.Before, p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

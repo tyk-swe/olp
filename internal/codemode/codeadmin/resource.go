@@ -136,11 +136,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 			where += " AND " + condition
 		}
 	}
-	rows, err := s.Pool.Query(r.Context(), selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), s.Pool, selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
 	return httpkit.ListReply(items, page), err
 }
 

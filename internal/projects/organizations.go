@@ -21,11 +21,7 @@ func (s *Server) organizations(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE o.id<$1 AND ($2 OR o.id=ANY($3::uuid[])) ORDER BY o.id DESC LIMIT $4", page.Before, p.AllProjects, p.OrganizationIDs(), page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE o.id<$1 AND ($2 OR o.id=ANY($3::uuid[])) ORDER BY o.id DESC LIMIT $4", page.Before, p.AllProjects, p.OrganizationIDs(), page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
 
@@ -128,11 +124,7 @@ func (s *Server) organizationMembers(r *http.Request, p authz.Principal) (httpki
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3`, id, page.Before, page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
+	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}

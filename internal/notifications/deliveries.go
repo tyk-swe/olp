@@ -36,12 +36,8 @@ func (s *Server) notificationDeliveries(r *http.Request, p authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	rows, err := s.access.Pool.Query(r.Context(), listDeliveriesSQL,
+	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, listDeliveriesSQL,
 		page.Before, p.AllProjects, p.ProjectIDs(), ruleID, status, page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	items, err := httpkit.JSONRows(rows)
 	return httpkit.ListReply(items, page), err
 }
 

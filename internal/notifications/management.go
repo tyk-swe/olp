@@ -60,13 +60,9 @@ func (s *Server) list(res resource) access.Handler {
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
-		rows, err := s.access.Pool.Query(r.Context(),
+		items, err := httpkit.QueryJSON(r.Context(), s.access.Pool,
 			"SELECT document FROM ("+res.documentsSQL+") documents WHERE id<$1::uuid AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4",
 			page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		items, err := httpkit.JSONRows(rows)
 		return httpkit.ListReply(items, page), err
 	}
 }
