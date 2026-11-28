@@ -161,25 +161,6 @@ feature goes into the list after every feature it imports, and a feature can
 move within the list when no new violation appears. Test files are exempt.
 Imports between the subfolders of one feature are not checked.
 
-### Suppressed violations
-
-`eslint-suppressions.json` is ESLint's
-[bulk suppressions](https://eslint.org/docs/latest/use/suppressions) file. It
-records how many violations of a rule each file had when that rule arrived, so
-the list can only shrink. `pnpm --dir console lint` fails when a file goes over
-its count, which then reports every violation of that rule in the file. It also
-fails when a count is higher than what the file still has, or when a listed file
-no longer exists. After fixing a violation, or after deleting or renaming a
-listed file, remove the stale entries and commit the result.
-
-```sh
-pnpm --dir console exec eslint . --prune-suppressions
-```
-
-Never add an entry or raise a count to get a change through. Fix the violation,
-also when listed code moves to another file. The counts are per file and rule, so
-they do not stop a listed file or function from growing further.
-
 ### Shared layers
 
 The shared layers form one strict order, so no two of them import each other.
