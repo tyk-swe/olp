@@ -34,7 +34,7 @@ func (s *Server) replay(r *http.Request, tx pgx.Tx, p authz.Principal, input any
 		return c, nil, err
 	}
 	c.Fingerprint = s.Auth.Digest(secrets.MutationDigest, string(data))
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id IN (SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT 100)"); err != nil {
+	if err = secrets.DeleteExpired(r.Context(), tx, 100); err != nil {
 		return c, nil, err
 	}
 	var stored []byte

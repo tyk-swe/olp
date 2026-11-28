@@ -333,8 +333,7 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 		if tag.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation)
-		return err
+		return secrets.Delete(ctx, tx, secrets.ProviderContinuation, id.String())
 	})
 }
 

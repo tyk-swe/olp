@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/domain/ids"
@@ -80,6 +81,46 @@ func (k *KeyRing) Store(ctx context.Context, tx pgx.Tx, installation, id string,
         ON CONFLICT(id) DO UPDATE SET key_version=excluded.key_version,ciphertext=excluded.ciphertext,expires_at=excluded.expires_at`, id, purpose, k.Active, ciphertext, expires)
 	return err
 }
+
+func ClearExpiry(ctx context.Context, tx pgx.Tx, id string) error {
+	_, err := tx.Exec(ctx, "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", id)
+	return err
+}
+
+func Delete(ctx context.Context, tx pgx.Tx, purpose SealPurpose, secretIDs ...string) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", secretIDs, purpose)
+	return err
+}
+
+func DeleteUnretainedContinuation(ctx context.Context, tx pgx.Tx, resourceID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2
+		AND NOT EXISTS(SELECT 1 FROM olp.provider_resources WHERE id=$1)`, resourceID, ProviderContinuation)
+	return err
+}
+
+func DeleteByID(ctx context.Context, tx pgx.Tx, secretIDs ...string) (int64, error) {
+	tag, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])", secretIDs)
+	return tag.RowsAffected(), err
+}
+
+func DeletePurpose(ctx context.Context, tx pgx.Tx, purpose SealPurpose) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", purpose)
+	return err
+}
+
+func DeleteExpired(ctx context.Context, tx pgx.Tx, limit int) error {
+	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id IN (SELECT id FROM olp.secrets WHERE expires_at<=now() LIMIT $1)", limit)
+	return err
+}
+
+func PurgeExpired(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error) {
+	tag, err := tx.Exec(ctx, `WITH expired AS (
+      SELECT ctid FROM olp.secrets WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.secrets target USING expired WHERE target.ctid = expired.ctid`, before, limit)
+	return tag.RowsAffected(), err
+}
+
 func (k *KeyRing) Read(ctx context.Context, query RowQuerier, installation, id string, purpose SealPurpose) ([]byte, error) {
 	var version int
 	var encrypted []byte

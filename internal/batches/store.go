@@ -137,7 +137,7 @@ func (s *Store) DeleteSubmission(ctx context.Context, resourceID uuid.UUID) erro
 		resourceID, submissionStates); err != nil {
 		return fmt.Errorf("delete batch submission intent: %w", err)
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, resourceID, secrets.ProviderContinuation); err != nil {
+	if err = secrets.Delete(ctx, tx, secrets.ProviderContinuation, resourceID.String()); err != nil {
 		return fmt.Errorf("delete staged batch contract: %w", err)
 	}
 	if err = tx.Commit(ctx); err != nil {

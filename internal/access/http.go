@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/platform/audit"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -295,13 +295,10 @@ func (s *Server) ClientIP(r *http.Request) string {
 
 // auditSource returns the client address guard resolved for r, falling back
 // to the peer address for requests that did not pass through guard.
-func auditSource(r *http.Request) any {
+func auditSource(r *http.Request) string {
 	source, ok := r.Context().Value(clientIPKey{}).(string)
 	if !ok {
 		source, _, _ = net.SplitHostPort(r.RemoteAddr)
-	}
-	if source == "" {
-		return nil
 	}
 	return source
 }
@@ -322,12 +319,9 @@ func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor auth
 			break
 		}
 	}
-	var userID, tokenID any
-	if user, token := actor.Subject(); user != "" {
-		userID = user
-	} else if token != "" {
-		tokenID = token
-	}
-	_, err := tx.Exec(ctx, auditInsertSQL, ids.New(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
-	return err
+	userID, tokenID := actor.Subject()
+	return audit.InsertInResourceProject(ctx, tx, audit.Entry{
+		UserID: userID, TokenID: tokenID, Action: action, ResourceType: resource, ResourceID: id, Outcome: outcome,
+		SourceIP: source, UserAgentFamily: family, ProjectID: projectID,
+	})
 }

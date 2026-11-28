@@ -138,8 +138,7 @@ func expire(ctx context.Context, tx pgx.Tx, providerID, id, principal string) (b
 	if err != nil || tag.RowsAffected() == 0 {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.GrantEnrollment)
-	return true, err
+	return true, secrets.Delete(ctx, tx, secrets.GrantEnrollment, id)
 }
 
 // stands reads where a device authorization stands when no poll is due. One
@@ -243,8 +242,7 @@ func (e Enrollment) settle(ctx context.Context, tx pgx.Tx, set string, ended boo
 	case !ended:
 		return nil
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", e.ID, secrets.GrantEnrollment)
-	return err
+	return secrets.Delete(ctx, tx, secrets.GrantEnrollment, e.ID)
 }
 
 func seconds(d time.Duration) int64 { return int64(d / time.Second) }

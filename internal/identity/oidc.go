@@ -319,7 +319,7 @@ func (s *oidcService) saveOIDCClientSecret(ctx context.Context, tx pgx.Tx, confi
 	if hasSecret {
 		return true, s.access.Keys.Store(ctx, tx, s.access.Installation, configID, secrets.OIDCClientSecret, []byte(secret), nil)
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1", configID)
+	_, err = secrets.DeleteByID(ctx, tx, configID)
 	return false, err
 }
 
@@ -376,7 +376,7 @@ func (s *oidcService) putOIDCConfiguration(r *http.Request, _ authz.Principal) (
 		if err = EnsureUsableOwner(r.Context(), tx, s.access.LocalLoginDisabled()); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE purpose=$1", secrets.OIDCFlow); err != nil {
+		if err = secrets.DeletePurpose(r.Context(), tx, secrets.OIDCFlow); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		next.DiscoveryBinding = ""

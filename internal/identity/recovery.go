@@ -100,7 +100,7 @@ func clearRecoveredMFA(ctx context.Context, tx pgx.Tx, userID string) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])", secretIDs); err != nil {
+	if _, err := secrets.DeleteByID(ctx, tx, secretIDs...); err != nil {
 		return err
 	}
 	return access.Audit(ctx, tx, &http.Request{}, authz.System, "user.mfa_recover", "user", userID, "success")

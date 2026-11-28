@@ -167,10 +167,22 @@ func SetLocalMFARequired(ctx context.Context, tx pgx.Tx, p authz.Principal, requ
 	return err
 }
 
+func pruneMFAChallenges(ctx context.Context, tx pgx.Tx, userID string) error {
+	rows, err := tx.Query(ctx, `WITH expired AS(DELETE FROM olp.mfa_challenges WHERE expires_at<=clock_timestamp() OR (user_id=$1 AND id IN(SELECT id FROM olp.mfa_challenges WHERE user_id=$1 ORDER BY created_at DESC OFFSET 7)) RETURNING secret_id) SELECT secret_id::text FROM expired WHERE secret_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE mfa_factors.id=expired.secret_id)`, userID)
+	if err != nil {
+		return err
+	}
+	abandoned, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	_, err = secrets.DeleteByID(ctx, tx, abandoned...)
+	return err
+}
+
 func (s *mfaService) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, time.Time, error) {
 	// Bound transient state and delete its expired enrollment secrets together.
-	_, err := tx.Exec(r.Context(), `WITH expired AS(DELETE FROM olp.mfa_challenges WHERE expires_at<=clock_timestamp() OR (user_id=$1 AND id IN(SELECT id FROM olp.mfa_challenges WHERE user_id=$1 ORDER BY created_at DESC OFFSET 7)) RETURNING secret_id) DELETE FROM olp.secrets WHERE id IN(SELECT secret_id FROM expired) AND NOT EXISTS(SELECT 1 FROM olp.mfa_factors WHERE mfa_factors.id=secrets.id)`, f.UserID)
-	if err != nil {
+	if err := pruneMFAChallenges(r.Context(), tx, f.UserID); err != nil {
 		return "", time.Time{}, err
 	}
 	token := secrets.Token()

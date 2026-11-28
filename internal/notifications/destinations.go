@@ -301,12 +301,7 @@ func removeDestination(ctx context.Context, tx pgx.Tx, id string) error {
 	if err := tx.QueryRow(ctx, deleteDestinationSQL, id).Scan(&secretID); err != nil || secretID == nil {
 		return err
 	}
-	return deleteSecret(ctx, tx, *secretID)
-}
-
-func deleteSecret(ctx context.Context, tx pgx.Tx, id string) error {
-	_, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", id, secrets.NotificationSecret)
-	return err
+	return secrets.Delete(ctx, tx, secrets.NotificationSecret, *secretID)
 }
 
 func (s *Server) storeSecretChange(ctx context.Context, tx pgx.Tx, id string, change secretChange) error {
@@ -328,7 +323,7 @@ func (s *Server) storeSecretChange(ctx context.Context, tx pgx.Tx, id string, ch
 	if previous == nil {
 		return nil
 	}
-	return deleteSecret(ctx, tx, *previous)
+	return secrets.Delete(ctx, tx, secrets.NotificationSecret, *previous)
 }
 
 func (s *Server) storeSecret(ctx context.Context, tx pgx.Tx, secret []byte) (*string, error) {

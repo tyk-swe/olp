@@ -139,7 +139,7 @@ func (s *oidcService) storeOIDCFlow(r *http.Request, tx pgx.Tx, prep preparedOID
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = pruneExpiredSecrets(r.Context(), tx); err != nil {
+	if err = secrets.DeleteExpired(r.Context(), tx, expiredCleanupLimit); err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err = s.access.Keys.Store(r.Context(), tx, s.access.Installation, id, secrets.OIDCFlow, data, &expires); err != nil {
@@ -197,7 +197,7 @@ func (s *oidcService) consumeFlow(r *http.Request) (oidcFlow, oidcConfiguration,
 		if config.ETag != etag || !config.Enabled {
 			return httpkit.Reply{}, false, problem.Fail(403, "oidc_flow_invalid", "OIDC configuration changed during sign-in.")
 		}
-		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", id); err != nil {
+		if _, err = secrets.DeleteByID(r.Context(), tx, id); err != nil {
 			return httpkit.Reply{}, false, err
 		}
 		return httpkit.Reply{}, true, nil

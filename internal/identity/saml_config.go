@@ -299,7 +299,7 @@ func (s *samlService) invalidateSAMLAfterConfigChange(ctx context.Context, tx pg
 	if err := EnsureUsableOwner(ctx, tx, s.access.LocalLoginDisabled()); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE purpose=$1", secrets.SAMLFlow); err != nil {
+	if err := secrets.DeletePurpose(ctx, tx, secrets.SAMLFlow); err != nil {
 		return err
 	}
 	if !next.Enabled {

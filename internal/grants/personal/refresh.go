@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
 type storedGrant struct {
@@ -154,7 +155,7 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 	if tag.RowsAffected() != 1 {
 		return ErrRequired
 	}
-	if _, err := tx.Exec(record, `DELETE FROM olp.secrets WHERE id=ANY($1::uuid[])`, replacedSecretIDs(current)); err != nil {
+	if _, err := secrets.DeleteByID(record, tx, replacedSecretIDs(current)...); err != nil {
 		return err
 	}
 	return tx.Commit(record)

@@ -80,8 +80,7 @@ func closeGeminiUploadTx(ctx context.Context, tx pgx.Tx, owner string, sessionID
 	if tag.RowsAffected() != 1 {
 		return ErrTransition
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", sessionID, secrets.ProviderUploadSession)
-	return err
+	return secrets.Delete(ctx, tx, secrets.ProviderUploadSession, sessionID.String())
 }
 
 func (s *Store) FinalizeGeminiUpload(ctx context.Context, owner string, sessionID uuid.UUID, finalOffset int64, file *Resource) (*Resource, error) {

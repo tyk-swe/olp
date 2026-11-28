@@ -344,7 +344,7 @@ func (s *mfaService) deleteMFAFactor(ctx context.Context, tx pgx.Tx, p authz.Pri
 	if deleted.RowsAffected() != 1 {
 		return pgx.ErrNoRows
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1", factorID); err != nil {
+	if _, err := secrets.DeleteByID(ctx, tx, factorID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "UPDATE olp.users SET mfa_revision=uuidv7() WHERE id=$1", p.ID); err != nil {

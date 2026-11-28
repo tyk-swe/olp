@@ -263,8 +263,7 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 	if err != nil || len(refreshTokens) == 0 {
 		return retired, err
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=ANY($1::uuid[]) AND purpose=$2", refreshTokens, secrets.ProviderGrantRefresh)
-	return retired, err
+	return retired, secrets.Delete(ctx, tx, secrets.ProviderGrantRefresh, refreshTokens...)
 }
 
 // pinningResources names resources whose drafts or immutable revisions pin a plugin digest.

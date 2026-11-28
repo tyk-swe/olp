@@ -189,7 +189,7 @@ func DeleteReplacedCredentials(ctx context.Context, tx pgx.Tx, current *Definiti
 		if credential.id == nil || !credential.replace {
 			continue
 		}
-		if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *credential.id, credential.purpose); err != nil {
+		if err := secrets.Delete(ctx, tx, credential.purpose, *credential.id); err != nil {
 			return err
 		}
 	}

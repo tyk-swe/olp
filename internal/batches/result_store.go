@@ -183,9 +183,7 @@ func (s *Store) Close(ctx context.Context, settlement Settlement, closing Closin
 		return nil, err
 	}
 	if closing.State == StateUncertain {
-		if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2
-			AND NOT EXISTS(SELECT 1 FROM olp.provider_resources WHERE id=$1)`,
-			settlement.ResourceID, secrets.ProviderContinuation); err != nil {
+		if err = secrets.DeleteUnretainedContinuation(ctx, tx, settlement.ResourceID); err != nil {
 			return nil, fmt.Errorf("delete uncertain batch contract: %w", err)
 		}
 	}

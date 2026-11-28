@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/export/destination"
+	"github.com/tyk-swe/olp/internal/platform/audit"
 )
 
 const (
@@ -122,7 +122,11 @@ func (m *Manager) audit(ctx context.Context, item queued, action, outcome string
 	if item.projectID != "" {
 		project = &item.projectID
 	}
-	if _, err := m.pool.Exec(ctx, auditSQL, ids.New(), action, item.requestID, outcome, project); err != nil {
+	if err := pgx.BeginFunc(ctx, m.pool, func(tx pgx.Tx) error {
+		return audit.Insert(ctx, tx, audit.Entry{
+			Action: action, ResourceType: "payload_capture", ResourceID: item.requestID, Outcome: outcome, UserAgentFamily: "other", ProjectID: project,
+		})
+	}); err != nil {
 		m.log.Warn("capture audit failed", "request_id", item.requestID, "code", "database")
 	}
 }

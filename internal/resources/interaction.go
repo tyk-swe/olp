@@ -156,8 +156,7 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 		if tag.RowsAffected() != 1 {
 			return ErrNotFound
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`, id, secrets.ProviderContinuation)
-		return err
+		return secrets.Delete(ctx, tx, secrets.ProviderContinuation, id.String())
 	})
 }
 

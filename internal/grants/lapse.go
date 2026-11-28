@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/notifications"
+	"github.com/tyk-swe/olp/internal/platform/audit"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -123,11 +123,12 @@ func serialize(ctx context.Context, tx pgx.Tx) error {
 // actor, and key authority advances, so gateways stop serving the grant's
 // credential version within one authority poll.
 func ended(ctx context.Context, tx pgx.Tx, g *dueGrant, action string) error {
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", g.refreshTokenID, secrets.ProviderGrantRefresh); err != nil {
+	if err := secrets.Delete(ctx, tx, secrets.ProviderGrantRefresh, g.refreshTokenID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.audit(id,action,resource_type,resource_id,outcome,user_agent_family)
-		VALUES($1,$2,'provider_credential',$3,'success',$4)`, ids.New(), action, g.credentialID, workerAgent); err != nil {
+	if err := audit.Insert(ctx, tx, audit.Entry{
+		Action: action, ResourceType: "provider_credential", ResourceID: g.credentialID, Outcome: "success", UserAgentFamily: workerAgent,
+	}); err != nil {
 		return err
 	}
 	_, err := access.AdvanceAuthority(ctx, tx)
@@ -148,6 +149,5 @@ func Revoke(ctx context.Context, tx pgx.Tx, credentialID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2", *refreshTokenID, secrets.ProviderGrantRefresh)
-	return err
+	return secrets.Delete(ctx, tx, secrets.ProviderGrantRefresh, *refreshTokenID)
 }

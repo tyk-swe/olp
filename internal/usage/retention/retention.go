@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/platform/audit"
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -90,7 +92,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if _, err = drainInBatches(ctx, conn, purgeTraceSpansSQL, windows.request, int64(retentionBatch)); err != nil {
+	if _, err = drainInBatches(ctx, conn, execBatch(purgeTraceSpansSQL, windows.request, int64(retentionBatch))); err != nil {
 		return MaintenanceReport{}, err
 	}
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
@@ -148,11 +150,20 @@ func retentionCutoffs(ctx context.Context, conn *pgx.Conn, now time.Time) (cutof
 	}, nil
 }
 
+type purgeBatch func(context.Context, pgx.Tx) (int64, error)
+
+func execBatch(sql string, args ...any) purgeBatch {
+	return func(ctx context.Context, tx pgx.Tx) (int64, error) {
+		tag, err := tx.Exec(ctx, sql, args...)
+		return tag.RowsAffected(), err
+	}
+}
+
 // drainInBatches deletes in committed batches until a short batch says nothing
 // is left that this pass can claim. Every caller narrows its candidate set with
 // LIMIT and FOR UPDATE SKIP LOCKED, so a short batch is a real end, not a row
 // another transaction happens to hold.
-func drainInBatches(ctx context.Context, conn *pgx.Conn, sql string, args ...any) (int64, error) {
+func drainInBatches(ctx context.Context, conn *pgx.Conn, purge purgeBatch) (int64, error) {
 	var deleted int64
 	for {
 		if err := ctx.Err(); err != nil {
@@ -162,7 +173,7 @@ func drainInBatches(ctx context.Context, conn *pgx.Conn, sql string, args ...any
 		if err != nil {
 			return deleted, fmt.Errorf("maintenance batch: %w", err)
 		}
-		tag, err := tx.Exec(ctx, sql, args...)
+		rows, err := purge(ctx, tx)
 		if err != nil {
 			_ = tx.Rollback(context.WithoutCancel(ctx))
 			return deleted, fmt.Errorf("maintenance batch: %w", err)
@@ -170,7 +181,6 @@ func drainInBatches(ctx context.Context, conn *pgx.Conn, sql string, args ...any
 		if err = tx.Commit(ctx); err != nil {
 			return deleted, fmt.Errorf("maintenance batch: %w", err)
 		}
-		rows := tag.RowsAffected()
 		deleted += rows
 		if rows < retentionBatch {
 			return deleted, nil
@@ -193,7 +203,7 @@ const purgeTraceSpansSQL = `WITH expired AS (
 ) DELETE FROM olp.trace_spans span USING expired WHERE span.id = expired.id`
 
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
-	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
+	return drainInBatches(ctx, conn, execBatch(purgeRequestsSQL, cutoff, int64(retentionBatch)))
 }
 
 // Anchors outlive their request rows so facts keep a foreign key. Candidates
@@ -215,17 +225,14 @@ const purgeAnchorsSQL = `WITH orphan AS (
        AND anchor.request_started_at = orphan.request_started_at`
 
 func purgeOrphanedAnchors(ctx context.Context, conn *pgx.Conn, cutoff time.Time) error {
-	_, err := drainInBatches(ctx, conn, purgeAnchorsSQL, cutoff, int64(retentionBatch))
+	_, err := drainInBatches(ctx, conn, execBatch(purgeAnchorsSQL, cutoff, int64(retentionBatch)))
 	return err
 }
 
-const purgeAuditSQL = `WITH expired AS (
-      SELECT ctid FROM olp.audit WHERE occurred_at < $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.audit entry USING expired WHERE entry.ctid = expired.ctid`
-
 func purgeExpiredAudit(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
-	return drainInBatches(ctx, conn, purgeAuditSQL, cutoff, int64(retentionBatch))
+	return drainInBatches(ctx, conn, func(ctx context.Context, tx pgx.Tx) (int64, error) {
+		return audit.Purge(ctx, tx, cutoff, retentionBatch)
+	})
 }
 
 // Gap rows roll into hourly evidence rather than disappearing: the totals a
@@ -355,11 +362,6 @@ const purgeMFAChallengesSQL = `WITH expired AS (
     )
     DELETE FROM olp.mfa_challenges target USING expired WHERE target.ctid = expired.ctid`
 
-const purgeSecretsSQL = `WITH expired AS (
-      SELECT ctid FROM olp.secrets WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.secrets target USING expired WHERE target.ctid = expired.ctid`
-
 const purgeRecentAuthSQL = `WITH expired AS (
       SELECT ctid FROM olp.recent_auth WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
     )
@@ -394,7 +396,7 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 		{&report.GrantEnrollmentRows, purgeGrantEnrollmentsSQL, []any{now.Add(-time.Hour), int64(retentionBatch)}},
 	}
 	for _, statement := range deletes {
-		deleted, err := drainInBatches(ctx, conn, statement.sql, statement.args...)
+		deleted, err := drainInBatches(ctx, conn, execBatch(statement.sql, statement.args...))
 		if err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)
 		}
@@ -402,8 +404,14 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 	}
 	// Stored replay responses and re-authentication grants expire with their
 	// owners; both are counted under the records above rather than separately.
-	for _, sql := range []string{purgeMFAChallengesSQL, purgeSecretsSQL, purgeRecentAuthSQL} {
-		if _, err := drainInBatches(ctx, conn, sql, now, int64(retentionBatch)); err != nil {
+	for _, purge := range []purgeBatch{
+		execBatch(purgeMFAChallengesSQL, now, int64(retentionBatch)),
+		func(ctx context.Context, tx pgx.Tx) (int64, error) {
+			return secrets.PurgeExpired(ctx, tx, now, retentionBatch)
+		},
+		execBatch(purgeRecentAuthSQL, now, int64(retentionBatch)),
+	} {
+		if _, err := drainInBatches(ctx, conn, purge); err != nil {
 			return fmt.Errorf("purge expiring records: %w", err)
 		}
 	}
