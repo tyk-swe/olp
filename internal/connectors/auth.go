@@ -30,6 +30,10 @@ func NewAuth(policy *egress.Policy, getenv func(string) string) *Auth {
 	return newAuth(cloudidentity.Standard(policy, getenv))
 }
 
+func NewSigningAuth(policy *egress.Policy, getenv func(string) string, signer Signer) *Auth {
+	return &Auth{Signer: signer, cloud: cloudidentity.NewSource(cloudidentity.Standard(policy, getenv))}
+}
+
 func newAuth(dependencies cloudidentity.Dependencies) *Auth {
 	return &Auth{cloud: cloudidentity.NewSource(dependencies)}
 }

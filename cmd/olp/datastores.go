@@ -26,6 +26,13 @@ type datastores struct {
 	closers      []namedCloser
 }
 
+func (d datastores) limitState() sharedLimits {
+	if d.shared == nil {
+		return sharedLimits{}
+	}
+	return *d.shared
+}
+
 func openDatastores(startup context.Context, c Config, pgConfig *pgxpool.Config, openValkey func(context.Context) (*coordination.Client, error), deadline *time.Time, log *slog.Logger) (datastores, error) {
 	var stores datastores
 	fail := func(err error) (datastores, error) {
