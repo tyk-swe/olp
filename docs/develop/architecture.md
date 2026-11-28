@@ -55,7 +55,10 @@ and a gateway handler that can be built from its own collaborators belongs in
 its own package under `internal/gateway/`. Each declares its allowed imports in
 its own [`imports.txt`](gateway-packages.md). Process wiring belongs in
 `cmd/olp`, where each plane is assembled by one constructor and `Run` owns mode
-selection, listeners and shutdown ordering. A new small package is justified
+selection, listeners and shutdown ordering. Each `cmd/olp/management_<area>.go`
+registers the management routes of one area, and each
+`cmd/olp/workers_<area>.go` returns the background workers of one area, which
+`startRecoveryPlane` supervises. A new small package is justified
 only when it owns behavior of its own or breaks an import cycle with stable
 vocabulary, as `internal/domain/routeidentity` and `internal/keyauthority` do. A
 wrapper whose only job is forwarding to another package belongs in that package

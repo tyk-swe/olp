@@ -15,6 +15,6 @@ func (m Management) registerAccess(mux *http.ServeMux) {
 	projects.New(m.Access).Register(mux)
 	settings.NewAPI(m.Access).Register(mux)
 	budgets.NewAPI(m.Access).Register(mux)
-	apikeys.NewAPI(m.Access, m.KeyOverlaps).Register(mux)
+	apikeys.NewAPI(m.Access, m.serving.overlaps).Register(mux)
 	auditlog.NewAPI(m.Access).Register(mux)
 }

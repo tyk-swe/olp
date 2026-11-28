@@ -15,12 +15,13 @@ import (
 )
 
 func (m Management) registerAgents(mux *http.ServeMux) {
-	a2a.NewManagement(m.Access, m.AgentTasks, agents.NewTaskOperations(m.AgentTasks, m.AgentPeers, m.AgentGrants)).Register(mux)
-	publications.New(m.Access, m.Egress, m.AgentPeers.ValidateCard).Register(mux)
+	plane := m.serving.agents
+	a2a.NewManagement(m.Access, plane.tasks, agents.NewTaskOperations(plane.tasks, plane.peers, plane.grants)).Register(mux)
+	publications.New(m.Access, m.core.policy, plane.peers.ValidateCard).Register(mux)
 	runs.NewManagement(m.Access).Register(mux)
 	tasks.NewManagement(m.Access).Register(mux)
 	investigations.NewManagement(m.Access).Register(mux)
-	mcpServers := registration.New(m.Access, m.Egress, registration.NewExecutables(m.Unconfined, m.Access.Pool))
+	mcpServers := registration.New(m.Access, m.core.policy, registration.NewExecutables(m.core.unconfined, m.Access.Pool))
 	mcpServers.Register(mux)
 	accounting.NewManagement(m.Access).Register(mux)
 	personal.New(m.Access, mcpServers).Register(mux)

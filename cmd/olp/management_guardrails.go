@@ -28,14 +28,14 @@ func (m Management) registerGuardrails(mux *http.ServeMux) {
 	credential.NewAPI(m.Access).Register(mux)
 	definition.NewAPI(m.Access, publish).Register(mux)
 	policy.NewAPI(m.Access, publish, func(r *http.Request, p authz.Principal, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-		result, err := m.Gateway.EvaluateGuardrails(r, guardrailsMember(p), pinned, in)
+		result, err := m.serving.gateway.EvaluateGuardrails(r, guardrailsMember(p), pinned, in)
 		return result, guardrailsHTTPError(err)
 	}, func(r *http.Request, p authz.Principal, batch []guardrails.PinnedApplication) ([]guardrails.Result, error) {
-		results, err := m.Gateway.EvaluateGuardrailsBatch(r, guardrailsMember(p), batch)
+		results, err := m.serving.gateway.EvaluateGuardrailsBatch(r, guardrailsMember(p), batch)
 		return results, guardrailsHTTPError(err)
 	}).Register(mux)
 	attachment.NewAPI(m.Access, publish).Register(mux)
-	guardrailpreview.Register(m.Access, mux, m.Runtime.Release)
+	guardrailpreview.Register(m.Access, mux, m.core.rt.Release)
 }
 
 func guardrailsMember(p authz.Principal) kernel.Member {

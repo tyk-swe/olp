@@ -194,15 +194,9 @@ func (r *running) startDelivery(startup context.Context) error {
 // configured. Probes produce accounting events, so they stop before delivery
 // closes; the consumer and recovery workers remain alive until delivery drains.
 func (r *running) startWorkers() {
-	c, stores, core := r.config, r.stores, r.core
+	c, stores := r.config, r.stores
 	if c.Mode == Worker || c.Mode == All {
-		r.workersStopped = startWorkers(r.workers, r.supervise, workerDeps{
-			pool: stores.pool, vk: r.feed.reader, store: stores.debitStore, shared: stores.shared, stream: r.feed.stream,
-			mediaService: r.media.service, credentials: core.rt, pluginHost: core.pluginHost,
-			keys: core.keys, auth: core.auth, installation: stores.installation, region: c.Region, hostname: c.Hostname,
-			policy: core.policy, log: r.log, exporter: core.exporter, focusWorker: core.focusWorker,
-			importer: core.importer, reference: r.reference,
-		})
+		r.workersStopped = r.startRecoveryPlane()
 	}
 	if prober := r.serving.prober; prober != nil {
 		stopped := make(chan struct{})

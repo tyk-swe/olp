@@ -105,14 +105,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 		return err
 	}
 	if c.Mode.Management() {
-		mgmt, err := newManagement(startup, managementInputs{
-			config: c, pool: stores.pool, installation: stores.installation, core: core,
-			limiter: stores.limiter, shared: stores.shared, gateway: serving.gateway,
-			keyOverlaps: serving.overlaps,
-			agentTasks:  serving.agents.tasks, agentPeers: serving.agents.peers, agentGrants: serving.agents.grants,
-			media: media.service, spool: media.spool, health: base.health,
-			catalog: documents.catalog, catalogKeys: documents.catalogKeys, pluginIndex: documents.pluginIndex, log: log,
-		})
+		mgmt, err := newManagement(startup, base, serving, documents)
 		if err != nil {
 			return err
 		}
