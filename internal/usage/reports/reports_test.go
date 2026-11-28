@@ -67,7 +67,7 @@ func TestOversizedExportIsUnprocessable(t *testing.T) {
 
 func TestInternalFailuresKeepTheirCause(t *testing.T) {
 	cause := errors.New("database went away")
-	if !errors.Is(problem(cause), cause) {
+	if !errors.Is(reportProblem(cause), cause) {
 		t.Fatal("an internal failure was rewritten as a report failure")
 	}
 }
@@ -75,7 +75,7 @@ func TestInternalFailuresKeepTheirCause(t *testing.T) {
 func usageProblem(t *testing.T, err error) *httpkit.Problem {
 	t.Helper()
 	var mapped *httpkit.Problem
-	if !errors.As(problem(err), &mapped) {
+	if !errors.As(reportProblem(err), &mapped) {
 		t.Fatalf("error %v is not a management problem", err)
 	}
 	return mapped

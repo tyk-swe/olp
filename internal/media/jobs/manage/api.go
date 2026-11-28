@@ -58,7 +58,7 @@ func scoped(r *http.Request, store *jobs.Store, p authz.Principal, need authz.Ne
 	}
 	record, err := store.Get(r.Context(), id.String())
 	if err != nil {
-		return jobs.Record{}, problem(err)
+		return jobs.Record{}, jobProblem(err)
 	}
 	if err := p.Project(record.ProjectID, need); err != nil {
 		return jobs.Record{}, err
@@ -95,7 +95,7 @@ func (m *API) refresh(r *http.Request, _ authz.Principal) (httpkit.Reply, error)
 	}
 	updated, err := m.Jobs.Refresh(r.Context(), record.ID)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	return access.Transact(m.Access, r, access.Unlocked, func(_ pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		reply, err := detail(updated)
@@ -163,7 +163,7 @@ func claimDeleteTx(r *http.Request, store *jobs.Store, p authz.Principal, now ti
 	}
 	claimed, needsReconcile, err := store.ClaimForDelete(r.Context(), record.ID, record.ETag, now)
 	if err != nil {
-		return deleteClaim{}, access.Event{}, problem(err)
+		return deleteClaim{}, access.Event{}, jobProblem(err)
 	}
 	if !needsReconcile {
 		return deleteClaim{}, auditEvent("media_job.delete", record), nil
@@ -186,7 +186,7 @@ func (m *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	}
 	updated, err := m.Jobs.ReconcileClaimed(r.Context(), plan.claimed)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	if updated.Lifecycle != jobs.Deleted {
 		if _, err := access.Run(m.Access, r, func(_ pgx.Tx, _ authz.Principal) (struct{}, access.Event, error) {
@@ -332,7 +332,7 @@ func (m *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	}
 	page, err := m.Jobs.Store().List(r.Context(), listing)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, jobProblem(err)
 	}
 	items := make([]contract.MediaJobItem, len(page.Items))
 	for i, record := range page.Items {
@@ -398,7 +398,7 @@ func jobItem(record jobs.Record) (contract.MediaJobItem, error) {
 	}, nil
 }
 
-func problem(err error) error {
+func jobProblem(err error) error {
 	failure, ok := errors.AsType[*jobs.Error](err)
 	if !ok {
 		return err

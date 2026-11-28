@@ -123,7 +123,7 @@ func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	}
 	manifest, err := s.Runtime.Inspect(r.Context(), module)
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, pluginProblem(err)
 	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -299,8 +299,8 @@ func pinningResources(ctx context.Context, q database.Queryer, digest string) (s
 	return listed, nil
 }
 
-// problem is the problem a refusal of a plugin becomes.
-func problem(err error) error {
+// pluginProblem is the problem a refusal of a plugin becomes.
+func pluginProblem(err error) error {
 	refusal, ok := errors.AsType[*Error](err)
 	if !ok {
 		return err

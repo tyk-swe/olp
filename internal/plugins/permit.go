@@ -59,7 +59,7 @@ func (s *Management) review(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	file, manifest, err := tier.Inspect(r.Context(), r.PathValue("executable"))
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, pluginProblem(err)
 	}
 	permitted, err := isPermitted(r.Context(), s.Access.Pool, file.Digest)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *Management) permit(r *http.Request, _ authz.Principal) (httpkit.Reply, 
 	}
 	file, manifest, err := tier.Inspect(r.Context(), r.PathValue("executable"))
 	if err != nil {
-		return httpkit.Reply{}, problem(err)
+		return httpkit.Reply{}, pluginProblem(err)
 	}
 	if file.Digest != input.Digest {
 		return httpkit.Reply{}, httpkit.Fail(http.StatusConflict, CodeExecutableChanged, "The executable changed since you reviewed it. Review it again.")

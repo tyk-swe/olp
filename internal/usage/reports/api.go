@@ -40,13 +40,13 @@ func (s *API) Register(mux *http.ServeMux) {
 func (s *API) route(mux *http.ServeMux, pattern string, handler access.Handler) {
 	s.Access.Route(mux, pattern, func(r *http.Request, principal authz.Principal) (httpkit.Reply, error) {
 		reply, err := handler(r, principal)
-		return reply, problem(err)
+		return reply, reportProblem(err)
 	})
 }
 
 func (s *API) stream(mux *http.ServeMux, pattern string, handler access.StreamHandler) {
 	s.Access.Stream(mux, pattern, func(w http.ResponseWriter, r *http.Request, principal authz.Principal) error {
-		return problem(handler(w, r, principal))
+		return reportProblem(handler(w, r, principal))
 	})
 }
 

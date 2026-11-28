@@ -305,14 +305,14 @@ func CodePaidProviders(ctx context.Context, tx database.Queryer, route codemode.
 	if len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		return map[string]routing.Provider{}, nil
 	}
-	ids := slices.Collect(func(yield func(string) bool) {
+	providerIDs := slices.Collect(func(yield func(string) bool) {
 		for _, target := range route.AllPaidTargets() {
 			if !yield(target.ProviderID) {
 				return
 			}
 		}
 	})
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+release.PluginColumn("r")+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+release.PluginColumn("r")+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, providerIDs, route.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +361,7 @@ func ValidateCodePaidProviders(route codemode.Route, published map[string]routin
 }
 
 func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
-	ids, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.PoolID})
+	parsed, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.PoolID})
 	if err != nil {
 		return CodeRouteInput{}, err
 	}
@@ -386,7 +386,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 	if fallbackError != nil {
 		return CodeRouteInput{}, fallbackError
 	}
-	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
+	canonical := CodeRouteInput{ProjectID: parsed[0], Slug: in.Slug, PoolID: parsed[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, CodexCLIIdentity: in.CodexCLIIdentity, ChatToCodex: in.ChatToCodex, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
 	return canonical, canonical.validate()
 }
 

@@ -226,20 +226,20 @@ func TestProblemMapping(t *testing.T) {
 		{jobs.KindCallerCredential, http.StatusConflict, "media_job_caller_credential"},
 	}
 	for _, tc := range cases {
-		mapped := problem(&jobs.Error{Kind: tc.kind, Message: "detail"})
+		mapped := jobProblem(&jobs.Error{Kind: tc.kind, Message: "detail"})
 		p, ok := errors.AsType[*httpkit.Problem](mapped)
 		if !ok || p.Status != tc.wantStatus || p.Code != tc.wantCode {
-			t.Errorf("problem(%v) = %v, want status=%d code=%q", tc.kind, mapped, tc.wantStatus, tc.wantCode)
+			t.Errorf("jobProblem(%v) = %v, want status=%d code=%q", tc.kind, mapped, tc.wantStatus, tc.wantCode)
 		}
 	}
 
 	unknown := errors.New("boom")
-	if got := problem(unknown); !errors.Is(got, unknown) {
-		t.Fatalf("problem(unknown) = %v, want %v", got, unknown)
+	if got := jobProblem(unknown); !errors.Is(got, unknown) {
+		t.Fatalf("jobProblem(unknown) = %v, want %v", got, unknown)
 	}
 	dbErr := &jobs.Error{Kind: jobs.KindDatabase, Message: "db down"}
-	if got := problem(dbErr); !errors.Is(got, dbErr) {
-		t.Fatalf("problem(KindDatabase) = %v, want passthrough", got)
+	if got := jobProblem(dbErr); !errors.Is(got, dbErr) {
+		t.Fatalf("jobProblem(KindDatabase) = %v, want passthrough", got)
 	}
 }
 

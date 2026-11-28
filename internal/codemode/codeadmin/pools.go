@@ -164,7 +164,7 @@ func (in PoolInput) Validated() (PoolInput, error) {
 		return PoolInput{}, httpkit.Invalid("assignments", "Use at most 100 accounts and keys.")
 	}
 	weightKeys := slices.Sorted(maps.Keys(in.AccountWeights))
-	ids, err := httpkit.ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
+	parsed, err := httpkit.ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
 	if err != nil {
 		return PoolInput{}, err
 	}
@@ -174,7 +174,7 @@ func (in PoolInput) Validated() (PoolInput, error) {
 	}
 	accountEnd := 1 + len(in.AccountIDs)
 	keyEnd := accountEnd + len(in.APIKeyIDs)
-	canonicalWeights := ids[keyEnd:]
+	canonicalWeights := parsed[keyEnd:]
 	if len(slices.Compact(slices.Sorted(slices.Values(canonicalWeights)))) != len(weightKeys) {
 		return PoolInput{}, httpkit.Invalid("account_weights", "Assign each account weight once.")
 	}
@@ -185,7 +185,7 @@ func (in PoolInput) Validated() (PoolInput, error) {
 			}
 		}
 	})
-	canonical := PoolInput{ProjectID: ids[0], Name: in.Name, Kind: in.Kind, OwnerUserID: owner, AccountIDs: ids[1:accountEnd], APIKeyIDs: ids[accountEnd:keyEnd], AccountWeights: weights}
+	canonical := PoolInput{ProjectID: parsed[0], Name: in.Name, Kind: in.Kind, OwnerUserID: owner, AccountIDs: parsed[1:accountEnd], APIKeyIDs: parsed[accountEnd:keyEnd], AccountWeights: weights}
 	return canonical, canonical.validate()
 }
 

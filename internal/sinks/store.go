@@ -44,8 +44,8 @@ func Update(ctx context.Context, tx pgx.Tx, id string, spec Spec, etag string) e
 }
 
 func nameTaken(err error) error {
-	var problem *pgconn.PgError
-	if errors.As(err, &problem) && problem.Code == "23505" {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
 		return httpkit.Fail(409, "sink_name_exists", "Use a unique active sink name inside its scope.")
 	}
 	return err

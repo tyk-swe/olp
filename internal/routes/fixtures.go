@@ -189,8 +189,8 @@ func (s *Server) compareFixtures(shared simulation, published, draft *routing.Sn
 }
 
 func fixturePlanError(index int, err error) error {
-	var problem *httpkit.Problem
-	if errors.As(err, &problem) && problem.Status == http.StatusUnprocessableEntity {
+	var refusal *httpkit.Problem
+	if errors.As(err, &refusal) && refusal.Status == http.StatusUnprocessableEntity {
 		return httpkit.Invalid(fmt.Sprintf("fixtures.%d", index), "The request could not be inspected for both revisions. Check its route, dialect and delivery mode.")
 	}
 	return err

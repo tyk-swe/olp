@@ -28,7 +28,7 @@ func (f *Failure) Error() string { return string(f.Kind) }
 
 func fail(kind FailureKind, detail string) error { return &Failure{Kind: kind, Detail: detail} }
 
-func problem(err error) error {
+func reportProblem(err error) error {
 	failure, ok := errors.AsType[*Failure](err)
 	if !ok {
 		return err

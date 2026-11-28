@@ -71,8 +71,8 @@ func WithFieldPrefix(err error, prefix string) error {
 	if validation, ok := errors.AsType[*keyauthority.ValidationError](err); ok {
 		return &keyauthority.ValidationError{Field: prefix + "." + validation.Field, Detail: validation.Detail}
 	}
-	if problem, ok := errors.AsType[*httpkit.Problem](err); ok && problem.Field != "" {
-		return &httpkit.Problem{Status: problem.Status, Code: problem.Code, Detail: problem.Detail, Field: prefix + "." + problem.Field}
+	if known, ok := errors.AsType[*httpkit.Problem](err); ok && known.Field != "" {
+		return &httpkit.Problem{Status: known.Status, Code: known.Code, Detail: known.Detail, Field: prefix + "." + known.Field}
 	}
 	return err
 }

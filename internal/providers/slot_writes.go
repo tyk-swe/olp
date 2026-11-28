@@ -74,15 +74,15 @@ func apiKeyIDs(keys []string) ([]string, error) {
 	if keys == nil {
 		return nil, nil
 	}
-	ids := make([]string, len(keys))
+	parsed := make([]string, len(keys))
 	for i, key := range keys {
 		id, err := httpkit.ParseUUID(key)
 		if err != nil {
 			return nil, httpkit.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
 		}
-		ids[i] = id
+		parsed[i] = id
 	}
-	return ids, nil
+	return parsed, nil
 }
 
 func credentialVersionID(given *string) (*string, error) {
