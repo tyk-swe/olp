@@ -169,21 +169,43 @@ describe('native resource lifecycle requests', () => {
     const upload = request({
       endpoint: skill,
       multipart: true,
-      body: '{"display_title":"My skill"}',
-      files: [new File(['instructions'], 'SKILL.md', { type: 'text/markdown' })]
+      body: '{"display_title":"My skill","beta":"fixture"}',
+      files: [
+        new File(['instructions'], 'SKILL.md', { type: 'text/markdown' }),
+        new File(['notes'], 'notes.txt')
+      ]
     });
-    vi.mocked(gatewayFetch).mockResolvedValue(new Response('{}'));
-    await runNativeResourceRequest(upload);
-    const [, options] = vi.mocked(gatewayFetch).mock.calls.at(-1)!;
-    expect(options?.headers).not.toHaveProperty('Content-Type');
-    const form = options?.body as FormData;
-    expect(form.get('display_title')).toBe('My skill');
-    expect((form.get('files[]') as File).name).toBe('SKILL.md');
+    const reordered = {
+      ...upload,
+      body: '{ "beta": "fixture", "display_title": "My skill" }'
+    };
     const before = await nativeResourceFingerprint(upload);
+    expect(await nativeResourceFingerprint(reordered)).toBe(before);
+    vi.mocked(gatewayFetch).mockResolvedValue(new Response('{}'));
+    for (const input of [upload, reordered]) {
+      await runNativeResourceRequest(input);
+      const [, options] = vi.mocked(gatewayFetch).mock.calls.at(-1)!;
+      expect(options?.headers).not.toHaveProperty('Content-Type');
+      const form = options?.body as FormData;
+      expect([...form.keys()]).toEqual([
+        'beta',
+        'display_title',
+        'files[]',
+        'files[]'
+      ]);
+      expect(form.get('display_title')).toBe('My skill');
+      expect(form.get('beta')).toBe('fixture');
+      expect(form.getAll('files[]').map((file) => (file as File).name)).toEqual(
+        ['SKILL.md', 'notes.txt']
+      );
+    }
     expect(
       await nativeResourceFingerprint({
         ...upload,
-        files: [new File(['changed'], 'SKILL.md', { type: 'text/markdown' })]
+        files: [
+          new File(['changed'], 'SKILL.md', { type: 'text/markdown' }),
+          upload.files[1]
+        ]
       })
     ).not.toBe(before);
     await expect(

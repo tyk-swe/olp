@@ -16,9 +16,8 @@ import (
 )
 
 type retainedSubmission struct {
-	slug   string
-	key    string
-	digest []byte
+	slug     string
+	identity resources.Submission
 }
 
 func (q retainedRequest) create() {
@@ -94,16 +93,16 @@ func (q retainedRequest) submission() (retainedSubmission, *fault.Error) {
 	if q.parent != nil {
 		scope += "\x00" + q.parent.ID
 	}
-	digest, err := q.server.kernel.RetainedBodyDigest(q.endpoint, scope, q.input.body, q.input.contentType)
+	digest, legacyDigest, err := q.server.kernel.RetainedBodyDigest(q.endpoint, scope, q.input.body, q.input.contentType)
 	if err != nil {
 		return retainedSubmission{}, err
 	}
-	submission := retainedSubmission{slug: slug, key: key, digest: digest}
-	return submission, q.server.unsubmitted(q.r.Context(), q.reply, q.endpoint.Operation, submission)
+	identity := resources.Submission{Operation: q.endpoint.Operation, Key: key, Digest: digest, LegacyDigest: legacyDigest}
+	return retainedSubmission{slug: slug, identity: identity}, q.server.unsubmitted(q.r.Context(), q.reply, identity)
 }
 
-func (s surface) unsubmitted(ctx context.Context, reply retainedReply, operation string, submission retainedSubmission) *fault.Error {
-	prior, err := s.kernel.Deps.Resources.LookupLifecycle(ctx, reply.x.KeyID(), operation, submission.key, submission.digest)
+func (s surface) unsubmitted(ctx context.Context, reply retainedReply, submission resources.Submission) *fault.Error {
+	prior, err := s.kernel.Deps.Resources.LookupLifecycle(ctx, reply.x.KeyID(), submission)
 	if errors.Is(err, resources.ErrSubmissionConflict) {
 		return retainedSubmissionConflict()
 	}
@@ -206,7 +205,7 @@ func (q retainedRequest) beginCreation(ctx context.Context, p *kernel.Pin, route
 	if err := s.kernel.PrepareRetainedAccounting(q.x, p, route, candidate, e); err != nil {
 		return nil, nil, err
 	}
-	lifecycle, err := s.kernel.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
+	lifecycle, err := s.kernel.Deps.Resources.BeginCreate(ctx, candidate, submission.identity)
 	if errors.Is(err, resources.ErrSubmissionConflict) {
 		return nil, nil, retainedSubmissionConflict()
 	}

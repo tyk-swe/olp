@@ -163,8 +163,8 @@ func (q agentRequest) submission() (retainedSubmission, *fault.Error) {
 	if err != nil {
 		return retainedSubmission{}, err
 	}
-	submission := retainedSubmission{slug: slug, key: key, digest: digest}
-	return submission, q.server.unsubmitted(q.r.Context(), q.reply, q.endpoint.Operation, submission)
+	identity := resources.Submission{Operation: q.endpoint.Operation, Key: key, Digest: digest}
+	return retainedSubmission{slug: slug, identity: identity}, q.server.unsubmitted(q.r.Context(), q.reply, identity)
 }
 
 func (q agentRequest) creationRoute(slug string) (*routing.Route, *fault.Error) {
@@ -239,7 +239,7 @@ func (q agentRequest) begin(ctx context.Context, pin *kernel.Pin, route *routing
 	meta, _ := json.Marshal(map[string]string{"upstream_model": pin.Model, "contract_revision": retainedapi.Revision})
 	version := retainedapi.Revision
 	candidate := &resources.Resource{Kind: e.Kind, APIKeyID: q.x.KeyID(), RouteSlug: route.Slug, ProviderID: pin.Provider.ID, ProviderRevisionID: pin.Provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: pin.Target.ID, SlotID: pin.Slot.ID, CredentialID: pin.Slot.CredentialID, Metadata: meta, ContractVersion: &version}
-	lifecycle, err := q.server.kernel.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: e.Operation, Key: submission.key, Digest: submission.digest})
+	lifecycle, err := q.server.kernel.Deps.Resources.BeginCreate(ctx, candidate, submission.identity)
 	if errors.Is(err, resources.ErrSubmissionConflict) {
 		return nil, retainedSubmissionConflict()
 	}

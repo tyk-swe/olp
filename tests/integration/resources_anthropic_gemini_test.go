@@ -13,9 +13,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/tests/harness"
 )
+
+func TestSkillUploadRetryRecoversTheOriginalSubmissionAcrossMetadataOrder(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	const slug, model = "skills", "claude-model"
+	upstream := &retainedUpstream{
+		replies: func(string, int) map[string]string {
+			return map[string]string{"POST /skills": `{"error":{"type":"api_error","message":"fixture outage"}}`}
+		},
+		status: func(string) int { return http.StatusInternalServerError },
+	}
+	g := newStoredGateway(t, newUsageFixture(t, pool), storedPlan{
+		slug: slug, model: model, kind: "anthropic", surface: "anthropic", operations: []string{"skill"}, upstream: upstream,
+	})
+	owner := g.key(t, "owner")
+	field := func(name, value string) string {
+		return "--fixture\r\nContent-Disposition: form-data; name=\"" + name + "\"\r\n\r\n" + value + "\r\n"
+	}
+	file := func(name, value string) string {
+		return "--fixture\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"" + name + "\"\r\n\r\n" + value + "\r\n"
+	}
+	title, metadata := field("display_title", "Skill"), field("beta", "fixture")
+	repeated := field("beta", "other")
+	first, second := file("SKILL.md", "instructions"), file("notes.txt", "notes")
+	post := func(key, parts string, status int, code string) string {
+		t.Helper()
+		header, raw := g.send(t, http.MethodPost, "/anthropic/v1/skills", map[string]string{
+			"Authorization": "Bearer owner", "Content-Type": "multipart/form-data; boundary=fixture", "Idempotency-Key": key,
+		}, parts+"--fixture--\r\n", status)
+		var reply struct{ Error struct{ Code string } }
+		if err := json.Unmarshal(raw, &reply); err != nil || reply.Error.Code != code {
+			t.Fatalf("upload returned %s (%v), want code %q", raw, err, code)
+		}
+		id := header.Get("X-OLP-Resource-ID")
+		t.Logf("HTTP %d %s, X-OLP-Resource-ID=%q", status, code, id)
+		return id
+	}
+	original := title + metadata + repeated + first + second
+	id := post("upload", original, http.StatusInternalServerError, "provider_resource_error")
+	if id == "" {
+		t.Fatal("ambiguous upload returned no local resource ID")
+	}
+	if got := post("upload", metadata+first+title+repeated+second, http.StatusConflict, "submission_exists"); got != id {
+		t.Fatalf("reordered metadata recovered %q, want %q", got, id)
+	}
+	for _, changed := range []string{
+		title + field("beta", "changed") + repeated + first + second,
+		title + repeated + metadata + first + second,
+		title + metadata + repeated + second + first,
+		title + metadata + repeated + file("SKILL.md", "changed") + second,
+	} {
+		if got := post("upload", changed, http.StatusConflict, "idempotency_conflict"); got != "" {
+			t.Fatalf("changed upload returned resource ID %q", got)
+		}
+	}
+
+	const legacyPayload = `[{"Header":{"Content-Disposition":["form-data; name=\"display_title\""]},"Body":"U2tpbGw="},` +
+		`{"Header":{"Content-Disposition":["form-data; name=\"beta\""]},"Body":"Zml4dHVyZQ=="},` +
+		`{"Header":{"Content-Disposition":["form-data; name=\"beta\""]},"Body":"b3RoZXI="},` +
+		`{"Header":{"Content-Disposition":["form-data; name=\"files[]\"; filename=\"SKILL.md\""]},"Body":"aW5zdHJ1Y3Rpb25z"},` +
+		`{"Header":{"Content-Disposition":["form-data; name=\"files[]\"; filename=\"notes.txt\""]},"Body":"bm90ZXM="}]`
+	oldDigest := g.kernel.Deps.Digester.Digest(secrets.RetainedSubmissionDigest, "skill\x00skill\x00"+slug+"\x00"+legacyPayload)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.retained_submissions SET request_digest=$1 WHERE api_key_id=$2 AND operation='skill' AND submission_key='upload'`, oldDigest, owner); err != nil {
+		t.Fatal(err)
+	}
+	if got := post("upload", original, http.StatusConflict, "submission_exists"); got != id {
+		t.Fatalf("matching pre-upgrade upload recovered %q, want %q", got, id)
+	}
+	if sent := upstream.sent("POST /skills"); len(sent) != 1 || sent[0].body != original+"--fixture--\r\n" {
+		t.Fatalf("upstream received %+v, want only the original upload body", sent)
+	}
+}
 
 func anthropicReplies(string, int) map[string]string {
 	const file = `{"id":"file_provider-owned","type":"file","filename":"a.txt","mime_type":"text/plain","size_bytes":5,"created_at":"2026-01-01T00:00:00Z","downloadable":true}`

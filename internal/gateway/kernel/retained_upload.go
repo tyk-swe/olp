@@ -84,12 +84,13 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		return
 	}
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Operation: operation, Surface: "openai", Kind: resources.KindFile, Identity: "id", Collection: "data", Path: "/v1/files"}, Action: "create", Method: http.MethodPost, Pattern: "/v1/files"}
-	digest, digestErr := s.RetainedBodyDigest(e, route.Slug, body, contentType)
+	digest, legacyDigest, digestErr := s.RetainedBodyDigest(e, route.Slug, body, contentType)
 	if digestErr != nil {
 		fail(digestErr)
 		return
 	}
-	prior, lookupErr := s.Deps.Resources.LookupLifecycle(ctx, x.keyID, operation+":file", idempotency, digest)
+	submission := resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest, LegacyDigest: legacyDigest}
+	prior, lookupErr := s.Deps.Resources.LookupLifecycle(ctx, x.keyID, submission)
 	if errors.Is(lookupErr, resources.ErrSubmissionConflict) {
 		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -118,7 +119,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	version := retainedapi.Revision
 	meta, _ := json.Marshal(map[string]any{"upstream_model": p.Model, "file_operation": operation, "purpose": purpose, "bytes": file.Size, "filename": file.Filename, "upload_digest": file.Digest})
 	candidate := &resources.Resource{Kind: resources.KindFile, APIKeyID: x.keyID, RouteSlug: route.Slug, RouteRevisionID: route.RevisionID, ProviderID: p.Provider.ID, ProviderRevisionID: p.Provider.RevisionID, TargetID: p.Target.ID, SlotID: p.Slot.ID, CredentialID: p.Slot.CredentialID, ContractVersion: &version, Metadata: meta}
-	lifecycle, prepareErr := s.Deps.Resources.BeginCreate(ctx, candidate, resources.Submission{Operation: operation + ":file", Key: idempotency, Digest: digest})
+	lifecycle, prepareErr := s.Deps.Resources.BeginCreate(ctx, candidate, submission)
 	if errors.Is(prepareErr, resources.ErrSubmissionConflict) {
 		fail(fault.ServerError(409, "idempotency_conflict", "This submission identity is already bound to another upload."))
 		return
@@ -127,8 +128,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 		fail(fault.ServerError(503, "provider_state_unavailable", "The file submission could not be committed."))
 		return
 	}
-	resource := lifecycle.Resource()
-	w.Header().Set("X-OLP-Resource-ID", resource.ID)
+	w.Header().Set("X-OLP-Resource-ID", lifecycle.Resource().ID)
 	if lifecycle.Existing() {
 		fail(fault.ServerError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
@@ -144,7 +144,7 @@ func (s *Server) UploadRetainedFile(w http.ResponseWriter, r *http.Request, x *C
 	}
 	defer s.SettleFence(r.Context(), lifecycle.Close)
 	status = s.RetainedDispatch(w, r.WithContext(ctx), RetainedDispatchRequest{
-		Call: x, Pin: p, Endpoint: e, Resource: resource, URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
+		Call: x, Pin: p, Endpoint: e, Resource: lifecycle.Resource(), URL: endpoint, Body: body, ContentType: contentType, Lifecycle: lifecycle, Fail: fail,
 	})
 }
 
