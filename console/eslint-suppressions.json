@@ -31,10 +31,5 @@
     "max-lines-per-function": {
       "count": 1
     }
-  },
-  "src/lib/shell/navigation.ts": {
-    "max-lines": {
-      "count": 1
-    }
   }
 }

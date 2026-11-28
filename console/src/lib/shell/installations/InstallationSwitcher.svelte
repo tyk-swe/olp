@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import { errorMessage } from '#lib/management/http.js';
-  import { OVERVIEW } from '#lib/shell/navigation.js';
+  import { OVERVIEW } from '#lib/shell/navigationTree/pinned.js';
   import {
     addBookmark,
     bookmarkOrigin,

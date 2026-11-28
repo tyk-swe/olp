@@ -308,16 +308,17 @@ guard whether the draft differs from the saved record.
 Pages are built from the shared components in `src/lib/components/` rather than
 hand-rolled markup. A standalone page starts with `PageHeader`. A page with
 several views is a route folder whose `+layout.svelte` renders `SectionLayout`,
-which reads the title, description and tabs from `src/lib/shell/navigation.ts`,
-so each tab is its own URL. A query-backed region goes through `QueryView`,
-which renders the loading status, a danger `Callout` with the failure message
-and a retry button, an optional empty state, or its children. Lists open create
-and edit forms in a `Dialog` with `placement="side"`. Errors and empty states
-use `Callout` and `EmptyState`. Rarely used fields go in `Advanced`.
-Destructive or hard-to-undo actions await `confirmAction` from `confirm.ts`,
-and successful saves call `notify` from `toasts.svelte.ts` instead of leaving a
-notice on the page. A new page also needs an entry in `navigation.ts` so it
-appears in the sidebar, breadcrumbs and command palette.
+which reads the title, description and tabs from the navigation tree in
+`src/lib/shell/navigationTree/`, so each tab is its own URL. A query-backed
+region goes through `QueryView`, which renders the loading status, a danger
+`Callout` with the failure message and a retry button, an optional empty state,
+or its children. Lists open create and edit forms in a `Dialog` with
+`placement="side"`. Errors and empty states use `Callout` and `EmptyState`.
+Rarely used fields go in `Advanced`. Destructive or hard-to-undo actions await
+`confirmAction` from `confirm.ts`, and successful saves call `notify` from
+`toasts.svelte.ts` instead of leaving a notice on the page. A new page also
+needs an entry in the file for its area under `src/lib/shell/navigationTree/` so
+it appears in the sidebar, breadcrumbs and command palette.
 
 ## Design system
 
