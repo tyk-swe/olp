@@ -82,6 +82,22 @@ it.each([
   }
 );
 
+it.each([true, false])(
+  'rejects an invalid identity reauthentication URL (SAML available: %s)',
+  async (saml) => {
+    serve((request) =>
+      request.method === 'GET'
+        ? json({ reauthentication_available: saml, identities: [] })
+        : json({ authorization_url: 'mailto:help@example.test' })
+    );
+    await expect(
+      beginIdentityReauthentication('agent_delegation', 'key')
+    ).rejects.toMatchObject({
+      problem: { status: 502, type: 'urn:olp:problem:invalid-api-response' }
+    });
+  }
+);
+
 it('does not start identity verification when identity availability fails', async () => {
   serve((request) => {
     route(request, 'GET', '/api/v1/profile/saml-identities');

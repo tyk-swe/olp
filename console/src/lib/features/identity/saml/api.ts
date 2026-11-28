@@ -1,5 +1,10 @@
 import { apiClient } from '#lib/session/client.js';
-import { ensureOk, unwrap, ifMatch } from '#lib/management/http.js';
+import {
+  ensureOk,
+  unwrap,
+  unwrapAuthorizationUrl,
+  ifMatch
+} from '#lib/management/http.js';
 import type { components } from '#lib/management/schema.js';
 export type SAMLWrite = components['schemas']['SAMLConfigurationWrite'];
 export async function getSAML(signal?: AbortSignal) {
@@ -24,16 +29,25 @@ export async function listSAMLIdentities(signal?: AbortSignal) {
   );
 }
 export async function beginSAMLLogin(returnTo: string, signal?: AbortSignal) {
-  return unwrap(
+  const { authorization_url } = unwrap(
     await apiClient.POST('/api/v1/saml/login', {
       body: { return_to: returnTo },
       signal
     })
-  ).authorization_url;
+  );
+  return unwrapAuthorizationUrl(
+    authorization_url,
+    'The SAML authorization response is invalid'
+  );
 }
 export async function beginSAMLLink() {
-  return unwrap(await apiClient.POST('/api/v1/profile/saml/link'))
-    .authorization_url;
+  const { authorization_url } = unwrap(
+    await apiClient.POST('/api/v1/profile/saml/link')
+  );
+  return unwrapAuthorizationUrl(
+    authorization_url,
+    'The SAML authorization response is invalid'
+  );
 }
 export async function unlinkSAML(id: string) {
   ensureOk(

@@ -4,6 +4,7 @@ import { apiClient } from '#lib/session/client.js';
 import {
   ensureOk,
   unwrap,
+  unwrapAuthorizationUrl,
   unwrapOutcome,
   ifMatch
 } from '#lib/management/http.js';
@@ -114,7 +115,10 @@ export async function beginOidcReauthentication(
     '/api/v1/oidc/reauthenticate',
     { body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) } }
   );
-  return unwrap({ data, error, response }).authorization_url;
+  return unwrapAuthorizationUrl(
+    unwrap({ data, error, response }).authorization_url,
+    'The OIDC authorization response is invalid'
+  );
 }
 
 export async function unlinkOidcIdentity(identityId: string): Promise<void> {
@@ -132,11 +136,13 @@ export async function beginIdentityReauthentication(
   const identities = unwrap(
     await apiClient.GET('/api/v1/profile/saml-identities')
   );
-  if (identities.reauthentication_available)
-    return unwrap(
-      await apiClient.POST('/api/v1/profile/saml/reauthenticate', {
-        body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
-      })
-    ).authorization_url;
-  return beginOidcReauthentication(purpose, resourceId);
+  if (!identities.reauthentication_available)
+    return beginOidcReauthentication(purpose, resourceId);
+  const response = await apiClient.POST('/api/v1/profile/saml/reauthenticate', {
+    body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
+  });
+  return unwrapAuthorizationUrl(
+    unwrap(response).authorization_url,
+    'The SAML authorization response is invalid'
+  );
 }

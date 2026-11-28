@@ -371,6 +371,23 @@ describe('personal grant HTTP journey', () => {
     expect(await api.revokeMCPGrant('grant-a')).toEqual({ state: 'revoked' });
   });
 
+  it('rejects invalid links in grant completion and poll responses', async () => {
+    serve(() => json({ state: 'pending', authorization_url: '/authorize' }));
+    await expect(
+      api.completeMCPGrant('enrollment-a', 'code', 'state')
+    ).rejects.toMatchObject({ problem: { status: 502 } });
+
+    serve(() =>
+      json({
+        state: 'pending',
+        device: { verification_url: 'ftp://identity.example.test/device' }
+      })
+    );
+    await expect(api.pollMCPGrant('enrollment-a')).rejects.toMatchObject({
+      problem: { status: 502 }
+    });
+  });
+
   it('propagates one-use, foreign-user and provider refusals instead of returning successful standing', async () => {
     serve(() => json({ status: 409, title: 'Enrollment already used' }, 409));
     await expect(api.claimMCPGrant('used', 'token')).rejects.toMatchObject({

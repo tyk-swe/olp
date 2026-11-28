@@ -3,9 +3,11 @@ import type { components } from '#lib/management/schema.js';
 import {
   ensureOk,
   unwrap,
+  unwrapAuthorizationUrl,
   unwrapPage,
   createHeaders,
-  mutationHeaders
+  mutationHeaders,
+  type Fetched
 } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
 import type { PublicationCommand, PublicationIdentity } from './form';
@@ -385,11 +387,33 @@ export const revokeMCPGrant = async (grantID: string) =>
 
 export type MCPGrantAuthorization =
   components['schemas']['MCPGrantAuthorization'];
+
+function grantAuthorization(fetched: Fetched<MCPGrantAuthorization>) {
+  const authorization = unwrap(fetched);
+  const { authorization_url, device } = authorization;
+  const title = 'The personal grant authorization response is invalid';
+  return {
+    ...authorization,
+    ...(authorization_url !== undefined && {
+      authorization_url: unwrapAuthorizationUrl(authorization_url, title)
+    }),
+    ...(device !== undefined && {
+      device: {
+        ...device,
+        verification_url: unwrapAuthorizationUrl(
+          device?.verification_url,
+          title
+        )
+      }
+    })
+  };
+}
+
 export async function authorizeMCPGrant(
   enrollmentID: string,
   flow: 'authorization_code' | 'device_code'
 ) {
-  return unwrap(
+  return grantAuthorization(
     await apiClient.POST(
       '/api/v1/mcp-grant-enrollments/{enrollment_id}/authorize',
       {
@@ -404,7 +428,7 @@ export async function completeMCPGrant(
   code: string,
   state: string
 ) {
-  return unwrap(
+  return grantAuthorization(
     await apiClient.POST(
       '/api/v1/mcp-grant-enrollments/{enrollment_id}/complete',
       {
@@ -415,7 +439,7 @@ export async function completeMCPGrant(
   );
 }
 export async function pollMCPGrant(enrollmentID: string) {
-  return unwrap(
+  return grantAuthorization(
     await apiClient.POST('/api/v1/mcp-grant-enrollments/{enrollment_id}/poll', {
       params: { path: { enrollment_id: enrollmentID } }
     })

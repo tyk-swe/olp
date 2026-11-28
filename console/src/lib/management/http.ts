@@ -147,6 +147,20 @@ export function unwrap<T>(fetched: Fetched<T>): NonNullable<T> {
   return unwrapOutcome(responseOutcome(fetched));
 }
 
+function parseHttpUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+export function unwrapAuthorizationUrl(value: unknown, title: string): string {
+  const url = typeof value === 'string' ? parseHttpUrl(value) : null;
+  return url?.href ?? unwrapOutcome(invalidResponse(title));
+}
+
 export function unwrapPage<T>(
   fetched: Fetched<{ items: T[]; next_cursor?: string | null }>
 ): CursorPage<T> {
