@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   workflow_call:
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 defaults:
   run:
@@ -53,6 +53,7 @@ jobs:
             go:
               - 'Makefile'
               - 'scripts/check-lint.sh'
+              - 'scripts/check-migrations.sh'
               - '.golangci.yml'
               - '**/*.go'
               - 'go.mod'
@@ -77,7 +78,6 @@ jobs:
               - 'package.json'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
-              - '!**/*.md'
             contracts:
               - 'Makefile'
               - '.nvmrc'
@@ -143,10 +143,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: $/.github/actions/setup
         with:
           node-modules: false
       - run: make check-go
+        env:
+          MIGRATIONS_BASE: HEAD^1
   check-console:
     needs: changes
     if: needs.changes.outputs.console == 'true'
@@ -323,6 +326,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - run: |
+          yq -o=json .github/workflows/ci.yml |
+            jq -e '((.jobs | keys) - ["ci-gate"] - .jobs."ci-gate".needs) as $ungated | if $ungated == [] then true else error("jobs missing from ci-gate: \($ungated)") end'
       - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           version: 1.32.0
@@ -352,3 +358,28 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/setup
       - run: make build
+  ci-gate:
+    if: always()
+    needs:
+      - changes
+      - check-go
+      - check-console
+      - test-unit-go
+      - test-unit-console
+      - test-integration
+      - test-e2e-api
+      - test-e2e-browser
+      - contracts
+      - helm
+      - workflows
+      - dependencies
+      - build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$NEEDS" >/dev/null

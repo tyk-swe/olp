@@ -2,7 +2,8 @@
 
 report_budget() {
   local name=$1 budget=$2 ran=$3 wall=$4
-  printf '%s: ran %ss of a %ss budget (%ss wall with builds)\n' "$name" "$ran" "$budget" "$wall"
+  printf '%s: ran %ss of a %ss budget (%ss wall with builds)\n' "$name" "$ran" "$budget" "$wall" |
+    tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
   if awk -v ran="$ran" -v budget="$budget" 'BEGIN { exit !(ran > budget) }'; then
     printf '%s: exceeded its %ss run budget\n' "$name" "$budget" >&2
     return 1
