@@ -1,6 +1,11 @@
 import { beforeNavigate } from '$app/navigation';
+import { replaceEqualDeep } from '@tanstack/svelte-query';
 
 let decision: { navigation: unknown; discard: boolean } | null = null;
+
+export function hasChanges<Draft>(saved: Draft, edited: Draft): boolean {
+  return replaceEqualDeep(saved, edited) !== saved;
+}
 
 /** Local transitions must ask before replacing the same draft that route
  * navigation protects. */
