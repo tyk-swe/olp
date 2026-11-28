@@ -80,7 +80,7 @@ func TestRetrievalBindingHTTPLifecycle(t *testing.T) {
 	}
 
 	register := func(mux *http.ServeMux, a *access.Server) {
-		(&retrieval.Server{Access: a}).Register(mux)
+		retrieval.NewAPI(a).Register(mux)
 	}
 	manager := managementHTTPAs(t, pool, managerID, register)
 	outsider := managementHTTPAs(t, pool, outsiderID, register)

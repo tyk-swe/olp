@@ -3,19 +3,13 @@ package retrieval
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"maps"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/textfield"
@@ -43,7 +37,13 @@ type Binding struct {
 	ETag       string     `json:"etag"`
 	RetiredAt  *time.Time `json:"retired_at"`
 }
-type Server struct{ Access *access.Server }
+
+type revisionDetail struct {
+	BindingID  string `json:"binding_id"`
+	Definition Input  `json:"definition"`
+	ID         string `json:"id"`
+	Revision   int64  `json:"revision"`
+}
 
 func normalizeInput(in Input) (Input, error) {
 	name := strings.TrimSpace(in.Name)
@@ -135,6 +135,27 @@ func List(ctx context.Context, q database.Queryer) ([]Binding, error) {
 	return out, rows.Err()
 }
 
+func listPage(ctx context.Context, q database.Queryer, page database.Pagination, allProjects bool, projects []string) ([]*Binding, error) {
+	rows, err := q.Query(ctx, "SELECT "+bindingColumns+bindingJoin+" WHERE b.retired_at IS NULL AND b.id<$1 AND ($2 OR b.project_id=ANY($3::uuid[])) ORDER BY b.id DESC LIMIT $4", page.Before, allProjects, projects, page.Limit+1)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (*Binding, error) { return scanBinding(row) })
+}
+
+func loadRevision(ctx context.Context, q database.Queryer, bindingID, revisionID string) (revisionDetail, error) {
+	var raw []byte
+	var number int64
+	if err := q.QueryRow(ctx, "SELECT definition,revision FROM olp.retrieval_binding_revisions WHERE id=$1 AND binding_id=$2", revisionID, bindingID).Scan(&raw, &number); err != nil {
+		return revisionDetail{}, err
+	}
+	var definition Input
+	if err := json.Unmarshal(raw, &definition); err != nil {
+		return revisionDetail{}, err
+	}
+	return revisionDetail{BindingID: bindingID, Definition: definition, ID: revisionID, Revision: number}, nil
+}
+
 // ValidateAuthority runs in the management transaction. The serving path also
 // verifies current published route, target, credential and API-key authority.
 func ValidateAuthority(ctx context.Context, q database.Queryer, in Input) (string, error) {
@@ -223,154 +244,8 @@ func nextBindingIdentity(current *Binding) (string, int64) {
 	}
 	return ids.New(), 1
 }
-func (s *Server) Register(mux *http.ServeMux) {
-	s.Access.Route(mux, "GET /api/v1/retrieval-bindings", s.list)
-	s.Access.Route(mux, "POST /api/v1/retrieval-bindings", s.write)
-	s.Access.Route(mux, "GET /api/v1/retrieval-bindings/{binding_id}", s.get)
-	s.Access.Route(mux, "PUT /api/v1/retrieval-bindings/{binding_id}", s.write)
-	s.Access.Route(mux, "DELETE /api/v1/retrieval-bindings/{binding_id}", s.write)
-	s.Access.Route(mux, "GET /api/v1/retrieval-bindings/{binding_id}/revisions/{revision_id}", s.revision)
-}
-func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	page, err := httpkit.Page(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+bindingColumns+bindingJoin+" WHERE b.retired_at IS NULL AND b.id<$1 AND ($2 OR b.project_id=ANY($3::uuid[])) ORDER BY b.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		d, err := scanBinding(rows)
-		if err != nil {
-			return httpkit.Reply{}, err
-		}
-		raw, _ := json.Marshal(d)
-		var item map[string]any
-		_ = json.Unmarshal(raw, &item)
-		items = append(items, item)
-	}
-	return httpkit.ListReply(items, page), rows.Err()
-}
-func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	id, err := httpkit.IDParam(r, "binding_id")
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	d, err := Load(r.Context(), s.Access.Pool, id, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(&d.ProjectID, authz.View); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(d, d.ETag), nil
-}
-func (s *Server) revision(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
-	id, err := httpkit.IDParam(r, "binding_id")
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	version, err := httpkit.IDParam(r, "revision_id")
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	d, err := Load(r.Context(), s.Access.Pool, id, false)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	if err = p.Project(&d.ProjectID, authz.View); err != nil {
-		return httpkit.Reply{}, err
-	}
-	var raw json.RawMessage
-	var n int64
-	err = s.Access.Pool.QueryRow(r.Context(), "SELECT definition,revision FROM olp.retrieval_binding_revisions WHERE id=$1 AND binding_id=$2", version, id).Scan(&raw, &n)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	var definition Input
-	if err = json.Unmarshal(raw, &definition); err != nil {
-		return httpkit.Reply{}, err
-	}
-	return httpkit.Detail(map[string]any{"id": version, "binding_id": id, "revision": n, "definition": definition}, version), nil
-}
-func readBindingInput(r *http.Request) (Input, error) {
-	if r.Method == http.MethodDelete {
-		return Input{}, nil
-	}
-	var in Input
-	if err := httpkit.DecodeUnique(r, &in, 64<<10); err != nil {
-		return Input{}, err
-	}
-	return normalizeInput(in)
-}
 
-func (s *Server) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
-	in, err := readBindingInput(r)
-	if err != nil {
-		return httpkit.Reply{}, err
-	}
-	return access.Mutate(s.Access, r, in, s.target(r, in), func(tx pgx.Tx, p authz.Principal, current *Binding) (httpkit.Reply, access.Event, error) {
-		if current != nil {
-			if err := httpkit.Match(r, current.ETag); err != nil {
-				return httpkit.Reply{}, access.Event{}, err
-			}
-			if current.RetiredAt != nil {
-				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
-			}
-		}
-		reply, event, err := change(r, tx, p, current, in)
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" {
-			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
-		}
-		if err != nil {
-			return httpkit.Reply{}, access.Event{}, err
-		}
-		_, err = access.AdvanceAuthority(r.Context(), tx)
-		return reply, event, err
-	})
-}
-
-func (s *Server) target(r *http.Request, in Input) func(pgx.Tx, authz.Principal) (*Binding, error) {
-	return func(tx pgx.Tx, p authz.Principal) (*Binding, error) {
-		if err := p.Authorize(authz.Configure); err != nil {
-			return nil, err
-		}
-		if r.PathValue("binding_id") == "" {
-			return nil, s.Access.RequireProject(r.Context(), tx, p, &in.ProjectID)
-		}
-		id, err := httpkit.IDParam(r, "binding_id")
-		if err != nil {
-			return nil, err
-		}
-		current, err := Load(r.Context(), tx, id, true)
-		if err != nil {
-			return nil, err
-		}
-		return current, p.Project(&current.ProjectID, authz.Change)
-	}
-}
-
-func change(r *http.Request, tx pgx.Tx, p authz.Principal, current *Binding, in Input) (httpkit.Reply, access.Event, error) {
-	if r.Method == http.MethodDelete {
-		_, err := tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", current.ID, ids.New())
-		return httpkit.Reply{Status: http.StatusNoContent}, bindingEvent("retire", current.ID), err
-	}
-	next, err := Save(r.Context(), tx, p.UserID(), current, in)
-	if err != nil {
-		return httpkit.Reply{}, access.Event{}, err
-	}
-	reply := httpkit.Detail(next, next.ETag)
-	if current != nil {
-		return reply, bindingEvent("update", next.ID), nil
-	}
-	reply.Status, reply.Location = http.StatusCreated, "/api/v1/retrieval-bindings/"+next.ID
-	return reply, bindingEvent("create", next.ID), nil
-}
-
-func bindingEvent(action, id string) access.Event {
-	return access.Event{Action: "retrieval_binding." + action, Resource: "retrieval_binding", ID: id}
+func markRetired(ctx context.Context, tx pgx.Tx, id, etag string) error {
+	_, err := tx.Exec(ctx, "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", id, etag)
+	return err
 }
