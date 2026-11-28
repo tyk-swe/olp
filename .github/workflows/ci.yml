@@ -77,7 +77,6 @@ jobs:
               - 'package.json'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
-              - '!**/*.md'
             contracts:
               - 'Makefile'
               - '.nvmrc'
