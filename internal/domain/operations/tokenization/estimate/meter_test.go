@@ -1,9 +1,26 @@
 package estimate
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
+
+func TestFactorsScaleOnlyFamiliesWithoutATokenizer(t *testing.T) {
+	text := strings.Repeat("scaled estimate ", 64)
+	factors := map[Family]float64{FamilyAnthropic: 1.5, FamilyOpenAIO200k: 1.5}
+	scaled, provenance := ForModel("claude-sonnet", factors).Count(text)
+	if want := int64(math.Ceil(float64(HeuristicTokens(text)) * 1.5)); scaled != want || provenance != ProvenanceCalibrated {
+		t.Fatalf("anthropic estimate = %d, %s, want %d, %s", scaled, provenance, want, ProvenanceCalibrated)
+	}
+	if plain, provenance := ForModel("gemini-pro", factors).Count(text); plain != HeuristicTokens(text) || provenance != ProvenanceHeuristic {
+		t.Fatalf("family without a factor = %d, %s", plain, provenance)
+	}
+	exact, _ := ForModel("gpt-4o", nil).Count(text)
+	if counted, provenance := ForModel("gpt-4o", factors).Count(text); counted != exact || provenance != ProvenanceTokenizer {
+		t.Fatalf("tokenizer count = %d, %s, want %d, %s", counted, provenance, exact, ProvenanceTokenizer)
+	}
+}
 
 // TestAMeterReadsNoMoreThanItsWindow holds a Meter to the contract a walked
 // prompt relies on to keep only part of its text: given the bytes of a segment
@@ -22,7 +39,7 @@ func TestAMeterReadsNoMoreThanItsWindow(t *testing.T) {
 		"punctuation":                         strings.Repeat("]);\n", ExactBytes),
 	} {
 		for _, model := range []string{"gpt-4o", "gpt-4"} {
-			c := ForModel(model)
+			c := ForModel(model, nil)
 			for _, lead := range []int{0, 1, 2, 3, 100, ExactBytes - 7, ExactBytes - 1, ExactBytes} {
 				if lead > len(text) {
 					continue

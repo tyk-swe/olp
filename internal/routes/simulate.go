@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -117,7 +118,7 @@ func (d *simulatedDemand) request() *routing.TokenDemand {
 	if d.prompt == nil {
 		return d.fixed
 	}
-	e := d.prompt.Estimate(estimate.ForModel(""), nil)
+	e := d.prompt.Estimate(catalog.TokenCounter(""), nil)
 	demand := &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 	if d.output != nil {
 		demand.MaxOutputTokens = d.output
@@ -154,7 +155,7 @@ func (d *simulatedDemand) prepared(target routing.Target, request *wire.Request)
 }
 
 func (d *simulatedDemand) measure(target routing.Target, prompt *estimate.Prompt) *routing.TokenDemand {
-	e := prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
+	e := prompt.Estimate(catalog.TokenCounter(target.ProviderModel), nil)
 	d.estimates[target.ID] = simulatedEstimate{Estimate: e, retainedContextUnknown: d.sampleGeneration && hasUnmeasuredContext(prompt.Request())}
 	demand := &routing.TokenDemand{EstimatedInputTokens: e.ContextInput, MaxOutputTokens: e.Output, CostInputTokens: new(e.InputExposure())}
 	if d.output != nil {

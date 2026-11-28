@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -79,7 +80,7 @@ func (x *Call) summarizeSource() requestSummary {
 // sourceDemand is what routing weighs a target's context window against: the
 // caller's request as the model that would serve it counts it.
 func (x *Call) sourceDemand(model string) *routing.TokenDemand {
-	return demandOf(x.summarizeSource().prompt.Estimate(estimate.ForModel(model), nil))
+	return demandOf(x.summarizeSource().prompt.Estimate(catalog.TokenCounter(model), nil))
 }
 
 func demandOf(e estimate.Estimate) *routing.TokenDemand {
@@ -205,7 +206,7 @@ func (x *Call) buildTransformed(provider *routing.Provider, model string) (prepa
 func (x *Call) preparedEstimate(model string, effective requestSummary) (admittedEstimate, *routing.TokenDemand) {
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
-	counter := estimate.ForModel(model)
+	counter := catalog.TokenCounter(model)
 	if x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Redact) || x.guard.engine.HasAction(guardrailpolicy.Input, guardrailpolicy.Mask) {
 		to := effective.prompt.Estimate(counter, nil)
 		return admittedEstimate{reserve: to.Tokens(), input: to.InputExposure(), reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
@@ -333,7 +334,7 @@ func (x *Call) attemptEstimate(provider *routing.Provider, targetID, model strin
 		if err != nil {
 			return admittedEstimate{}, err
 		}
-		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
+		e := x.summarizeSource().prompt.Estimate(catalog.TokenCounter(model), provider.ParameterDefaults)
 		e.Output, e.Candidates = bounds.output, bounds.candidates
 		return admittedEstimate{reserve: e.Tokens(), input: e.InputExposure(), reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}

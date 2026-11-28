@@ -16,13 +16,12 @@ boundaries are enforced separately by ESLint and documented in
 | `resources_isolation` | `internal/resources/**` outside `internal/resources/manage/**` (non-test) | Denies `internal/access` and `internal/management/contract` so resource persistence and background workers stay free of management HTTP handlers. |
 | `media_isolation` | `internal/media/**` outside `internal/media/jobs/manage/**` (non-test) | Denies `internal/access` and `internal/management/contract` so media codecs, transport, persistence and workers stay free of management HTTP handlers. |
 | `store_worker_validation` | Files named `*store.go`, `*stores.go`, `*worker.go`, `*workers.go`, `*validation.go` and `*validate.go` (non-test) | Denies `internal/access/httpkit` so stores, workers and validators return [problem values](management.md#problem-values) and leave the reply to the HTTP handler. |
-| `domain` | `internal/domain/**` (non-test) | Allows only `internal/domain` and `internal/catalog$` inside `internal/`, and denies `net/http`, `database/sql`, `github.com/jackc/pgx` and `github.com/valkey-io`. Take values in as arguments and do I/O in the caller. |
+| `domain` | `internal/domain/**` (non-test) | Allows only `internal/domain` inside `internal/`, and denies `net/http`, `database/sql`, `github.com/jackc/pgx` and `github.com/valkey-io`. Take values in as arguments and do I/O in the caller. |
 | `platform` | `internal/platform/**` (non-test) | Allows only `internal/platform` and `internal/domain` inside `internal/` so shared infrastructure never imports a feature. |
 | `library` | `internal/**` | Denies all imports of `cmd/`. |
 
 Beyond those `depguard` rules, `scripts/check-lint.sh` verifies that top-level
-modules under `internal/` never form an import cycle, with `internal/domain`
-importing `internal/catalog` as the one allowed edge. When two modules need each
+modules under `internal/` never form an import cycle. When two modules need each
 other, move the shared vocabulary into `internal/domain` or inject the
 collaborator from `cmd/olp`. Every other directory under `internal/` is named
 for the module that owns a behavior, including its SQL, validation and routes,
