@@ -134,7 +134,7 @@ func (r *relay) accept(frame sse.Frame) (geminilifecycle.InteractionEvent, error
 
 func (r relay) account(event geminilifecycle.InteractionEvent, seen relayed) relayed {
 	if object, ok := event.Source.Root().Lookup("interaction"); ok {
-		kernel.RecordInteractionUsage(r.exchange, object)
+		r.turn.recordInteractionUsage(r.exchange, object)
 	}
 	if r.state.Done {
 		r.complete(event)
@@ -170,7 +170,7 @@ func (r relay) persist(ctx context.Context, event geminilifecycle.InteractionEve
 	object, _ := event.Source.Root().Lookup("interaction")
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
 	defer stopCommit()
-	_, err = r.turn.kernel.ObserveInteraction(commitCtx, r.turn.authority.ID, bound.local.ID, observed, object)
+	err = r.turn.observeInteraction(commitCtx, r.turn.authority.ID, bound.local.ID, observed, object)
 	return bound, err
 }
 

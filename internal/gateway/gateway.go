@@ -41,7 +41,7 @@ func Register(k *kernel.Server, mux *http.ServeMux, deps kernel.Dependencies, op
 	k.RegisterKernel(mux, geministate.Actions(k, deps.Resources, deps.Staging))
 	anthropicstate.Register(k, mux, deps.Resources, deps.Staging)
 	cloudbatches.Register(k, mux, deps.Resources)
-	geminiinteractions.Register(k, mux, deps.Resources, deps.Resolver)
+	geminiinteractions.Register(k, mux, deps.Resources, deps.Resolver, deps.Admission)
 	geministate.Register(k, mux, deps.Resources, deps.Staging)
 	guardrails.Register(k, mux)
 	geminilive.Register(k, mux)

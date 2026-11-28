@@ -214,7 +214,7 @@ func (t turn) answerStored(ctx context.Context, response *kernel.PinnedResponse,
 	// its owner-scoped projection cannot be delivered.
 	response.Exchange.Complete(kernel.ClassSuccess)
 	commitCtx, stopCommit := kernel.ResourceCommitContext(ctx)
-	_, err := t.kernel.ObserveInteraction(commitCtx, t.authority.ID, interaction.id, result.Status, result.Source.Root())
+	err := t.observeInteraction(commitCtx, t.authority.ID, interaction.id, result.Status, result.Source.Root())
 	stopCommit()
 	if err != nil {
 		t.refuse(fault.ServerError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction state could not be updated."))
