@@ -8,7 +8,7 @@
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { confirmDiscardChanges } from '#lib/editing/unsavedChanges.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { formatDate, formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -22,10 +22,7 @@
     queryKey: sinkKeys.all,
     queryFn: listSinks
   }));
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    queryFn: ({ signal }) => listProjects(signal)
-  }));
+  const projects = createQuery(projectQueries.all);
   let selected = $state('');
   let editorVersion = $state(0);
   let editorOpen = $state(false);

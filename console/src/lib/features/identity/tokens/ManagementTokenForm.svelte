@@ -4,7 +4,7 @@
     MANAGEMENT_TOKEN_SCOPES,
     type ManagementTokenScope
   } from '#lib/features/identity/tokens/api.js';
-  import type { listProjects } from '#lib/features/access/index.js';
+  import type { Project } from '#lib/domain/projects/api.js';
 
   export type TokenFormInput = {
     name: string;
@@ -23,7 +23,7 @@
     projects: {
       isPending: boolean;
       isError: boolean;
-      data?: Awaited<ReturnType<typeof listProjects>>;
+      data?: Project[];
       refetch: () => Promise<unknown>;
     };
     onSubmit: (input: TokenFormInput) => Promise<boolean>;

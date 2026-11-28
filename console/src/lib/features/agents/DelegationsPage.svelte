@@ -8,10 +8,7 @@
   import { writable } from 'svelte/store';
   import { page } from '$app/state';
   import { errorMessage } from '#lib/management/http.js';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listDelegations } from './api';
   import { agentKeys } from './agentKeys';
 
@@ -27,13 +24,7 @@
     project: initialProject,
     delegationID: initialDelegationID
   });
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false
-  }));
+  const projects = createQuery(projectQueries.memberships);
   const delegations = createQuery(() => ({
     queryKey: agentKeys.delegations(
       $filters.project,

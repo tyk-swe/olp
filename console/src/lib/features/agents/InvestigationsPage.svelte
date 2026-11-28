@@ -9,10 +9,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '#lib/management/http.js';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { listInvestigations } from './api';
   import { agentKeys } from './agentKeys';
@@ -21,13 +18,7 @@
   const filters = writable<{ project: string; cursor?: string }>({
     project: ''
   });
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false
-  }));
+  const projects = createQuery(projectQueries.memberships);
   const investigations = createQuery(() => ({
     queryKey: agentKeys.investigations($filters.project, $filters.cursor),
     queryFn: () => listInvestigations($filters.project, $filters.cursor),

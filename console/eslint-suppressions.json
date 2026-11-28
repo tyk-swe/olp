@@ -19,27 +19,7 @@
       "count": 1
     }
   },
-  "src/lib/features/budgets/AggregateBudgetPanel.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/budgets/aggregateBudgetKeys.ts": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/budgets/budget-groups/BudgetGroupCreateDialog.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
   "src/lib/features/budgets/budget-groups/BudgetGroupsPanel.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/budgets/budget-increases/BudgetIncreaseRequests.svelte": {
     "console/feature-order": {
       "count": 1
     }
@@ -51,26 +31,6 @@
   },
   "src/lib/features/identity/profile/profileIdentity.svelte.ts": {
     "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/lib/features/identity/scim/ScimPage.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/identity/scim/scimKeys.ts": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/identity/tokens/ManagementTokenForm.svelte": {
-    "console/feature-order": {
-      "count": 1
-    }
-  },
-  "src/lib/features/identity/tokens/ManagementTokensPanel.svelte": {
-    "console/feature-order": {
       "count": 1
     }
   },

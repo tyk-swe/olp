@@ -13,7 +13,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { projectKeys } from '../projects/projectKeys';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import { organizationKeys } from './organizationKeys';
   import { AggregateBudgetPanel } from '#lib/features/budgets/index.js';
   import * as api from './api';

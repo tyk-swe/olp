@@ -1,6 +1,6 @@
 <script lang="ts">
   import EntityPicker from '#lib/components/EntityPicker.svelte';
-  import { projectOptions } from '#lib/features/access/index.js';
+  import { projectOptions } from '#lib/domain/projects/projectOptions.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { formatDate } from '#lib/format.js';

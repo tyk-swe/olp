@@ -14,7 +14,7 @@
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     listCredentials,
@@ -53,9 +53,8 @@
     queryFn: listAttachments
   }));
   const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    notifyOnChangeProps: 'all',
-    queryFn: ({ signal }) => listProjects(signal)
+    ...projectQueries.all(),
+    notifyOnChangeProps: 'all'
   }));
   const credentials = createQuery(() => ({
     queryKey: guardrailKeys.credentials(),

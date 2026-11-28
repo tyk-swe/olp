@@ -13,7 +13,7 @@
     type Credential,
     type Definition
   } from './api';
-  import type { Project } from '#lib/features/access/index.js';
+  import type { Project } from '#lib/domain/projects/api.js';
 
   let {
     action,

@@ -23,7 +23,7 @@
   import ReadOnlyNote from '#lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '#lib/format.js';
   import { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
-  import { ProjectScopeField } from '#lib/features/access/index.js';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   let {
     routeId
   }: {

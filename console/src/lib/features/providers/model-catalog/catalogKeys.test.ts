@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it } from 'vitest';
-import { catalogKeys } from '#lib/features/providers/model-catalog/catalogKeys.js';
-import { projectKeys } from './projectKeys';
+import { projectKeys } from '#lib/domain/projects/projectKeys.js';
+import { catalogKeys } from './catalogKeys';
 
 it('marks a project publication stale when the model catalog is invalidated', async () => {
   const client = new QueryClient();

@@ -1,10 +1,8 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
-  import {
-    ProjectScopeField,
-    type ApiKey
-  } from '#lib/features/access/index.js';
+  import type { ApiKey } from '#lib/features/access/index.js';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import { notificationEvents, newRuleDraft } from './ruleDraft';
   import type { RuleDraft } from './ruleDraft';
   import type { BudgetGroup } from '#lib/features/budgets/index.js';

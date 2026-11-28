@@ -1,7 +1,7 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
-  import { ProjectScopeField } from '#lib/features/access/index.js';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { validRouteSlug } from '#lib/routeIdentity.js';
   import { limitsError } from '../limitForm';

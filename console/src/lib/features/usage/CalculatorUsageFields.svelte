@@ -1,7 +1,7 @@
 <script lang="ts">
   import { operationKinds } from './history/api.js';
   import type { listProviders } from '#lib/features/providers/index.js';
-  import type { listProjects } from '#lib/features/access/index.js';
+  import type { Project } from '#lib/domain/projects/api.js';
 
   let {
     providerId = $bindable(),
@@ -52,7 +52,7 @@
     successful: boolean;
     toolCalls: { name: string; count: string }[];
     providers: Awaited<ReturnType<typeof listProviders>>;
-    projects: Awaited<ReturnType<typeof listProjects>>;
+    projects: Project[];
     busy: boolean;
     onSubmit: () => void;
   } = $props();

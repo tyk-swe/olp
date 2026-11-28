@@ -10,8 +10,8 @@
     putProjectAttributionPolicy,
     type ProjectAttributionPolicy
   } from './api';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import ProjectPolicyEditor from './ProjectPolicyEditor.svelte';
-  import { projectKeys } from './projectKeys';
 
   let {
     projectId,

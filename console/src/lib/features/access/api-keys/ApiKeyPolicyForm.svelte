@@ -23,7 +23,7 @@
   import ApiKeyScopeFields from './ApiKeyScopeFields.svelte';
   import ApiKeyRateFields from './ApiKeyRateFields.svelte';
   import ApiKeySpendingFields from './ApiKeySpendingFields.svelte';
-  import ProjectScopeField from '#lib/features/access/projects/ProjectScopeField.svelte';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import {
     listBudgetGroups,
     budgetGroupKeys

@@ -6,7 +6,8 @@
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { listProjects, projectKeys } from '#lib/features/access/index.js';
+  import { projectKeys } from '#lib/domain/projects/projectKeys.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listGroups, saveMapping, type Group, type Mapping } from './api';
   import { scimKeys } from './scimKeys';
   const access = useRole();
@@ -15,10 +16,7 @@
     queryKey: scimKeys.groups(),
     queryFn: ({ signal }) => listGroups(signal)
   }));
-  const projects = createQuery(() => ({
-    queryKey: scimKeys.projectOptions(),
-    queryFn: ({ signal }) => listProjects(signal)
-  }));
+  const projects = createQuery(projectQueries.all);
   const editable = $derived(
     access.allows('PUT /api/v1/scim/groups/{scim_id}/mapping')
   );

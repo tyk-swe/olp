@@ -28,6 +28,7 @@ const sharedLayers = [
   'editing',
   'listing',
   'components',
+  'domain',
   'shell'
 ];
 const orderedFeatures = [
@@ -52,8 +53,7 @@ const orderedFeatures = [
 ];
 const apiModules = [
   'src/lib/management/**',
-  'src/lib/features/**/api.ts',
-  'src/lib/session/api.ts',
+  'src/lib/**/api.ts',
   'src/lib/features/providers/billing.ts',
   'src/lib/features/providers/catalog.ts',
   'src/lib/features/providers/credentials.ts',

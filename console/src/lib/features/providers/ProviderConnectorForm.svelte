@@ -5,7 +5,7 @@
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
-  import { ProjectScopeField } from '#lib/features/access/index.js';
+  import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import { stateLabel } from '#lib/format.js';
   import type { FieldIssue } from '#lib/management/http.js';

@@ -7,10 +7,7 @@
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
-  import {
-    listProjectMemberships,
-    projectKeys
-  } from '#lib/features/access/index.js';
+  import { projectQueries } from '#lib/domain/projects/queries.js';
   import {
     createInvestigation,
     type InvestigationEvidence,
@@ -27,13 +24,7 @@
   let evidenceError = $state('');
   let error = $state('');
   const saveAction = useMutation();
-  const projects = createQuery(() => ({
-    queryKey: projectKeys.memberships,
-    queryFn: ({ signal }) => listProjectMemberships(signal),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false
-  }));
+  const projects = createQuery(projectQueries.memberships);
 
   function addEvidence() {
     if (!evidenceID.trim()) {
