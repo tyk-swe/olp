@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const maxLogoBytes = 64 << 10
@@ -104,7 +105,7 @@ func (a *API) updateBranding(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		return struct{}{}, httpkit.Match(r, current)
 	}, func(tx pgx.Tx, _ authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		identity := newBrandingIdentity(input.Name, logo, accent, ids.New())
-		_, err := tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,logo=$2,accent=$3,branding_etag=$4 WHERE singleton", identity.Name, identity.Logo, identity.Accent, identity.ETag)
+		err := database.SetInstallationBranding(r.Context(), tx, identity.Name, identity.Logo, identity.Accent, identity.ETag)
 		return httpkit.Detail(identity, identity.ETag), access.Event{Action: "branding.update", Resource: "installation", ID: a.server.Installation}, err
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/apikeys"
+	"github.com/tyk-swe/olp/internal/gateway/traceingest"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/internal/usage/retention"
@@ -32,7 +33,7 @@ func runMaintenance(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
 		resourceErr = errors.Join(resourceErr, apikeys.ExpireKeyOverlaps(resourceCtx, pool), release.ExpireInstallStatus(resourceCtx, pool))
 		stopResource()
 		usageCtx, stopUsage := context.WithTimeout(ctx, retention.MaintenanceInterval/2)
-		report, usageErr := retention.RunMaintenance(usageCtx, pool, now, grants.PurgeExpiredEnrollments)
+		report, usageErr := retention.RunMaintenance(usageCtx, pool, now, grants.PurgeExpiredEnrollments, traceingest.PurgeExpiredSpans)
 		var batchErr error
 		if report.LockAcquired {
 			batchStore := batches.NewStore(pool)

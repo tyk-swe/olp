@@ -1,4 +1,4 @@
-// Package database owns PostgreSQL connection lifecycle. Feature packages own SQL.
+// Package database owns PostgreSQL connection lifecycle and the installation row. Feature packages own their own SQL.
 package database
 
 import (

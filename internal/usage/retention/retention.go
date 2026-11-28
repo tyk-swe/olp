@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/identity"
 	"github.com/tyk-swe/olp/internal/platform/audit"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -67,7 +68,7 @@ type cutoffs struct{ request, usage, audit time.Time }
 // pool because it holds a session advisory lock across many transactions: that
 // connection must never be handed back to another caller while locked, and
 // closing it is what releases the lock.
-func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purgeEnrollments Purge) (MaintenanceReport, error) {
+func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purgeEnrollments, purgeTraceSpans Purge) (MaintenanceReport, error) {
 	resource, err := pool.Acquire(ctx)
 	if err != nil {
 		return MaintenanceReport{}, fmt.Errorf("acquire maintenance connection: %w", err)
@@ -93,7 +94,7 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time, purg
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}
-	if _, err = drainInBatches(ctx, conn, execBatch(purgeTraceSpansSQL, windows.request, int64(retentionBatch))); err != nil {
+	if _, err = drainInBatches(ctx, conn, expiredBatch(purgeTraceSpans, windows.request)); err != nil {
 		return MaintenanceReport{}, err
 	}
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
@@ -206,10 +207,6 @@ const purgeRequestsSQL = `WITH expired AS (
     )
     DELETE FROM olp.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
-
-const purgeTraceSpansSQL = `WITH expired AS (
- SELECT id FROM olp.trace_spans WHERE received_at < $1 ORDER BY received_at LIMIT $2 FOR UPDATE SKIP LOCKED
-) DELETE FROM olp.trace_spans span USING expired WHERE span.id = expired.id`
 
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, execBatch(purgeRequestsSQL, cutoff, int64(retentionBatch)))
@@ -329,11 +326,6 @@ const purgeReceiptsSQL = `WITH expired AS (
     DELETE FROM olp.request_metadata_event_receipts receipt USING expired
      WHERE receipt.ctid = expired.ctid`
 
-const purgeReplaysSQL = `WITH expired AS (
-      SELECT ctid FROM olp.replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.replays target USING expired WHERE target.ctid = expired.ctid`
-
 // purgeExpiringRecords clears the tables that carry their own expiry. Each
 // table drains in its own committed batches, like the purges above, so one
 // locked row or a cancelled pass cannot roll back a whole pass of reclaimed
@@ -353,7 +345,7 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 		{&report.InvitationRows, expiredBatch(identity.PurgeExpiredInvitations, now)},
 		// Replay records first, then the encrypted responses they point at:
 		// deleting the secret would cascade the replay away uncounted.
-		{&report.ReplayRows, execBatch(purgeReplaysSQL, now, int64(retentionBatch))},
+		{&report.ReplayRows, expiredBatch(access.PurgeExpiredReplays, now)},
 		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredSAMLFlows, now)},
 		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredSAMLAssertionReplays, now)},
 		{&report.OIDCFlowRows, expiredBatch(identity.PurgeExpiredOIDCFlows, now)},

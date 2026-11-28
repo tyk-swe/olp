@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/consumerauth"
@@ -351,4 +352,13 @@ func (d *Store) persist(ctx context.Context, authority keyauthority.Authority, r
 	}
 	_, err = d.Pool.Exec(ctx, insertTraceSpansSQL, *authority.ProjectID, authority.ID, runs.PrincipalDigest(d.Auth, authority), string(payload))
 	return err
+}
+
+const purgeSpansSQL = `WITH expired AS (
+ SELECT id FROM olp.trace_spans WHERE received_at < $1 ORDER BY received_at LIMIT $2 FOR UPDATE SKIP LOCKED
+) DELETE FROM olp.trace_spans span USING expired WHERE span.id = expired.id`
+
+func PurgeExpiredSpans(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error) {
+	tag, err := tx.Exec(ctx, purgeSpansSQL, before, limit)
+	return tag.RowsAffected(), err
 }

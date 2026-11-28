@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -34,8 +35,8 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 	if err != nil {
 		return Published{}, err
 	}
-	var sequence int64
-	if err = tx.QueryRow(ctx, "UPDATE olp.installation SET release_sequence=release_sequence+1 WHERE singleton RETURNING release_sequence").Scan(&sequence); err != nil {
+	sequence, err := database.NextReleaseSequence(ctx, tx)
+	if err != nil {
 		return Published{}, err
 	}
 	now := time.Now().UTC()

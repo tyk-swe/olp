@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/audit"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -92,7 +93,7 @@ func PrepareInstallation(ctx context.Context, pool *pgxpool.Pool, installation s
 	if _, err = keys.VerifyAll(ctx, tx, installation); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE olp.installation SET auth_fingerprint=$1,active_key_version=$2 WHERE singleton", expected, keys.Active); err != nil {
+	if err = database.BindInstallationKeys(ctx, tx, expected, keys.Active); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {

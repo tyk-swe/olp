@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/textfield"
+	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -156,7 +157,7 @@ func (s *accountService) completeSetup(r *http.Request, tx pgx.Tx, input setupIn
 	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.users(id,email,display_name,password_hash,role,etag) VALUES($1,$2,$3,$4,'owner',$5)", id, input.email, input.displayName, hash, ids.New()); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,setup_complete=true WHERE singleton", input.installationName); err != nil {
+	if err := database.CompleteInstallationSetup(r.Context(), tx, input.installationName); err != nil {
 		return httpkit.Reply{}, err
 	}
 	for _, setting := range defaultInstallationSettings {

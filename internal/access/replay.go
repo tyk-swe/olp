@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
@@ -87,4 +88,14 @@ func (s *Server) completeReplay(r *http.Request, tx pgx.Tx, c replayClaim, resul
 	}
 	_, err = tx.Exec(r.Context(), "INSERT INTO olp.replays(actor,key,fingerprint,secret_id,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(actor,key) DO UPDATE SET fingerprint=excluded.fingerprint,secret_id=excluded.secret_id,expires_at=excluded.expires_at", c.Actor, c.Key, c.Fingerprint, id, expires)
 	return err
+}
+
+const purgeReplaysSQL = `WITH expired AS (
+      SELECT ctid FROM olp.replays WHERE expires_at <= $1 LIMIT $2 FOR UPDATE SKIP LOCKED
+    )
+    DELETE FROM olp.replays target USING expired WHERE target.ctid = expired.ctid`
+
+func PurgeExpiredReplays(ctx context.Context, tx pgx.Tx, before time.Time, limit int) (int64, error) {
+	tag, err := tx.Exec(ctx, purgeReplaysSQL, before, limit)
+	return tag.RowsAffected(), err
 }
