@@ -152,7 +152,7 @@ func TestTaskCallbacksStopAtTheContinuationLimitAndAccountOnlyForAdmittedCalls(t
 		idle:         taskCallbackIDs{token: "olpt_idle", dispatch: uuid.NewString(), task: uuid.NewString()},
 	}
 	f.seed(t, pool, auth)
-	manager := release.NewManager(release.ManagerConfig{Pool: pool, Installation: installation, Auth: auth, Log: slog.New(slog.DiscardHandler), Hostname: "task-callbacks"})
+	manager := release.NewManager(release.ManagerConfig{Pool: pool, Installation: installation, Auth: auth, Log: slog.New(slog.DiscardHandler), Hostname: "task-callbacks", CountTaskCallback: tasks.CountCallback})
 	if err := manager.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}

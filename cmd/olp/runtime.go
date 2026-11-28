@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/billing/imports"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/export/capture"
@@ -113,6 +114,7 @@ func newRuntimeCore(startup context.Context, c Config, pool, readPool *pgxpool.P
 		Auth: auth, Keys: keys, Log: log, Hostname: c.Hostname, Region: c.Region,
 		ExternalSecrets: secretstore.New(*policy, os.Getenv), Mounted: mounted,
 		PrepareGuardrailPlugin: core.pluginHost.PinGuardrail,
+		CountTaskCallback:      tasks.CountCallback,
 		SyncSharedQuotas: func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error {
 			return quota.SyncSharedQuotas(ctx, limiter, previous, next, skippedGroupIDs...)
 		},

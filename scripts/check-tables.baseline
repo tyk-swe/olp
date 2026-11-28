@@ -7,9 +7,6 @@ internal/identity installation 1
 internal/identity settings 2
 internal/mcp execution_debits 2
 internal/plugins provider_grants 1
-internal/release a2a_task_admissions 1
-internal/release a2a_task_callback_accounting 1
-internal/release a2a_tasks 1
 internal/release api_keys 1
 internal/release installation 1
 internal/release provider_grants 1

@@ -14,6 +14,8 @@ type taskCapabilityDatabase interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
+type TaskCallbackCounter func(context.Context, pgx.Tx, agentcontract.CallbackAttempt) (bool, error)
+
 type taskCapabilityRecord struct {
 	KeyID, ProjectID, PublicationID, RevisionID, WorkloadRevision, EndUser, Pair, DelegationRevision string
 	CallerExpires                                                                                    *time.Time
@@ -37,7 +39,7 @@ func lookupTaskCapability(ctx context.Context, db taskCapabilityDatabase, digest
 	return record, nil
 }
 
-func admitTaskCallback(ctx context.Context, db taskCapabilityDatabase, digest []byte, scope, accountingID string) error {
+func admitTaskCallback(ctx context.Context, db taskCapabilityDatabase, count TaskCallbackCounter, digest []byte, scope, accountingID string) error {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return ErrStaleAuthority
@@ -59,20 +61,12 @@ func admitTaskCallback(ctx context.Context, db taskCapabilityDatabase, digest []
 	if definition.Agent.MaxTaskContinuations != nil {
 		limit = *definition.Agent.MaxTaskContinuations
 	}
-	var count int
-	if task == "" {
-		err = tx.QueryRow(ctx, `UPDATE olp.a2a_task_admissions SET callback_attempts=callback_attempts+1 WHERE dispatch_id=$1 AND callback_attempts<$2 RETURNING callback_attempts`, dispatch, limit).Scan(&count)
-	} else {
-		err = tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1,callback_attempts=callback_attempts+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, task, limit).Scan(&count)
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrTaskAttemptLimit
-	}
+	counted, err := count(ctx, tx, agentcontract.CallbackAttempt{DispatchID: dispatch, TaskID: task, Kind: scope, AccountingID: accountingID, Limit: limit})
 	if err != nil {
 		return ErrStaleAuthority
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.a2a_task_callback_accounting(dispatch_id,kind,accounting_id) VALUES($1,$2,$3) ON CONFLICT(dispatch_id,kind,accounting_id) DO NOTHING`, dispatch, scope, accountingID); err != nil {
-		return ErrStaleAuthority
+	if !counted {
+		return ErrTaskAttemptLimit
 	}
 	if tx.Commit(ctx) != nil {
 		return ErrStaleAuthority

@@ -3,10 +3,12 @@ package tasks
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -140,6 +142,28 @@ func (l *Store) admitTask(ctx context.Context, res reservation, authority keyaut
 		return "", err
 	}
 	return token, nil
+}
+
+func CountCallback(ctx context.Context, tx pgx.Tx, attempt agentcontract.CallbackAttempt) (bool, error) {
+	var count int
+	err := countedRow(ctx, tx, attempt).Scan(&count)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_task_callback_accounting(dispatch_id,kind,accounting_id) VALUES($1,$2,$3) ON CONFLICT(dispatch_id,kind,accounting_id) DO NOTHING`, attempt.DispatchID, attempt.Kind, attempt.AccountingID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func countedRow(ctx context.Context, tx pgx.Tx, attempt agentcontract.CallbackAttempt) pgx.Row {
+	if attempt.TaskID == "" {
+		return tx.QueryRow(ctx, `UPDATE olp.a2a_task_admissions SET callback_attempts=callback_attempts+1 WHERE dispatch_id=$1 AND callback_attempts<$2 RETURNING callback_attempts`, attempt.DispatchID, attempt.Limit)
+	}
+	return tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1,callback_attempts=callback_attempts+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, attempt.TaskID, attempt.Limit)
 }
 
 func (l *Store) RecordState(ctx context.Context, taskID string, state State) error {

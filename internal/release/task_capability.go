@@ -127,5 +127,5 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 	if scope != "inference" && scope != "tools" {
 		return problem.Forbidden()
 	}
-	return admitTaskCallback(ctx, m.taskCapabilities(), digest, scope, accountingID)
+	return admitTaskCallback(ctx, m.taskCapabilities(), m.countTaskCallback, digest, scope, accountingID)
 }
