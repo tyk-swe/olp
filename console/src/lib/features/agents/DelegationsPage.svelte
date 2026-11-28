@@ -1,38 +1,38 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import EmptyState from '#lib/components/EmptyState.svelte';
+  import QueryView from '#lib/components/QueryView.svelte';
+  import { emptyCursorHistory, resetCursor } from '#lib/listing/pagination.js';
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import { formatDate } from '#lib/format.js';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { writable } from 'svelte/store';
   import { page } from '$app/state';
   import { errorMessage } from '#lib/management/http.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { listDelegations } from './api';
   import { agentKeys } from './agentKeys';
+  import ListPager from './ListPager.svelte';
+  import { loadingWhileFetching } from './listQuery';
 
   const initialProject = page.url?.searchParams.get('project_id') ?? '';
   const initialDelegationID = page.url?.searchParams.get('delegation_id') ?? '';
   let project = $state(initialProject);
   let delegationID = $state(initialDelegationID);
-  const filters = writable<{
-    project: string;
-    delegationID: string;
-    cursor?: string;
-  }>({
+  let applied = $state.raw({
     project: initialProject,
     delegationID: initialDelegationID
   });
+  const pagination = $state(emptyCursorHistory());
   const projects = createQuery(projectQueries.memberships);
   const delegations = createQuery(() => ({
     queryKey: agentKeys.delegations(
-      $filters.project,
-      $filters.cursor,
-      $filters.delegationID
+      applied.project,
+      pagination.cursor,
+      applied.delegationID
     ),
     queryFn: () =>
-      listDelegations($filters.project, $filters.cursor, $filters.delegationID),
+      listDelegations(applied.project, pagination.cursor, applied.delegationID),
     staleTime: 0,
     gcTime: 0,
     retry: false
@@ -44,7 +44,8 @@
   class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
-    filters.set({ project, delegationID: delegationID.trim() });
+    applied = { project, delegationID: delegationID.trim() };
+    resetCursor(pagination);
   }}
 >
   <label class="form-field">
@@ -66,23 +67,12 @@
 {#if projects.error}<Callout tone="danger">
     {errorMessage(projects.error)}
   </Callout>{/if}
-{#if delegations.error}<Callout tone="danger">
-    {errorMessage(delegations.error)}
-    {#snippet actions()}<button
-        class="button button-secondary"
-        type="button"
-        onclick={() => delegations.refetch()}
-      >
-        Retry
-      </button>{/snippet}
-  </Callout>
-{:else if delegations.isFetching}<div class="loading-state" role="status">
-    Loading delegations…
-  </div>
-{:else if !delegations.data?.items.length}<EmptyState
-    title="No delegations in this view"
-  />
-{:else}
+<QueryView
+  query={loadingWhileFetching(delegations)}
+  loading="Loading delegations…"
+  emptyWhen={!delegations.data?.items.length}
+>
+  {#snippet empty()}<EmptyState title="No delegations in this view" />{/snippet}
   <ScrollTable label="Delegations">
     <table class="data-table">
       <thead>
@@ -99,7 +89,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each delegations.data.items as delegation (delegation.id)}
+        {#each delegations.data?.items ?? [] as delegation (delegation.id)}
           <tr>
             <td><code>{delegation.id}</code></td>
             <td>
@@ -143,37 +133,5 @@
       </tbody>
     </table>
   </ScrollTable>
-{/if}
-<nav class="page-actions list-pager" aria-label="Delegation pages">
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!$filters.cursor || delegations.isFetching}
-    onclick={() =>
-      filters.update((current) => ({ ...current, cursor: undefined }))}
-  >
-    Newest
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={!!delegations.error ||
-      !delegations.data?.nextCursor ||
-      delegations.isFetching}
-    onclick={() =>
-      filters.update((current) => ({
-        ...current,
-        cursor: delegations.data?.nextCursor ?? undefined
-      }))}
-  >
-    Older
-  </button>
-  <button
-    class="button button-secondary"
-    type="button"
-    disabled={delegations.isFetching}
-    onclick={() => delegations.refetch()}
-  >
-    Refresh
-  </button>
-</nav>
+</QueryView>
+<ListPager {pagination} query={delegations} label="Delegation pages" />
