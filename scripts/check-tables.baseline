@@ -12,13 +12,5 @@ internal/release provider_grants 1
 internal/routes api_keys 1
 internal/settings installation 1
 internal/usage execution_debit_versions 1
-internal/usage grant_enrollments 1
-internal/usage invitations 1
-internal/usage mfa_challenges 1
-internal/usage oidc_flows 1
-internal/usage recent_auth 1
 internal/usage replays 1
-internal/usage saml_assertion_replays 1
-internal/usage saml_flows 1
-internal/usage sessions 1
 internal/usage trace_spans 1

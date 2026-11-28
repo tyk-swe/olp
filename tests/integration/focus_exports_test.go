@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/export/destination"
 	"github.com/tyk-swe/olp/internal/export/focus"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 	"github.com/tyk-swe/olp/internal/platform/workerhealth"
@@ -118,7 +119,7 @@ func TestFocusRetainedHistoryCompleteness(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) VALUES('retention.usage_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fixture.ownerID); err != nil {
 		t.Fatal(err)
 	}
-	report, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour))
+	report, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour), grants.PurgeExpiredEnrollments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestFocusRetainedHistoryCompleteness(t *testing.T) {
 		if result, err := ingest.PersistEvent(t.Context(), pool, accepted); err != nil || result.Outcome != ingest.PersistOutcomePersisted {
 			t.Fatalf("late fixture failed: %+v %v", result, err)
 		}
-		if _, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour)); err != nil {
+		if _, err := retention.RunMaintenance(t.Context(), pool, today.Add(12*time.Hour), grants.PurgeExpiredEnrollments); err != nil {
 			t.Fatal(err)
 		}
 	}
