@@ -3,7 +3,8 @@ import {
   type ConfigurationPatch
 } from './configurationDraft.svelte';
 import type { NativeValue } from '#lib/nativeJson.js';
-import type { Provider, ProviderAuthMode, ProviderKind } from './providers';
+import type { ProviderAuthMode } from './providers';
+import type { Provider, ProviderKind } from '#lib/domain/providers/api.js';
 import type { ProviderDraft, ProviderEditValues } from './providerEditor';
 
 function setProfileId(document: ConfigurationDraft, input: string): void {

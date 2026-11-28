@@ -27,8 +27,8 @@
     scopeBody,
     validateForm
   } from './billingImportForm.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
-  import type { Provider } from '#lib/features/providers/providers.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
 
   let { provider, canManage }: { provider: Provider; canManage: boolean } =
     $props();

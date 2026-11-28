@@ -1,6 +1,6 @@
 <script lang="ts">
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
 
   import { resolve } from '$app/paths';
@@ -14,7 +14,7 @@
     type CapabilityDeclaration,
     type ProviderModel
   } from '#lib/features/providers/models.js';
-  import type { Provider } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
   import { cursorPaginationProps } from '#lib/listing/pagination.js';

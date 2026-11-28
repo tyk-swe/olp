@@ -4,7 +4,6 @@
   import EmptyState from '#lib/components/EmptyState.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
   import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
   import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
@@ -13,7 +12,8 @@
     type PreviewEntry,
     type PreviewSelection
   } from './api';
-  import { guardrailKeys } from './guardrailKeys';
+  import { guardrailKeys } from '#lib/domain/guardrails/guardrailKeys.js';
+  import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
 
   const generation = [
     ['openai-chat', 'OpenAI Chat Completions'],
@@ -55,9 +55,8 @@
     notifyOnChangeProps: 'all'
   }));
   const keys = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    notifyOnChangeProps: 'all',
-    queryFn: ({ signal }) => listApiKeys(signal)
+    ...apiKeyQueries.all(),
+    notifyOnChangeProps: 'all'
   }));
   const dialects = createQuery(() => ({
     ...routeQueries.dialects(),

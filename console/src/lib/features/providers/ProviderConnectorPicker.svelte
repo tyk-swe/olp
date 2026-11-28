@@ -1,14 +1,13 @@
 <script lang="ts">
-  import { providerKeys } from './providerKeys.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listProviderVendors } from './providers.js';
   import {
     emptyProviderOptions,
     selectProviderPreset,
     setProviderDraftKind,
     type ProviderDraft
   } from './providerEditor.js';
-  import type { ProviderKindCapability } from './models.js';
+  import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let {
     draft,
@@ -20,10 +19,7 @@
     lockKind: boolean;
   } = $props();
 
-  const vendors = createQuery(() => ({
-    queryKey: providerKeys.vendors(),
-    queryFn: ({ signal }) => listProviderVendors(signal)
-  }));
+  const vendors = createQuery(providerQueries.vendors);
   // The last name this form suggested. A name the operator typed is never
   // replaced; only an untouched suggestion follows a later vendor choice.
   let suggestedName = $state('');

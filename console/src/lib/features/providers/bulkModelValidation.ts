@@ -5,7 +5,8 @@ import {
   type ProviderCapabilityOptions
 } from './models.js';
 import { certificationPrerequisiteReady } from './providerEditor.js';
-import { getProvider, probeProvider, type Provider } from './providers.js';
+import { probeProvider } from './providers.js';
+import { getProvider, type Provider } from '#lib/domain/providers/api.js';
 
 export type BulkModelTarget = {
   id: string;

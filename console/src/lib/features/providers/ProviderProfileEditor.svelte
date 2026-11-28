@@ -8,14 +8,14 @@
     getConfigurationSchemas,
     listProviderProfiles
   } from './providerProfiles';
-  import { providerKeys } from './providerKeys';
-  import { listProviderVendors } from './providers';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import { vendorSpeaks } from './profiles';
   import NativeValueField from './NativeValueField.svelte';
   import NativeMapEditor from './NativeMapEditor.svelte';
   import OperationDefaultsEditor from './OperationDefaultsEditor.svelte';
   import ServingBindingsEditor from './ServingBindingsEditor.svelte';
   import NetworkCredentialsEditor from './NetworkCredentialsEditor.svelte';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
   let {
     values,
     idPrefix,
@@ -42,10 +42,7 @@
   const kind = $derived(draft?.text(['kind']));
   // A plugin provider's profile is pinned by its plugin profile field.
   const plugin = $derived(kind === 'plugin');
-  const vendors = createQuery(() => ({
-    queryKey: providerKeys.vendors(),
-    queryFn: ({ signal }) => listProviderVendors(signal)
-  }));
+  const vendors = createQuery(providerQueries.vendors);
   // Profiles in a generation dialect the vendor's contract does not document
   // are refused for it, so they are not offered.
   const vendorDialects = $derived(

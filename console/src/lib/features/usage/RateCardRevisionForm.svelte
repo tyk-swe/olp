@@ -2,8 +2,10 @@
   import PriceFields from './PriceFields.svelte';
   import { operationKinds } from './history/api';
   import { emptyPriceRow, type PriceEntryRow } from './priceEntry.js';
-  import type { ProviderKindCapability } from '#lib/features/providers/index.js';
-  import type { ProviderVendor } from '#lib/features/providers/index.js';
+  import type {
+    ProviderKindCapability,
+    ProviderVendor
+  } from '#lib/domain/providers/api.js';
 
   let {
     cardId,

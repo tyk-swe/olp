@@ -2,17 +2,14 @@ import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
 import {
   unwrap,
-  unwrapPage,
   createHeaders,
   ifMatch,
   mutationHeaders
 } from '#lib/management/http.js';
-import { type CursorPage } from '#lib/management/http.js';
-import { collectCursorPages } from '#lib/management/pagination.js';
+import type { ApiKey } from '#lib/domain/api-keys/api.js';
 
 type Schemas = components['schemas'];
 
-export type ApiKey = Schemas['ApiKeyDetailResponse'];
 export type CreateApiKeyInput = Schemas['CreateApiKeyRequest'];
 export type UpdateApiKeyInput = Schemas['UpdateApiKeyRequest'];
 export type ApiKeyMutation = Schemas['ApiKeyMutationResponse'];
@@ -20,34 +17,6 @@ export type ApiKeySecret =
   Schemas['CreateApiKeyResponse'] | Schemas['RotateApiKeyResponse'];
 export type ApiKeyPause = Schemas['ApiKeyPauseResponse'];
 export type ApiKeyPauseRollout = Schemas['ApiKeyPauseRolloutResponse'];
-
-/** Every key, for pickers that must offer the whole inventory at once. */
-export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
-  return collectCursorPages((cursor) => listApiKeyPage(cursor, signal));
-}
-
-export async function listApiKeyPage(
-  cursor?: string,
-  signal?: AbortSignal,
-  createdBy?: string
-): Promise<CursorPage<ApiKey>> {
-  const response = await apiClient.GET('/api/v1/api-keys', {
-    params: { query: { limit: 50, cursor, created_by: createdBy } },
-    signal
-  });
-  return unwrapPage(response);
-}
-
-export async function getApiKey(
-  apiKeyId: string,
-  signal?: AbortSignal
-): Promise<ApiKey> {
-  const response = await apiClient.GET('/api/v1/api-keys/{api_key_id}', {
-    params: { path: { api_key_id: apiKeyId } },
-    signal
-  });
-  return unwrap(response);
-}
 
 export async function createApiKey(
   input: CreateApiKeyInput,

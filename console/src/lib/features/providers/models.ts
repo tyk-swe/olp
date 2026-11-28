@@ -10,10 +10,7 @@ import {
 } from '#lib/management/http.js';
 import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
-import type {
-  Provider,
-  ProviderKind
-} from '#lib/features/providers/providers.js';
+import type { Provider, ProviderKind } from '#lib/domain/providers/api.js';
 
 type Schemas = components['schemas'];
 
@@ -29,8 +26,6 @@ export type CapabilityDeclaration = Schemas['CapabilityInput'];
 
 export type ProviderCapabilityOptions =
   Schemas['ProviderCapabilityOptionsResponse'];
-
-export type ProviderKindCapability = Schemas['ProviderKindCapabilityResponse'];
 
 export type ProviderPreset = Schemas['ProviderPresetResponse'];
 
@@ -57,13 +52,6 @@ export async function getProviderCapabilityOptions(
     }
   );
   return unwrap(response);
-}
-
-export async function listProviderKinds(
-  signal?: AbortSignal
-): Promise<ProviderKindCapability[]> {
-  const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
-  return unwrap(response).items;
 }
 
 export async function listProviderModelPage(

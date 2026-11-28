@@ -1,36 +1,17 @@
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
 import {
-  type CursorPage,
   ensureOk,
   unwrap,
-  unwrapPage,
   ifMatch,
   mutationHeaders
 } from '#lib/management/http.js';
-import { PROVIDER_CREDENTIAL_PAGE_SIZE } from '#lib/management/pageSizes.js';
-import { collectCursorPages } from '#lib/management/pagination.js';
-import type { Provider } from '#lib/features/providers/providers.js';
+import type { Provider } from '#lib/domain/providers/api.js';
 
 type Schemas = components['schemas'];
 
-export type ProviderCredential = Schemas['CredentialResponse'];
 export type ExternalCredentialReference =
   Schemas['ExternalCredentialReference'];
-export type CredentialSlot = Schemas['CredentialSlot'];
-export type CredentialSlotPool = Schemas['SlotList'];
-
-export async function listCredentialSlots(
-  providerId: string,
-  signal?: AbortSignal
-): Promise<CredentialSlotPool> {
-  return unwrap(
-    await apiClient.GET('/api/v1/providers/{provider_id}/credential-slots', {
-      params: { path: { provider_id: providerId } },
-      signal
-    })
-  );
-}
 
 export async function putCredentialSlot(
   providerId: string,
@@ -68,33 +49,6 @@ export async function validateCredentialSlot(
       }
     )
   );
-}
-
-export async function listProviderCredentials(
-  id: string,
-  signal?: AbortSignal
-): Promise<ProviderCredential[]> {
-  return collectCursorPages((cursor) =>
-    listProviderCredentialPage(id, cursor, signal)
-  );
-}
-
-async function listProviderCredentialPage(
-  id: string,
-  cursor?: string,
-  signal?: AbortSignal
-): Promise<CursorPage<ProviderCredential>> {
-  const response = await apiClient.GET(
-    '/api/v1/providers/{provider_id}/credentials',
-    {
-      params: {
-        path: { provider_id: id },
-        query: { cursor, limit: PROVIDER_CREDENTIAL_PAGE_SIZE }
-      },
-      signal
-    }
-  );
-  return unwrapPage(response);
 }
 
 export async function rotateProviderCredential(

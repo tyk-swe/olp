@@ -1,4 +1,4 @@
-import type { CredentialSlot } from '#lib/features/providers/index.js';
+import type { CredentialSlot } from '#lib/domain/providers/api.js';
 export type PaidTargetOption = {
   id: string;
   name: string;

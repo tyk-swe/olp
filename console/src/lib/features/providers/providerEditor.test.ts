@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderKindCapability, ProviderPreset } from './models';
+import type { ProviderPreset } from './models';
+import type { ProviderKindCapability } from '#lib/domain/providers/api.js';
 import {
   activationReady,
   capabilitiesCertified,

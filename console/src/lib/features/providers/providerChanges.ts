@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/svelte-query';
 import { overviewKeys } from '#lib/features/overview/index.js';
 import { errorMessage } from '#lib/management/http.js';
-import { providerKeys } from './providerKeys';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
 export type ProviderChange =
   { kind: 'connection' | 'details' } | { kind: 'activation'; id: string };

@@ -5,72 +5,21 @@ import {
   ApiProblem,
   ensureOk,
   unwrap,
-  unwrapPage,
   createHeaders,
   ifMatch,
   mutationHeaders
 } from '#lib/management/http.js';
-import { PROVIDER_PAGE_SIZE } from '#lib/management/pageSizes.js';
-import { collectCursorPages } from '#lib/management/pagination.js';
-import { type CursorPage } from '#lib/management/http.js';
+import type { Provider } from '#lib/domain/providers/api.js';
 
 type Schemas = components['schemas'];
 
-export type ProviderKind = Schemas['ProviderKind'];
 export type ProviderAuthMode = Schemas['ProviderAuthMode'];
-export type Provider = Schemas['ProviderDetailResponse'];
-export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 
 export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
 
 export type ProviderProbeReceipt = { result: ProviderProbe; etag: string };
-
-export type ProviderVendor = Schemas['Vendor'];
-
-export async function listProviderVendors(
-  signal?: AbortSignal
-): Promise<ProviderVendor[]> {
-  const response = await apiClient.GET('/api/v1/provider-vendors', { signal });
-  return unwrap(response);
-}
-
-export async function listProviders(
-  signal?: AbortSignal
-): Promise<ProviderSummary[]> {
-  return collectCursorPages((cursor) => listProviderPage(cursor, signal));
-}
-
-export async function listProviderPage(
-  cursor?: string,
-  signal?: AbortSignal,
-  search?: string
-): Promise<CursorPage<ProviderSummary>> {
-  const response = await apiClient.GET('/api/v1/providers', {
-    params: {
-      query: { limit: PROVIDER_PAGE_SIZE, cursor, search: search || undefined }
-    },
-    signal
-  });
-  return unwrapPage(response);
-}
-
-export async function getProvider(
-  id: string,
-  signal?: AbortSignal
-): Promise<Provider> {
-  return requestNative(
-    apiClient,
-    'get',
-    '/api/v1/providers/{provider_id}',
-    {
-      params: { path: { provider_id: id } },
-      signal
-    },
-    [['configuration']]
-  );
-}
 
 export async function createProvider(
   input: CreateProviderInput,

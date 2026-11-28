@@ -1,4 +1,4 @@
-import type { ApiKey } from './api';
+import type { ApiKey } from '#lib/domain/api-keys/api.js';
 
 export function isApiKeyExpired(
   key: Pick<ApiKey, 'expires_at'>,

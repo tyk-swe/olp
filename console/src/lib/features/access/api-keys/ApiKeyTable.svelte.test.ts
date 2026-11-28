@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import ApiKeyTable from './ApiKeyTable.svelte';
-import type { ApiKey } from './api';
+import type { ApiKey } from '#lib/domain/api-keys/api.js';
 
 const active: ApiKey = {
   id: 'active-id',

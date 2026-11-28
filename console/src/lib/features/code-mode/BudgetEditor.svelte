@@ -1,7 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
     saveCodeBudget,
@@ -16,6 +15,7 @@
     type ResourceEditorProps
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
+  import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
 
   let {
     current,
@@ -35,8 +35,7 @@
   let enabled = $state(initial?.enabled ?? true);
 
   const keys = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    queryFn: ({ signal }) => listApiKeys(signal),
+    ...apiKeyQueries.all(),
     enabled: access.can('api_keys.read')
   }));
   const projectKeysList = $derived(

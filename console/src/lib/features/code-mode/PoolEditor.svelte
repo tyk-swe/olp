@@ -2,7 +2,6 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { listApiKeys, apiKeyKeys } from '#lib/features/access/index.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
@@ -18,6 +17,7 @@
     type ResourceEditorProps
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
+  import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
 
   let {
     current,
@@ -42,8 +42,7 @@
   let keyIds = $state([...(initial?.api_key_ids ?? [])]);
 
   const keys = createQuery(() => ({
-    queryKey: apiKeyKeys.list(),
-    queryFn: ({ signal }) => listApiKeys(signal),
+    ...apiKeyQueries.all(),
     enabled: access.can('api_keys.read')
   }));
   const members = createQuery(() => ({

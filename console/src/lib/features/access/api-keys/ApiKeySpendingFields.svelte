@@ -1,11 +1,9 @@
 <script lang="ts">
-  import type { ApiKey } from './api.js';
+  import type { ApiKey } from '#lib/domain/api-keys/api.js';
   import type { ApiKeyFormState } from './apiKeyPolicy.js';
   import type { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import {
-    currentBudgetLimit,
-    type listBudgetGroups
-  } from '#lib/features/budgets/index.js';
+  import { currentBudgetLimit } from '#lib/features/budgets/index.js';
+  import { type listBudgetGroups } from '#lib/domain/budget-groups/api.js';
   import { budgetStateNote, budgetWindowState } from './budgetPresentation.js';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
 

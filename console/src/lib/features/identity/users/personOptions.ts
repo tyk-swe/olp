@@ -1,8 +1,8 @@
 import { createQuery } from '@tanstack/svelte-query';
 import type { EntityOption } from '#lib/components/entityOptions.js';
 import { useRole } from '#lib/session/useRole.svelte.js';
-import { listUsers, type User } from './api.js';
-import { userKeys } from './userKeys.js';
+import { type User } from '#lib/domain/users/api.js';
+import { userQueries } from '#lib/domain/users/queries.js';
 
 const person = (user: User): EntityOption => ({
   value: user.id,
@@ -13,8 +13,7 @@ const person = (user: User): EntityOption => ({
 export function personOptions() {
   const { allows } = useRole();
   return createQuery(() => ({
-    queryKey: userKeys.roster,
-    queryFn: ({ signal }) => listUsers(signal),
+    ...userQueries.all(),
     enabled: allows('GET /api/v1/users'),
     select: (users: User[]) => users.map(person)
   }));

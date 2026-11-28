@@ -8,8 +8,8 @@ import {
   unwrapPage
 } from '#lib/management/http.js';
 import { collectCursorPages } from '#lib/management/pagination.js';
+import type { Definition } from '#lib/domain/guardrails/api.js';
 
-export type Definition = components['schemas']['GuardrailResponse'];
 export type Policy = components['schemas']['GuardrailPolicy'];
 export type Entry = components['schemas']['GuardrailPolicyEntry'];
 export type Result = components['schemas']['GuardrailApplyResult'];
@@ -25,15 +25,6 @@ export const getGuardrailPreview = async (
       params: { query },
       signal
     })
-  );
-export const listDefinitions = (signal?: AbortSignal): Promise<Definition[]> =>
-  collectCursorPages(async (cursor) =>
-    unwrapPage(
-      await apiClient.GET('/api/v1/guardrails', {
-        params: { query: { cursor } },
-        signal
-      })
-    )
   );
 export const listPolicies = async () => ({
   items: await collectCursorPages(async (cursor) =>

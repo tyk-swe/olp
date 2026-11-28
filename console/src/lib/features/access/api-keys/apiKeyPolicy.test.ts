@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { ApiKey } from './api';
+import type { ApiKey } from '#lib/domain/api-keys/api.js';
 import {
   buildApiKeyPolicyInput,
   compileApiKeyPolicy,

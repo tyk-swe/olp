@@ -13,10 +13,6 @@
   } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import {
-    guardrailKeys,
-    listDefinitions
-  } from '#lib/features/guardrails/index.js';
-  import {
     createCapturePolicy,
     deleteCapturePolicy,
     getCaptureConfiguration,
@@ -26,6 +22,7 @@
     updateCapturePolicy,
     type CapturePolicy
   } from './api';
+  import { guardrailQueries } from '#lib/domain/guardrails/queries.js';
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
@@ -58,8 +55,7 @@
   }));
 
   const redactorOptions = createQuery(() => ({
-    queryKey: guardrailKeys.definitions(),
-    queryFn: ({ signal }) => listDefinitions(signal),
+    ...guardrailQueries.definitions(),
     enabled: canManageProjects || canManageInstallation
   }));
   const eligibleRedactors = $derived(

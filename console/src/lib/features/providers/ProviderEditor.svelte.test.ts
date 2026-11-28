@@ -6,10 +6,12 @@ import { findButton, mountState, mountWithState } from '#test/mount.js';
 import type { BillingImport } from './billing';
 import BillingImportSection from './BillingImportSection.svelte';
 import { networkCredentialPath } from './configurationDraft.svelte';
-import type { ProviderKindCapability } from './models';
+import type {
+  ProviderKindCapability,
+  Provider
+} from '#lib/domain/providers/api.js';
 import { ProviderEditor } from './providerEditor.svelte';
-import { providerKeys } from './providerKeys';
-import type { Provider } from './providers';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
 const provider: Provider = {
   id: 'provider',

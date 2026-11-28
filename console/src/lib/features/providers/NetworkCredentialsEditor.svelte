@@ -2,7 +2,7 @@
   import { confirmAction } from '#lib/components/confirm.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import { providerKeys } from './providerKeys';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import {
     networkCredentialPath,
     type ConfigurationDraft

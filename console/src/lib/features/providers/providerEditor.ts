@@ -5,18 +5,19 @@ import {
 import { ProviderCreateDraft, ProviderEditDraft } from './providerDraft.svelte';
 import { parseExternalReference } from './externalReference';
 import { nativeObject } from '#lib/nativeJson.js';
-import type { Provider, ProviderVendor } from './providers';
+import type {
+  Provider,
+  ProviderVendor,
+  ProviderKind,
+  ProviderKindCapability
+} from '#lib/domain/providers/api.js';
 import type {
   CreateProviderInput,
   ProviderAuthMode,
-  ProviderKind,
   ProviderProbe,
   UpdateProviderInput
 } from '#lib/features/providers/providers.js';
-import type {
-  ProviderKindCapability,
-  ProviderPreset
-} from '#lib/features/providers/models.js';
+import type { ProviderPreset } from '#lib/features/providers/models.js';
 import { declaresModels, pluginOptionFields } from './profiles';
 import type { ProviderProfile } from './providerProfiles';
 import { stateLabel } from '#lib/format.js';

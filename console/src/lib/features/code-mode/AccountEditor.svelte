@@ -2,12 +2,8 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import {
-    getProvider,
-    listProviders,
-    listProviderCredentials,
-    providerKeys
-  } from '#lib/features/providers/index.js';
+  import { getProvider } from '#lib/domain/providers/api.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import {
     saveCodeAccount,
     type CodeAccount,
@@ -28,6 +24,7 @@
     type ResourceEditorProps
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let {
     current,
@@ -52,13 +49,9 @@
   );
   let enrolling = $state(false);
 
-  const providers = createQuery(() => ({
-    queryKey: providerKeys.all(),
-    queryFn: ({ signal }) => listProviders(signal)
-  }));
+  const providers = createQuery(providerQueries.all);
   const credentials = createQuery(() => ({
-    queryKey: providerKeys.credentials(providerId),
-    queryFn: ({ signal }) => listProviderCredentials(providerId, signal),
+    ...providerQueries.credentials(providerId),
     enabled: !!providerId
   }));
   const provider = createQuery(() => ({

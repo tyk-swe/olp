@@ -1,6 +1,6 @@
 <script lang="ts">
   import { confirmAction } from '#lib/components/confirm.js';
-  import type { Provider } from './providers';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import type { ProviderEditor } from './providerEditor.svelte';
   import {
     activationReady,

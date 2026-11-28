@@ -25,8 +25,8 @@ import {
   isEtagMismatch,
   type FieldIssue
 } from '#lib/management/http.js';
-import { listProviderKinds, listProviderModelPage } from './models';
-import { providerKeys } from './providerKeys';
+import { listProviderModelPage } from './models';
+import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 import {
   refreshProviderChange,
   refreshProviderReceipt,
@@ -37,6 +37,7 @@ import {
   createProviderEditorActions,
   providerEditorIntentNames
 } from './providerEditorActions';
+import { providerQueries } from '#lib/domain/providers/queries.js';
 
 function emptyEditValues(): ProviderEditValues {
   return {
@@ -56,10 +57,7 @@ export class ProviderEditor {
   readonly canManage = $derived(this.access.can('providers.manage'));
   readonly modelPageState = $state(emptyCursorHistory());
   readonly snapshot;
-  readonly providerKinds = createQuery(() => ({
-    queryKey: providerKeys.kinds(),
-    queryFn: ({ signal }) => listProviderKinds(signal)
-  }));
+  readonly providerKinds = createQuery(providerQueries.kinds);
   readonly providerSpec = $derived(
     this.providerKinds.data?.find(
       (candidate) => candidate.kind === this.current?.configuration.kind

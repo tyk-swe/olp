@@ -2,7 +2,7 @@ import { requestNative } from '#lib/management/transport.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
 import { unwrap, mutationHeaders } from '#lib/management/http.js';
-import type { Provider } from '#lib/features/providers/providers.js';
+import type { Provider } from '#lib/domain/providers/api.js';
 
 type Schemas = components['schemas'];
 

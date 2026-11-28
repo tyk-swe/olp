@@ -1,13 +1,11 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import type {
-    Provider,
-    ProviderProbe
-  } from '#lib/features/providers/providers.js';
+  import type { ProviderProbe } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
   import { probeSummary } from '#lib/features/providers/providerEditor.js';
-  import { providerKeys } from '#lib/features/providers/providerKeys.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   let {
     provider,

@@ -4,16 +4,13 @@
   import CalculatorUsageFields from './CalculatorUsageFields.svelte';
   import { errorMessage } from '#lib/management/http.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
-  import {
-    listProviders,
-    providerKeys
-  } from '#lib/features/providers/index.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
   import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
   import { routeQueries } from '#lib/domain/routes/queries.js';
   import { simulateRouting, decisionRows } from '#lib/features/routes/index.js';
   import type { ExplanationRow } from '#lib/features/routes/index.js';
   import { quoteUsage, type PricingQuote } from '#lib/features/usage/quote.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   const services = useServiceCapabilities();
 
@@ -59,9 +56,8 @@
     select: selectActiveRoutes
   }));
   const providers = createQuery(() => ({
-    queryKey: providerKeys.all(),
-    enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listProviders(signal)
+    ...providerQueries.all(),
+    enabled: services.gatewayAvailable
   }));
   const projects = createQuery(() => ({
     ...projectQueries.all(),

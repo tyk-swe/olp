@@ -3,8 +3,11 @@ import { flushSync } from 'svelte';
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import { mountState } from '#test/mount.js';
-import type { ProviderKindCapability } from './models';
-import type { Provider, ProviderProbe } from './providers';
+import type {
+  ProviderKindCapability,
+  Provider
+} from '#lib/domain/providers/api.js';
+import type { ProviderProbe } from './providers';
 import { ProviderWizardState } from './providerWizard.svelte';
 
 const spec: ProviderKindCapability = {

@@ -6,14 +6,12 @@
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { getReconciliation } from '#lib/features/usage/reconciliation.js';
   import { usageKeys } from '#lib/features/usage/usageKeys.js';
-  import {
-    listProviders,
-    providerKeys
-  } from '#lib/features/providers/index.js';
   import type {
     ReconciliationItem,
     ReconciliationTotals
   } from '#lib/features/usage/reconciliation.js';
+  import { listProviders } from '#lib/domain/providers/api.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   let { start, end }: { start: string; end: string } = $props();
 

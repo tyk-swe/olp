@@ -5,7 +5,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import EmptyState from '#lib/components/EmptyState.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
-  import { userKeys } from '#lib/features/identity/users/userKeys.js';
+  import { userKeys } from '#lib/domain/users/userKeys.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import { logout } from '#lib/session/api.js';
@@ -13,7 +13,6 @@
     listSessionPage,
     revokeSession
   } from '#lib/features/identity/sessions/api.js';
-  import { listUsers } from '#lib/features/identity/users/api.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import {
@@ -23,6 +22,7 @@
   } from '#lib/listing/pagination.js';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import { formatDate } from '#lib/format.js';
+  import { userQueries } from '#lib/domain/users/queries.js';
 
   const access = useRole();
   const canManage = $derived(access.can('sessions.manage'));
@@ -32,8 +32,7 @@
   const exit = useAction(undefined, 'authentication');
 
   const users = createQuery(() => ({
-    queryKey: userKeys.roster,
-    queryFn: ({ signal }) => listUsers(signal),
+    ...userQueries.all(),
     // Only the member filter needs the roster, and only managers see it.
     enabled: canManage
   }));

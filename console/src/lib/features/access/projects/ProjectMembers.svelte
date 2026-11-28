@@ -4,7 +4,6 @@
   import Callout from '#lib/components/Callout.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
-  import { listUsers, userKeys } from '#lib/features/identity/index.js';
   import {
     cursorPaginationProps,
     emptyCursorHistory
@@ -24,6 +23,7 @@
   } from '#lib/domain/projects/api.js';
   import { projectKeys } from '#lib/domain/projects/projectKeys.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
+  import { userQueries } from '#lib/domain/users/queries.js';
 
   let { project }: { project: Project } = $props();
 
@@ -35,10 +35,7 @@
       listProjectMemberPage(project.id, pagination.cursor, signal)
   }));
   const allMembers = createQuery(() => projectQueries.allMembers(project.id));
-  const users = createQuery(() => ({
-    queryKey: userKeys.roster,
-    queryFn: ({ signal }) => listUsers(signal)
-  }));
+  const users = createQuery(userQueries.all);
   const memberIds = $derived(
     new Set((allMembers.data ?? []).map((member) => member.user_id))
   );

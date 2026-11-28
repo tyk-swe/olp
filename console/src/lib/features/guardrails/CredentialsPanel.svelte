@@ -12,7 +12,7 @@
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import { listCredentials, createCredential, deleteCredential } from './api';
-  import { guardrailKeys } from './guardrailKeys';
+  import { guardrailKeys } from '#lib/domain/guardrails/guardrailKeys.js';
   let {
     projects,
     projectID = '',

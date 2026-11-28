@@ -10,7 +10,7 @@
     isApiKeyExpired,
     isApiKeyUsable
   } from '#lib/features/access/api-keys/apiKeyLifecycle.js';
-  import type { ApiKey } from '#lib/features/access/api-keys/api.js';
+  import type { ApiKey } from '#lib/domain/api-keys/api.js';
 
   let {
     items,

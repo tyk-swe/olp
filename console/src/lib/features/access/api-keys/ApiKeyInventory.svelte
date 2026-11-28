@@ -14,7 +14,7 @@
   import ApiKeyTable from './ApiKeyTable.svelte';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { apiKeyKeys } from '#lib/features/access/api-keys/apiKeyKeys.js';
+  import { apiKeyKeys } from '#lib/domain/api-keys/apiKeyKeys.js';
   import { overviewKeys } from '#lib/features/overview/index.js';
 
   import { goto } from '$app/navigation';
@@ -29,14 +29,13 @@
 
   import {
     getApiKeyPauseRollout,
-    listApiKeyPage,
     pauseApiKey,
     resumeApiKey,
     revokeApiKey,
     rotateApiKey,
-    type ApiKey,
     type ApiKeySecret
   } from '#lib/features/access/api-keys/api.js';
+  import { listApiKeyPage, type ApiKey } from '#lib/domain/api-keys/api.js';
   import SecretDialog from '#lib/components/SecretDialog.svelte';
   import CursorPagination from '#lib/components/CursorPagination.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';

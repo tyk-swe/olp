@@ -8,7 +8,7 @@
   import { listSAMLIdentities } from '../saml/api';
   import { oidcFailureMessage } from '#lib/features/identity/login/oidcFailure.js';
   import { profileKeys } from '#lib/features/identity/profile/profileKeys.js';
-  import { userKeys } from '#lib/features/identity/users/userKeys.js';
+  import { userKeys } from '#lib/domain/users/userKeys.js';
   import { authLifecycle } from '#lib/session/lifecycle.js';
 
   import { onMount } from 'svelte';

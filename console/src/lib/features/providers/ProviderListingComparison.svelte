@@ -2,7 +2,7 @@
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { formatDate } from '#lib/format.js';
   import type { ProviderListingComparison } from '#lib/features/providers/models.js';
-  import type { Provider } from '#lib/features/providers/providers.js';
+  import type { Provider } from '#lib/domain/providers/api.js';
   import type { ProviderEditor } from './providerEditor.svelte';
 
   let { current, editor }: { current: Provider; editor: ProviderEditor } =

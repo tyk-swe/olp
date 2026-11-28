@@ -2,16 +2,14 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import ScrollTable from '#lib/components/ScrollTable.svelte';
-  import {
-    listProviders,
-    providerKeys
-  } from '#lib/features/providers/index.js';
   import { formatInteger } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import type { components } from '#lib/management/schema.js';
   import { unpricedBreakdown, type UsageFilters } from './usage.js';
   import { usageKeys } from './usageKeys.js';
+  import { listProviders } from '#lib/domain/providers/api.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
 
   let { filters }: { filters: UsageFilters } = $props();
   const access = useRole();

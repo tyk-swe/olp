@@ -5,15 +5,15 @@
   import { onDestroy } from 'svelte';
   import {
     importSubscriptionCredentials,
-    getProvider,
-    listProviderKinds,
-    providerKeys,
     requiresGrant,
     GrantEnrollmentState,
     GrantEnrollmentPanel
   } from '#lib/features/providers/index.js';
+  import { getProvider } from '#lib/domain/providers/api.js';
+  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '#lib/session/useRole.svelte.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let {
     providerId,
@@ -32,10 +32,7 @@
     queryFn: ({ signal }) => getProvider(providerId, signal),
     enabled: !!providerId
   }));
-  const kinds = createQuery(() => ({
-    queryKey: providerKeys.kinds(),
-    queryFn: ({ signal }) => listProviderKinds(signal)
-  }));
+  const kinds = createQuery(providerQueries.kinds);
   const spec = $derived(
     kinds.data?.find((item) => item.kind === provider.data?.configuration.kind)
   );

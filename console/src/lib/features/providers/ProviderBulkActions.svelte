@@ -12,9 +12,9 @@
   import {
     activateProvider,
     disableProvider,
-    restoreProviderAsDraft,
-    type ProviderSummary
+    restoreProviderAsDraft
   } from './providers';
+  import { type ProviderSummary } from '#lib/domain/providers/api.js';
   import { ApiProblem, errorMessage } from '#lib/management/http.js';
 
   const intents = useMutationIntents();

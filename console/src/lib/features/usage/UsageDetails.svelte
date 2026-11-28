@@ -12,7 +12,7 @@
   } from '#lib/features/access/index.js';
   import { currentBudgetLimit } from '#lib/features/budgets/index.js';
   import { presentUsageCompleteness } from './completenessPresentation.js';
-  import type { getApiKey } from '#lib/features/access/index.js';
+  import type { getApiKey } from '#lib/domain/api-keys/api.js';
   import {
     usageSummary,
     type UsageCompleteness

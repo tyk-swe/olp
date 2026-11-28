@@ -13,11 +13,10 @@
   import {
     retireBudgetGroup,
     createBudgetGroup,
-    listBudgetGroups,
-    updateBudgetGroup,
-    type BudgetGroup
+    updateBudgetGroup
   } from '#lib/features/budgets/budget-groups/api.js';
-  import { budgetGroupKeys } from '#lib/features/budgets/budget-groups/budgetGroupKeys.js';
+  import { type BudgetGroup } from '#lib/domain/budget-groups/api.js';
+  import { budgetGroupKeys } from '#lib/domain/budget-groups/budgetGroupKeys.js';
   import { formatBudget, formatDate, formatInteger } from '#lib/format.js';
   import { limitsError } from '../limitForm';
 
@@ -25,6 +24,7 @@
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
   import BudgetGroupCreateDialog from './BudgetGroupCreateDialog.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
+  import { budgetGroupQueries } from '#lib/domain/budget-groups/queries.js';
 
   const create = useMutation();
   const edit = useAction();
@@ -34,10 +34,7 @@
   const access = useRole();
   const canManage = $derived(access.can('api_keys.manage'));
 
-  const groups = createQuery(() => ({
-    queryKey: budgetGroupKeys.list(),
-    queryFn: ({ signal }) => listBudgetGroups(signal)
-  }));
+  const groups = createQuery(budgetGroupQueries.all);
   const items = $derived(groups.data ?? []);
 
   let creating = $state(false);
