@@ -50,7 +50,8 @@ build: ## Build the native Go binary and static console from prepared contracts
 	pnpm --dir console build
 
 ##@ Focused checks
-check-go: ## Check Go formatting, vet, and static analysis
+check-go: ## Check migration numbers, Go formatting, vet, and static analysis
+	./scripts/check-migrations.sh
 	$(MAKE) fmt-check vet lint
 
 check-console: ## Prepare console types and check formatting, types, and lint
