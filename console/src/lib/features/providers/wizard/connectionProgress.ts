@@ -1,9 +1,9 @@
 import { snapshotNativeJSON, stringifyNativeJSON } from '#lib/nativeJson.js';
-import { ApiProblem } from '#lib/management/http.js';
 import type { MutationIntent } from '#lib/editing/mutationIntent.js';
 import {
   activateProvider,
   createProvider,
+  isRefusedProblem,
   updateProvider
 } from '#lib/features/providers/providers.js';
 import type {
@@ -33,15 +33,6 @@ export type ActivationProgress = { input: Pick<Provider, 'id' | 'etag'> } & (
   | { phase: 'pending'; uncertain: boolean }
   | { phase: 'committed'; generation: number }
 );
-
-export function isRefusedProblem(error: unknown): boolean {
-  return (
-    error instanceof ApiProblem &&
-    error.problem.status >= 400 &&
-    error.problem.status < 500 &&
-    ![408, 429].includes(error.problem.status)
-  );
-}
 
 export function isLiveGrant(
   credentials: ProviderCredential[] | undefined,

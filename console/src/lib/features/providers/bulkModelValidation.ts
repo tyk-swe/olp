@@ -1,11 +1,17 @@
-import type { CapabilityDeclaration } from './models.js';
 import {
   certifyProviderModel,
+  getProviderCapabilityOptions,
   setProviderModel,
-  type ProviderCapabilityOptions
+  type CapabilityDeclaration,
+  type ProviderCapabilityOptions,
+  type ProviderModel
 } from './models.js';
 import { certificationPrerequisiteReady } from './providerReadiness.js';
-import { probeProvider } from './providers.js';
+import { isRefusedProblem, probeProvider } from './providers.js';
+import { dialectSurface } from './profiles.js';
+import { listProviderProfiles } from './providerProfiles.js';
+import { ApiProblem } from '#lib/management/http.js';
+import { stringifyNativeJSON } from '#lib/nativeJson.js';
 import { getProvider, type Provider } from '#lib/domain/providers/api.js';
 
 export type BulkModelTarget = {
@@ -22,7 +28,33 @@ export type ReviewedValidationState = {
 export type ReviewedValidation =
   { status: 'checked'; certified: boolean } | { status: 'stopped' };
 
-export function desiredOperations(
+export type ReviewedInventory = {
+  items: ProviderModel[];
+  provider: Provider;
+};
+
+export type PlannedValidation = {
+  model: BulkModelTarget;
+  capabilities: CapabilityDeclaration[];
+};
+
+export function providerTarget(provider: Provider): string {
+  return stringifyNativeJSON([
+    provider.id,
+    provider.configuration,
+    provider.draft_credential_id
+  ]);
+}
+
+export function leavesOutcomeUnknown(error: unknown): boolean {
+  if (!isRefusedProblem(error)) return true;
+  return (
+    error instanceof ApiProblem &&
+    Boolean(error.problem.type?.endsWith('/idempotency_conflict'))
+  );
+}
+
+function desiredOperations(
   submittedOperation: string,
   vendor: string | undefined
 ): string[] {
@@ -30,7 +62,7 @@ export function desiredOperations(
   return vendor === 'voyage' ? ['embeddings'] : ['generation'];
 }
 
-export function suggestedCapabilities(
+function suggestedCapabilities(
   desired: string[],
   surface: string,
   options: ProviderCapabilityOptions
@@ -49,7 +81,7 @@ export function suggestedCapabilities(
   });
 }
 
-export function modelCapabilities(
+function modelCapabilities(
   model: BulkModelTarget,
   submittedOperation: string,
   vendor: string | undefined,
@@ -62,6 +94,58 @@ export function modelCapabilities(
     model.capabilities.length
     ? model.capabilities
     : suggested;
+}
+
+/** The client surface that speaks the provider's dialect natively. */
+async function nativeSurface(configuration: Provider['configuration']) {
+  const { kind, profile_id, profile_revision } = configuration;
+  if (kind === 'anthropic') return 'anthropic';
+  if (kind === 'gemini' || kind === 'vertex_ai') return 'gemini';
+  if (kind !== 'plugin') return 'openai';
+  // A plugin profile names its dialect.
+  const profile = (await listProviderProfiles()).find(
+    (candidate) =>
+      candidate.id === profile_id && candidate.revision === profile_revision
+  );
+  return dialectSurface(profile?.dialect);
+}
+
+export async function planBulkValidation(args: {
+  inventory: ReviewedInventory;
+  selected: readonly string[];
+  operation: string;
+  signal: AbortSignal;
+}): Promise<PlannedValidation[]> {
+  const { inventory, selected, operation, signal } = args;
+  const configuration = { ...inventory.provider.configuration };
+  const vendor = configuration.options?.vendor_id ?? undefined;
+  const targets = selected.flatMap((id) => {
+    const model = inventory.items.find((candidate) => candidate.id === id);
+    return model
+      ? [
+          {
+            id,
+            name: model.display_name,
+            capabilities: model.capabilities.map(
+              ({ operation, surface, mode }) => ({ operation, surface, mode })
+            )
+          }
+        ]
+      : [];
+  });
+  const options = await getProviderCapabilityOptions(
+    configuration.kind,
+    signal
+  );
+  const suggested = suggestedCapabilities(
+    desiredOperations(operation, vendor),
+    await nativeSurface(configuration),
+    options
+  );
+  return targets.map((model) => ({
+    model,
+    capabilities: modelCapabilities(model, operation, vendor, suggested)
+  }));
 }
 
 export async function validateReviewedModel(args: {
