@@ -60,18 +60,22 @@ it('renders an empty state when there are no usage points', () => {
   expect(target.querySelector('svg')).toBeNull();
 });
 
-it('updates the readout via keyboard navigation', () => {
-  const { target } = mountWithState(UsageChart, {
-    points,
-    granularity: 'hour'
-  });
+it('keeps keyboard inspection through pointer leave until Escape or blur', () => {
+  const { target } = mountWithState(
+    UsageChart,
+    { points, granularity: 'hour' },
+    { attach: true }
+  );
 
   expect(target.querySelector('svg')).not.toBeNull();
 
   const stage = target.querySelector<HTMLInputElement>(
     'input[type="range"][aria-label="Inspect usage bucket"]'
   );
-  expect(stage).not.toBeNull();
+  const chart = target.querySelector('.chart');
+  expect(chart).not.toBeNull();
+  stage?.focus();
+  expect(stage).toBe(document.activeElement);
 
   stage?.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
@@ -85,6 +89,12 @@ it('updates the readout via keyboard navigation', () => {
   flushSync();
   expect(target.querySelector('.readout')?.textContent).toContain('28 req');
 
+  chart?.dispatchEvent(new MouseEvent('pointerleave'));
+  flushSync();
+  expect(stage).toBe(document.activeElement);
+  expect(target.querySelector('.readout')?.textContent).toContain('28 req');
+  expect(stage?.getAttribute('aria-valuetext')).toContain('28 requests');
+
   stage?.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
   );
@@ -92,6 +102,19 @@ it('updates the readout via keyboard navigation', () => {
   expect(target.querySelector('.readout')?.textContent).toContain(
     'Hover or focus chart to inspect buckets'
   );
+
+  stage?.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
+  );
+  flushSync();
+  expect(target.querySelector('.readout')?.textContent).toContain('12 req');
+
+  stage?.blur();
+  flushSync();
+  expect(target.querySelector('.readout')?.textContent).toContain(
+    'Hover or focus chart to inspect buckets'
+  );
+  expect(stage?.getAttribute('aria-valuetext')).toBe('No bucket selected');
 });
 
 it('selects the bucket plotted under the pointer when buckets are unevenly spaced', () => {
@@ -117,4 +140,10 @@ it('selects the bucket plotted under the pointer when buckets are unevenly space
   flushSync();
 
   expect(target.querySelector('.readout')?.textContent).toContain('28 req');
+
+  chart.dispatchEvent(new MouseEvent('pointerleave'));
+  flushSync();
+  expect(target.querySelector('.readout')?.textContent).toContain(
+    'Hover or focus chart to inspect buckets'
+  );
 });
