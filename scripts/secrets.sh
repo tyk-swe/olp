@@ -1,7 +1,6 @@
 # shellcheck shell=bash
-olp_secrets_dir=${1:?secret directory required}
-python3 - "$olp_secrets_dir" <<'PY'
-import json, os, secrets, sys
+python3 - "${1:?secret directory required}" <<'PY' || return
+import json, os, secrets, stat, sys
 from pathlib import Path
 
 directory = Path(sys.argv[1])
@@ -16,11 +15,12 @@ for name, value in {
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            sys.exit(f'cannot keep {path}: expected a regular file')
         continue
     with os.fdopen(fd, 'w') as stream:
         stream.write(value + '\n')
 PY
-export OLP_AUTH_HMAC_KEY_FILE=${OLP_AUTH_HMAC_KEY_FILE:-$olp_secrets_dir/auth.key}
-export OLP_BOOTSTRAP_TOKEN_FILE=${OLP_BOOTSTRAP_TOKEN_FILE:-$olp_secrets_dir/bootstrap.token}
-export OLP_MASTER_KEY_FILE=${OLP_MASTER_KEY_FILE:-$olp_secrets_dir/master.json}
-unset olp_secrets_dir
+export OLP_AUTH_HMAC_KEY_FILE=${OLP_AUTH_HMAC_KEY_FILE:-$1/auth.key}
+export OLP_BOOTSTRAP_TOKEN_FILE=${OLP_BOOTSTRAP_TOKEN_FILE:-$1/bootstrap.token}
+export OLP_MASTER_KEY_FILE=${OLP_MASTER_KEY_FILE:-$1/master.json}
