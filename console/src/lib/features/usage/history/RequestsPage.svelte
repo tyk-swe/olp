@@ -4,14 +4,15 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import PageHeader from '#lib/components/PageHeader.svelte';
   import SavedFilters from '../SavedFilters.svelte';
-  import { requestKeys } from '#lib/features/usage/history/requestKeys.js';
+  import { listRequests } from '#lib/domain/requests/api.js';
+  import { requestKeys } from '#lib/domain/requests/requestKeys.js';
 
   import RequestTimeline from '#lib/features/usage/history/RequestTimeline.svelte';
   import RequestResults from '#lib/features/usage/history/RequestResults.svelte';
   import { page } from '$app/state';
   import { applyListSearch } from '#lib/listing/urlSync.svelte.js';
   import { createQuery } from '@tanstack/svelte-query';
-  import { getRequest, listRequests } from '#lib/features/usage/history/api.js';
+  import { getRequest } from '#lib/features/usage/history/api.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
 
   import {

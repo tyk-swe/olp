@@ -1,13 +1,12 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes, routeKeys } from '#lib/features/routes/index.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
   import ExposurePanel from './ExposurePanel.svelte';
   let open = $state(false);
   let selected = $state('');
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal),
+    ...routeQueries.all(),
     enabled: open
   }));
 </script>

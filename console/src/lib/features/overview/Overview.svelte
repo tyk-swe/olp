@@ -1,6 +1,7 @@
 <script lang="ts">
   import { overviewKeys } from '#lib/features/overview/overviewKeys.js';
-  import { requestKeys, listRequests } from '#lib/features/usage/index.js';
+  import { listRequests } from '#lib/domain/requests/api.js';
+  import { requestKeys } from '#lib/domain/requests/requestKeys.js';
 
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';

@@ -1,4 +1,16 @@
-import type { PlaygroundOperation } from './api';
+export type PlaygroundOperation =
+  | 'generation'
+  | 'decision'
+  | 'token_count'
+  | 'embeddings'
+  | 'moderation'
+  | 'rerank'
+  | 'classification'
+  | 'scoring'
+  | 'translation'
+  | 'realtime'
+  | 'ocr'
+  | 'search';
 
 export type PlaygroundTemplate = {
   key: string;

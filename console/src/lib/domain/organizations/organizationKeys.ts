@@ -4,7 +4,7 @@ const root = [...projectKeys.root, 'organizations'] as const;
 
 export const organizationKeys = {
   root,
-  all: ['organizations'] as const,
+  all: [...root, 'all'] as const,
   members: (organizationId: string) =>
     [...root, organizationId, 'members'] as const,
   projects: (organizationId: string) =>

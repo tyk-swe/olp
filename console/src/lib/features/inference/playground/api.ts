@@ -15,20 +15,6 @@ type PlaygroundResponse = components['schemas']['PlaygroundResponse'];
 
 const maxPlaygroundResponseBytes = 32 * 1024 * 1024;
 
-export type PlaygroundOperation =
-  | 'generation'
-  | 'decision'
-  | 'token_count'
-  | 'embeddings'
-  | 'moderation'
-  | 'rerank'
-  | 'classification'
-  | 'scoring'
-  | 'translation'
-  | 'realtime'
-  | 'ocr'
-  | 'search';
-
 export type PlaygroundStreamDone = {
   id?: string;
   model?: string;

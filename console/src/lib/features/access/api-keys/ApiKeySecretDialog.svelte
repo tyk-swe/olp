@@ -2,7 +2,7 @@
   import { formatDate } from '#lib/format.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   const services = useServiceCapabilities();
-  import { routeKeys, listRoutes } from '#lib/features/routes/index.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
 
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
@@ -43,9 +43,8 @@
   // test makes an in-flight result stale so it cannot overwrite the new tab.
   let testRun = 0;
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listRoutes(signal)
+    ...routeQueries.all(),
+    enabled: services.gatewayAvailable
   }));
   const routeSlug = $derived(
     preferredRoute ?? routes.data?.[0]?.slug ?? 'default'

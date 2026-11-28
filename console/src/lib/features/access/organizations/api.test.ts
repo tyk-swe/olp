@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { components } from '#lib/management/schema.js';
 import { json, route, serve } from '#lib/session/test/transport.js';
+import type { Organization } from '#lib/domain/organizations/api.js';
 import type { Project, ProjectMember } from '#lib/domain/projects/api.js';
 import {
   createOrganization,
   createOrganizationProject,
-  listOrganizations,
   organizationMembers,
   organizationProjects,
   projectMembers,
@@ -14,8 +14,7 @@ import {
   removeOrganizationMember,
   removeProjectMember,
   renameOrganization,
-  renameProject,
-  type Organization
+  renameProject
 } from './api';
 
 type Schemas = components['schemas'];
@@ -66,13 +65,6 @@ const updatedProjectMember: ProjectMember = {
 const organizationPath = `/api/v1/organizations/${organization.id}`;
 const projectPath = `${organizationPath}/projects/${project.id}`;
 const lists = [
-  {
-    name: 'organizations',
-    path: '/api/v1/organizations',
-    first: organization,
-    second: { ...organization, id: 'another-organization' },
-    load: listOrganizations
-  },
   {
     name: 'organization members',
     path: `${organizationPath}/members`,

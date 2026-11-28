@@ -3,7 +3,7 @@
   import SegmentedRadioGroup from '#lib/components/SegmentedRadioGroup.svelte';
   import PlaygroundDryRun from './PlaygroundDryRun.svelte';
   import { publicNativeOperations } from './nativeOperation';
-  import { playgroundTemplates } from './templates';
+  import { playgroundTemplates } from '#lib/requestTemplates.js';
   import { errorMessage } from '#lib/management/http.js';
   import type { PlaygroundState } from './playgroundState.svelte';
 

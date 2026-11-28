@@ -1,5 +1,6 @@
 import { inspectionDialects } from '#lib/features/routes/index.js';
-import type { InspectRoutingInput, PlaygroundOperation } from './api';
+import type { PlaygroundOperation } from '#lib/requestTemplates.js';
+import type { InspectRoutingInput } from './api';
 import {
   nativeDialects,
   publicNativeOperations,

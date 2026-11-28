@@ -6,7 +6,7 @@
     focusFormError,
     focusErrorSummary
   } from '#lib/editing/focusError.js';
-  import { routeKeys, listRoutes } from '#lib/features/routes/index.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
 
   import { createQuery } from '@tanstack/svelte-query';
   import type { ApiKey } from '#lib/features/access/api-keys/api.js';
@@ -67,9 +67,8 @@
   let editRevision = 0;
   let initialized = $state(false);
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listRoutes(signal)
+    ...routeQueries.all(),
+    enabled: services.gatewayAvailable
   }));
   const groups = createQuery(() => ({
     queryKey: budgetGroupKeys.list(),

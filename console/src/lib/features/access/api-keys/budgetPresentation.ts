@@ -1,3 +1,4 @@
+import { currentBudgetLimit } from '#lib/features/budgets/index.js';
 import type { components } from '#lib/management/schema.js';
 
 type Schemas = components['schemas'];
@@ -47,16 +48,6 @@ export function compareDecimalStrings(
   const secondFraction = second[1].padEnd(width, '0');
   if (firstFraction === secondFraction) return 0;
   return firstFraction < secondFraction ? -1 : 1;
-}
-
-/** Current allowance is separate from the permanent editable policy. */
-export function currentBudgetLimit(
-  window: { limit: string | null; effective_limit?: string | null } | undefined
-): string | null {
-  if (!window) return null;
-  return window.effective_limit !== undefined
-    ? window.effective_limit
-    : window.limit;
 }
 
 /** The state of one window of a key's cost budget. */

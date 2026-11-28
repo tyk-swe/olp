@@ -9,17 +9,21 @@ import {
 import { json, route, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import { mountState, setFieldValue } from '#test/mount.js';
-import { listRoutes, simulateRouting } from '#lib/features/routes/api.js';
+import { listRoutes } from '#lib/domain/routes/api.js';
+import { simulateRouting } from '#lib/features/routes/api.js';
 import AgentResources from '#lib/features/resources/AgentResources.svelte';
 import NativeResources from '#lib/features/resources/NativeResources.svelte';
 import CostCalculator from '#lib/features/usage/CostCalculator.svelte';
 import PlaygroundPage from './PlaygroundPage.svelte';
 import { PlaygroundState } from './playgroundState.svelte';
-import { playgroundTemplates } from './templates';
+import { playgroundTemplates } from '#lib/requestTemplates.js';
 
+vi.mock(import('#lib/domain/routes/api.js'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  listRoutes: vi.fn().mockResolvedValue([])
+}));
 vi.mock(import('#lib/features/routes/api.js'), async (importOriginal) => ({
   ...(await importOriginal()),
-  listRoutes: vi.fn().mockResolvedValue([]),
   simulateRouting: vi.fn().mockResolvedValue([])
 }));
 vi.mock('#lib/features/access/api-keys/api.js', () => ({

@@ -8,8 +8,7 @@
   import { readResult } from '#lib/editing/result.js';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import { listRoutes } from '#lib/features/routes/index.js';
-  import { providerKeys } from './providerKeys';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
   import {
     activateProvider,
     disableProvider,
@@ -100,11 +99,11 @@
     }
     preview = action;
     outcomes = [...review.outcomes.values()];
+    void routes.refetch();
   }
   const routes = createQuery(() => ({
-    queryKey: providerKeys.bulkRoutePreview(),
-    enabled: Boolean(preview),
-    queryFn: ({ signal }) => listRoutes(signal)
+    ...routeQueries.all(),
+    enabled: Boolean(preview)
   }));
   const affected = $derived(
     routes.data?.filter((route) =>
@@ -151,6 +150,7 @@
       !preview ||
       !review ||
       routes.isPending ||
+      routes.isFetching ||
       routes.isError
     )
       return;
@@ -240,7 +240,10 @@
         Review {selected.map((provider) => provider.name).join(', ')} before applying
         {preview}.
       </p>
-      {#if routes.isPending}<p class="inline-status" role="status">
+      {#if routes.isPending || routes.isFetching}<p
+          class="inline-status"
+          role="status"
+        >
           Checking affected routes…
         </p>{:else if routes.isError}<p class="inline-problem" role="alert">
           Route preview unavailable. <button onclick={() => routes.refetch()}>

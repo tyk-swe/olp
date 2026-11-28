@@ -2,7 +2,8 @@ import {
   providerKeys,
   listProviderModelInventory
 } from '#lib/features/providers/index.js';
-import { routeKeys } from '#lib/features/routes/routeKeys.js';
+import { routeKeys } from '#lib/domain/routes/routeKeys.js';
+import { routeQueries } from '#lib/domain/routes/queries.js';
 import { untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { guardUnsavedChanges } from '#lib/editing/unsavedChanges.js';
@@ -19,7 +20,6 @@ import {
 } from '#lib/editing/concurrentEdit.js';
 import {
   getRouteDraft,
-  listOperationDialects,
   type RouteActivation,
   type RouteDraft,
   type RouteSimulation
@@ -73,10 +73,7 @@ export class RouteDraftEditorState {
   draft;
   providerModels;
   toolsets;
-  dialects = createQuery(() => ({
-    queryKey: routeKeys.dialects(),
-    queryFn: ({ signal }) => listOperationDialects(signal)
-  }));
+  dialects = createQuery(() => routeQueries.dialects());
   operationOptions = $derived(
     discoveredOperations(this.dialects.data?.items ?? [])
   );

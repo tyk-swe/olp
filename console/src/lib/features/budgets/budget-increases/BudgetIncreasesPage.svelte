@@ -2,7 +2,7 @@
   import PageTitle from '#lib/shell/branding/PageTitle.svelte';
   import type { EntitySource } from '#lib/components/entityOptions.js';
   import { budgetGroupOptions } from '#lib/features/budgets/budget-groups/budgetGroupOptions.js';
-  import { organizationOptions } from '#lib/features/access/index.js';
+  import { organizationOptions } from '#lib/domain/organizations/organizationOptions.js';
   import { projectOptions } from '#lib/domain/projects/projectOptions.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';

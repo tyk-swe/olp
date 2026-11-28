@@ -1,6 +1,7 @@
 export { default as AggregateBudgetPanel } from './AggregateBudgetPanel.svelte';
 export { type BudgetGroup, listBudgetGroups } from './budget-groups/api.js';
 export { budgetGroupKeys } from './budget-groups/budgetGroupKeys.js';
+export { currentBudgetLimit } from './budgetLimit.js';
 export { default as LimitFields } from './LimitFields.svelte';
 export {
   limitFields,

@@ -9,13 +9,9 @@
     providerKeys
   } from '#lib/features/providers/index.js';
   import { projectQueries } from '#lib/domain/projects/queries.js';
-  import {
-    listRoutes,
-    selectActiveRoutes,
-    simulateRouting,
-    routeKeys,
-    decisionRows
-  } from '#lib/features/routes/index.js';
+  import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
+  import { routeQueries } from '#lib/domain/routes/queries.js';
+  import { simulateRouting, decisionRows } from '#lib/features/routes/index.js';
   import type { ExplanationRow } from '#lib/features/routes/index.js';
   import { quoteUsage, type PricingQuote } from '#lib/features/usage/quote.js';
 
@@ -58,9 +54,8 @@
   let quoteBusy = $state(false);
 
   const routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
+    ...routeQueries.all(),
     enabled: services.gatewayAvailable,
-    queryFn: ({ signal }) => listRoutes(signal),
     select: selectActiveRoutes
   }));
   const providers = createQuery(() => ({

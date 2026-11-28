@@ -1,10 +1,9 @@
+import type { RequestFilters } from '#lib/domain/requests/api.js';
 import type { components } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
-import { apiProblem, unwrap, unwrapPage } from '#lib/management/http.js';
-import type { CursorPage } from '#lib/management/http.js';
+import { apiProblem, unwrap } from '#lib/management/http.js';
 import { compactQuery } from '#lib/management/query.js';
 
-export type RequestSummary = components['schemas']['RequestSummary'];
 export type RequestDetail = components['schemas']['RequestDetailResponse'];
 export type RequestAttempt = components['schemas']['AttemptResponse'];
 
@@ -43,33 +42,6 @@ export const operationKinds = [
   'bedrock_invoke',
   'passthrough'
 ] as const;
-
-export type RequestFilters = {
-  cursor?: string;
-  limit?: number;
-  route?: string;
-  provider_id?: string;
-  model?: string;
-  api_key_id?: string;
-  project_id?: string;
-  session_id?: string;
-  attribution_key?: string;
-  attribution_value?: string;
-  operation?: string;
-  status_code?: number;
-  error_class?: string;
-  started_after?: string;
-  started_before?: string;
-};
-
-export async function listRequests(
-  filters: RequestFilters
-): Promise<CursorPage<RequestSummary>> {
-  const { data, error, response } = await apiClient.GET('/api/v1/requests', {
-    params: { query: compactQuery(filters) }
-  });
-  return unwrapPage({ data, error, response });
-}
 
 export async function getRequest(requestId: string): Promise<RequestDetail> {
   const { data, error, response } = await apiClient.GET(

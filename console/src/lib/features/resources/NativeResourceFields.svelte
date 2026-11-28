@@ -1,6 +1,6 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
-  import type { ActiveRoute } from '#lib/features/routes/index.js';
+  import type { ActiveRoute } from '#lib/domain/routes/api.js';
   import type { NativeEndpoint } from './nativeLifecycle';
 
   let {

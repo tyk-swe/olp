@@ -9,7 +9,7 @@
   import { formatDate, statusLabel, statusTone } from '#lib/format.js';
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { CursorPage } from '#lib/management/http.js';
-  import type { RequestSummary } from '#lib/features/usage/index.js';
+  import type { RequestSummary } from '#lib/domain/requests/api.js';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
 
   const {

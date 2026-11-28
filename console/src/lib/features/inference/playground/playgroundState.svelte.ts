@@ -2,19 +2,15 @@ import { createMutation, createQuery } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { readResult } from '#lib/editing/result.js';
 import { apiKeyKeys, listApiKeys } from '#lib/features/access/index.js';
-import {
-  listRoutes,
-  routeKeys,
-  selectActiveRoutes,
-  simulateRouting
-} from '#lib/features/routes/index.js';
+import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
+import { routeQueries } from '#lib/domain/routes/queries.js';
+import { simulateRouting } from '#lib/features/routes/index.js';
 import { abortError, errorMessage } from '#lib/management/http.js';
 import {
   inspectRouting,
   runPlayground,
   streamPlayground,
   type InspectRoutingInput,
-  type PlaygroundOperation,
   type PlaygroundRequest,
   type PlaygroundStreamDone
 } from './api';
@@ -24,7 +20,11 @@ import {
   type Mode,
   type PlaygroundSurface
 } from './playgroundPlan';
-import { playgroundTemplates, templateFor } from './templates';
+import {
+  playgroundTemplates,
+  templateFor,
+  type PlaygroundOperation
+} from '#lib/requestTemplates.js';
 import {
   buildInspectionInput,
   buildPlaygroundRequest,
@@ -78,8 +78,7 @@ export class PlaygroundState {
   validationError = $state('');
   completedRequest = $state<PlaygroundRequest | null>(null);
   routes = createQuery(() => ({
-    queryKey: routeKeys.all(),
-    queryFn: ({ signal }) => listRoutes(signal),
+    ...routeQueries.all(),
     select: selectActiveRoutes
   }));
   apiKeys = createQuery(() => ({

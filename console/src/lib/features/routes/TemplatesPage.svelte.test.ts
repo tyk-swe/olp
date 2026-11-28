@@ -1,5 +1,6 @@
-import { routeKeys } from './routeKeys';
-import { listRouteDraftPage, listRoutePage } from './api';
+import { routeKeys } from '#lib/domain/routes/routeKeys.js';
+import { listRoutePage } from '#lib/domain/routes/api.js';
+import { listRouteDraftPage } from './api';
 import { expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { json, serve } from '#lib/session/test/transport.js';

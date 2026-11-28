@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
 import {
   nativeDialects,
   nativeOperationRequest,
   publicNativeOperations
-} from './nativeOperation';
-import { playgroundTemplates } from './templates';
+} from '#lib/features/inference/playground/nativeOperation.js';
+import { inspectionDialects } from '#lib/features/routes/inspectionDialects.js';
+import { playgroundTemplates } from './requestTemplates.js';
 
 describe('playground examples', () => {
   it('uses registered dialects and binds model-bearing native examples to the chosen route', () => {

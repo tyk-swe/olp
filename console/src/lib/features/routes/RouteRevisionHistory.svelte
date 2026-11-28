@@ -8,7 +8,7 @@
   import Tabs from '#lib/components/Tabs.svelte';
   import { routeTabs } from './routeTabs.js';
   import { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
-  import { routeKeys } from '#lib/features/routes/routeKeys.js';
+  import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';

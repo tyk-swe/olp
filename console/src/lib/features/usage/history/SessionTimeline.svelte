@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { formatDate, statusLabel } from '#lib/format.js';
   import { timeOrder } from '#lib/listing/filters.js';
-  import type { RequestSummary } from '#lib/features/usage/history/api.js';
+  import type { RequestSummary } from '#lib/domain/requests/api.js';
 
   let { items, sessionId }: { items: RequestSummary[]; sessionId: string } =
     $props();
