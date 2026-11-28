@@ -8,8 +8,7 @@
   import type { components } from '#lib/management/schema.js';
   import { unpricedBreakdown, type UsageFilters } from './usage.js';
   import { usageKeys } from './usageKeys.js';
-  import { listProviders } from '#lib/domain/providers/api.js';
-  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let { filters }: { filters: UsageFilters } = $props();
   const access = useRole();
@@ -18,8 +17,7 @@
     queryFn: ({ signal, queryKey }) => unpricedBreakdown(queryKey[2], signal)
   }));
   const providers = createQuery(() => ({
-    queryKey: providerKeys.summaries,
-    queryFn: ({ signal }) => listProviders(signal),
+    ...providerQueries.all(),
     enabled:
       Boolean(report.data?.items.length) &&
       access.allows('GET /api/v1/providers')

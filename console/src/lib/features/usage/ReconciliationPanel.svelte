@@ -10,8 +10,7 @@
     ReconciliationItem,
     ReconciliationTotals
   } from '#lib/features/usage/reconciliation.js';
-  import { listProviders } from '#lib/domain/providers/api.js';
-  import { providerKeys } from '#lib/domain/providers/providerKeys.js';
+  import { providerQueries } from '#lib/domain/providers/queries.js';
 
   let { start, end }: { start: string; end: string } = $props();
 
@@ -48,8 +47,7 @@
   }));
 
   const providers = createQuery(() => ({
-    queryKey: providerKeys.summaries,
-    queryFn: ({ signal }) => listProviders(signal),
+    ...providerQueries.all(),
     enabled: canRead
   }));
 
