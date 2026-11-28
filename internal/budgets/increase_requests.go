@@ -13,8 +13,10 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const increaseRequestJSON = `to_jsonb(q)||jsonb_build_object('amount',q.amount::text,'base_cap',q.base_cap::text,'status',CASE WHEN q.status='pending' AND q.window_ends_at<=now() THEN 'expired' ELSE q.status END)`
@@ -44,7 +46,7 @@ func (a *API) increaseRequests(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), a.server.Pool, "SELECT "+increaseRequestJSON+" FROM olp.budget_increase_requests q WHERE q.id<$1 AND ($2 OR q.project_id=ANY($3::uuid[])) ORDER BY q.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
+	items, err := database.QueryJSON(r.Context(), a.server.Pool, "SELECT "+increaseRequestJSON+" FROM olp.budget_increase_requests q WHERE q.id<$1 AND ($2 OR q.project_id=ANY($3::uuid[])) ORDER BY q.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
 
@@ -78,7 +80,7 @@ func (a *API) createIncreaseRequest(r *http.Request, _ authz.Principal) (httpkit
 	}
 	project, err := uuid.Parse(strings.TrimSpace(raw.ProjectID))
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("project_id", "A project UUID is required.")
+		return httpkit.Reply{}, problem.Invalid("project_id", "A project UUID is required.")
 	}
 	in := increaseRequestInput{ProjectID: project.String(), Window: raw.Window, Amount: strings.TrimSpace(raw.Amount), Reason: strings.TrimSpace(raw.Reason)}
 	if err := validateIncreaseTerms(in.Window, in.Amount, in.Reason); err != nil {
@@ -94,7 +96,7 @@ func (a *API) createIncreaseRequest(r *http.Request, _ authz.Principal) (httpkit
 	}, func(tx pgx.Tx, p authz.Principal, policy *keyauthority.BudgetPolicy) (httpkit.Reply, access.Event, error) {
 		cap := capForWindow(policy, in.Window)
 		if cap == nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("window", "This boundary has no permanent cap for the selected window.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("window", "This boundary has no permanent cap for the selected window.")
 		}
 		var end time.Time
 		var window int64
@@ -164,7 +166,7 @@ func authorizeIncreaseRequestReviewer(p authz.Principal, request increaseRequest
 		return err
 	}
 	if approve && request.requestedBy == p.UserID() {
-		return httpkit.Fail(403, "budget_increase_request_self_approval", "You cannot approve your own budget increase request.")
+		return problem.Fail(403, "budget_increase_request_self_approval", "You cannot approve your own budget increase request.")
 	}
 	return nil
 }
@@ -178,7 +180,7 @@ func applyIncreaseRequestDecision(r *http.Request, tx pgx.Tx, p authz.Principal,
 			}
 			return httpkit.Reply{Status: http.StatusOK, Body: data, ETag: state.request.etag}, access.Event{}, nil
 		}
-		return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "budget_increase_request_decided", "This budget increase request has already been decided.")
+		return httpkit.Reply{}, access.Event{}, problem.Fail(409, "budget_increase_request_decided", "This budget increase request has already been decided.")
 	}
 	if !approve {
 		return declinePendingIncreaseRequest(r, tx, p, state.request)
@@ -247,7 +249,7 @@ func checkIncreaseRequestCurrent(ctx context.Context, tx pgx.Tx, state increaseR
 }
 
 func staleIncreaseRequest(detail string) error {
-	return httpkit.Fail(409, "budget_increase_request_stale", detail)
+	return problem.Fail(409, "budget_increase_request_stale", detail)
 }
 
 func readIncreaseRequest(ctx context.Context, tx pgx.Tx, id string) (json.RawMessage, error) {

@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 	pluginidentity "github.com/tyk-swe/olp/internal/domain/pluginidentity"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -107,11 +108,11 @@ func (s *Management) load(ctx context.Context, q database.Queryer, digest string
 func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	// The route authorizes before reading an upload of up to 32 MiB.
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType != "application/wasm" {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
+		return httpkit.Reply{}, problem.Fail(http.StatusUnsupportedMediaType, "unsupported_media_type", "Upload the plugin module as application/wasm.")
 	}
 	module, err := io.ReadAll(r.Body)
 	if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
-		return httpkit.Reply{}, httpkit.Fail(http.StatusRequestEntityTooLarge, "plugin_too_large", "A plugin module may be at most 32 MiB.")
+		return httpkit.Reply{}, problem.Fail(http.StatusRequestEntityTooLarge, "plugin_too_large", "A plugin module may be at most 32 MiB.")
 	}
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -135,7 +136,7 @@ func (s *Management) install(r *http.Request, _ authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if count >= maxInstalled {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusUnprocessableEntity, "plugin_limit", "An installation holds at most 64 plugin digests. Uninstall one first.")
 		}
 		tag, err := tx.Exec(r.Context(), "INSERT INTO olp.plugins(digest,abi_version,manifest,module,size_bytes,etag,installed_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (digest) DO NOTHING",
 			digest, abi.Version, data, module, len(module), ids.New(), p.ID)
@@ -166,10 +167,10 @@ func (s *Management) approve(r *http.Request, _ authz.Principal) (httpkit.Reply,
 	}
 	reply, err := access.Transact(s.Access, r, s.matched(r, digest), func(tx pgx.Tx, p authz.Principal, plugin contract.Plugin) (httpkit.Reply, access.Event, error) {
 		if !plugin.ApprovedAt.IsNull() {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "plugin_approved", "An owner already approved this plugin.")
 		}
 		if !slices.Equal(slices.Sorted(slices.Values(input.Origins)), slices.Sorted(slices.Values(plugin.Manifest.Origins))) {
-			return httpkit.Reply{}, access.Event{}, &httpkit.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
+			return httpkit.Reply{}, access.Event{}, &problem.Problem{Status: http.StatusUnprocessableEntity, Code: "plugin_origins_mismatch", Field: "origins",
 				Detail: "Approve exactly the origins the plugin declares; review them again."}
 		}
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.plugins SET approved_by=$1, approved_at=now(), etag=$2 WHERE digest=$3", p.ID, ids.New(), digest); err != nil {
@@ -221,7 +222,7 @@ func (s *Management) remove(r *http.Request, tx pgx.Tx, p authz.Principal, diges
 		return httpkit.Reply{}, access.Event{}, err
 	}
 	if len(pinning) > 0 {
-		return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
+		return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, CodePinned, "A draft or published revision of "+pinning+" pins this plugin. Keep this plugin installed while those revisions exist.")
 	}
 	retired, err := retireGrants(r.Context(), tx, digest)
 	if err != nil {
@@ -312,13 +313,13 @@ func pluginProblem(err error) error {
 	case CodeExecutableChanged:
 		status = http.StatusConflict
 	}
-	return &httpkit.Problem{Status: status, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
+	return &problem.Problem{Status: status, Code: refusal.Code, Detail: refusal.Message, Field: refusal.Field}
 }
 
 func digestParam(r *http.Request) (string, error) {
 	digest := r.PathValue("plugin_digest")
 	if !pluginidentity.ValidDigest(digest) {
-		return "", httpkit.Fail(http.StatusBadRequest, "invalid_identifier", "Identify the plugin by the lowercase hexadecimal SHA-256 digest of its module.")
+		return "", problem.Fail(http.StatusBadRequest, "invalid_identifier", "Identify the plugin by the lowercase hexadecimal SHA-256 digest of its module.")
 	}
 	return digest, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type InvestigationFilters struct {
@@ -49,14 +50,14 @@ type Investigation struct {
 
 func (input InvestigationInput) Validate() error {
 	if !ids.Canonical(input.ProjectID) || input.Filters == nil || input.Evidence == nil || len(input.Evidence) > 100 || utf8.RuneCountInString(input.Summary) > 4096 || strings.TrimSpace(input.Summary) == "" {
-		return httpkit.Invalid("investigation", "Supply filters, up to 100 evidence references, and a summary of at most 4096 characters.")
+		return problem.Invalid("investigation", "Supply filters, up to 100 evidence references, and a summary of at most 4096 characters.")
 	}
 	if !validInvestigationFilters(*input.Filters) {
-		return httpkit.Invalid("filters", "Use valid time, run, duration, error and tool filters.")
+		return problem.Invalid("filters", "Use valid time, run, duration, error and tool filters.")
 	}
 	for _, evidence := range input.Evidence {
 		if investigationEvidenceQuery(evidence.Kind) == "" || !ids.Canonical(evidence.ID) {
-			return httpkit.Invalid("evidence", "Use a valid evidence kind and canonical UUID.")
+			return problem.Invalid("evidence", "Use a valid evidence kind and canonical UUID.")
 		}
 	}
 	return nil
@@ -104,7 +105,7 @@ func validateInvestigationEvidence(ctx context.Context, tx pgx.Tx, project strin
 		return err
 	}
 	if !exists {
-		return httpkit.Invalid("evidence", "Evidence must exist in the investigation project.")
+		return problem.Invalid("evidence", "Evidence must exist in the investigation project.")
 	}
 	return nil
 }

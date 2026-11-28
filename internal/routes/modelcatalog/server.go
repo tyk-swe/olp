@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
@@ -38,7 +39,7 @@ type Exposure struct {
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/catalog", s.list, access.InferenceKeyAuth(func(r *http.Request) (keyauthority.Authority, error) {
 		if s.AuthenticateKey == nil || s.Runtime == nil {
-			return keyauthority.Authority{}, httpkit.Fail(503, "authority_unavailable", "Key authority is unavailable.")
+			return keyauthority.Authority{}, problem.Fail(503, "authority_unavailable", "Key authority is unavailable.")
 		}
 		return s.AuthenticateKey(r)
 	}))
@@ -68,18 +69,18 @@ func (s *Server) public(r *http.Request) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if !publication.Enabled {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+		return httpkit.Reply{}, problem.Fail(404, "not_found", "The resource was not found.")
 	}
 	return s.describe(r, func(route routing.Route) bool { return route.ProjectID != nil && *route.ProjectID == id }, publication.PricesPublic)
 }
 
 func (s *Server) describe(r *http.Request, visible func(routing.Route) bool, prices bool) (httpkit.Reply, error) {
 	if s.Runtime == nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
+		return httpkit.Reply{}, problem.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
 	}
 	release := s.Runtime.Release()
 	if release == nil || release.Snapshot() == nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
+		return httpkit.Reply{}, problem.Fail(503, "catalog_unavailable", "The catalog is unavailable.")
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT route_id::text,expose_upstream_models FROM olp.model_catalog_route_settings")
 	if err != nil {
@@ -122,7 +123,7 @@ func readPublication(ctx context.Context, q database.Queryer, id string) (Public
 	var result Publication
 	err := q.QueryRow(ctx, `SELECT COALESCE(c.enabled,false),COALESCE(c.prices_public,false),COALESCE(c.etag,p.etag)::text FROM olp.projects p LEFT JOIN olp.model_catalog_project_settings c ON c.project_id=p.id WHERE p.id=$1`, id).Scan(&result.Enabled, &result.PricesPublic, &result.ETag)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = httpkit.Fail(404, "not_found", "The resource was not found.")
+		err = problem.Fail(404, "not_found", "The resource was not found.")
 	}
 	return result, err
 }
@@ -152,7 +153,7 @@ func (s *Server) putPublication(r *http.Request, _ authz.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	if input.Enabled == nil || input.PricesPublic == nil {
-		return httpkit.Reply{}, httpkit.Invalid("enabled", "Include enabled and prices_public explicitly.")
+		return httpkit.Reply{}, problem.Invalid("enabled", "Include enabled and prices_public explicitly.")
 	}
 	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		if err = p.Project(&id, authz.Change); err != nil {
@@ -160,7 +161,7 @@ func (s *Server) putPublication(r *http.Request, _ authz.Principal) (httpkit.Rep
 		}
 		var locked string
 		if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.projects WHERE id=$1 FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found", "The resource was not found.")
 		} else if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -184,7 +185,7 @@ func readExposure(ctx context.Context, q database.Queryer, id string) (Exposure,
 	var project *string
 	err := q.QueryRow(ctx, `SELECT COALESCE(c.expose_upstream_models,false),COALESCE(c.etag,r.etag)::text,r.project_id::text FROM olp.routes r LEFT JOIN olp.model_catalog_route_settings c ON c.route_id=r.id WHERE r.id=$1 AND r.state='active'`, id).Scan(&result.ExposeUpstreamModels, &result.ETag, &project)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = httpkit.Fail(404, "not_found", "The resource was not found.")
+		err = problem.Fail(404, "not_found", "The resource was not found.")
 	}
 	return result, project, err
 }
@@ -216,12 +217,12 @@ func (s *Server) putExposure(r *http.Request, _ authz.Principal) (httpkit.Reply,
 		return httpkit.Reply{}, err
 	}
 	if input.ExposeUpstreamModels == nil {
-		return httpkit.Reply{}, httpkit.Invalid("expose_upstream_models", "Include expose_upstream_models explicitly.")
+		return httpkit.Reply{}, problem.Invalid("expose_upstream_models", "Include expose_upstream_models explicitly.")
 	}
 	return access.Transact(s.Access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		var locked string
 		if err = tx.QueryRow(r.Context(), "SELECT id::text FROM olp.routes WHERE id=$1 AND state='active' FOR UPDATE", id).Scan(&locked); errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found", "The resource was not found.")
 		} else if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}

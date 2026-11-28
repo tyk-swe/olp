@@ -3,7 +3,7 @@ package release
 import (
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
@@ -36,10 +36,10 @@ func (m *Manager) authorizeAgentTask(keyID, projectID, publicationID, revisionID
 	}
 	principal, ok := m.authority.taskPrincipal(keyID)
 	if !ok || principal.ID != keyID || principal.ProjectID == nil || *principal.ProjectID != projectID || principal.RevokedAt != nil || principal.ExpiresAt != nil && !principal.ExpiresAt.After(now) || callerExpiresAt != nil && !callerExpiresAt.After(now) {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	if principal.WorkloadIssuerID != nil && (principal.WorkloadDigest == "" || callerExpiresAt == nil || workloadRevision == "") {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	identity := keyauthority.Authority{
 		ID:               principal.ID,
@@ -49,7 +49,7 @@ func (m *Manager) authorizeAgentTask(keyID, projectID, publicationID, revisionID
 		WorkloadRevision: workloadRevision,
 	}
 	if !m.authority.currentAgentPrincipal(identity, "agents", publicationID, projectID, now, admission) {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return m.authority.authorizeTaskPublication(projectID, publicationID, revisionID)
 }
@@ -69,7 +69,7 @@ func (state authorityState) taskPrincipal(keyID string) (keyauthority.Authority,
 func (state authorityState) authorizeTaskPublication(projectID, publicationID, revisionID string) error {
 	resource, ok := state.agentResources[publicationID]
 	if !ok || resource.Kind != "agent" || resource.ProjectID != projectID || !resource.Revisions[revisionID] {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return nil
 }

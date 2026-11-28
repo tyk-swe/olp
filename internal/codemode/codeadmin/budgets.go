@@ -6,7 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -83,7 +84,7 @@ func SaveBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag stri
 			return nil, err
 		}
 		if !matches {
-			return nil, httpkit.Invalid("scope", "Budget scope is immutable.")
+			return nil, problem.Invalid("scope", "Budget scope is immutable.")
 		}
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_token_budgets(id,project_id,route_id,api_key_id,daily_tokens,monthly_tokens,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -98,26 +99,26 @@ func SaveBudget(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag stri
 
 func (in BudgetInput) validate() error {
 	if in.DailyTokens == nil && in.MonthlyTokens == nil {
-		return httpkit.Invalid("tokens", "Set a daily or monthly token cap.")
+		return problem.Invalid("tokens", "Set a daily or monthly token cap.")
 	}
 	for _, n := range []*int64{in.DailyTokens, in.MonthlyTokens} {
 		if n != nil && (*n < 1 || *n > 1<<53-1) {
-			return httpkit.Invalid("tokens", "Use a positive safe integer.")
+			return problem.Invalid("tokens", "Use a positive safe integer.")
 		}
 	}
 	return nil
 }
 
 func (in BudgetInput) Validated() (BudgetInput, error) {
-	project, projectError := httpkit.ParseUUID(in.ProjectID)
+	project, projectError := ids.Parse(in.ProjectID)
 	if projectError != nil {
 		return BudgetInput{}, projectError
 	}
-	route, routeError := httpkit.ParseOptionalUUID(in.RouteID)
+	route, routeError := ids.ParseOptional(in.RouteID)
 	if routeError != nil {
 		return BudgetInput{}, routeError
 	}
-	key, keyError := httpkit.ParseOptionalUUID(in.APIKeyID)
+	key, keyError := ids.ParseOptional(in.APIKeyID)
 	if keyError != nil {
 		return BudgetInput{}, keyError
 	}

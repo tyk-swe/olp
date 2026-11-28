@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func TestProjectAuthorityForInvestigations(t *testing.T) {
@@ -42,7 +42,7 @@ func TestProjectAuthorityForInvestigations(t *testing.T) {
 				}
 				return
 			}
-			var problem *httpkit.Problem
+			var problem *problem.Problem
 			if !errors.As(err, &problem) || problem.Status != tc.status {
 				t.Fatalf("project authority returned %v, want status %d", err, tc.status)
 			}
@@ -79,7 +79,7 @@ func TestProjectFilterAdmitsOnlyACanonicalProjectInScope(t *testing.T) {
 				}
 				return
 			}
-			var problem *httpkit.Problem
+			var problem *problem.Problem
 			if !errors.As(err, &problem) || problem.Status != tc.status {
 				t.Fatalf("project filter returned %v, want status %d", err, tc.status)
 			}

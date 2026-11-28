@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
@@ -46,27 +48,27 @@ type Server struct{ Access *access.Server }
 func normalizeInput(in Input) (Input, error) {
 	name := strings.TrimSpace(in.Name)
 	route := strings.TrimSpace(in.Route)
-	if err := httpkit.ValidText("name", name, 100); err != nil {
+	if err := textfield.Validate("name", name, 100); err != nil {
 		return Input{}, err
 	}
 	if _, err := uuid.Parse(in.ProjectID); err != nil {
-		return Input{}, httpkit.Invalid("project_id", "Choose an owning project.")
+		return Input{}, problem.Invalid("project_id", "Choose an owning project.")
 	}
 	if _, err := uuid.Parse(in.TargetID); err != nil {
-		return Input{}, httpkit.Invalid("target_id", "Choose one route target.")
+		return Input{}, problem.Invalid("target_id", "Choose one route target.")
 	}
 	if route == "" || len(route) > 128 || !identity.ValidResource(in.Backend, in.Resource) {
-		return Input{}, httpkit.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
+		return Input{}, problem.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
 	}
 	if err := ValidateFields(in.Backend, in.Fields); err != nil {
-		return Input{}, httpkit.Invalid("fields", err.Error())
+		return Input{}, problem.Invalid("fields", err.Error())
 	}
 	if len(in.KeyGrants) > 2000 {
-		return Input{}, httpkit.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
+		return Input{}, problem.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
 	}
 	for _, key := range in.KeyGrants {
 		if !ids.CanonicalOrNil(key) {
-			return Input{}, httpkit.Invalid("key_grants", "Use canonical API-key UUIDs.")
+			return Input{}, problem.Invalid("key_grants", "Use canonical API-key UUIDs.")
 		}
 	}
 	return Input{
@@ -160,7 +162,7 @@ func ValidateAuthority(ctx context.Context, q database.Queryer, in Input) (strin
 		return "", err
 	}
 	if len(providers) != 1 {
-		return "", httpkit.Invalid("target_id", "Choose a retrieval target in this project's route or draft with the matching backend kind and resource.")
+		return "", problem.Invalid("target_id", "Choose a retrieval target in this project's route or draft with the matching backend kind and resource.")
 	}
 	var count int
 	err = q.QueryRow(ctx, "SELECT count(*) FROM olp.api_keys WHERE id=ANY($1::uuid[]) AND project_id=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now())", in.KeyGrants, in.ProjectID).Scan(&count)
@@ -168,7 +170,7 @@ func ValidateAuthority(ctx context.Context, q database.Queryer, in Input) (strin
 		return "", err
 	}
 	if count != len(in.KeyGrants) {
-		return "", httpkit.Invalid("key_grants", "Every grant must name an active API key in this project.")
+		return "", problem.Invalid("key_grants", "Every grant must name an active API key in this project.")
 	}
 	return providers[0], nil
 }
@@ -182,7 +184,7 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current *Binding, in Inp
 		return Binding{}, err
 	}
 	if current != nil && (current.RetiredAt != nil || current.ProjectID != normalized.ProjectID) {
-		return Binding{}, httpkit.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
+		return Binding{}, problem.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
 	}
 	id, revision := nextBindingIdentity(current)
 	next := Binding{
@@ -316,13 +318,13 @@ func (s *Server) write(r *http.Request, _ authz.Principal) (httpkit.Reply, error
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if current.RetiredAt != nil {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "retrieval_binding_retired", "Create a new binding instead of changing retired history.")
 			}
 		}
 		reply, event, err := change(r, tx, p, current, in)
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == "23505" {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
 		}
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err

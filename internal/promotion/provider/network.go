@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -20,7 +20,7 @@ func portableConfiguration(input contract.ProviderConfiguration, at path) (conne
 	}
 	configuration := converted.Normalized()
 	if configuration.Options.Network != nil && configuration.Options.Network.CredentialID != "" {
-		return connection.Configuration{}, httpkit.Invalid(at.field("configuration.options.network.credential_id"), "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
+		return connection.Configuration{}, problem.Invalid(at.field("configuration.options.network.credential_id"), "Configuration artifacts use network_credential_ref instead of environment-specific credential IDs.")
 	}
 	return configuration, nil
 }
@@ -31,7 +31,7 @@ func parseNetwork(entry contract.ConfigurationProviderEntry, configuration conne
 	}
 	ref := *entry.NetworkCredentialRef
 	if configuration.Options.Network == nil || promotion.Ref(ref) != NetworkRef(entry.Name) || len(ref) > maxRef {
-		return false, httpkit.Invalid(at.field("network_credential_ref"), "Use the provider name followed by /network and configure network options.")
+		return false, problem.Invalid(at.field("network_credential_ref"), "Use the provider name followed by /network and configure network options.")
 	}
 	return true, nil
 }
@@ -52,10 +52,10 @@ func networkClaims(entry Entry) []promotion.Claim {
 			if err := promotion.ValidateExternal(bound.Reference); err != nil {
 				return err
 			}
-			return httpkit.Invalid("external_credential_bindings", "Network identities require sealed secret bindings.")
+			return problem.Invalid("external_credential_bindings", "Network identities require sealed secret bindings.")
 		case promotion.Sealed:
 			if err := egress.ValidateConnectionSecret([]byte(bound.Secret)); err != nil {
-				return httpkit.Invalid("secret_bindings."+string(ref), err.Error())
+				return problem.Invalid("secret_bindings."+string(ref), err.Error())
 			}
 			return validSecret(ref, bound.Secret)
 		}
@@ -94,7 +94,7 @@ func (a applying) networkConfiguration(ctx context.Context, tx pgx.Tx, entry Ent
 		return connection.Prepared{}, false, err
 	}
 	if credentialID == nil {
-		return connection.Prepared{}, false, httpkit.Invalid("secret_bindings", "Supply the provider's network credential binding.")
+		return connection.Prepared{}, false, problem.Invalid("secret_bindings", "Supply the provider's network credential binding.")
 	}
 	return prepared.WithNetworkCredential(*credentialID), rotated, nil
 }

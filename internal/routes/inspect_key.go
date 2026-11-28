@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -35,9 +36,9 @@ LEFT JOIN olp.organizations o ON o.id=p.organization_id WHERE i.singleton`, rout
 		return key, err
 	}
 	var err error
-	key.id, err = httpkit.ParseUUID(*selected)
+	key.id, err = ids.Parse(*selected)
 	if err != nil {
-		return key, httpkit.Invalid("api_key_id", "Use an API key identifier.")
+		return key, problem.Invalid("api_key_id", "Use an API key identifier.")
 	}
 	authority := keyauthority.Authority{ID: key.id}
 	var raw []byte
@@ -63,7 +64,7 @@ WHERE k.id=$1`, key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &
 		return key, err
 	}
 	if !sameProject(authority.ProjectID, route.ProjectID) {
-		return key, httpkit.Invalid("api_key_id", "The API key and route must belong to the same project.")
+		return key, problem.Invalid("api_key_id", "The API key and route must belong to the same project.")
 	}
 	if err := json.Unmarshal(raw, &authority.Policy); err != nil {
 		return key, err

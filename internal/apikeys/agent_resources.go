@@ -4,9 +4,9 @@ import (
 	"context"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/consumerscope"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -23,7 +23,7 @@ func checkKeyAgentResources(ctx context.Context, q database.Queryer, policy keya
 			continue
 		}
 		if project == nil {
-			return httpkit.Invalid(field, "Consumer resources require an owning project.")
+			return problem.Invalid(field, "Consumer resources require an owning project.")
 		}
 		kind := "toolset"
 		if field == "allowed_agents" {
@@ -34,7 +34,7 @@ func checkKeyAgentResources(ctx context.Context, q database.Queryer, policy keya
 			return err
 		}
 		if count != len(ids) {
-			return httpkit.Invalid(field, "Choose published resources in this key's project.")
+			return problem.Invalid(field, "Choose published resources in this key's project.")
 		}
 	}
 	return nil
@@ -48,12 +48,12 @@ func ConsumerScopes() []string {
 
 func validateResourceAllowlist(field string, allowed []string) error {
 	if len(allowed) > 100 {
-		return httpkit.Invalid(field, "Use at most 100 unique resource UUIDs.")
+		return problem.Invalid(field, "Use at most 100 unique resource UUIDs.")
 	}
 	seen := map[string]bool{}
 	for _, raw := range allowed {
 		if !ids.Canonical(raw) || seen[raw] {
-			return httpkit.Invalid(field, "Use unique canonical resource UUIDs.")
+			return problem.Invalid(field, "Use unique canonical resource UUIDs.")
 		}
 		seen[raw] = true
 	}

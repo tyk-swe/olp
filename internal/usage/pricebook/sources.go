@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -390,7 +390,7 @@ func normalizeRemovalDimensions(price rates.Price, normalizer Normalizer) (rates
 		entry.VendorID = &vendor
 	}
 	if entry.ProviderID != nil {
-		id, err := httpkit.ParseUUID(*entry.ProviderID)
+		id, err := ids.Parse(*entry.ProviderID)
 		if err != nil {
 			return rates.Price{}, invalid("overrides", "Use a valid provider identifier.")
 		}

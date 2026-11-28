@@ -7,8 +7,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 )
 
@@ -29,7 +29,7 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 		return Authorization{State: StandingState(item.Outcome)}, nil
 	}
 	if item.Flow != DeviceCode {
-		return Authorization{}, httpkit.Invalid("enrollment_id", "This enrollment does not use device authorization.")
+		return Authorization{}, problem.Invalid("enrollment_id", "This enrollment does not use device authorization.")
 	}
 	attempt := ids.New()
 	tag, claimErr := tx.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET poll_at=now()+$3::integer*interval '1 second',exchange_attempt_id=$2 WHERE id=$1 AND poll_at<=now() AND exchange_attempt_id IS NULL AND outcome IS NULL`, id, attempt, int64(grants.PollLease/time.Second))
@@ -48,7 +48,7 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 	}
 	client, clientErr := newOAuthClient(s.egress, item.Binding, "", "")
 	if clientErr != nil {
-		return Authorization{}, httpkit.Fail(503, "grant_authorization_unavailable", "Personal authorization is unavailable. Try polling this enrollment again.")
+		return Authorization{}, problem.Fail(503, "grant_authorization_unavailable", "Personal authorization is unavailable. Try polling this enrollment again.")
 	}
 	defer client.client.CloseIdleConnections()
 	if commitErr := tx.Commit(ctx); commitErr != nil {

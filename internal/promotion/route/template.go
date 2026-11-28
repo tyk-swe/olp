@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -77,7 +77,7 @@ func parseTemplates(entries *[]contract.ConfigurationTemplateEntry) ([]Template,
 	return promotion.TryMapIndex(declared, func(i int, t Template) (Template, error) {
 		field := "templates." + strconv.Itoa(i)
 		if first[t.Name] != i {
-			return Template{}, httpkit.Invalid(field+".name", "Template names must be unique.")
+			return Template{}, problem.Invalid(field+".name", "Template names must be unique.")
 		}
 		parsed, err := normalized(t)
 		if err != nil {
@@ -201,7 +201,7 @@ func TemplateApplier(desired Desired) promotion.Applier {
 				return routes.WriteTemplate(ctx, tx, ids.New(), ids.New(), p.UserID(), &in, false)
 			}
 			if ptr.Value(stored.ProjectID) != ptr.Value(projectID) {
-				return httpkit.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
+				return problem.Fail(409, "route_template_project_mismatch", "Route template "+t.Name+" belongs to a different project.")
 			}
 			same, err := sameTemplate(t, templateOf(stored.TemplateInput, nil))
 			if err != nil || same {

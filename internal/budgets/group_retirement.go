@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 // Retirement preserves the original identity carried by in-flight events and
@@ -23,7 +23,7 @@ func retireBudgetGroup(ctx context.Context, tx pgx.Tx, id string) error {
 		return err
 	}
 	if used {
-		return httpkit.Fail(409, "budget_group_in_use", "The budget group still has dependent resources or retained history.")
+		return problem.Fail(409, "budget_group_in_use", "The budget group still has dependent resources or retained history.")
 	}
 	_, err := tx.Exec(ctx, `UPDATE olp.budget_groups SET retired_at=now(),updated_at=now(),etag=$2,
  limit_template=NULL,requests_per_minute=NULL,tokens_per_minute=NULL,max_concurrency=NULL,

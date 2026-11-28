@@ -10,10 +10,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -29,12 +30,12 @@ type Pool struct {
 }
 
 func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, error) {
-	if httpkit.ValidText("code", e.Project, 100) != nil {
-		return Pool{}, httpkit.Invalid("code.pools.project", "Name the project.")
+	if textfield.Validate("code", e.Project, 100) != nil {
+		return Pool{}, problem.Invalid("code.pools.project", "Name the project.")
 	}
 	owner := promotion.Pointer(e.OwnerRef)
 	if (e.Kind == contract.ConfigurationCodePoolKindPersonal) != (owner != nil) {
-		return Pool{}, httpkit.Invalid("code.pools.owner_ref", "Personal pools require an explicit owner reference.")
+		return Pool{}, problem.Invalid("code.pools.owner_ref", "Personal pools require an explicit owner reference.")
 	}
 	weights, err := poolAccounts(e, accounts)
 	if err != nil {
@@ -46,8 +47,8 @@ func parsePool(e contract.ConfigurationCodePool, accounts []Account) (Pool, erro
 	if err := placeholder.Validate(); err != nil {
 		return Pool{}, err
 	}
-	if slices.ContainsFunc(keys, func(ref string) bool { return httpkit.ValidText("code", ref, 200) != nil }) {
-		return Pool{}, httpkit.Invalid("code.pools.api_key_refs", "Use nonempty destination key references.")
+	if slices.ContainsFunc(keys, func(ref string) bool { return textfield.Validate("code", ref, 200) != nil }) {
+		return Pool{}, problem.Invalid("code.pools.api_key_refs", "Use nonempty destination key references.")
 	}
 	return pool, nil
 }
@@ -64,13 +65,13 @@ func poolAccounts(e contract.ConfigurationCodePool, accounts []Account) (map[str
 		return !slices.ContainsFunc(accounts, func(a Account) bool { return a.ID == id && strings.EqualFold(a.Project, e.Project) })
 	}
 	if len(weights) != len(e.Accounts) || slices.ContainsFunc(slices.Collect(maps.Keys(weights)), undeclared) {
-		return nil, httpkit.Invalid("code.pools.accounts", "Every account must resolve within the pool project.")
+		return nil, problem.Invalid("code.pools.accounts", "Every account must resolve within the pool project.")
 	}
 	return weights, nil
 }
 
 func canonical(ref string) string {
-	id, err := httpkit.ParseUUID(ref)
+	id, err := ids.Parse(ref)
 	if err != nil {
 		return ""
 	}

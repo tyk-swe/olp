@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/gateway/fault"
@@ -51,7 +52,7 @@ func (p *API) Handle(r *http.Request, principal authz.Principal) (httpkit.Reply,
 	}
 	out := run.Run(r.Context(), parsed, nil)
 	if e := out.Err; e != nil {
-		return httpkit.Reply{}, httpkit.Fail(cmp.Or(e.Status, http.StatusBadGateway), e.Code, e.Message)
+		return httpkit.Reply{}, problem.Fail(cmp.Or(e.Status, http.StatusBadGateway), e.Code, e.Message)
 	}
 	return httpkit.Reply{
 		Status:              http.StatusOK,

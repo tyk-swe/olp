@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -22,7 +22,7 @@ func (s *Server) ConsumeRecent(r *http.Request, tx pgx.Tx, p authz.Principal, pu
 		return err
 	}
 	if tag.RowsAffected() != 1 {
-		return httpkit.Fail(428, "reauthentication_required", "Confirm your identity again before this operation.")
+		return problem.Fail(428, "reauthentication_required", "Confirm your identity again before this operation.")
 	}
 	return nil
 }

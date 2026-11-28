@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
 
@@ -84,7 +84,7 @@ func TestCheckActivationSlotValidatesSlotAndCredentialState(t *testing.T) {
 			t.Parallel()
 			slot, err := checkActivationSlot(tc.cfg, tc.slots)
 			if tc.wantCode != "" {
-				problem, ok := errors.AsType[*httpkit.Problem](err)
+				problem, ok := errors.AsType[*problem.Problem](err)
 				if !ok || problem.Status != 422 || problem.Code != tc.wantCode {
 					t.Fatalf("checkActivationSlot error = %v, want 422 %s", err, tc.wantCode)
 				}
@@ -117,7 +117,7 @@ func TestBuildRevisionModelsAndSlotsEnforceActivationRules(t *testing.T) {
 	t.Run("no enabled models rejected", func(t *testing.T) {
 		t.Parallel()
 		_, err := buildRevisionModels(nil)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "no_enabled_models" {
 			t.Fatalf("error = %v, want 422 no_enabled_models", err)
 		}
@@ -132,7 +132,7 @@ func TestBuildRevisionModelsAndSlotsEnforceActivationRules(t *testing.T) {
 			Capabilities:  []storedCapability{{Capability: connection.Capability{Operation: "generation", Surface: "openai", Mode: "unary"}, Source: "declared"}},
 		}}
 		_, err := buildRevisionModels(models)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "certification_required" {
 			t.Fatalf("error = %v, want 422 certification_required", err)
 		}
@@ -148,7 +148,7 @@ func TestBuildRevisionModelsAndSlotsEnforceActivationRules(t *testing.T) {
 			{ID: "s-2", Name: "second", Enabled: true, CredentialID: new("c-2"), CredentialPlugin: "build", CredentialProfile: "profile", CredentialPrincipal: "acct-2"},
 		}
 		_, _, err := buildRevisionSlots(grantCfg, certified, slots)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "principal_mismatch" {
 			t.Fatalf("error = %v, want 422 principal_mismatch", err)
 		}
@@ -159,7 +159,7 @@ func TestBuildRevisionModelsAndSlotsEnforceActivationRules(t *testing.T) {
 		apiCfg := connection.Configuration{Identity: providerconfig.Identity[*string]{AuthMode: connectors.AuthAPIKey}}
 		slots := []slotRow{{ID: "s-1", Name: "default", Default: true, Enabled: true, CredentialID: new("c-1"), CredentialVersion: new(2)}}
 		_, _, err := buildRevisionSlots(apiCfg, certified, slots)
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 422 || problem.Code != "slot_validation_required" {
 			t.Fatalf("error = %v, want 422 slot_validation_required", err)
 		}

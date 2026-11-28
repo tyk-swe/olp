@@ -12,9 +12,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
@@ -69,7 +69,7 @@ type Policy struct {
 }
 
 func invalid(message string) error {
-	return httpkit.Invalid("capture_policy", message)
+	return problem.Invalid("capture_policy", message)
 }
 
 func (p Settings) validate() error {

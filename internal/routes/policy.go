@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -50,14 +51,14 @@ func policyScope(r *http.Request) (string, string, authz.Operation, error) {
 	switch scope {
 	case "installation":
 		if id != uuid.Nil.String() {
-			return "", "", 0, httpkit.Invalid("id", "Installation policy uses the nil UUID")
+			return "", "", 0, problem.Invalid("id", "Installation policy uses the nil UUID")
 		}
 		operation = authz.Settings
 	case "route-draft":
 	case "api-key":
 		operation = authz.Keys
 	default:
-		return "", "", 0, httpkit.Fail(404, "not_found", "Unknown policy scope")
+		return "", "", 0, problem.Fail(404, "not_found", "Unknown policy scope")
 	}
 	return scope, id, operation, nil
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type authorizeRequest struct {
@@ -18,7 +19,7 @@ type completionRequest struct {
 
 func (s *Server) authorize(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "enrollment_id")
 	if err != nil {
@@ -37,7 +38,7 @@ func (s *Server) authorize(r *http.Request, p authz.Principal) (httpkit.Reply, e
 
 func (s *Server) complete(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "enrollment_id")
 	if err != nil {
@@ -48,7 +49,7 @@ func (s *Server) complete(r *http.Request, p authz.Principal) (httpkit.Reply, er
 		return httpkit.Reply{}, err
 	}
 	if input.Code == "" || len(input.Code) > 8192 || input.State == "" || len(input.State) > 256 {
-		return httpkit.Reply{}, httpkit.Invalid("code", "Use the code and state from the authorization callback.")
+		return httpkit.Reply{}, problem.Invalid("code", "Use the code and state from the authorization callback.")
 	}
 	result, runErr := s.grants.Complete(r.Context(), id, p.UserID(), input.Code, input.State)
 	if runErr != nil {
@@ -59,7 +60,7 @@ func (s *Server) complete(r *http.Request, p authz.Principal) (httpkit.Reply, er
 
 func (s *Server) poll(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "enrollment_id")
 	if err != nil {

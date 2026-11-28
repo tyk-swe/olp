@@ -10,6 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -99,7 +101,7 @@ func (s *scimService) scimGroupMapping(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	if input.Mapping == nil {
-		return httpkit.Reply{}, httpkit.Invalid("mapping", "Provide an explicit mapping object.")
+		return httpkit.Reply{}, problem.Invalid("mapping", "Provide an explicit mapping object.")
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		ctx := r.Context()
@@ -138,8 +140,8 @@ func (s *scimService) storeMapping(ctx context.Context, tx pgx.Tx, p authz.Princ
 	if err := p.Authorize(authz.Access); err != nil {
 		return err
 	}
-	if httpkit.ValidText("name", name, 100) != nil {
-		return httpkit.Invalid("scim_group_mappings", "Choose a nonempty group name up to 100 characters.")
+	if textfield.Validate("name", name, 100) != nil {
+		return problem.Invalid("scim_group_mappings", "Choose a nonempty group name up to 100 characters.")
 	}
 	var id string
 	err := tx.QueryRow(ctx, "SELECT id::text FROM olp.scim_groups WHERE lower(document->>'displayName')=lower($1) FOR UPDATE", name).Scan(&id)

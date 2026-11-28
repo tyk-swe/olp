@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -97,16 +97,16 @@ func parseOwner(owner contract.ConfigurationRateCardOwner) Owner {
 func validateCard(i int, entry contract.ConfigurationRateCardEntry, card RateCard, duplicate bool) error {
 	field := "rate_cards." + strconv.Itoa(i)
 	if card.Markup == "" || !nonNegative(card.Markup) {
-		return httpkit.Invalid(field+".markup", "A rate card needs a markup.")
+		return problem.Invalid(field+".markup", "A rate card needs a markup.")
 	}
 	if err := validateOwner(field, entry.Owner, card.Owner); err != nil {
 		return err
 	}
 	if duplicate {
-		return httpkit.Invalid(field+".owner", "The document owns this card twice.")
+		return problem.Invalid(field+".owner", "The document owns this card twice.")
 	}
 	if j := slices.IndexFunc(ptr.Value(entry.Prices), func(price contract.ConfigurationPriceEntry) bool { return promotion.Pointer(price.Provider) != nil }); j >= 0 {
-		return httpkit.Invalid(field+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
+		return problem.Invalid(field+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
 	}
 	return nil
 }
@@ -114,13 +114,13 @@ func validateCard(i int, entry contract.ConfigurationRateCardEntry, card RateCar
 func validateOwner(field string, entry contract.ConfigurationRateCardOwner, owner Owner) error {
 	switch {
 	case entry.Kind == contract.ConfigurationRateCardOwnerKindInstallation && (entry.Organization != nil || entry.Project != nil):
-		return httpkit.Invalid(field+".owner", "The installation card takes no owner name.")
+		return problem.Invalid(field+".owner", "The installation card takes no owner name.")
 	case entry.Kind == contract.ConfigurationRateCardOwnerKindOrganization && owner == Organization{}:
-		return httpkit.Invalid(field+".owner.organization", "Name the organization.")
+		return problem.Invalid(field+".owner.organization", "Name the organization.")
 	case entry.Kind == contract.ConfigurationRateCardOwnerKindProject && owner == Project{}:
-		return httpkit.Invalid(field+".owner.project", "Name the project.")
+		return problem.Invalid(field+".owner.project", "Name the project.")
 	case !entry.Kind.Valid():
-		return httpkit.Invalid("rate_cards.owner.kind", "Use installation, organization or project.")
+		return problem.Invalid("rate_cards.owner.kind", "Use installation, organization or project.")
 	default:
 		return nil
 	}

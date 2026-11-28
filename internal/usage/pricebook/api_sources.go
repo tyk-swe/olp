@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/usage/rates"
 )
 
@@ -90,18 +92,18 @@ func (s *API) createPricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 // validateSourceInput normalizes a new source: a price list needs a URL, and
 // a catalog source without one reads the catalog this release ships.
 func (s *API) validateSourceInput(input *sourceInput) error {
-	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err := textfield.Validate("name", input.Name, 100); err != nil {
 		return err
 	}
 	if input.Format == "" {
 		input.Format = FormatPrices
 	}
 	if input.Format != FormatPrices && input.Format != FormatCatalog {
-		return httpkit.Invalid("format", "Use prices or catalog.")
+		return problem.Invalid("format", "Use prices or catalog.")
 	}
 	if input.URL == nil {
 		if input.Format == FormatPrices {
-			return httpkit.Invalid("url", "A price list source needs a URL.")
+			return problem.Invalid("url", "A price list source needs a URL.")
 		}
 		return nil
 	}
@@ -112,10 +114,10 @@ func (s *API) validateSourceInput(input *sourceInput) error {
 
 func (s *API) validateSourceURL(raw string) error {
 	if s.Egress == nil {
-		return httpkit.Fail(503, "egress_policy_unavailable", "Source fetching is not configured on this installation.")
+		return problem.Fail(503, "egress_policy_unavailable", "Source fetching is not configured on this installation.")
 	}
 	if _, err := s.Egress.ValidateEndpoint(raw); err != nil {
-		return httpkit.Fail(422, "invalid_url", "The source URL is not permitted by egress policy.")
+		return problem.Fail(422, "invalid_url", "The source URL is not permitted by egress policy.")
 	}
 	return nil
 }
@@ -126,14 +128,14 @@ func (s *API) updatePricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 		return httpkit.Reply{}, err
 	}
 	if len(patch) == 0 {
-		return httpkit.Reply{}, httpkit.Invalid("source", "Send at least one field to update.")
+		return httpkit.Reply{}, problem.Invalid("source", "Send at least one field to update.")
 	}
 	for field := range patch {
 		if field == "format" {
-			return httpkit.Reply{}, httpkit.Invalid(field, "A source keeps its format; create another source instead.")
+			return httpkit.Reply{}, problem.Invalid(field, "A source keeps its format; create another source instead.")
 		}
 		if field != "name" && field != "url" && field != "enabled" {
-			return httpkit.Reply{}, httpkit.Invalid(field, "Unknown pricing source field.")
+			return httpkit.Reply{}, problem.Invalid(field, "Unknown pricing source field.")
 		}
 	}
 	id, err := httpkit.IDParam(r, "pricing_source_id")
@@ -152,20 +154,20 @@ func (s *API) updatePricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 		name, rawURL, enabled := source.Name, source.URL, source.Enabled
 		if raw, ok := patch["name"]; ok {
 			if err = json.Unmarshal(raw, &name); err != nil {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("name", "Use a non-empty source name.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("name", "Use a non-empty source name.")
 			}
-			if err = httpkit.ValidText("name", name, 100); err != nil {
+			if err = textfield.Validate("name", name, 100); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			name = strings.TrimSpace(name)
 		}
 		if raw, ok := patch["url"]; ok {
 			if err = json.Unmarshal(raw, &rawURL); err != nil {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("url", "Use a valid source URL.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("url", "Use a valid source URL.")
 			}
 			if rawURL == nil {
 				if source.Format == FormatPrices {
-					return httpkit.Reply{}, access.Event{}, httpkit.Invalid("url", "A price list source needs a URL.")
+					return httpkit.Reply{}, access.Event{}, problem.Invalid("url", "A price list source needs a URL.")
 				}
 			} else {
 				trimmed := strings.TrimSpace(*rawURL)
@@ -177,7 +179,7 @@ func (s *API) updatePricingSource(r *http.Request, _ authz.Principal) (httpkit.R
 		}
 		if raw, ok := patch["enabled"]; ok {
 			if err = json.Unmarshal(raw, &enabled); err != nil {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("enabled", "Use true or false.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("enabled", "Use true or false.")
 			}
 		}
 		source, err = scanSource(tx.QueryRow(r.Context(),
@@ -341,14 +343,14 @@ func (s *API) publishPricingSourceSnapshot(r *http.Request, _ authz.Principal) (
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if currency != doc.Currency {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(422, "invalid_price_set",
+			return httpkit.Reply{}, access.Event{}, problem.Fail(422, "invalid_price_set",
 				"The merged price set must keep the source currency.")
 		}
 		effectiveAt := time.Now()
 		if input.EffectiveAt != nil {
 			effectiveAt = input.EffectiveAt.UTC()
 			if effectiveAt.Before(time.Now()) {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("effective_at",
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("effective_at",
 					"Choose an effective time now or in the future.")
 			}
 		}

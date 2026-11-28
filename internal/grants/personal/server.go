@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -76,7 +77,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 
 func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "agent_id")
 	if err != nil {
@@ -88,7 +89,7 @@ func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, 
 	}
 	keyUUID, err := uuid.Parse(input.KeyID)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key UUID.")
+		return httpkit.Reply{}, problem.Invalid("api_key_id", "Use an API key UUID.")
 	}
 	var project string
 	var draft agentcontract.Draft
@@ -103,11 +104,11 @@ func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, 
 		return httpkit.Reply{}, err
 	}
 	if keyProject != project || draft.Agent == nil {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The API key was not found.")
+		return httpkit.Reply{}, problem.Fail(404, "not_found", "The API key was not found.")
 	}
 	bound, err := BindAgent(keyauthority.Authority{ID: keyUUID.String(), ProjectID: &project}, id, *draft.Agent)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
+		return httpkit.Reply{}, problem.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
 	}
 	member := p.UserID()
 	handoff, err := s.grants.Start(r.Context(), bound, &member)
@@ -119,7 +120,7 @@ func (s *Server) startAgent(r *http.Request, p authz.Principal) (httpkit.Reply, 
 
 func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "server_id")
 	if err != nil {
@@ -131,7 +132,7 @@ func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error
 	}
 	keyUUID, err := uuid.Parse(input.KeyID)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("api_key_id", "Use an API key UUID.")
+		return httpkit.Reply{}, problem.Invalid("api_key_id", "Use an API key UUID.")
 	}
 	keyID := keyUUID.String()
 	serverProject, tool, err := s.servers.Toolset(r.Context(), id)
@@ -146,11 +147,11 @@ func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error
 		return httpkit.Reply{}, err
 	}
 	if project != serverProject {
-		return httpkit.Reply{}, httpkit.Fail(404, "not_found", "The API key was not found.")
+		return httpkit.Reply{}, problem.Fail(404, "not_found", "The API key was not found.")
 	}
 	bound, err := Bind(keyauthority.Authority{ID: keyID, ProjectID: &project}, tool)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
+		return httpkit.Reply{}, problem.Invalid("server_id", "Configure personal OAuth for this server before enrollment.")
 	}
 	member := p.UserID()
 	handoff, err := s.grants.Start(r.Context(), bound, &member)
@@ -162,7 +163,7 @@ func (s *Server) start(r *http.Request, p authz.Principal) (httpkit.Reply, error
 
 func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	var input claimRequest
 	if err := httpkit.Decode(r, &input); err != nil {
@@ -170,10 +171,10 @@ func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error
 	}
 	enrollmentID, err := uuid.Parse(input.EnrollmentID)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("enrollment_id", "Use an enrollment UUID.")
+		return httpkit.Reply{}, problem.Invalid("enrollment_id", "Use an enrollment UUID.")
 	}
 	if len(input.HandoffToken) < 20 || len(input.HandoffToken) > 128 {
-		return httpkit.Reply{}, httpkit.Invalid("handoff_token", "Use the one-use browser enrollment link.")
+		return httpkit.Reply{}, problem.Invalid("handoff_token", "Use the one-use browser enrollment link.")
 	}
 	enrollment, err := s.grants.Claim(r.Context(), enrollmentID.String(), input.HandoffToken, p.UserID())
 	if err != nil {
@@ -184,10 +185,10 @@ func (s *Server) claim(r *http.Request, p authz.Principal) (httpkit.Reply, error
 
 func grantProblem(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Fail(404, "not_found", "The personal grant enrollment was not found.")
+		return problem.Fail(404, "not_found", "The personal grant enrollment was not found.")
 	}
 	if errors.Is(err, ErrRequired) {
-		return httpkit.Fail(409, "grant_binding_changed", "Start a new enrollment for the server's current OAuth configuration.")
+		return problem.Fail(409, "grant_binding_changed", "Start a new enrollment for the server's current OAuth configuration.")
 	}
 	return err
 }
@@ -219,7 +220,7 @@ func (s *Server) list(r *http.Request, p authz.Principal) (httpkit.Reply, error)
 
 func (s *Server) revoke(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	if p.Kind != "user" {
-		return httpkit.Reply{}, httpkit.Forbidden()
+		return httpkit.Reply{}, problem.Forbidden()
 	}
 	id, err := httpkit.IDParam(r, "grant_id")
 	if err != nil {

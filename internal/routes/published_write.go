@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -50,13 +51,13 @@ func (s *Server) writePublished(r *http.Request, id string) (httpkit.Reply, erro
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if previous.State != "active" {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "route_retired", "Import or restore retired routes explicitly before publishing a replacement.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "route_retired", "Import or restore retired routes explicitly before publishing a replacement.")
 			}
 			if input.Slug != previous.Slug {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("slug", "A published route's slug is immutable.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("slug", "A published route's slug is immutable.")
 			}
 			if input.ProjectID != nil && !sameProject(input.ProjectID, previous.ProjectID) {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "A published route's project is immutable.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("project_id", "A published route's project is immutable.")
 			}
 			input.ProjectID = previous.ProjectID
 			targets = previous.Latest.Targets
@@ -66,7 +67,7 @@ func (s *Server) writePublished(r *http.Request, id string) (httpkit.Reply, erro
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if exists {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "route_exists", "Import the existing route before changing its published configuration.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "route_exists", "Import the existing route before changing its published configuration.")
 			}
 		}
 		targets, err = ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, targets)

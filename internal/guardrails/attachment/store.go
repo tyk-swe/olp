@@ -7,9 +7,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -77,14 +77,14 @@ func (l listed) target() target {
 func requirePolicy(ctx context.Context, tx pgx.Tx, p authz.Principal, t target) error {
 	var project *string
 	if err := tx.QueryRow(ctx, "SELECT p.project_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id WHERE v.id=$1 AND p.retired_at IS NULL", t.PolicyRevisionID).Scan(&project); err != nil {
-		return httpkit.Invalid("policy_revision_id", "Choose an existing policy revision.")
+		return problem.Invalid("policy_revision_id", "Choose an existing policy revision.")
 	}
 	if err := p.Project(project, authz.Change); err != nil {
 		return err
 	}
 	ownedBy := func(id *string) bool { return project != nil && id != nil && *project == *id }
 	if t.Scope == guardrailpolicy.ProjectScope && !ownedBy(&t.ScopeID) || t.owned() && !ownedBy(t.owner) {
-		return httpkit.Invalid("scope_id", "The policy must belong to this project.")
+		return problem.Invalid("scope_id", "The policy must belong to this project.")
 	}
 	return nil
 }
@@ -129,7 +129,7 @@ func requireSamePolicy(ctx context.Context, tx pgx.Tx, current, next, refusal st
 		return err
 	}
 	if !same {
-		return httpkit.Invalid("guardrail_attachments", refusal)
+		return problem.Invalid("guardrail_attachments", refusal)
 	}
 	return nil
 }

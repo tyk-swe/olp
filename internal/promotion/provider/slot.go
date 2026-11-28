@@ -6,9 +6,10 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -64,7 +65,7 @@ type slotScope struct {
 
 func parseSlots(entry contract.ConfigurationProviderEntry, configuration connection.Configuration, at path) ([]Slot, error) {
 	if len(entry.Slots) < 1 || len(entry.Slots) > maxSlots {
-		return nil, httpkit.Invalid(at.field("slots"), "Declare 1–"+strconv.Itoa(maxSlots)+" credential slots per provider.")
+		return nil, problem.Invalid(at.field("slots"), "Declare 1–"+strconv.Itoa(maxSlots)+" credential slots per provider.")
 	}
 	scope := slotScope{
 		provider:      entry.Name,
@@ -78,7 +79,7 @@ func parseSlots(entry contract.ConfigurationProviderEntry, configuration connect
 		return nil, err
 	}
 	if len(slices.DeleteFunc(slices.Clone(slots), func(slot Slot) bool { return !slot.Default })) != 1 {
-		return nil, httpkit.Invalid(at.field("slots"), "Declare exactly one default slot per provider.")
+		return nil, problem.Invalid(at.field("slots"), "Declare exactly one default slot per provider.")
 	}
 	return slots, credentialRequirement(slots, configuration, at)
 }
@@ -114,33 +115,33 @@ func (s slotScope) parse(j int, slot contract.ConfigurationSlotEntry) (Slot, err
 }
 
 func (s slotScope) validate(j int, slot contract.ConfigurationSlotEntry, field path) error {
-	if err := httpkit.ValidText(field.field("name"), slot.Name, 100); err != nil {
+	if err := textfield.Validate(field.field("name"), slot.Name, 100); err != nil {
 		return err
 	}
 	if s.names[slot.Name] != j {
-		return httpkit.Invalid(field.field("name"), "Slot names must be unique per provider.")
+		return problem.Invalid(field.field("name"), "Slot names must be unique per provider.")
 	}
 	if slot.Position < 0 || slot.Position > 32767 || s.positions[slot.Position] != j {
-		return httpkit.Invalid(field.field("position"), "Use unique positions from 0 to 32767.")
+		return problem.Invalid(field.field("position"), "Use unique positions from 0 to 32767.")
 	}
 	if slot.Priority < 0 || slot.Priority > 32767 {
-		return httpkit.Invalid(field.field("priority"), "Use a priority from 0 to 32767.")
+		return problem.Invalid(field.field("priority"), "Use a priority from 0 to 32767.")
 	}
 	if slot.Weight < 1 || slot.Weight > 1000000 {
-		return httpkit.Invalid(field.field("weight"), "Use a weight from 1 to 1000000.")
+		return problem.Invalid(field.field("weight"), "Use a weight from 1 to 1000000.")
 	}
 	return validRestrictions(slot.Restrictions, field)
 }
 
 func validRestrictions(restrictions contract.ConfigurationSlotRestrictions, field path) error {
 	if len(restrictions.AllowedApiKeys) > 0 {
-		return httpkit.Fail(http.StatusUnprocessableEntity, "non_portable_reference", "allowed_api_keys cannot be promoted; re-establish them on the destination after creating keys.")
+		return problem.Fail(http.StatusUnprocessableEntity, "non_portable_reference", "allowed_api_keys cannot be promoted; re-establish them on the destination after creating keys.")
 	}
 	if len(restrictions.AllowedRoutes) > 100 || len(restrictions.AllowedModels) > 2000 {
-		return httpkit.Invalid(string(field), "Use at most 100 routes and 2000 models per slot.")
+		return problem.Invalid(string(field), "Use at most 100 routes and 2000 models per slot.")
 	}
 	if slices.ContainsFunc(restrictions.AllowedRoutes, func(route string) bool { return !routeidentity.ValidSlug(route) }) {
-		return httpkit.Invalid(field.field("allowed_routes"), "Use route slugs.")
+		return problem.Invalid(field.field("allowed_routes"), "Use route slugs.")
 	}
 	for _, model := range restrictions.AllowedModels {
 		if err := connection.ValidModelName(field.field("allowed_models"), model); err != nil {
@@ -155,13 +156,13 @@ func slotCredential(provider string, slot contract.ConfigurationSlotEntry, grant
 	ref, bound := promotion.Present(slot.CredentialRef)
 	switch {
 	case !bound && grant:
-		return nil, httpkit.Invalid(field, "A grant backs each of this provider's credential slots: reference its credential as "+string(want)+".")
+		return nil, problem.Invalid(field, "A grant backs each of this provider's credential slots: reference its credential as "+string(want)+".")
 	case !bound:
 		return Unbound{}, nil
 	case promotion.Ref(ref) != want:
-		return nil, httpkit.Invalid(field, "Credential references must read "+string(want)+".")
+		return nil, problem.Invalid(field, "Credential references must read "+string(want)+".")
 	case len(ref) > maxRef:
-		return nil, httpkit.Invalid(field, "Credential references must fit within "+strconv.Itoa(maxRef)+" bytes.")
+		return nil, problem.Invalid(field, "Credential references must fit within "+strconv.Itoa(maxRef)+" bytes.")
 	case grant:
 		return Grant{}, nil
 	}
@@ -172,10 +173,10 @@ func credentialRequirement(slots []Slot, configuration connection.Configuration,
 	hasCredential := slices.ContainsFunc(slots, referenced)
 	required := configuration.CredentialRequired()
 	if required && !hasCredential {
-		return httpkit.Invalid(at.field("slots"), "This authentication mode requires at least one credential slot.")
+		return problem.Invalid(at.field("slots"), "This authentication mode requires at least one credential slot.")
 	}
 	if !required && hasCredential {
-		return httpkit.Invalid(at.field("slots.credential_ref"), "This authentication mode takes no stored credential.")
+		return problem.Invalid(at.field("slots.credential_ref"), "This authentication mode takes no stored credential.")
 	}
 	return nil
 }
@@ -221,7 +222,7 @@ func slotClaims(entry Entry) []promotion.Claim {
 			return []promotion.Claim{{Ref: ref, Accept: acceptSlot(ref)}}
 		case Grant:
 			return []promotion.Claim{{Ref: ref, Accept: func(promotion.Credential) error {
-				return httpkit.Invalid("secret_bindings."+string(ref), GrantBindingRefused)
+				return problem.Invalid("secret_bindings."+string(ref), GrantBindingRefused)
 			}}}
 		}
 		return nil
@@ -242,10 +243,10 @@ func acceptSlot(ref promotion.Ref) func(promotion.Credential) error {
 
 func validSecret(ref promotion.Ref, secret string) error {
 	if providers.ValidCredential(secret) != nil {
-		return httpkit.Invalid("secret_bindings."+string(ref), "Use a credential of 1–65536 bytes.")
+		return problem.Invalid("secret_bindings."+string(ref), "Use a credential of 1–65536 bytes.")
 	}
 	if len(secret) > promotion.MaxSecret {
-		return httpkit.Invalid("secret_bindings."+string(ref), "Secrets must fit within 64 KiB.")
+		return problem.Invalid("secret_bindings."+string(ref), "Secrets must fit within 64 KiB.")
 	}
 	return nil
 }

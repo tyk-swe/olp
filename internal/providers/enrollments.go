@@ -10,6 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/plugin/abi"
@@ -115,7 +117,7 @@ func (s *enrollmentService) startGrantEnrollment(r *http.Request, p authz.Princi
 	}
 	document := current.Connection.Document()
 	if !document.Grant() {
-		return httpkit.Reply{}, httpkit.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
+		return httpkit.Reply{}, problem.Fail(422, "grant_enrollment_unavailable", "This provider's profile authenticates without a grant.")
 	}
 	slots, err := loadSlots(ctx, s.access.Pool, providerID)
 	if err != nil {
@@ -146,9 +148,9 @@ func optionalSlotID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	parsed, err := httpkit.ParseUUID(raw)
+	parsed, err := ids.Parse(raw)
 	if err != nil {
-		return "", httpkit.Invalid("slot_id", "Use a credential slot identifier.")
+		return "", problem.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	return parsed, nil
 }
@@ -159,7 +161,7 @@ func enrollmentSlot(slots []slotRow, requested string) (slotRow, error) {
 			return slot, nil
 		}
 	}
-	return slotRow{}, httpkit.Invalid("slot_id", "Unknown credential slot for this connection.")
+	return slotRow{}, problem.Invalid("slot_id", "Unknown credential slot for this connection.")
 }
 
 func (s *enrollmentService) continueGrantEnrollment(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
@@ -172,7 +174,7 @@ func (s *enrollmentService) continueGrantEnrollment(r *http.Request, _ authz.Pri
 		return httpkit.Reply{}, err
 	}
 	if input.Input == "" || len(input.Input) > maxGrantInput || strings.ContainsRune(input.Input, 0) {
-		return httpkit.Reply{}, httpkit.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
+		return httpkit.Reply{}, problem.Invalid("input", "Paste the callback URL, or the code the upstream displayed, in at most 8192 bytes.")
 	}
 	ctx := r.Context()
 	claim, err := access.Run(s.access, r, func(tx pgx.Tx, principal authz.Principal) (claimedEnrollment, access.Event, error) {
@@ -228,7 +230,7 @@ func (s *enrollmentService) stageGrant(ctx context.Context, tx pgx.Tx, principal
 	if err := principal.Project(locked.ProjectID, authz.Change); err != nil {
 		return enrollmentCompletion{}, err
 	}
-	stale := httpkit.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
+	stale := problem.Fail(409, "grant_enrollment_stale", "The connection's plugin profile, credential boundary or credential slot changed during grant enrollment. Start another.")
 	change, err := connection.Diff(current.Connection.Document(), locked.Connection.Document())
 	if err != nil {
 		return enrollmentCompletion{}, err

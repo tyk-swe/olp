@@ -3,7 +3,7 @@ package access
 import (
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -16,7 +16,7 @@ func ValidateRouteReferences(r *http.Request, q database.Queryer, routes []strin
 		return err
 	}
 	if mismatched {
-		return httpkit.Invalid("allowed_routes", "Allowed routes must belong to the key's project.")
+		return problem.Invalid("allowed_routes", "Allowed routes must belong to the key's project.")
 	}
 	return nil
 }

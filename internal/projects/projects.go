@@ -14,6 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 const projectFields = `'organization_id',p.organization_id,'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
@@ -28,7 +31,7 @@ func (s *Server) projects(r *http.Request, principal authz.Principal) (httpkit.R
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 AND ($3::uuid IS NULL OR p.organization_id=$3) ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1, nullableOrganizationPath(r))
+	items, err := database.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 AND ($3::uuid IS NULL OR p.organization_id=$3) ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1, nullableOrganizationPath(r))
 	return httpkit.ListReply(items, p), err
 }
 
@@ -62,7 +65,7 @@ func (s *Server) createProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 		return struct{}{}, organizationProject(r, tx, p, authz.Change)
 	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		input.Name = strings.TrimSpace(input.Name)
-		if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+		if err := textfield.Validate("name", input.Name, 100); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		id, etag, err := CreateProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
@@ -107,12 +110,12 @@ func (s *Server) updateProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		input.Name = strings.TrimSpace(input.Name)
-		if err = httpkit.ValidText("name", input.Name, 100); err != nil {
+		if err = textfield.Validate("name", input.Name, 100); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.projects SET name=$2,etag=$3,updated_at=now() WHERE id=$1", id, input.Name, etag); duplicateName(err) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "project_name_taken", "A project with this name already exists.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "project_name_taken", "A project with this name already exists.")
 		} else if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -147,7 +150,7 @@ func (s *Server) projectMembers(r *http.Request, principal authz.Principal) (htt
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3", id, p.Before, p.Limit+1)
+	items, err := database.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+projectMemberFields+")"+projectMemberFrom+" WHERE m.project_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3", id, p.Before, p.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -194,7 +197,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 			return httpkit.Reply{}, err
 		}
 		if input.Role != "manager" && input.Role != "viewer" {
-			return httpkit.Reply{}, httpkit.Invalid("role", "Use manager or viewer.")
+			return httpkit.Reply{}, problem.Invalid("role", "Use manager or viewer.")
 		}
 	}
 	projectID, err := httpkit.IDParam(r, "project_id")
@@ -243,7 +246,7 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (httpkit.Reply
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !hasManager {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_project_manager", "Keep at least one project manager.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "last_project_manager", "Keep at least one project manager.")
 		}
 		if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

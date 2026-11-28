@@ -14,6 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 )
@@ -120,26 +122,26 @@ func (s *Server) get(r *http.Request, p authz.Principal) (httpkit.Reply, error) 
 }
 func validateAndNormalize(in *input, policy *egress.Policy, project *string) error {
 	in.Name = strings.TrimSpace(in.Name)
-	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
+	if err := textfield.Validate("name", in.Name, 100); err != nil {
 		return err
 	}
 	if in.Enabled == nil {
-		return httpkit.Invalid("enabled", "Supply an explicit enabled flag.")
+		return problem.Invalid("enabled", "Supply an explicit enabled flag.")
 	}
 	if policy == nil {
-		return httpkit.Fail(503, "egress_policy_unavailable", "Export delivery requires provider egress policy.")
+		return problem.Fail(503, "egress_policy_unavailable", "Export delivery requires provider egress policy.")
 	}
 	target, err := policy.ValidateEndpoint(in.Destination)
 	if err != nil {
-		return httpkit.Invalid("destination", "The endpoint is not permitted by egress policy.")
+		return problem.Invalid("destination", "The endpoint is not permitted by egress policy.")
 	}
 	in.Destination = target.String()
 	if len(in.Streams) < 1 || len(in.Streams) > 4 {
-		return httpkit.Invalid("streams", "Choose supported content-free fact streams.")
+		return problem.Invalid("streams", "Choose supported content-free fact streams.")
 	}
 	for index, stream := range in.Streams {
 		if !slices.Contains([]string{"requests", "attempts", "guardrail_decisions", "audit", "runs", "trace_spans"}, stream) || slices.Contains(in.Streams[:index], stream) || (stream == "audit" && project != nil) {
-			return httpkit.Invalid("streams", "Use unique streams; audit export requires an installation sink.")
+			return problem.Invalid("streams", "Use unique streams; audit export requires an installation sink.")
 		}
 	}
 	return nil
@@ -218,10 +220,10 @@ func changeable(r *http.Request, current Definition, in input) error {
 		return err
 	}
 	if current.RetiredAt != nil {
-		return httpkit.Fail(409, "sink_retired", "Create a new sink instead of altering retained history.")
+		return problem.Fail(409, "sink_retired", "Create a new sink instead of altering retained history.")
 	}
 	if in.ProjectID != nil || in.Type != "" {
-		return httpkit.Invalid("project_id", "Sink project and type are immutable.")
+		return problem.Invalid("project_id", "Sink project and type are immutable.")
 	}
 	return nil
 }
@@ -246,14 +248,14 @@ func (s *Server) retireSink(r *http.Request, tx pgx.Tx, current Definition) (htt
 func (s *Server) createSink(r *http.Request, tx pgx.Tx, p authz.Principal, in input) (httpkit.Reply, access.Event, error) {
 	ctx := r.Context()
 	if in.Type != "https" {
-		return httpkit.Reply{}, access.Event{}, httpkit.Invalid("type", "Use the HTTPS JSON sink type.")
+		return httpkit.Reply{}, access.Event{}, problem.Invalid("type", "Use the HTTPS JSON sink type.")
 	}
 	var count int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM olp.managed_export_sinks WHERE retired_at IS NULL").Scan(&count); err != nil {
 		return httpkit.Reply{}, access.Event{}, err
 	}
 	if count >= 64 {
-		return httpkit.Reply{}, access.Event{}, httpkit.Invalid("sinks", "At most 64 active sinks are supported.")
+		return httpkit.Reply{}, access.Event{}, problem.Invalid("sinks", "At most 64 active sinks are supported.")
 	}
 	id, etag := ids.New(), ids.New()
 	if err := Insert(ctx, tx, id, in.spec(in.ProjectID), etag, p.UserID()); err != nil {
@@ -307,7 +309,7 @@ func signingCredential(raw json.RawMessage) (*string, error) {
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil || len(value) < 1 || len(value) > 4096 {
-		return nil, httpkit.Invalid("credential", "Use a signing credential of 1–4096 bytes or null.")
+		return nil, problem.Invalid("credential", "Use a signing credential of 1–4096 bytes or null.")
 	}
 	return &value, nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -35,7 +36,7 @@ type lockedResource struct {
 func lockResourceTx(ctx context.Context, tx pgx.Tx, rawID string, p authz.Principal) (lockedResource, error) {
 	expectedKind, id, err := resources.ParseLocalID(rawID)
 	if err != nil {
-		return lockedResource{}, httpkit.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
+		return lockedResource{}, problem.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
 	}
 	var kind string
 	var projectID *uuid.UUID
@@ -46,13 +47,13 @@ func lockResourceTx(ctx context.Context, tx pgx.Tx, rawID string, p authz.Princi
 		LEFT JOIN olp.routes rt ON rt.slug = r.route_slug
 		WHERE r.id = $1`, id).Scan(&kind, &projectID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lockedResource{}, httpkit.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
+		return lockedResource{}, problem.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
 	}
 	if err != nil {
 		return lockedResource{}, err
 	}
 	if kind != expectedKind {
-		return lockedResource{}, httpkit.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
+		return lockedResource{}, problem.Fail(http.StatusNotFound, "not_found", "No resource exists in this scope.")
 	}
 	var project *string
 	if projectID != nil {
@@ -67,7 +68,7 @@ func lockResourceTx(ctx context.Context, tx pgx.Tx, rawID string, p authz.Princi
 		WHERE resource_id = $1
 		FOR UPDATE`, id).Scan(&locked.templatesRaw, &locked.operation, &locked.remoteTerminated, &locked.terminalAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lockedResource{}, httpkit.Fail(http.StatusNotFound, "settlement_not_found", "This resource has no retained settlement owner.")
+		return lockedResource{}, problem.Fail(http.StatusNotFound, "settlement_not_found", "This resource has no retained settlement owner.")
 	}
 	if err != nil {
 		return lockedResource{}, err
@@ -90,13 +91,13 @@ func (a *API) reconcile(r *http.Request, _ authz.Principal) (httpkit.Reply, erro
 	}, func(tx pgx.Tx, _ authz.Principal, resource lockedResource) (httpkit.Reply, access.Event, error) {
 		err := a.settlements.RequestReconciliationTx(ctx, tx, resource.id, ptr.Value(input.UpstreamId))
 		if errors.Is(err, resources.ErrNotFound) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusNotFound, "settlement_not_found", "This resource has no retained settlement owner.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusNotFound, "settlement_not_found", "This resource has no retained settlement owner.")
 		}
 		if errors.Is(err, resources.ErrSettlementClosed) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "settlement_closed", "This resource's retained settlement is already closed.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "settlement_closed", "This resource's retained settlement is already closed.")
 		}
 		if errors.Is(err, resources.ErrContract) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("upstream_id", "Reconciliation hint must be at most 512 bytes.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("upstream_id", "Reconciliation hint must be at most 512 bytes.")
 		}
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -142,7 +143,7 @@ func (a *API) recordRetainedEvidence(ctx context.Context, tx pgx.Tx, p authz.Pri
 	}
 	lines := retainedEvidenceLines(resource.operation, model, input)
 	if len(lines) == 0 {
-		return "", httpkit.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
+		return "", problem.Invalid("quantities", "Applicable quantities are required; omitted quantities are unknown.")
 	}
 	observed := time.Now().UTC()
 	if resource.remoteTerminated && resource.terminalAt != nil {
@@ -163,10 +164,10 @@ func (a *API) recordRetainedEvidence(ctx context.Context, tx pgx.Tx, p authz.Pri
 		Observation: observation,
 	})
 	if errors.Is(err, resources.ErrEvidenceConflict) {
-		return "", httpkit.Fail(http.StatusConflict, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
+		return "", problem.Fail(http.StatusConflict, "evidence_conflict", "Evidence overlaps or conflicts with already accounted coverage.")
 	}
 	if errors.Is(err, resources.ErrContract) {
-		return "", httpkit.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
+		return "", problem.Invalid("evidence", "Supply a nonnegative exact quantity, SHA-256 digest, idempotency key, and UTC interval.")
 	}
 	if err != nil {
 		return "", err
@@ -188,7 +189,7 @@ func resolveEvidenceModel(templatesRaw []byte, requested string) (string, error)
 		}
 	}
 	if templates[model] == nil {
-		return "", httpkit.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
+		return "", problem.Invalid("model", "Choose a model pinned by this resource's original acceptance.")
 	}
 	return model, nil
 }

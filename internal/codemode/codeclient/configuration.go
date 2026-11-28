@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode/codexauth"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
@@ -27,17 +27,17 @@ type Request struct {
 func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientConfiguration, error) {
 	empty := codemode.ClientConfiguration{}
 	if !route.Enabled || route.RevisionID == "" || !routeidentity.ValidSlug(route.Slug) {
-		return empty, httpkit.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
+		return empty, problem.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
 	}
 	platform := cmp.Or(in.Platform, "linux")
 	if !slices.Contains([]string{"linux", "macos", "windows"}, platform) {
-		return empty, httpkit.Invalid("platform", "Choose Linux, macOS or Windows.")
+		return empty, problem.Invalid("platform", "Choose Linux, macOS or Windows.")
 	}
 	if err := codemode.ValidateModels(route.Models); err != nil {
-		return empty, httpkit.Invalid("models", err.Error())
+		return empty, problem.Invalid("models", err.Error())
 	}
 	if err := route.ValidateAliases(); err != nil {
-		return empty, httpkit.Invalid("aliases", err.Error())
+		return empty, problem.Invalid("aliases", err.Error())
 	}
 	catalog := Catalog(route, offers)
 	client, supported, native, adapters, err := clientModels(route, offers, catalog, in.Client)
@@ -46,7 +46,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}
 	model := cmp.Or(in.Model, native[0])
 	if !slices.Contains(native, model) {
-		return empty, httpkit.Invalid("model", nativeModel)
+		return empty, problem.Invalid("model", nativeModel)
 	}
 	plan, err := companionModel(client, "plan_model", "planning", in.PlanModel, model, native)
 	if err != nil {
@@ -68,7 +68,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		selected = append(selected, *companion.model)
 		var ok bool
 		if through, ok = offers.through(route, client, selected); !ok {
-			return empty, httpkit.Invalid(companion.field, "These models cannot share a conversation. Choose models from compatible subscriptions or only paid API targets.")
+			return empty, problem.Invalid(companion.field, "These models cannot share a conversation. Choose models from compatible subscriptions or only paid API targets.")
 		}
 	}
 	baseURL, err := clientBaseURL(in.GatewayURL, route.BasePath())
@@ -121,13 +121,13 @@ const nativeModel = "Choose a published model or exact alias this route serves f
 func companionModel(client, field, role, selected, model string, native []string) (*string, error) {
 	switch {
 	case client == codeadapter.ClientCodex && selected != "":
-		return nil, httpkit.Invalid(field, "Codex takes no separate "+role+" model.")
+		return nil, problem.Invalid(field, "Codex takes no separate "+role+" model.")
 	case client == codeadapter.ClientCodex:
 		return nil, nil
 	case selected == "":
 		return &model, nil
 	case !slices.Contains(native, selected):
-		return nil, httpkit.Invalid(field, nativeModel)
+		return nil, problem.Invalid(field, nativeModel)
 	}
 	return &selected, nil
 }
@@ -179,7 +179,7 @@ func clientModels(route codemode.Route, offers Offers, catalog []codemode.Model,
 		}
 	}
 	if len(supported) == 0 {
-		return "", nil, nil, nil, httpkit.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
+		return "", nil, nil, nil, problem.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
 	}
 	client := cmp.Or(requested, supported[0])
 	if !slices.Contains(supported, client) {
@@ -187,7 +187,7 @@ func clientModels(route codemode.Route, offers Offers, catalog []codemode.Model,
 		for i, c := range supported {
 			names[i] = clientNames[c]
 		}
-		return "", nil, nil, nil, httpkit.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
+		return "", nil, nil, nil, problem.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
 	}
 	var native []string
 	var adapters []codemode.Adapter
@@ -211,14 +211,14 @@ func clientModels(route codemode.Route, offers Offers, catalog []codemode.Model,
 func clientBaseURL(raw, path string) (string, error) {
 	base, err := url.Parse(raw)
 	if err != nil || base.Host == "" || base.User != nil || base.ForceQuery || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
-		return "", httpkit.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
+		return "", problem.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
 	}
 	local := base.Hostname() == "localhost"
 	if ip := net.ParseIP(base.Hostname()); ip != nil {
 		local = ip.IsLoopback()
 	}
 	if base.Scheme != "https" && !(base.Scheme == "http" && local) {
-		return "", httpkit.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
+		return "", problem.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + path
 	base.RawPath = ""

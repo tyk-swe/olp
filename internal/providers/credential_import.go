@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode/codexauth"
 	"github.com/tyk-swe/olp/internal/codesessions/codeaccounts"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/plugin/abi"
 )
@@ -62,14 +63,14 @@ func (s *enrollmentService) importCredentialsAs(r *http.Request, p authz.Princip
 	cfg := current.Connection.Document()
 	vendor, supported := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	if !supported || vendor.Adapter != adapter {
-		return httpkit.Reply{}, httpkit.Invalid("credentials", "This connection does not use the selected subscription profile.")
+		return httpkit.Reply{}, problem.Invalid("credentials", "This connection does not use the selected subscription profile.")
 	}
 	served, err := cfg.Serving()
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
 	if err := codeaccounts.ValidateConnection(r.Context(), s.plugins, served, vendor); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
+		return httpkit.Reply{}, problem.Invalid("credentials", "This connection must use the unmodified subscription plugin and configuration.")
 	}
 	slot, err := s.credentialImportSlot(r, id, input.SlotID)
 	if err != nil {
@@ -81,14 +82,14 @@ func (s *enrollmentService) importCredentialsAs(r *http.Request, p authz.Princip
 	}
 	credentials, err := prepareCredentialImport(r.Context(), adapter, input.Credentials, cfg.Options.PluginOptions["client_id"], client)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("credentials", "Could not verify the supported credential format and original account. Sign in again and retry.")
+		return httpkit.Reply{}, problem.Invalid("credentials", "Could not verify the supported credential format and original account. Sign in again and retry.")
 	}
 	grant, err := s.plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.refresh, client, credentials.secrets)
 	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
 		if auditErr := s.auditFailedEnrollment(r, id); auditErr != nil {
 			return httpkit.Reply{}, auditErr
 		}
-		return httpkit.Reply{}, httpkit.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
+		return httpkit.Reply{}, problem.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
 	}
 	verified := abi.Grant{AccessToken: grant.AccessToken, RefreshToken: cmp.Or(grant.RefreshToken, credentials.refresh.RefreshToken),
 		ExpiresIn: grant.ExpiresIn, Principal: grant.Principal, Facts: grant.Facts}
@@ -98,14 +99,14 @@ func (s *enrollmentService) importCredentialsAs(r *http.Request, p authz.Princip
 func (s *enrollmentService) credentialImportSlot(r *http.Request, providerID, slotID string) (credentialImportSlot, error) {
 	identifier, parseErr := uuid.Parse(slotID)
 	if slotID != "" && parseErr != nil {
-		return credentialImportSlot{}, httpkit.Invalid("slot_id", "Use a credential slot identifier.")
+		return credentialImportSlot{}, problem.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	var slot credentialImportSlot
 	err := s.access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
 		FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id
 		WHERE s.provider_id=$1 AND (($3 AND s.is_default) OR (NOT $3 AND s.id=$2))`, providerID, identifier, slotID == "").Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return credentialImportSlot{}, httpkit.Invalid("slot_id", "Unknown credential slot for this connection.")
+		return credentialImportSlot{}, problem.Invalid("slot_id", "Unknown credential slot for this connection.")
 	}
 	return slot, err
 }
@@ -124,7 +125,7 @@ func (s *enrollmentService) stageCredentialImport(request *http.Request, current
 		}
 		completed, err := bindGrant(ctx, tx, grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
 			Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}},
-			httpkit.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
+			problem.Fail(409, string(adapter)+"_import_stale", "The credential slot changed during import. Reload before retrying."))
 		if err != nil {
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -171,6 +172,6 @@ func prepareCredentialImport(ctx context.Context, adapter codemode.Adapter, inpu
 			return grant.Principal == antigravityauth.Principal(refresh.Facts["subject"], refresh.Facts["project_id"]) && maps.Equal(grant.Facts, refresh.Facts)
 		}}, nil
 	default:
-		return importedCredential{}, httpkit.Invalid("credentials", "This subscription profile does not support credential import.")
+		return importedCredential{}, problem.Invalid("credentials", "This subscription profile does not support credential import.")
 	}
 }

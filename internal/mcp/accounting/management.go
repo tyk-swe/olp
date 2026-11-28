@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/limits/debits"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -82,10 +83,10 @@ func loadToolCall(ctx context.Context, q database.Queryer, id string) (ToolCall,
 
 func validateToolCallFilters(apiKeyID, toolsetID string) error {
 	if apiKeyID != "" && !ids.Canonical(apiKeyID) {
-		return httpkit.Invalid("api_key_id", "Use a canonical UUID.")
+		return problem.Invalid("api_key_id", "Use a canonical UUID.")
 	}
 	if toolsetID != "" && !ids.Canonical(toolsetID) {
-		return httpkit.Invalid("toolset_id", "Use a canonical UUID.")
+		return problem.Invalid("toolset_id", "Use a canonical UUID.")
 	}
 	return nil
 }
@@ -119,7 +120,7 @@ func resolveAmount(raw *string, field string) (string, error) {
 		return "0", nil
 	}
 	if !resolveAmountPattern.MatchString(*raw) {
-		return "", httpkit.Invalid(field, "Use a non-negative decimal amount.")
+		return "", problem.Invalid(field, "Use a non-negative decimal amount.")
 	}
 	return *raw, nil
 }
@@ -130,20 +131,20 @@ func resolveAmountIsZero(amount string) bool {
 
 func checkResolveBounds(call ToolCall, observedCost, observedCharge string) error {
 	if !limits.WithinBound(call.CostBound, call.ObservedCost, observedCost) {
-		return httpkit.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
+		return problem.Invalid("observed_cost", "The observed cost exceeds the held debit bound.")
 	}
 	if !limits.WithinBound(call.ChargeBound, call.ObservedCharge, observedCharge) {
-		return httpkit.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
+		return problem.Invalid("observed_charge", "The observed charge exceeds the held debit bound.")
 	}
 	return nil
 }
 
 func validateResolveInput(outcome ResolveOutcome, evidenceDigest string) error {
 	if outcome != ResolveSettled && outcome != ResolveNotAccepted {
-		return httpkit.Invalid("outcome", "Use settled or not_accepted.")
+		return problem.Invalid("outcome", "Use settled or not_accepted.")
 	}
 	if _, ok := parseEvidenceDigest(evidenceDigest); !ok {
-		return httpkit.Invalid("evidence_digest", "Use a lowercase SHA-256 hex digest of the reviewed evidence.")
+		return problem.Invalid("evidence_digest", "Use a lowercase SHA-256 hex digest of the reviewed evidence.")
 	}
 	return nil
 }
@@ -186,7 +187,7 @@ func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply,
 		return httpkit.Reply{}, err
 	}
 	if request.Outcome == ResolveNotAccepted && (!resolveAmountIsZero(observedCost) || !resolveAmountIsZero(observedCharge)) {
-		return httpkit.Reply{}, httpkit.Invalid("observed_cost", "A not accepted finding requires zero observed amounts.")
+		return httpkit.Reply{}, problem.Invalid("observed_cost", "A not accepted finding requires zero observed amounts.")
 	}
 	evidence, _ := parseEvidenceDigest(request.EvidenceDigest)
 	call, err := loadToolCall(r.Context(), m.access.Pool, id)
@@ -204,10 +205,10 @@ func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply,
 		if found && bytes.Equal(stored, evidence) && limits.AmountEqual(call.ObservedCost, observedCost) && limits.AmountEqual(call.ObservedCharge, observedCharge) {
 			return httpkit.Detail(call, call.ID), nil
 		}
-		return httpkit.Reply{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+		return httpkit.Reply{}, problem.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 	}
 	if call.Status != StatusOutcomeUnknown {
-		return httpkit.Reply{}, httpkit.Fail(409, "tool_call_not_unknown", "Only a tool call with an unknown outcome can be resolved.")
+		return httpkit.Reply{}, problem.Fail(409, "tool_call_not_unknown", "Only a tool call with an unknown outcome can be resolved.")
 	}
 	if request.Outcome == ResolveSettled {
 		if err = checkResolveBounds(call, observedCost, observedCharge); err != nil {
@@ -232,7 +233,7 @@ func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply,
 		}
 		if err != nil {
 			if errors.Is(err, debits.ErrState) || errors.Is(err, debits.ErrConflict) {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 			}
 			return httpkit.Reply{}, access.Event{}, err
 		}
@@ -241,7 +242,7 @@ func (m *Management) resolve(r *http.Request, p authz.Principal) (httpkit.Reply,
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if tag.RowsAffected() != 1 {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "debit_already_resolved", "This held debit was already resolved by different evidence.")
 		}
 		updated, err := loadToolCall(r.Context(), tx, id)
 		if err != nil {

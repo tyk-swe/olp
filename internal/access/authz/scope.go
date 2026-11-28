@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 // Need is how a principal uses a project-bound resource.
@@ -28,14 +28,14 @@ func (p Principal) Project(projectID *string, need Need) error {
 		return nil
 	}
 	if projectID == nil {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	role, ok := p.Projects[*projectID]
 	if !ok {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	if need == Change && role != "manager" {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return nil
 }
@@ -46,7 +46,7 @@ func (p Principal) ProjectFilter(r *http.Request) (string, error) {
 		return "", nil
 	}
 	if !ids.Canonical(project) {
-		return "", httpkit.Invalid("project_id", "Use a canonical project UUID.")
+		return "", problem.Invalid("project_id", "Use a canonical project UUID.")
 	}
 	if err := p.Project(&project, View); err != nil {
 		return "", err
@@ -73,10 +73,10 @@ func (p Principal) Organization(id string, need Need) error {
 	}
 	role, ok := p.Organizations[id]
 	if !ok {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	if need == Change && role != "manager" {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return nil
 }

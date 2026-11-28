@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/signing"
@@ -309,7 +309,7 @@ func signedCatalog(t *testing.T, published time.Time) ([]byte, []byte, signing.K
 }
 
 func problemCode(err error) string {
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if errors.As(err, &problem) {
 		return problem.Code
 	}

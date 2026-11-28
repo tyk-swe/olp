@@ -14,7 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -111,7 +113,7 @@ func (s *draftService) updateProvider(r *http.Request, _ authz.Principal) (httpk
 	if err = httpkit.DecodeUnique(r, &input, 1<<20); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err = httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err = textfield.Validate("name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return access.Transact(s.access, r, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, access.Event, error) {
@@ -209,7 +211,7 @@ func (s *draftService) restoreDraft(ctx context.Context, tx pgx.Tx, current *rec
 func (s *draftService) restoreActiveAsDraft(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	return providerMutation(s.access, r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		if current.ActiveRevisionID == nil {
-			return httpkit.Reply{}, httpkit.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
+			return httpkit.Reply{}, problem.Fail(409, "invalid_state", "This connection has no activated revision to restore.")
 		}
 		v, err := loadRevision(ctx, tx, current.ID, *current.ActiveRevisionID)
 		if err != nil {
@@ -227,7 +229,7 @@ func (s *draftService) restoreRevisionAsDraft(r *http.Request, _ authz.Principal
 	return providerMutation(s.access, r, "provider.restore", nil, func(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (httpkit.Reply, error) {
 		v, err := loadRevision(ctx, tx, current.ID, ref)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return httpkit.Reply{}, httpkit.Fail(404, "not_found", "Unknown revision.")
+			return httpkit.Reply{}, problem.Fail(404, "not_found", "Unknown revision.")
 		}
 		if err != nil {
 			return httpkit.Reply{}, err
@@ -268,7 +270,7 @@ func normalizeSlotRestrictions(restrictions SlotRestrictions) SlotRestrictions {
 }
 
 func (s *draftService) createDraft(ctx context.Context, tx pgx.Tx, p authz.Principal, input createRequest, credential credentialSource) (createdProvider, error) {
-	if err := httpkit.ValidText("name", input.Name, 100); err != nil {
+	if err := textfield.Validate("name", input.Name, 100); err != nil {
 		return createdProvider{}, err
 	}
 	prepared, err := connection.Prepare(ctx, s.connectionPolicy(tx), input.Configuration)
@@ -278,11 +280,11 @@ func (s *draftService) createDraft(ctx context.Context, tx pgx.Tx, p authz.Princ
 	configuration := prepared.Document()
 	switch {
 	case configuration.Grant() && credential != nil:
-		return createdProvider{}, httpkit.Invalid("credential", grantEnrollmentOnly)
+		return createdProvider{}, problem.Invalid("credential", grantEnrollmentOnly)
 	case configuration.CredentialRequired() && !configuration.Grant() && credential == nil:
-		return createdProvider{}, httpkit.Invalid("credential", "This authentication mode requires a credential.")
+		return createdProvider{}, problem.Invalid("credential", "This authentication mode requires a credential.")
 	case !configuration.CredentialRequired() && credential != nil:
-		return createdProvider{}, httpkit.Invalid("credential", "This authentication mode takes no stored credential.")
+		return createdProvider{}, problem.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
 	displayName := cmp.Or(ptr.Value(input.DisplayName), ptr.Value(input.Model))
 	if input.Model != nil {
@@ -389,7 +391,7 @@ func preserveCredentialBoundary(ctx context.Context, q database.Queryer, provide
 		return err
 	}
 	if stored {
-		return httpkit.Fail(422, "credential_destination_changed", "This provider owns unrevoked credential versions bound to its authentication, endpoint, network and profile. Create a new provider or revoke every old credential before supplying credentials for a different destination.")
+		return problem.Fail(422, "credential_destination_changed", "This provider owns unrevoked credential versions bound to its authentication, endpoint, network and profile. Create a new provider or revoke every old credential before supplying credentials for a different destination.")
 	}
 	return nil
 }
@@ -501,7 +503,7 @@ func (s *draftService) stageDraftInventory(ctx context.Context, tx pgx.Tx, provi
 			return err
 		}
 		if result.RowsAffected() != 1 {
-			return httpkit.Invalid("slots", "Slot identity belongs to another provider.")
+			return problem.Invalid("slots", "Slot identity belongs to another provider.")
 		}
 	}
 	_, err := touchSlots(ctx, tx, providerID)

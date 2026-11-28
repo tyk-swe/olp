@@ -7,7 +7,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -72,7 +72,7 @@ func parseTimeZone(value nullable.Nullable[string]) (*string, error) {
 		return nil, nil
 	}
 	if err := access.ValidateBudgetTimeZone(*zone); err != nil {
-		return nil, httpkit.Invalid("budget_time_zone", "Use a supported IANA time zone.")
+		return nil, problem.Invalid("budget_time_zone", "Use a supported IANA time zone.")
 	}
 	return zone, nil
 }

@@ -7,10 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -34,7 +35,7 @@ type Project struct {
 
 func Parse(document contract.ConfigurationDocument) ([]Project, error) {
 	if len(document.Projects) > maxProjects {
-		return nil, httpkit.Invalid("projects", "Declare at most 100 projects.")
+		return nil, problem.Invalid("projects", "Declare at most 100 projects.")
 	}
 	declared, err := promotion.Convert[[]Project](document.Projects)
 	if err != nil {
@@ -74,11 +75,11 @@ func validate(projects []Project, routes []contract.ConfigurationRouteEntry) err
 			return err
 		}
 		field := "projects." + strconv.Itoa(i) + ".name"
-		if err := httpkit.ValidText(field, project.Name, 100); err != nil {
+		if err := textfield.Validate(field, project.Name, 100); err != nil {
 			return err
 		}
 		if first[strings.ToLower(project.Name)] != i {
-			return httpkit.Invalid(field, "Project names must be unique.")
+			return problem.Invalid(field, "Project names must be unique.")
 		}
 	}
 	return nil
@@ -97,7 +98,7 @@ func (p Project) validate(routes []contract.ConfigurationRouteEntry) error {
 		}
 	}
 	if p.EndUserTemplate != nil && !routeidentity.ValidSlug(*p.EndUserTemplate) {
-		return httpkit.Invalid("end_user_limit_template", "Use a valid template name.")
+		return problem.Invalid("end_user_limit_template", "Use a valid template name.")
 	}
 	if err := p.RouteGroups.Validate(); err != nil {
 		return err
@@ -106,7 +107,7 @@ func (p Project) validate(routes []contract.ConfigurationRouteEntry) error {
 		return foreignRoutes()
 	}
 	if p.Attribution != nil && p.Attribution.Validate() != nil {
-		return httpkit.Invalid("projects.attribution_policy", "Use at most four distinct valid attribution labels.")
+		return problem.Invalid("projects.attribution_policy", "Use at most four distinct valid attribution labels.")
 	}
 	if p.EndUserDefaults != nil {
 		return p.EndUserDefaults.ValidateAndNormalize()

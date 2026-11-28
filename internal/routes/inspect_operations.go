@@ -3,7 +3,7 @@ package routes
 import (
 	"encoding/json"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
@@ -27,7 +27,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	}
 	doc, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 1 << 20})
 	if err != nil {
-		return nil, nil, nil, httpkit.Invalid("request", "Use one bounded unambiguous native request.")
+		return nil, nil, nil, problem.Invalid("request", "Use one bounded unambiguous native request.")
 	}
 	tuple := len(doc.Root().Members()) > 0
 	for _, member := range doc.Root().Members() {
@@ -38,7 +38,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	}
 	if vendors.IsMediaOperation(operation) {
 		if surface != "openai" || mode != "unary" && mode != "streaming" || media.Operation(operation) != media.OpImageGeneration && media.Operation(operation) != media.OpSpeech {
-			return nil, nil, nil, httpkit.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
+			return nil, nil, nil, problem.Invalid("request", "This media source requires a live multipart or lifecycle invocation; the inspector cannot stage its assets.")
 		}
 		var request *media.Request
 		var failure *media.Error
@@ -48,7 +48,7 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 			request, failure = media.DecodeSpeech(raw)
 		}
 		if failure != nil || request.Route() != slug || request.Mode() != mode {
-			return nil, nil, nil, httpkit.Invalid("request", "Use a native media request naming this route and delivery mode.")
+			return nil, nil, nil, problem.Invalid("request", "Use a native media request naming this route and delivery mode.")
 		}
 		return nil, nil, request, nil
 	}
@@ -58,14 +58,14 @@ func (s *Server) inspectorAnyRequest(raw json.RawMessage, operation, surface, mo
 	}
 	codec, ok := operationregistry.Lookup(dialect)
 	if !ok || codec.Operation.ID != operation || mode != "unary" || surface != "native" && surface != codec.Surface {
-		return nil, nil, nil, httpkit.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
+		return nil, nil, nil, problem.Invalid("dialect", "Choose a registered unary dialect for this operation and surface.")
 	}
 	request, err := unary.Parse(dialect, raw, 1<<20)
 	if err != nil {
-		return nil, nil, nil, httpkit.Invalid("request", "Use a valid native operation source.")
+		return nil, nil, nil, problem.Invalid("request", "Use a valid native operation source.")
 	}
 	if err := protocols.ValidateOperationInlineMedia(doc, codec.Identity, s.InlineMedia); err != nil {
-		return nil, nil, nil, httpkit.Invalid("request", err.Error())
+		return nil, nil, nil, problem.Invalid("request", err.Error())
 	}
 	return nil, &request, nil, nil
 }

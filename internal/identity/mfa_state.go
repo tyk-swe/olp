@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -189,7 +190,7 @@ func (s *mfaService) loadMFAFlow(r *http.Request, tx pgx.Tx, token string) (mfaF
 func (s *mfaService) readMFAFlow(r *http.Request, q database.Queryer, token string, lock bool) (mfaFlow, error) {
 	var f mfaFlow
 	if len(token) > 256 {
-		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return f, problem.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	query := mfaFlowSelectSQL
 	if lock {
@@ -197,7 +198,7 @@ func (s *mfaService) readMFAFlow(r *http.Request, q database.Queryer, token stri
 	}
 	err := q.QueryRow(r.Context(), query, s.access.Auth.Digest(secrets.MFAChallengeDigest, token)).Scan(&f.ID, &f.UserID, &f.UserETag, &f.Revision, &f.SessionID, &f.SecretID, &f.Purpose, &f.Data)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return f, problem.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	if err != nil {
 		return f, err
@@ -208,13 +209,13 @@ func (s *mfaService) readMFAFlow(r *http.Request, q database.Queryer, token stri
 			return f, e
 		}
 		if !enabled {
-			return f, httpkit.Fail(401, "mfa_challenge_invalid", "Local sign-in is unavailable. Start authentication again.")
+			return f, problem.Fail(401, "mfa_challenge_invalid", "Local sign-in is unavailable. Start authentication again.")
 		}
 		return f, nil
 	}
 	p, err := s.access.Authenticate(r, q)
 	if err != nil || p.SessionID != *f.SessionID || p.ID != f.UserID {
-		return f, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return f, problem.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 	return f, nil
 }
@@ -242,7 +243,7 @@ func (s *mfaService) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose st
 		methods = append(methods, "webauthn")
 	}
 	if purpose != "bootstrap" && len(methods) == 0 {
-		return httpkit.Reply{}, httpkit.Fail(403, "mfa_recovery_required", "No enrolled factor is available at this public origin. Restore the WebAuthn origin or use offline account recovery.")
+		return httpkit.Reply{}, problem.Fail(403, "mfa_recovery_required", "No enrolled factor is available at this public origin. Restore the WebAuthn origin or use offline account recovery.")
 	}
 	token, until, err := s.storeMFAFlow(r, tx, mfaFlow{ID: ids.New(), UserID: userID, SessionID: session, Purpose: purpose, Data: flowData})
 	if err != nil {

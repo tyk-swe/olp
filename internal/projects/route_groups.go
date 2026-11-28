@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 )
 
@@ -38,7 +39,7 @@ func (s *Server) putProjectRouteGroups(r *http.Request, _ authz.Principal) (http
 		return httpkit.Reply{}, err
 	}
 	if input.Groups == nil {
-		return httpkit.Reply{}, httpkit.Invalid("groups", "Provide the group map; an empty object removes all groups.")
+		return httpkit.Reply{}, problem.Invalid("groups", "Provide the group map; an empty object removes all groups.")
 	}
 	if err = input.Groups.Validate(); err != nil {
 		return httpkit.Reply{}, err

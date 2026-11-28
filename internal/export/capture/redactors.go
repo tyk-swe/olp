@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -38,7 +38,7 @@ func pin(ctx context.Context, q database.Queryer, project string, names []string
 		return nil, err
 	}
 	if !resolvedInOrder(found, len(names)) {
-		return nil, httpkit.Invalid("redact", "each name must resolve to one active, non-retired local regex, PII, secrets or keywords detector in the policy project")
+		return nil, problem.Invalid("redact", "each name must resolve to one active, non-retired local regex, PII, secrets or keywords detector in the policy project")
 	}
 	pins := make([]Redactor, len(found))
 	definitions := make(map[string]guardrails.Revision, len(found))
@@ -48,7 +48,7 @@ func pin(ctx context.Context, q database.Queryer, project string, names []string
 		definitions[d.ID] = d
 	}
 	if _, err := compile(project, names, pins, definitions); err != nil {
-		return nil, httpkit.Invalid("redact", "capture detector revisions could not be compiled")
+		return nil, problem.Invalid("redact", "capture detector revisions could not be compiled")
 	}
 	return pins, nil
 }

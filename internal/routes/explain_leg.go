@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/media"
@@ -23,13 +23,13 @@ func resolveSimulationAttribution(input simulationInput, key *inspectionKeyConte
 	if key.id != "" {
 		for name := range input.Attribution {
 			if !slices.Contains(key.authority.Policy.AllowedAttributionKeys, name) && key.authority.Policy.AttributionDefaults[name] == "" && key.authority.ProjectAttributionPolicy.Defaults[name] == "" {
-				return simulationInput{}, httpkit.Invalid("attribution", "An attribution label is not allowed by the selected key.")
+				return simulationInput{}, problem.Invalid("attribution", "An attribution label is not allowed by the selected key.")
 			}
 		}
 	}
 	labels, err := key.authority.ResolveAttribution(input.Attribution)
 	if err != nil {
-		return simulationInput{}, httpkit.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
+		return simulationInput{}, problem.Invalid("attribution", "Attribution does not satisfy the key and project policies.")
 	}
 	key.authority.Attribution, input.Attribution = labels, labels
 	return input, nil

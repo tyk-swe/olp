@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -116,16 +116,16 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority keya
 		return err
 	}
 	if current.ID != authority.ID || project == nil {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	if scope == "inference" && (!current.Allows(scope, resource, project, time.Now()) || !slices.Contains(current.TaskCapability.RouteRevisions, revision)) {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	if scope == "tools" && (!current.AllowsResource(scope, resource, *project, time.Now()) || !slices.Contains(current.TaskCapability.ToolsetRevisions, revision)) {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	if scope != "inference" && scope != "tools" {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return admitTaskCallback(ctx, m.taskCapabilities(), digest, scope, accountingID)
 }

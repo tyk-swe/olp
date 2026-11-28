@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/agentcontract"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type draftRequest struct {
@@ -36,7 +37,7 @@ func decodeChange(r *http.Request, kind, action string) (change, error) {
 			return change{}, err
 		}
 		if err := request.Draft.Validate(kind); err != nil {
-			return change{}, httpkit.Invalid("draft", err.Error())
+			return change{}, problem.Invalid("draft", err.Error())
 		}
 		input, err := json.Marshal(request)
 		return change{draft: request, input: input}, err
@@ -86,7 +87,7 @@ func (s *Server) apply(r *http.Request, tx pgx.Tx, p authz.Principal, current *a
 			return agentcontract.Publication{}, err
 		}
 		if next.Kind == "agent" && (s.validateAgent == nil || s.validateAgent(r.Context(), *next.Draft.Agent) != nil) {
-			return agentcontract.Publication{}, httpkit.Invalid("agent", "The pinned agent card must declare the configured protocol and JSON-RPC endpoint.")
+			return agentcontract.Publication{}, problem.Invalid("agent", "The pinned agent card must declare the configured protocol and JSON-RPC endpoint.")
 		}
 		return next, nil
 	case "retire", "label":
@@ -99,7 +100,7 @@ func (s *Server) apply(r *http.Request, tx pgx.Tx, p authz.Principal, current *a
 		_, err := tx.Exec(r.Context(), `UPDATE olp.agent_publications SET retired=$2,etag=$3 WHERE id=$1`, next.ID, next.Retired, next.ETag)
 		return next, err
 	default:
-		return agentcontract.Publication{}, httpkit.Invalid("action", "Unknown publication action.")
+		return agentcontract.Publication{}, problem.Invalid("action", "Unknown publication action.")
 	}
 }
 func (s *Server) write(r *http.Request, kind, action string) (httpkit.Reply, error) {
@@ -115,14 +116,14 @@ func (s *Server) write(r *http.Request, kind, action string) (httpkit.Reply, err
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if current.Retired {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "publication_retired", "Retired history cannot be changed.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "publication_retired", "Retired history cannot be changed.")
 			}
 		}
 		next, applyErr := s.apply(r, tx, principal, current, kind, action, input)
 		if applyErr != nil {
 			var pg *pgconn.PgError
 			if errors.As(applyErr, &pg) && pg.Code == "23505" {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "publication_exists", "Choose an unused name in this project.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "publication_exists", "Choose an unused name in this project.")
 			}
 			return httpkit.Reply{}, access.Event{}, applyErr
 		}

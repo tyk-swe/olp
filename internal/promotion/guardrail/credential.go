@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails/credential"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -44,7 +44,7 @@ func ensureCredential(ctx context.Context, tx pgx.Tx, p authz.Principal, vault V
 	}
 	sealed, ok := binding.(promotion.Sealed)
 	if !ok {
-		return httpkit.Invalid("secret_bindings", unboundCredential)
+		return problem.Invalid("secret_bindings", unboundCredential)
 	}
 	_, err = credential.Create(ctx, tx, vault.Keys, vault.Installation, credential.New{ProjectID: project, Name: string(ref), Secret: []byte(sealed.Secret), CreatedBy: p.UserID()})
 	return err
@@ -56,7 +56,7 @@ func credentialID(ctx context.Context, q database.Queryer, project *string) reso
 	return func(name string) (string, error) {
 		id, found, err := credential.FindID(ctx, q, project, name)
 		if err == nil && !found {
-			return "", httpkit.Invalid("secret_bindings", unboundCredential)
+			return "", problem.Invalid("secret_bindings", unboundCredential)
 		}
 		return id, err
 	}

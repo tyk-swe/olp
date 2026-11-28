@@ -11,8 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 var (
@@ -31,23 +31,23 @@ type awsScope struct {
 func parseAWSScope(raw json.RawMessage) (awsScope, error) {
 	var scope awsScope
 	if err := decodeStrict(raw, &scope); errors.Is(err, errTrailingData) {
-		return awsScope{}, httpkit.Invalid("scope", "scope must be a single JSON document")
+		return awsScope{}, problem.Invalid("scope", "scope must be a single JSON document")
 	} else if err != nil {
-		return awsScope{}, httpkit.Invalid("scope", "AWS scope must be a JSON object with only AWS keys")
+		return awsScope{}, problem.Invalid("scope", "AWS scope must be a JSON object with only AWS keys")
 	}
 	switch {
 	case !awsAccount.MatchString(scope.PayerAccountID):
-		return awsScope{}, httpkit.Invalid("scope.payer_account_id", "payer account ID must contain 12 digits")
+		return awsScope{}, problem.Invalid("scope.payer_account_id", "payer account ID must contain 12 digits")
 	case !connectors.ValidS3Bucket(scope.Bucket):
-		return awsScope{}, httpkit.Invalid("scope.bucket", "bucket must be a valid S3 bucket name")
+		return awsScope{}, problem.Invalid("scope.bucket", "bucket must be a valid S3 bucket name")
 	case len(scope.ReportPrefix) < 1 || len(scope.ReportPrefix) > 1024 || strings.HasPrefix(scope.ReportPrefix, "/") || strings.HasSuffix(scope.ReportPrefix, "/") || strings.Contains(scope.ReportPrefix, "..") || strings.ContainsAny(scope.ReportPrefix, "\r\n\x00"):
-		return awsScope{}, httpkit.Invalid("scope.report_prefix", "report prefix must name the CUR report")
+		return awsScope{}, problem.Invalid("scope.report_prefix", "report prefix must name the CUR report")
 	case !awsRegion.MatchString(scope.Region) || len(scope.Region) > 64:
-		return awsScope{}, httpkit.Invalid("scope.region", "region must be an AWS region")
+		return awsScope{}, problem.Invalid("scope.region", "region must be an AWS region")
 	case len(scope.LinkedAccountIDs) > 100:
-		return awsScope{}, httpkit.Invalid("scope.linked_account_ids", "at most 100 linked accounts")
+		return awsScope{}, problem.Invalid("scope.linked_account_ids", "at most 100 linked accounts")
 	case slices.ContainsFunc(scope.LinkedAccountIDs, func(id string) bool { return !awsAccount.MatchString(id) }):
-		return awsScope{}, httpkit.Invalid("scope.linked_account_ids", "linked account IDs must contain 12 digits")
+		return awsScope{}, problem.Invalid("scope.linked_account_ids", "linked account IDs must contain 12 digits")
 	}
 	return awsScope{PayerAccountID: scope.PayerAccountID, Bucket: scope.Bucket, ReportPrefix: scope.ReportPrefix, Region: scope.Region, LinkedAccountIDs: slices.Sorted(slices.Values(scope.LinkedAccountIDs))}, nil
 }
@@ -93,27 +93,27 @@ func (awsWorkload) MarshalJSON() ([]byte, error) {
 
 func parseAWSCredential(text string) (awsCredential, error) {
 	if len(text) > 8192 {
-		return nil, httpkit.Invalid("credential", "AWS credential exceeds 8192 bytes")
+		return nil, problem.Invalid("credential", "AWS credential exceeds 8192 bytes")
 	}
 	var doc awsCredentialDocument
 	if err := decodeStrict(json.RawMessage(text), &doc); errors.Is(err, errTrailingData) {
-		return nil, httpkit.Invalid("credential", "AWS credential must be one document")
+		return nil, problem.Invalid("credential", "AWS credential must be one document")
 	} else if err != nil {
-		return nil, httpkit.Invalid("credential", "AWS credential must be a valid credential document")
+		return nil, problem.Invalid("credential", "AWS credential must be a valid credential document")
 	}
 	keys := doc.AccessKeyID + doc.SecretAccessKey + doc.SessionToken
 	switch doc.AuthMode {
 	case "static":
 		if len(doc.AccessKeyID) < 1 || len(doc.AccessKeyID) > 128 || len(doc.SecretAccessKey) < 1 || len(doc.SecretAccessKey) > 4096 || len(doc.SessionToken) > 4096 || strings.ContainsAny(keys, "\r\n\x00") {
-			return nil, httpkit.Invalid("credential", "AWS static credentials require an access key ID and secret access key")
+			return nil, problem.Invalid("credential", "AWS static credentials require an access key ID and secret access key")
 		}
 		return awsStatic{AccessKeyID: doc.AccessKeyID, SecretAccessKey: doc.SecretAccessKey, SessionToken: doc.SessionToken}, nil
 	case "workload":
 		if keys != "" {
-			return nil, httpkit.Invalid("credential", "AWS workload credentials cannot contain static keys")
+			return nil, problem.Invalid("credential", "AWS workload credentials cannot contain static keys")
 		}
 		return awsWorkload{}, nil
 	default:
-		return nil, httpkit.Invalid("credential", "AWS auth_mode must be static or workload")
+		return nil, problem.Invalid("credential", "AWS auth_mode must be static or workload")
 	}
 }

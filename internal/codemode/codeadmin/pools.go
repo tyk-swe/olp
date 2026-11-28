@@ -8,7 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -86,7 +88,7 @@ func SavePool(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string
 			return nil, err
 		}
 		if !member {
-			return nil, httpkit.Invalid("owner_user_id", "The owner must be a project member.")
+			return nil, problem.Invalid("owner_user_id", "The owner must be a project member.")
 		}
 	}
 	for _, account := range in.AccountIDs {
@@ -104,7 +106,7 @@ func SavePool(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string
 				return nil, err
 			}
 			if owner != *in.OwnerUserID {
-				return nil, httpkit.Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
+				return nil, problem.Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
 			}
 		}
 	}
@@ -115,7 +117,7 @@ func SavePool(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string
 			return nil, err
 		}
 		if kind != in.Kind || (owner == nil) != (in.OwnerUserID == nil) || owner != nil && *owner != *in.OwnerUserID {
-			return nil, httpkit.Invalid("kind", "Pool ownership is immutable.")
+			return nil, problem.Invalid("kind", "Pool ownership is immutable.")
 		}
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_pools(id,project_id,name,kind,owner_user_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
@@ -145,15 +147,15 @@ func SavePool(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag string
 }
 
 func (in PoolInput) validate() error {
-	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
+	if err := textfield.Validate("name", in.Name, 100); err != nil {
 		return err
 	}
 	if in.Kind != "personal" && in.Kind != "shared" || (in.Kind == "personal") != (in.OwnerUserID != nil) {
-		return httpkit.Invalid("kind", "Personal pools require an owner; shared pools have none.")
+		return problem.Invalid("kind", "Personal pools require an owner; shared pools have none.")
 	}
 	for account, weight := range in.AccountWeights {
 		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
-			return httpkit.Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
+			return problem.Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
 		}
 	}
 	return nil
@@ -161,14 +163,14 @@ func (in PoolInput) validate() error {
 
 func (in PoolInput) Validated() (PoolInput, error) {
 	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
-		return PoolInput{}, httpkit.Invalid("assignments", "Use at most 100 accounts and keys.")
+		return PoolInput{}, problem.Invalid("assignments", "Use at most 100 accounts and keys.")
 	}
 	weightKeys := slices.Sorted(maps.Keys(in.AccountWeights))
-	parsed, err := httpkit.ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
+	parsed, err := ids.ParseAll(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
 	if err != nil {
 		return PoolInput{}, err
 	}
-	owner, ownerError := httpkit.ParseOptionalUUID(in.OwnerUserID)
+	owner, ownerError := ids.ParseOptional(in.OwnerUserID)
 	if ownerError != nil {
 		return PoolInput{}, ownerError
 	}
@@ -176,7 +178,7 @@ func (in PoolInput) Validated() (PoolInput, error) {
 	keyEnd := accountEnd + len(in.APIKeyIDs)
 	canonicalWeights := parsed[keyEnd:]
 	if len(slices.Compact(slices.Sorted(slices.Values(canonicalWeights)))) != len(weightKeys) {
-		return PoolInput{}, httpkit.Invalid("account_weights", "Assign each account weight once.")
+		return PoolInput{}, problem.Invalid("account_weights", "Assign each account weight once.")
 	}
 	weights := maps.Collect(func(yield func(string, int64) bool) {
 		for index, key := range weightKeys {

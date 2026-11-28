@@ -10,8 +10,11 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 )
@@ -21,17 +24,17 @@ func (in slotInput) normalized(slotID string) (slotInput, error) {
 	if err != nil {
 		return slotInput{}, err
 	}
-	if err := httpkit.ValidText("slot.name", in.Name, 100); err != nil {
+	if err := textfield.Validate("slot.name", in.Name, 100); err != nil {
 		return slotInput{}, err
 	}
 	if in.Priority != nil && (*in.Priority < 0 || *in.Priority > 32767) {
-		return slotInput{}, httpkit.Invalid("slot.priority", "Use a priority from 0 to 32767.")
+		return slotInput{}, problem.Invalid("slot.priority", "Use a priority from 0 to 32767.")
 	}
 	if in.Weight != nil && (*in.Weight < 1 || *in.Weight > 1000000) {
-		return slotInput{}, httpkit.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
+		return slotInput{}, problem.Invalid("slot.weight", "Use a weight from 1 to 1000000.")
 	}
 	if len(in.AllowedAPIKeys) > 100 || len(in.AllowedRoutes) > 100 || len(in.AllowedModels) > 2000 {
-		return slotInput{}, httpkit.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
+		return slotInput{}, problem.Invalid("slot", "Use at most 100 API keys, 100 routes, and 2000 models per slot.")
 	}
 	keys, err := apiKeyIDs(in.AllowedAPIKeys)
 	if err != nil {
@@ -39,7 +42,7 @@ func (in slotInput) normalized(slotID string) (slotInput, error) {
 	}
 	for _, route := range in.AllowedRoutes {
 		if !routeidentity.ValidSlug(route) {
-			return slotInput{}, httpkit.Invalid("slot.allowed_routes", "Use route slugs.")
+			return slotInput{}, problem.Invalid("slot.allowed_routes", "Use route slugs.")
 		}
 	}
 	for _, model := range in.AllowedModels {
@@ -63,9 +66,9 @@ func slotPathID(given, path string) (string, error) {
 	if given == "" {
 		return "", nil
 	}
-	id, err := httpkit.ParseUUID(given)
+	id, err := ids.Parse(given)
 	if err != nil || (id != "00000000-0000-0000-0000-000000000000" && id != path) {
-		return "", httpkit.Invalid("slot.id", "The slot id must match the path.")
+		return "", problem.Invalid("slot.id", "The slot id must match the path.")
 	}
 	return id, nil
 }
@@ -76,9 +79,9 @@ func apiKeyIDs(keys []string) ([]string, error) {
 	}
 	parsed := make([]string, len(keys))
 	for i, key := range keys {
-		id, err := httpkit.ParseUUID(key)
+		id, err := ids.Parse(key)
 		if err != nil {
-			return nil, httpkit.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
+			return nil, problem.Invalid("slot.allowed_api_keys", "Use API key identifiers.")
 		}
 		parsed[i] = id
 	}
@@ -89,9 +92,9 @@ func credentialVersionID(given *string) (*string, error) {
 	if given == nil {
 		return nil, nil
 	}
-	id, err := httpkit.ParseUUID(*given)
+	id, err := ids.Parse(*given)
 	if err != nil {
-		return nil, httpkit.Invalid("slot.credential_version_id", "Use a credential identifier.")
+		return nil, problem.Invalid("slot.credential_version_id", "Use a credential identifier.")
 	}
 	return &id, nil
 }
@@ -102,11 +105,11 @@ func validateSlotCredentialSource(slot slotInput, source credentialSource) error
 	}
 	switch source.(type) {
 	case externalCredential:
-		return httpkit.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
+		return problem.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	case pastedCredential:
-		return httpkit.Invalid("credential", "Choose a new credential or an existing credential version.")
+		return problem.Invalid("credential", "Choose a new credential or an existing credential version.")
 	default:
-		return httpkit.Invalid("credential", "Choose a new credential or an existing credential version.")
+		return problem.Invalid("credential", "Choose a new credential or an existing credential version.")
 	}
 }
 
@@ -164,7 +167,7 @@ func (s *slotService) writeSlot(r *http.Request, _ authz.Principal) (httpkit.Rep
 func (s *slotService) saveDraftSlot(ctx context.Context, tx pgx.Tx, current *record, slotID string, slot slotInput, source credentialSource, existing *slotRow, slotCount int) error {
 	id := current.ID
 	if existing == nil && slotCount >= maxSlots {
-		return httpkit.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
+		return problem.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
 	}
 	enabled, priority, weight := ptr.Or(slot.Enabled, true), ptr.Value(slot.Priority), ptr.Or(slot.Weight, 1)
 	credentialID, err := s.slotCredential(ctx, tx, current, slot, source, existing)
@@ -197,10 +200,10 @@ func (s *slotService) slotCredential(ctx context.Context, tx pgx.Tx, current *re
 	switch {
 	case source != nil:
 		if !current.Connection.Document().CredentialRequired() {
-			return nil, httpkit.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
+			return nil, problem.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
 		if current.Connection.Document().Grant() {
-			return nil, httpkit.Fail(422, "credential_forbidden", grantEnrollmentOnly)
+			return nil, problem.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
 		stored, _, err := s.credentials.storeCredential(ctx, tx, current.ID, source)
 		return &stored, err
@@ -209,13 +212,13 @@ func (s *slotService) slotCredential(ctx context.Context, tx pgx.Tx, current *re
 		err := tx.QueryRow(ctx, "SELECT c.revoked_at IS NOT NULL,g.lapsed_at IS NOT NULL FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id WHERE c.id=$1 AND c.provider_id=$2", *slot.CredentialVersionID, current.ID).Scan(&revoked, &lapsed)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return nil, httpkit.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
+			return nil, problem.Invalid("slot.credential_version_id", "Unknown credential for this connection.")
 		case err != nil:
 			return nil, err
 		case revoked:
-			return nil, httpkit.Fail(422, "credential_revoked", "That credential version is revoked.")
+			return nil, problem.Fail(422, "credential_revoked", "That credential version is revoked.")
 		case lapsed:
-			return nil, httpkit.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
+			return nil, problem.Fail(422, "credential_lapsed", "That credential version's grant lapsed. Enroll a new grant.")
 		}
 		return slot.CredentialVersionID, nil
 	case existing != nil:
@@ -251,7 +254,7 @@ func (s *slotService) getSlot(r *http.Request, p authz.Principal) (httpkit.Reply
 	}
 	slot := findSlot(rows, slotID)
 	if slot == nil {
-		return httpkit.Reply{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+		return httpkit.Reply{}, problem.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 	}
 	return httpkit.Detail(struct {
 		slotReply
@@ -278,7 +281,7 @@ func (s *slotService) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Re
 		}
 		slot := findSlot(rows, slotID)
 		if slot == nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "slot_not_found", "The credential slot is unavailable.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(404, "slot_not_found", "The credential slot is unavailable.")
 		}
 		if err = matchSlot(r, current, slot); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -293,7 +296,7 @@ func (s *slotService) deleteSlot(r *http.Request, _ authz.Principal) (httpkit.Re
 
 func (s *slotService) deleteDraftSlot(ctx context.Context, tx pgx.Tx, providerID, slotID string, slot *slotRow) (string, error) {
 	if slot.Default {
-		return "", httpkit.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
+		return "", problem.Fail(409, "default_slot_required", "The default credential slot cannot be deleted.")
 	}
 	if err := grants.DiscardSlotEnrollments(ctx, tx, providerID, slotID); err != nil {
 		return "", err

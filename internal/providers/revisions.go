@@ -16,6 +16,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -63,9 +65,9 @@ func loadRevision(ctx context.Context, q database.Queryer, providerID, ref strin
 	if n, err := strconv.Atoi(ref); err == nil {
 		return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND revision=$2", providerID, n))
 	}
-	id, err := httpkit.ParseUUID(ref)
+	id, err := ids.Parse(ref)
 	if err != nil {
-		return nil, httpkit.Fail(404, "not_found", "Unknown revision.")
+		return nil, problem.Fail(404, "not_found", "Unknown revision.")
 	}
 	return scanRevision(q.QueryRow(ctx, "SELECT "+revisionColumns+" FROM olp.provider_revisions WHERE provider_id=$1 AND id=$2", providerID, id))
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
 type Resource struct{ table, audit string }
@@ -26,7 +28,7 @@ var (
 type Writer func(tx pgx.Tx, p authz.Principal, id, etag string, existing bool) (any, error)
 
 func Write(s *access.Server, r *http.Request, resource Resource, project string, input any, write Writer) (httpkit.Reply, error) {
-	projectID, err := httpkit.ParseUUID(project)
+	projectID, err := ids.Parse(project)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -52,7 +54,7 @@ func target(s *access.Server, r *http.Request, resource Resource, projectID stri
 		if err := s.RequireProject(r.Context(), tx, p, &projectID); err != nil {
 			return "", err
 		}
-		id, err := httpkit.ParseUUID(r.PathValue("id"))
+		id, err := ids.Parse(r.PathValue("id"))
 		if err != nil {
 			return "", err
 		}
@@ -64,7 +66,7 @@ func target(s *access.Server, r *http.Request, resource Resource, projectID stri
 			return "", err
 		}
 		if oldProject != projectID {
-			return "", httpkit.Invalid("project_id", "The project is immutable.")
+			return "", problem.Invalid("project_id", "The project is immutable.")
 		}
 		return id, httpkit.Match(r, oldETag)
 	}
@@ -95,7 +97,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 	}
 	project := r.URL.Query().Get("project_id")
 	if project != "" {
-		project, err = httpkit.ParseUUID(project)
+		project, err = ids.Parse(project)
 		if err != nil {
 			return httpkit.Reply{}, err
 		}
@@ -109,7 +111,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 		if digest == "unidentified" {
 			digest = ""
 		} else if !attribution.ValidEndUserDigest(digest) {
-			return httpkit.Reply{}, httpkit.Invalid("end_user_digest", "Use an end-user digest or unidentified.")
+			return httpkit.Reply{}, problem.Invalid("end_user_digest", "Use an end-user digest or unidentified.")
 		}
 		args = append(args, digest)
 		where += fmt.Sprintf(" AND x.end_user_digest=$%d", len(args))
@@ -124,7 +126,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 	})
 	for _, field := range slices.Concat(fields, extra) {
 		if value := r.URL.Query().Get(field); value != "" {
-			id, err := httpkit.ParseUUID(value)
+			id, err := ids.Parse(value)
 			if err != nil {
 				return httpkit.Reply{}, err
 			}
@@ -136,7 +138,7 @@ func list(s *access.Server, r *http.Request, p authz.Principal, selectSQL string
 			where += " AND " + condition
 		}
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.Pool, selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
+	items, err := database.QueryJSON(r.Context(), s.Pool, selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
 	return httpkit.ListReply(items, page), err
 }
 
@@ -147,7 +149,7 @@ func scoped(ctx context.Context, tx pgx.Tx, table, id, project string) error {
 		return err
 	}
 	if !matches {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	return nil
 }

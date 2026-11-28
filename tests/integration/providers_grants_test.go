@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -471,7 +472,7 @@ func TestGrantEnrollmentSettlePersistsStandingAndSecretState(t *testing.T) {
 		if !standing.Ended || standing.Status != "" {
 			t.Fatalf("standing = %+v, want ended terminal failure", standing)
 		}
-		problem, ok := errors.AsType[*httpkit.Problem](standing.Failure)
+		problem, ok := errors.AsType[*problem.Problem](standing.Failure)
 		if !ok || problem.Status != 422 || problem.Code != "grant_enrollment_failed" {
 			t.Fatalf("Standing.Failure = %#v, want 422 grant_enrollment_failed", standing.Failure)
 		}
@@ -483,7 +484,7 @@ func TestGrantEnrollmentSettlePersistsStandingAndSecretState(t *testing.T) {
 
 	t.Run("terminal non-abi error preserves problem and deletes secret", func(t *testing.T) {
 		enrollment := claimDevice(t, 5)
-		stale := httpkit.Fail(409, "grant_enrollment_stale", "slot changed")
+		stale := problem.Fail(409, "grant_enrollment_stale", "slot changed")
 		standing, err := settle(t, enrollment, stale, false)
 		if err != nil {
 			t.Fatalf("Settle error: %v", err)

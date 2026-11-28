@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"golang.org/x/oauth2"
 )
 
@@ -164,7 +164,7 @@ func TestValidateAndResolveRoleMappings(t *testing.T) {
 		t.Fatalf("distinct-case groups and valid email rejected: %v", err)
 	}
 
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	err := validateRoleMappings(
 		[]roleMapping{
 			{ClaimValue: "Ada@Example.com", Role: "owner"},
@@ -371,7 +371,7 @@ func TestOIDCFailureRedirect(t *testing.T) {
 		{"oidc_token_invalid", "provider"},
 	}
 	for _, tc := range cases {
-		reply := oidcFailureRedirect(oidcFlow{ID: "flow-1", Kind: "login", ReturnTo: "/projects"}, httpkit.Fail(403, tc.code, "msg"))
+		reply := oidcFailureRedirect(oidcFlow{ID: "flow-1", Kind: "login", ReturnTo: "/projects"}, problem.Fail(403, tc.code, "msg"))
 		if reply.Status != http.StatusSeeOther {
 			t.Fatalf("%s: status = %d, want 303", tc.code, reply.Status)
 		}
@@ -400,7 +400,7 @@ func TestOIDCFailureRedirect(t *testing.T) {
 	}
 
 	for _, kind := range []string{"link", "reauthenticate"} {
-		reply := oidcFailureRedirect(oidcFlow{Kind: kind, ReturnTo: "/projects"}, httpkit.Fail(403, "oidc_identity_mismatch", "msg"))
+		reply := oidcFailureRedirect(oidcFlow{Kind: kind, ReturnTo: "/projects"}, problem.Fail(403, "oidc_identity_mismatch", "msg"))
 		loc, err := url.Parse(reply.Location)
 		if err != nil {
 			t.Fatal(err)

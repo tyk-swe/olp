@@ -10,11 +10,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeadapter"
 	"github.com/tyk-swe/olp/internal/domain/attribution"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -132,10 +132,10 @@ func validateCodeAdmission(in Admission) error {
 	if err := in.Operation.Identity.Validate(); err != nil {
 		return err
 	}
-	if err := httpkit.ValidText("operation", in.Operation.Name, 100); err != nil {
+	if err := textfield.Validate("operation", in.Operation.Name, 100); err != nil {
 		return codemode.Refuse(400, "code_operation_invalid")
 	}
-	if err := httpkit.ValidText("model", in.Operation.Model, 200); err != nil {
+	if err := textfield.Validate("model", in.Operation.Model, 200); err != nil {
 		return codemode.Refuse(400, "code_model_invalid")
 	}
 	return nil

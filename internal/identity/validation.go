@@ -7,14 +7,15 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func email(value string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	a, err := mail.ParseAddress(normalized)
 	if err != nil || a.Address != normalized || len(normalized) > 254 {
-		return "", httpkit.Invalid("email", "Enter a valid email address.")
+		return "", problem.Invalid("email", "Enter a valid email address.")
 	}
 	return normalized, nil
 }
@@ -22,7 +23,7 @@ func email(value string) (string, error) {
 func password(value string) error {
 	n := utf8.RuneCountInString(value)
 	if n < 12 || n > 1024 {
-		return httpkit.Invalid("password", "Use 12–1024 characters.")
+		return problem.Invalid("password", "Use 12–1024 characters.")
 	}
 	return nil
 }
@@ -56,8 +57,8 @@ func validatePurpose(purpose, resource string) error {
 			return nil
 		}
 	case "oidc_unlink", "saml_unlink", "agent_delegation":
-		_, err := httpkit.ParseUUID(resource)
+		_, err := ids.Parse(resource)
 		return err
 	}
-	return httpkit.Invalid("purpose", "Use a supported security purpose and its required resource ID.")
+	return problem.Invalid("purpose", "Use a supported security purpose and its required resource ID.")
 }

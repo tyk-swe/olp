@@ -3,9 +3,9 @@ package guardrailpreview
 import (
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
@@ -16,10 +16,10 @@ import (
 
 func compatibility(route routing.Route, in selection, window int) (guardrails.Compatibility, error) {
 	if !slices.Contains(route.Operations, in.operation) {
-		return guardrails.Compatibility{}, httpkit.Invalid("operation", "Choose an operation on the serving route.")
+		return guardrails.Compatibility{}, problem.Invalid("operation", "Choose an operation on the serving route.")
 	}
 	if in.retainsOutput && (in.operation != wire.OperationGeneration || in.surface != wire.Dialect(wire.Responses)) {
-		return guardrails.Compatibility{}, httpkit.Invalid("retains_output", "Retained output is only available for OpenAI Responses.")
+		return guardrails.Compatibility{}, problem.Invalid("retains_output", "Retained output is only available for OpenAI Responses.")
 	}
 	if family, ok := generationFamily(in.surface); in.operation == wire.OperationGeneration && ok {
 		if family == wire.GeminiInteractions || (family == wire.Bedrock && !route.UsesPreparedBedrockConverse()) {
@@ -48,7 +48,7 @@ func compatibility(route routing.Route, in selection, window int) (guardrails.Co
 	if uninspectedSurface(in) {
 		return guardrails.Compatibility{Uninspected: true}, nil
 	}
-	return guardrails.Compatibility{}, httpkit.Invalid("surface", "Choose a supported surface for this operation, fidelity and mode.")
+	return guardrails.Compatibility{}, problem.Invalid("surface", "Choose a supported surface for this operation, fidelity and mode.")
 }
 
 func generationFamily(surface string) (wire.Format, bool) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 )
@@ -31,7 +32,7 @@ func (p *API) Stream(w http.ResponseWriter, r *http.Request, principal authz.Pri
 		return nil
 	}
 	if out.Err != nil && !sw.committed {
-		return httpkit.Fail(out.Err.Status, out.Err.Code, out.Err.Message)
+		return problem.Fail(out.Err.Status, out.Err.Code, out.Err.Message)
 	}
 	sw.finish(run.Trail(), out)
 	return nil

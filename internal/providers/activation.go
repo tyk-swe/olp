@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 	"github.com/tyk-swe/olp/internal/release"
@@ -61,7 +62,7 @@ func onePrincipal(slots []slotRow, cfg connection.Configuration) error {
 	if !mixed {
 		return nil
 	}
-	return httpkit.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
+	return problem.Fail(422, "principal_mismatch", "The credential slots observe different upstream principals or serving environments: "+strings.Join(observed, "; ")+". Every slot of a provider serves one account and environment: re-enroll these slots alike, and pool other accounts through other providers.")
 }
 
 func (row slotRow) published(authMode connectors.AuthMode) routing.RevisionSlot {
@@ -96,7 +97,7 @@ type activationPreflight struct {
 func checkActivationSlot(cfg connection.Configuration, slots []slotRow) (*slotRow, error) {
 	slot := selectProbeSlot(slots, cfg, nil)
 	if slot == nil {
-		return nil, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+		return nil, problem.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 	}
 	if err := checkSlotCredential(cfg, *slot); err != nil {
 		return nil, err
@@ -162,7 +163,7 @@ func (s *draftService) activateProvider(r *http.Request, _ authz.Principal) (htt
 	}
 	return access.Mutate(s.access, r, nil, changeable(r.Context(), id), func(tx pgx.Tx, p authz.Principal, locked *record) (httpkit.Reply, access.Event, error) {
 		if locked.ETag != current.ETag {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "The connection changed during activation; reload and retry.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(412, "etag_mismatch", "The connection changed during activation; reload and retry.")
 		}
 		activated, err := s.activateDraft(r.Context(), tx, p, locked, preflight.externalRef)
 		if err != nil {
@@ -207,24 +208,24 @@ func (s *draftService) verifyActivationCredential(ctx context.Context, tx pgx.Tx
 		return err
 	}
 	if extRef != nil && (resolvedRef == nil || *extRef != *resolvedRef) {
-		return httpkit.Fail(412, "etag_mismatch", "The connection changed during activation; reload and retry.")
+		return problem.Fail(412, "etag_mismatch", "The connection changed during activation; reload and retry.")
 	}
 	return nil
 }
 
 func buildRevisionModels(models []storedModel) ([]routing.RevisionModel, error) {
 	if len(models) == 0 {
-		return nil, httpkit.Fail(422, "no_enabled_models", "Enable and certify at least one model before activating.")
+		return nil, problem.Fail(422, "no_enabled_models", "Enable and certify at least one model before activating.")
 	}
 	published := make([]routing.RevisionModel, 0, len(models))
 	for _, m := range models {
 		if len(m.Capabilities) == 0 {
-			return nil, httpkit.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
+			return nil, problem.Fail(422, "certification_required", "Model "+m.UpstreamModel+" declares no capabilities.")
 		}
 		rm := routing.RevisionModel{ID: m.ID, UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName, Listing: m.Listing}
 		for _, c := range m.Capabilities {
 			if c.Source != "certified" {
-				return nil, httpkit.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
+				return nil, problem.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
 			}
 			rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
 		}
@@ -251,14 +252,14 @@ func buildRevisionSlots(configuration connection.Configuration, models []storedM
 			}
 			if fingerprint != "" {
 				if slot.CredentialID == nil {
-					return nil, nil, httpkit.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
+					return nil, nil, problem.Fail(422, "credential_required", "Slot "+slot.Name+" has no credential.")
 				}
 				validatedAt, err := slots[i].validationTime(configuration, models)
 				if err != nil {
 					return nil, nil, err
 				}
 				if validatedAt == nil {
-					return nil, nil, httpkit.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
+					return nil, nil, problem.Fail(422, "slot_validation_required", "Validate slot "+slot.Name+" for its enabled models before activating.")
 				}
 			}
 		}
@@ -332,7 +333,7 @@ func (s *draftService) activateDraft(ctx context.Context, tx pgx.Tx, p authz.Pri
 
 func (s *draftService) disable(ctx context.Context, tx pgx.Tx, p authz.Principal, current *record) (activatedProvider, error) {
 	if current.State != stateActive {
-		return activatedProvider{}, httpkit.Fail(409, "invalid_state", "Only active connections can be disabled.")
+		return activatedProvider{}, problem.Fail(409, "invalid_state", "Only active connections can be disabled.")
 	}
 	etag := ids.New()
 	if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {

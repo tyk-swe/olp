@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/guardrails/activation"
 )
@@ -53,7 +54,7 @@ func (a *API) list(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	}
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	if len(search) > 200 {
-		return httpkit.Reply{}, httpkit.Invalid("search", "Use at most 200 bytes.")
+		return httpkit.Reply{}, problem.Invalid("search", "Use at most 200 bytes.")
 	}
 	rows, err := a.server.Pool.Query(r.Context(), selected+" WHERE g.retired_at IS NULL AND g.id<$1 AND ($2 OR g.project_id=ANY($3::uuid[])) AND ($5='' OR g.name ILIKE '%'||$5||'%') ORDER BY g.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1, search)
 	if err != nil {
@@ -112,10 +113,10 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 	ctx := r.Context()
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
 		if in.Type == "" {
-			return struct{}{}, httpkit.Invalid("type", "Choose a guardrail type.")
+			return struct{}{}, problem.Invalid("type", "Choose a guardrail type.")
 		}
 		if in.ProjectID == nil {
-			return struct{}{}, httpkit.Invalid("project_id", "Choose the owning project.")
+			return struct{}{}, problem.Invalid("project_id", "Choose the owning project.")
 		}
 		return struct{}{}, a.server.RequireProject(ctx, tx, p, in.ProjectID)
 	}, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -143,7 +144,7 @@ func (a *API) update(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if in.ProjectID != nil || in.Type != "" {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "A guardrail's project and type are immutable.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("project_id", "A guardrail's project and type are immutable.")
 		}
 		value, err := a.save(r, tx, p, &current, change, current.ProjectID, current.Type, in.Configuration)
 		if err != nil {
@@ -194,7 +195,7 @@ func changeable(r *http.Request, current Definition) error {
 		return err
 	}
 	if current.RetiredAt != nil {
-		return httpkit.Fail(http.StatusConflict, "guardrail_retired", "Create a new guardrail rather than changing retained history.")
+		return problem.Fail(http.StatusConflict, "guardrail_retired", "Create a new guardrail rather than changing retained history.")
 	}
 	return nil
 }
@@ -208,7 +209,7 @@ func (a *API) save(r *http.Request, tx pgx.Tx, p authz.Principal, current *Defin
 	saved, err := Save(ctx, tx, p.UserID(), current, draft)
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "23505" {
-		return Definition{}, httpkit.Fail(http.StatusConflict, "guardrail_exists", "Choose an unused guardrail name in this project.")
+		return Definition{}, problem.Fail(http.StatusConflict, "guardrail_exists", "Choose an unused guardrail name in this project.")
 	}
 	if err != nil {
 		return Definition{}, err

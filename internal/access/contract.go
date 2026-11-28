@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/management"
 )
 
@@ -35,7 +35,7 @@ type Alternative struct {
 
 // Admits reports whether p satisfies the requirement.
 func (req Requirement) Admits(p authz.Principal) error {
-	refusal := httpkit.Forbidden()
+	refusal := problem.Forbidden()
 	for _, alternative := range req.Alternatives {
 		if alternative.Kind != p.Kind {
 			continue
@@ -47,7 +47,7 @@ func (req Requirement) Admits(p authz.Principal) error {
 			}
 		}
 		if err == nil && alternative.Installation && !p.AllProjects {
-			err = httpkit.Forbidden()
+			err = problem.Forbidden()
 		}
 		if err == nil {
 			return nil

@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -21,7 +23,7 @@ func (s *Server) organizations(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE o.id<$1 AND ($2 OR o.id=ANY($3::uuid[])) ORDER BY o.id DESC LIMIT $4", page.Before, p.AllProjects, p.OrganizationIDs(), page.Limit+1)
+	items, err := database.QueryJSON(r.Context(), s.access.Pool, "SELECT jsonb_build_object("+organizationFields+") FROM olp.organizations o WHERE o.id<$1 AND ($2 OR o.id=ANY($3::uuid[])) ORDER BY o.id DESC LIMIT $4", page.Before, p.AllProjects, p.OrganizationIDs(), page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
 
@@ -57,7 +59,7 @@ func (s *Server) createOrganization(r *http.Request, _ authz.Principal) (httpkit
 		return httpkit.Reply{}, err
 	}
 	in.Name = strings.TrimSpace(in.Name)
-	if err := httpkit.ValidText("name", in.Name, 100); err != nil {
+	if err := textfield.Validate("name", in.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return access.Mutate(s.access, r, in, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -86,7 +88,7 @@ func (s *Server) updateOrganization(r *http.Request, _ authz.Principal) (httpkit
 		return httpkit.Reply{}, err
 	}
 	in.Name = strings.TrimSpace(in.Name)
-	if err = httpkit.ValidText("name", in.Name, 100); err != nil {
+	if err = textfield.Validate("name", in.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -124,7 +126,7 @@ func (s *Server) organizationMembers(r *http.Request, p authz.Principal) (httpki
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.access.Pool, `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3`, id, page.Before, page.Limit+1)
+	items, err := database.QueryJSON(r.Context(), s.access.Pool, `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
@@ -156,7 +158,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 			return httpkit.Reply{}, err
 		}
 		if in.Role != "manager" && in.Role != "viewer" {
-			return httpkit.Reply{}, httpkit.Invalid("role", "Use manager or viewer.")
+			return httpkit.Reply{}, problem.Invalid("role", "Use manager or viewer.")
 		}
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -176,7 +178,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 				return httpkit.Reply{}, access.Event{}, e
 			}
 			if tag.RowsAffected() == 0 {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found", "The resource was not found.")
 			}
 		} else {
 			var exists bool
@@ -184,7 +186,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if !exists {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(404, "not_found", "The resource was not found.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(404, "not_found", "The resource was not found.")
 			}
 			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.organization_members(organization_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role`, id, user, in.Role, p.UserID()); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
@@ -195,7 +197,7 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (httpkit.
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if !managers {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "last_organization_manager", "Keep at least one organization manager.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "last_organization_manager", "Keep at least one organization manager.")
 		}
 		etag = ids.New()
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.organizations SET etag=$2,updated_at=now() WHERE id=$1", id, etag); err != nil {
@@ -217,7 +219,7 @@ func organizationProject(r *http.Request, q database.Queryer, p authz.Principal,
 	if raw == "" {
 		return nil
 	}
-	id, err := httpkit.ParseUUID(raw)
+	id, err := ids.Parse(raw)
 	if err != nil {
 		return err
 	}
@@ -231,7 +233,7 @@ func organizationProject(r *http.Request, q database.Queryer, p authz.Principal,
 		return err
 	}
 	if !matches {
-		return httpkit.NotFound
+		return problem.NotFound
 	}
 	return nil
 }

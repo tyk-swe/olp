@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/usage/param"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -94,7 +96,7 @@ func (s *API) createPricingRevision(r *http.Request, _ authz.Principal) (httpkit
 		return httpkit.Reply{}, err
 	}
 	if input.EffectiveAt == nil {
-		return httpkit.Reply{}, httpkit.Invalid("effective_at",
+		return httpkit.Reply{}, problem.Invalid("effective_at",
 			"Give the time these prices take effect.")
 	}
 	return access.Mutate(s.Access, r, input, access.Unlocked, func(tx pgx.Tx, principal authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -110,7 +112,7 @@ func (s *API) createPricingRevision(r *http.Request, _ authz.Principal) (httpkit
 
 func (s *API) referenceCatalog(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if s.Catalog == nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
+		return httpkit.Reply{}, problem.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
 	return httpkit.OK(s.Catalog.Summary()), nil
 }
@@ -123,30 +125,30 @@ func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	if err := httpkit.DecodeUnique(r, &input, 64<<10); err != nil {
 		return httpkit.Reply{}, err
 	}
-	providerID, err := httpkit.ParseUUID(input.ProviderID)
+	providerID, err := ids.Parse(input.ProviderID)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("provider_id", "Use a valid provider identifier.")
+		return httpkit.Reply{}, problem.Invalid("provider_id", "Use a valid provider identifier.")
 	}
 	if input.Model == "" || len(input.Model) > 200 {
-		return httpkit.Reply{}, httpkit.Invalid("model", "Name the model to quote.")
+		return httpkit.Reply{}, problem.Invalid("model", "Name the model to quote.")
 	}
 	if !usage.ValidOperation(input.Operation) {
-		return httpkit.Reply{}, httpkit.Invalid("operation", "Use an operation name.")
+		return httpkit.Reply{}, problem.Invalid("operation", "Use an operation name.")
 	}
 	var quantities usage.AttemptUsage
 	if len(input.Usage) == 0 || json.Unmarshal(input.Usage, &quantities) != nil {
-		return httpkit.Reply{}, httpkit.Invalid("usage", "Use an attempt usage object.")
+		return httpkit.Reply{}, problem.Invalid("usage", "Use an attempt usage object.")
 	}
 	// A quote prices the billable shape: observed, complete usage.
 	quantities.Evidence = usage.EvidenceObservedComplete
 	if _, err := usage.ValidateUsage(&quantities, 0); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("usage", errors.Unwrap(err).Error())
+		return httpkit.Reply{}, problem.Invalid("usage", errors.Unwrap(err).Error())
 	}
 	startedAt := time.Now().UTC()
 	if input.StartedAt != nil {
 		startedAt = input.StartedAt.UTC()
 		if startedAt.After(time.Now()) {
-			return httpkit.Reply{}, httpkit.Invalid("started_at", "Use a past or present time.")
+			return httpkit.Reply{}, problem.Invalid("started_at", "Use a past or present time.")
 		}
 	}
 	successful := true
@@ -155,9 +157,9 @@ func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	}
 	consumer := quoteConsumer{set: true}
 	if input.ProjectID != nil {
-		project, err := httpkit.ParseUUID(*input.ProjectID)
+		project, err := ids.Parse(*input.ProjectID)
 		if err != nil {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Use a valid project identifier.")
+			return httpkit.Reply{}, problem.Invalid("project_id", "Use a valid project identifier.")
 		}
 		consumer.project = project
 	}
@@ -170,7 +172,7 @@ func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 	pricing, err := priceUsageQuoted(r.Context(), tx, event, quantities, startedAt,
 		successful, providerID, input.Model, routingPin{}, consumer)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, httpkit.Invalid("provider_id", "Name an existing provider.")
+		return httpkit.Reply{}, problem.Invalid("provider_id", "Name an existing provider.")
 	}
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -182,7 +184,7 @@ func (s *API) quotePricing(r *http.Request, _ authz.Principal) (httpkit.Reply, e
 			return httpkit.Reply{}, err
 		}
 		if !exists {
-			return httpkit.Reply{}, httpkit.Invalid("project_id", "Name an existing project.")
+			return httpkit.Reply{}, problem.Invalid("project_id", "Name an existing project.")
 		}
 	}
 	var commitment any

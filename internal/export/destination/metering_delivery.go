@@ -11,6 +11,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
@@ -68,13 +70,13 @@ func LookupMeteringDelivery(ctx context.Context, q database.Queryer, p authz.Pri
 	var sinkProject *string
 	var format Format
 	if err := q.QueryRow(ctx, meteringSinkSQL, sinkID).Scan(&sinkProject, &format); err != nil {
-		return MeteringDelivery{}, httpkit.NotFoundOr(err)
+		return MeteringDelivery{}, database.NotFoundOr(err)
 	}
 	if err := p.Project(sinkProject, authz.View); err != nil {
 		return MeteringDelivery{}, err
 	}
 	if format != contract.CreateExportSinkRequestFormatCloudevents {
-		return MeteringDelivery{}, httpkit.NotFound
+		return MeteringDelivery{}, problem.NotFound
 	}
 	live, found, err := liveDelivery(ctx, q, sinkID, attemptID)
 	if err != nil {
@@ -172,9 +174,9 @@ func (a *API) meteringDelivery(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	attemptID, err := httpkit.ParseUUID(r.PathValue("attempt_id"))
+	attemptID, err := ids.Parse(r.PathValue("attempt_id"))
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("attempt_id", "attempt_id must be a valid UUID")
+		return httpkit.Reply{}, problem.Invalid("attempt_id", "attempt_id must be a valid UUID")
 	}
 	delivery, err := LookupMeteringDelivery(r.Context(), a.server.Pool, p, sinkID, attemptID)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
@@ -195,10 +196,10 @@ func (s server) decode(r *http.Request) (desired, error) {
 		return desired{}, err
 	}
 	if request.Document.ApiVersion == "" {
-		return desired{}, httpkit.Invalid("document", "Send the configuration artifact.")
+		return desired{}, problem.Invalid("document", "Send the configuration artifact.")
 	}
 	if !request.Document.ApiVersion.Valid() {
-		return desired{}, httpkit.Fail(http.StatusUnprocessableEntity, "unsupported_api_version", "The artifact declares an unsupported api_version.")
+		return desired{}, problem.Fail(http.StatusUnprocessableEntity, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	parsed, err := s.parse(request.Document, request.CodeBindings)
 	if err != nil {

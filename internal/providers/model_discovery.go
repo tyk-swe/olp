@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -42,7 +43,7 @@ func (s *modelService) prepare(r *http.Request, p authz.Principal, id string) (*
 		cfg := current.Connection.Document()
 		slot := selectProbeSlot(slots, cfg, nil)
 		if slot == nil {
-			return preparedProbe{}, httpkit.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
+			return preparedProbe{}, problem.Fail(422, "credential_required", "Enable a credential slot before probing this connection.")
 		}
 		if err := checkSlotCredential(cfg, *slot); err != nil {
 			return preparedProbe{}, err
@@ -167,7 +168,7 @@ func (s *modelService) discover(r *http.Request, p authz.Principal) (httpkit.Rep
 		return httpkit.Reply{}, err
 	}
 	if len(input.Models) > 2000 {
-		return httpkit.Reply{}, httpkit.Invalid("models", "Declare at most 2000 models per request.")
+		return httpkit.Reply{}, problem.Invalid("models", "Declare at most 2000 models per request.")
 	}
 	var models []probe.DiscoveredModel
 	seen := map[string]bool{}
@@ -199,7 +200,7 @@ func (s *modelService) discover(r *http.Request, p authz.Principal) (httpkit.Rep
 			if err := s.recordProbe(r, "provider.discover", id, at, false, pe.Detail); err != nil {
 				return httpkit.Reply{}, err
 			}
-			return httpkit.Reply{}, httpkit.Fail(422, "discovery_failed", pe.Detail)
+			return httpkit.Reply{}, problem.Fail(422, "discovery_failed", pe.Detail)
 		}
 		models, listing = append(models, listed...), provenance
 	}

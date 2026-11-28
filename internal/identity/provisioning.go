@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 )
 
 type provisionInput struct {
@@ -26,10 +28,10 @@ type provisionInput struct {
 func provisioningID(r *http.Request, name, field string, max int) (string, error) {
 	value := r.PathValue(name)
 	if name == "source" && value == "scim" {
-		return "", httpkit.Fail(409, "managed_provisioning_source", "Use the SCIM API to manage its identities.")
+		return "", problem.Fail(409, "managed_provisioning_source", "Use the SCIM API to manage its identities.")
 	}
 	if value == "" || len(value) > max || strings.ContainsAny(value, "/\r\n") || strings.ContainsFunc(value, unicode.IsControl) {
-		return "", httpkit.Invalid(field, "Invalid provisioning identifier.")
+		return "", problem.Invalid(field, "Invalid provisioning identifier.")
 	}
 	return value, nil
 }
@@ -56,14 +58,14 @@ func parseProvisionInput(r *http.Request) (provisionInput, error) {
 	if err != nil {
 		return provisionInput{}, err
 	}
-	if err := httpkit.ValidText("display_name", raw.DisplayName, 100); err != nil {
+	if err := textfield.Validate("display_name", raw.DisplayName, 100); err != nil {
 		return provisionInput{}, err
 	}
 	if !authz.ValidRole(raw.Role) {
-		return provisionInput{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
+		return provisionInput{}, problem.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	if raw.Active == nil {
-		return provisionInput{}, httpkit.Invalid("active", "Provide the active state.")
+		return provisionInput{}, problem.Invalid("active", "Provide the active state.")
 	}
 	return provisionInput{
 		source:      source,
@@ -85,7 +87,7 @@ func lookupProvisionedUser(ctx context.Context, tx pgx.Tx, source, external stri
 		return "", false, err
 	}
 	if management != "provisioned" {
-		return "", false, httpkit.Fail(409, "provisioning_ownership_changed", "This identity is now managed locally and cannot be reconciled.")
+		return "", false, problem.Fail(409, "provisioning_ownership_changed", "This identity is now managed locally and cannot be reconciled.")
 	}
 	return userID, true, nil
 }
@@ -102,7 +104,7 @@ func ensureProvisionEmailAvailable(ctx context.Context, tx pgx.Tx, address, excl
 		return err
 	}
 	if taken {
-		return httpkit.Fail(409, "email_unavailable", "Another account already uses this email address.")
+		return problem.Fail(409, "email_unavailable", "Another account already uses this email address.")
 	}
 	return nil
 }

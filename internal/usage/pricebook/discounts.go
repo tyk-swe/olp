@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
 )
 
@@ -67,7 +66,7 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 		d.VendorID = &vendor
 	}
 	if input.ProviderID != nil {
-		id, err := httpkit.ParseUUID(*input.ProviderID)
+		id, err := ids.Parse(*input.ProviderID)
 		if err != nil {
 			return d, invalid("provider_id", "Use a valid provider identifier.")
 		}

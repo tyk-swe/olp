@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -122,7 +123,7 @@ func (s *draftService) providers(r *http.Request, principal authz.Principal) (ht
 	}
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	if len(search) > 100 {
-		return httpkit.Reply{}, httpkit.Invalid("search", "Use at most 100 characters.")
+		return httpkit.Reply{}, problem.Invalid("search", "Use at most 100 characters.")
 	}
 	rows, err := s.access.Pool.Query(r.Context(), detailQuery+" WHERE p.id<$1 AND ($2='' OR p.name ILIKE '%'||$2||'%') AND ($3 OR p.project_id=ANY($4::uuid[])) ORDER BY p.id DESC LIMIT $5", page.Before, search, principal.AllProjects, principal.ProjectIDs(), page.Limit+1)
 	if err != nil {
@@ -216,7 +217,7 @@ func (s *draftService) deleteProvider(r *http.Request, _ authz.Principal) (httpk
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if current.State != stateDraft || used {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "provider_in_use", "Disable published providers; deletion requires an unused draft without retained history.")
 		}
 		if err := grants.DiscardProvider(r.Context(), tx, id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -232,7 +233,7 @@ func (s *draftService) deleteProvider(r *http.Request, _ authz.Principal) (httpk
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.providers WHERE id=$1", id); err != nil {
 			if constraint, ok := errors.AsType[*pgconn.PgError](err); ok && constraint.Code == "23503" {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
 			}
 			return httpkit.Reply{}, access.Event{}, err
 		}

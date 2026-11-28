@@ -3,7 +3,7 @@ package authz
 import (
 	"slices"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 // Operation is a management action that authorization decides. Delegable
@@ -170,21 +170,21 @@ func (p Principal) Authorize(op Operation) error {
 		if op == Read && p.KeyAuthority != nil && slices.Contains(p.KeyAuthority.Policy.Scopes, "models_read") {
 			return nil
 		}
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	r, ok := op.rule()
 	if !ok {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	role := p.Role
 	if p.Kind == "machine" {
 		if !r.delegable || !p.scopes.has(op) {
-			return httpkit.Forbidden()
+			return problem.Forbidden()
 		}
 		role = p.creatorRole
 	}
 	if !r.roles.has(role) || r.installation && !p.AllProjects {
-		return httpkit.Forbidden()
+		return problem.Forbidden()
 	}
 	return nil
 }

@@ -24,6 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/identity/samlidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -108,15 +110,15 @@ func (s *samlService) samlConfiguration(r *http.Request, _ authz.Principal) (htt
 
 func validateSAMLMetadataTrust(m samlidentity.Metadata, enabled bool, now time.Time) error {
 	if enabled && !m.Entity.ValidUntil.IsZero() && !m.Entity.ValidUntil.After(now) {
-		return httpkit.Invalid("metadata_xml", "The imported identity metadata has expired.")
+		return problem.Invalid("metadata_xml", "The imported identity metadata has expired.")
 	}
 	if enabled && !slices.ContainsFunc(m.Certificates, func(cert *x509.Certificate) bool {
 		return !now.Before(cert.NotBefore) && !now.After(cert.NotAfter)
 	}) {
-		return httpkit.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
+		return problem.Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
 	}
 	if access.CheckIdentityURL(m.RedirectURL) != nil {
-		return httpkit.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
+		return problem.Invalid("metadata_xml", "The identity provider sign-in endpoint must use a safe HTTPS URL.")
 	}
 	return nil
 }
@@ -135,8 +137,8 @@ func validateSAMLAttributes(c samlConfiguration) error {
 		if attr.value == "" && !attr.required {
 			continue
 		}
-		if httpkit.ValidText(attr.field, attr.value, 256) != nil {
-			return httpkit.Invalid(attr.field, "Use a bounded SAML attribute name.")
+		if textfield.Validate(attr.field, attr.value, 256) != nil {
+			return problem.Invalid(attr.field, "Use a bounded SAML attribute name.")
 		}
 	}
 	return nil
@@ -145,7 +147,7 @@ func validateSAMLAttributes(c samlConfiguration) error {
 func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 	m, err := samlidentity.ParseMetadata([]byte(c.Metadata))
 	if err != nil {
-		return m, httpkit.Invalid("metadata_xml", "Import one SAML 2.0 IdP descriptor with signing certificates and an HTTP-Redirect sign-in endpoint.")
+		return m, problem.Invalid("metadata_xml", "Import one SAML 2.0 IdP descriptor with signing certificates and an HTTP-Redirect sign-in endpoint.")
 	}
 	if err := validateSAMLMetadataTrust(m, c.Enabled, time.Now()); err != nil {
 		return m, err
@@ -154,7 +156,7 @@ func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
 		return m, err
 	}
 	if c.DefaultRole != nil && !authz.ValidRole(*c.DefaultRole) {
-		return m, httpkit.Invalid("default_role", "Choose a valid role.")
+		return m, problem.Invalid("default_role", "Choose a valid role.")
 	}
 	if err := validateRoleMappings(c.EmailMappings, c.GroupMappings, "email_role_mappings", "group_role_mappings", "Use unique values and valid roles."); err != nil {
 		return m, err
@@ -255,7 +257,7 @@ func (s *samlService) putSAMLConfiguration(r *http.Request, _ authz.Principal) (
 				return httpkit.Reply{}, access.Event{}, err
 			}
 		} else if r.Header.Get("If-Match") != "" {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(412, "etag_mismatch", "No SAML configuration exists.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(412, "etag_mismatch", "No SAML configuration exists.")
 		}
 		c, err := s.storeDefinition(r.Context(), tx, p, input.SAMLDefinition, input.Rotate)
 		if err != nil {
@@ -356,7 +358,7 @@ func (s *samlService) importSAMLMetadata(r *http.Request, _ authz.Principal) (ht
 		return httpkit.Reply{}, err
 	}
 	if err := access.CheckIdentityURL(input.URL); err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("url", "Use a safe identity metadata URL.")
+		return httpkit.Reply{}, problem.Invalid("url", "Use a safe identity metadata URL.")
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, input.URL, nil)
 	if err != nil {
@@ -364,16 +366,16 @@ func (s *samlService) importSAMLMetadata(r *http.Request, _ authz.Principal) (ht
 	}
 	resp, err := s.access.IdentityClient().Do(req)
 	if err != nil {
-		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint is unavailable or outside identity egress policy.")
+		return httpkit.Reply{}, problem.Invalid("url", "The metadata endpoint is unavailable or outside identity egress policy.")
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, samlidentity.MaxXML+1))
 	if err != nil || resp.StatusCode != http.StatusOK {
-		return httpkit.Reply{}, httpkit.Invalid("url", "The metadata endpoint did not return a valid document.")
+		return httpkit.Reply{}, problem.Invalid("url", "The metadata endpoint did not return a valid document.")
 	}
 	m, err := samlidentity.ParseMetadata(b)
 	if err != nil || access.CheckIdentityURL(m.RedirectURL) != nil {
-		return httpkit.Reply{}, httpkit.Invalid("url", "Invalid or unsupported SAML identity metadata.")
+		return httpkit.Reply{}, problem.Invalid("url", "Invalid or unsupported SAML identity metadata.")
 	}
 	return httpkit.OK(samlImportResponse{MetadataXML: string(b), IDPEntityID: m.Entity.EntityID}), nil
 }

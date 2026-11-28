@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 type RunView struct {
@@ -154,13 +155,13 @@ func (s *Management) listRunSpans(r *http.Request, p authz.Principal) (httpkit.R
 	}
 	spanID := r.URL.Query().Get("span_id")
 	if spanID != "" && !ids.Canonical(spanID) {
-		return httpkit.Reply{}, httpkit.Invalid("span_id", "Use a canonical span UUID.")
+		return httpkit.Reply{}, problem.Invalid("span_id", "Use a canonical span UUID.")
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		limit, err = strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > 200 {
-			return httpkit.Reply{}, httpkit.Invalid("limit", "Use a page size from 1 to 200.")
+			return httpkit.Reply{}, problem.Invalid("limit", "Use a page size from 1 to 200.")
 		}
 	}
 	var beforeTime, beforeID any
@@ -170,7 +171,7 @@ func (s *Management) listRunSpans(r *http.Request, p authz.Principal) (httpkit.R
 		_, timeErr := strconv.ParseUint(timestamp, 10, 64)
 		parsedID, idErr := uuid.Parse(id)
 		if decodeErr != nil || !found || timeErr != nil || idErr != nil {
-			return httpkit.Reply{}, httpkit.Invalid("cursor", "Invalid pagination cursor.")
+			return httpkit.Reply{}, problem.Invalid("cursor", "Invalid pagination cursor.")
 		}
 		beforeTime, beforeID = timestamp, parsedID.String()
 	}

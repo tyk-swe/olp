@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/limits/ledger"
 )
@@ -58,7 +59,7 @@ func (s *Server) putProjectAttributionBudgets(r *http.Request, _ authz.Principal
 		return httpkit.Reply{}, err
 	}
 	if input.Budgets == nil {
-		return httpkit.Reply{}, httpkit.Invalid("budgets", "Supply a budget map; an empty object clears caps without resetting spend.")
+		return httpkit.Reply{}, problem.Invalid("budgets", "Supply a budget map; an empty object clears caps without resetting spend.")
 	}
 	if err = input.Budgets.ValidateAndNormalize(); err != nil {
 		return httpkit.Reply{}, err

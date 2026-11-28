@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/plugins/pluginindex"
 )
@@ -14,7 +15,7 @@ import (
 // owner uploads is what ties it to an index entry.
 func (s *Management) index(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 	if s.Index == nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "plugin_index_unavailable", "This process holds no verified plugin index.")
+		return httpkit.Reply{}, problem.Fail(503, "plugin_index_unavailable", "This process holds no verified plugin index.")
 	}
 	var digests []string
 	for _, plugin := range s.Index.Index.Plugins {

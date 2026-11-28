@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -55,10 +55,10 @@ func apply(ctx context.Context, tx pgx.Tx, p authz.Principal, directory promotio
 	}
 	certified, ok := prepared.certifications[server.key()]
 	if !ok {
-		return false, httpkit.Invalid("mcp_servers", "Prepare certified registrations before applying.")
+		return false, problem.Invalid("mcp_servers", "Prepare certified registrations before applying.")
 	}
 	if etagOf(existing) != certified.observed {
-		return false, httpkit.Fail(412, "mcp_registration_changed", "The destination MCP registration changed during certification.")
+		return false, problem.Fail(412, "mcp_registration_changed", "The destination MCP registration changed during certification.")
 	}
 	switch outcome := certified.outcome.(type) {
 	case limited:

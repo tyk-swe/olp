@@ -10,6 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -166,7 +168,7 @@ func (s *sessionService) sessions(r *http.Request, p authz.Principal) (httpkit.R
 			return httpkit.Reply{}, err
 		}
 	}
-	if _, err := httpkit.ParseUUID(userID); err != nil {
+	if _, err := ids.Parse(userID); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var currentSession *string
@@ -293,7 +295,7 @@ func (s *sessionService) updateProfile(r *http.Request, _ authz.Principal) (http
 	if err := httpkit.Decode(r, &input); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := httpkit.ValidText("display_name", input.Name, 100); err != nil {
+	if err := textfield.Validate("display_name", input.Name, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
 	return access.Transact(s.access, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
@@ -344,10 +346,10 @@ func (s *sessionService) preparePasswordWrite(r *http.Request, p authz.Principal
 		return "", err
 	}
 	if enroll && stored != nil {
-		return "", httpkit.Fail(409, "password_already_enrolled", "A local password is already configured.")
+		return "", problem.Fail(409, "password_already_enrolled", "A local password is already configured.")
 	}
 	if !enroll && stored == nil {
-		return "", httpkit.Fail(403, "local_password_unavailable", "This profile has no local password.")
+		return "", problem.Fail(403, "local_password_unavailable", "This profile has no local password.")
 	}
 	var hash string
 	valid := enroll
@@ -363,7 +365,7 @@ func (s *sessionService) preparePasswordWrite(r *http.Request, p authz.Principal
 		return "", err
 	}
 	if !valid {
-		return "", httpkit.Fail(403, "current_password_invalid", "The current password is invalid.")
+		return "", problem.Fail(403, "current_password_invalid", "The current password is invalid.")
 	}
 	return hash, nil
 }
@@ -422,7 +424,7 @@ func (s *sessionService) grantRecent(r *http.Request, tx pgx.Tx, p authz.Princip
 			return httpkit.Reply{}, err
 		}
 		if configured {
-			return httpkit.Reply{}, httpkit.Fail(403, "mfa_factor_required", "Verify an enrolled factor or recovery code to manage local MFA.")
+			return httpkit.Reply{}, problem.Fail(403, "mfa_factor_required", "Verify an enrolled factor or recovery code to manage local MFA.")
 		}
 	}
 	token := secrets.Token()

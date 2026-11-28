@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -52,29 +53,29 @@ func (f routeFixture) input() simulationInput {
 
 func (f fixtureFile) validate() error {
 	if !f.Synthetic {
-		return httpkit.Invalid("synthetic", "Confirm the file uses only synthetic requests and labels.")
+		return problem.Invalid("synthetic", "Confirm the file uses only synthetic requests and labels.")
 	}
 	if len(f.Fixtures) < 1 || len(f.Fixtures) > maxFixtures {
-		return httpkit.Invalid("fixtures", "Use between 1 and 16 fixtures.")
+		return problem.Invalid("fixtures", "Use between 1 and 16 fixtures.")
 	}
 	seen := make(map[string]bool, len(f.Fixtures))
 	for i, item := range f.Fixtures {
 		field := fmt.Sprintf("fixtures.%d", i)
 		if !fixtureName.MatchString(item.Name) || seen[item.Name] {
-			return httpkit.Invalid(field+".name", "Use a distinct name of 1 to 64 letters, digits, spaces, dots, underscores or hyphens, starting with a letter or digit.")
+			return problem.Invalid(field+".name", "Use a distinct name of 1 to 64 letters, digits, spaces, dots, underscores or hyphens, starting with a letter or digit.")
 		}
 		seen[item.Name] = true
 		if len(item.Seed) == 0 || len(item.Seed) > 256 {
-			return httpkit.Invalid(field+".seed", "Use a seed of 1 to 256 bytes.")
+			return problem.Invalid(field+".seed", "Use a seed of 1 to 256 bytes.")
 		}
 		if err := validTuple(item.Operation, item.Surface, item.Mode); err != nil {
-			return httpkit.Invalid(field, "Choose a supported operation, surface and mode.")
+			return problem.Invalid(field, "Choose a supported operation, surface and mode.")
 		}
 		if !bytes.HasPrefix(bytes.TrimSpace(item.Request), []byte("{")) {
-			return httpkit.Invalid(field+".request", "Provide a synthetic native request object.")
+			return problem.Invalid(field+".request", "Provide a synthetic native request object.")
 		}
 		if err := validSimulationLabels(item.input()); err != nil {
-			return httpkit.Invalid(field, "Use at most 16 attribution labels and 16 classifier labels, with names of 1 to 64 bytes and values of at most 256 bytes.")
+			return problem.Invalid(field, "Use at most 16 attribution labels and 16 classifier labels, with names of 1 to 64 bytes and values of at most 256 bytes.")
 		}
 	}
 	return nil
@@ -121,7 +122,7 @@ func (s *Server) checkFixtures(r *http.Request, p authz.Principal) (httpkit.Repl
 	}
 	published, ok := snapshot.Routes[d.Slug]
 	if !ok || !sameProject(d.ProjectID, published.ProjectID) {
-		return httpkit.Reply{}, httpkit.Fail(409, "no_published_fixture_baseline", "Publish a revision for this route in the draft's project before checking fixtures.")
+		return httpkit.Reply{}, problem.Fail(409, "no_published_fixture_baseline", "Publish a revision for this route in the draft's project before checking fixtures.")
 	}
 	if err := ValidateFidelity(d.Fidelity); err != nil {
 		return httpkit.Reply{}, err
@@ -189,9 +190,9 @@ func (s *Server) compareFixtures(shared simulation, published, draft *routing.Sn
 }
 
 func fixturePlanError(index int, err error) error {
-	var refusal *httpkit.Problem
+	var refusal *problem.Problem
 	if errors.As(err, &refusal) && refusal.Status == http.StatusUnprocessableEntity {
-		return httpkit.Invalid(fmt.Sprintf("fixtures.%d", index), "The request could not be inspected for both revisions. Check its route, dialect and delivery mode.")
+		return problem.Invalid(fmt.Sprintf("fixtures.%d", index), "The request could not be inspected for both revisions. Check its route, dialect and delivery mode.")
 	}
 	return err
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -114,7 +115,7 @@ func (s *modelService) prepareCertification(r *http.Request, p authz.Principal, 
 			return certificationSnapshot{}, err
 		}
 		if len(m.Capabilities) == 0 {
-			return certificationSnapshot{}, httpkit.Fail(422, "no_capabilities", "Declare at least one capability before certifying.")
+			return certificationSnapshot{}, problem.Fail(422, "no_capabilities", "Declare at least one capability before certifying.")
 		}
 		slots, err := loadSlots(r.Context(), tx, id)
 		if err != nil {
@@ -123,7 +124,7 @@ func (s *modelService) prepareCertification(r *http.Request, p authz.Principal, 
 		cfg := current.Connection.Document()
 		slot := selectProbeSlot(slots, cfg, &m)
 		if slot == nil {
-			return certificationSnapshot{}, httpkit.Fail(422, "credential_required", "Enable the model and configure an enabled credential slot that allows it before certifying.")
+			return certificationSnapshot{}, problem.Fail(422, "credential_required", "Enable the model and configure an enabled credential slot that allows it before certifying.")
 		}
 		if err := checkSlotCredential(cfg, *slot); err != nil {
 			return certificationSnapshot{}, err
@@ -227,7 +228,7 @@ func (s *modelService) setDraftModel(ctx context.Context, tx pgx.Tx, current *re
 		capabilities = make([]storedCapability, 0, len(requested))
 		for _, c := range requested {
 			if !probe.ConfigurationCertifiable(current.Connection.Transport(), c) {
-				return httpkit.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
+				return problem.Fail(422, "capability_unavailable", "This connector cannot certify the requested tuple.")
 			}
 			if kept, ok := existing[c]; ok {
 				capabilities = append(capabilities, kept)

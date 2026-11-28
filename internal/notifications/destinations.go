@@ -13,6 +13,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -65,15 +67,15 @@ func destinationSecret(typ contract.NotificationDestinationType, raw json.RawMes
 	if typ == contract.NotificationDestinationTypeWebhook {
 		var secret string
 		if err := json.Unmarshal(raw, &secret); err != nil {
-			return nil, httpkit.Invalid("secret", "Use a signing secret string or null.")
+			return nil, problem.Invalid("secret", "Use a signing secret string or null.")
 		}
 		if secret == "" || len(secret) > signingSecretLimit {
-			return nil, httpkit.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
+			return nil, problem.Invalid("secret", "Use a signing secret of 1–1024 bytes.")
 		}
 		return newSecret{[]byte(secret)}, nil
 	}
 	if len(raw) > secretObjectLimit {
-		return nil, httpkit.Invalid("secret", "The secret object is too large.")
+		return nil, problem.Invalid("secret", "The secret object is too large.")
 	}
 	return newSecret{raw}, nil
 }
@@ -83,16 +85,16 @@ func configurationObject(raw json.RawMessage) (json.RawMessage, error) {
 		return json.RawMessage(`{}`), nil
 	}
 	if len(raw) > configurationLimit {
-		return nil, httpkit.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
+		return nil, problem.Invalid("configuration", "Use a configuration object of at most 4096 bytes.")
 	}
 	if _, err := decodeObject(raw); err != nil {
-		return nil, httpkit.Invalid("configuration", "Use a configuration object.")
+		return nil, problem.Invalid("configuration", "Use a configuration object.")
 	}
 	return raw, nil
 }
 
 func parseDestination(input destinationInput) (destinationTarget, error) {
-	if err := httpkit.ValidText("name", input.Name, nameLimit); err != nil {
+	if err := textfield.Validate("name", input.Name, nameLimit); err != nil {
 		return destinationTarget{}, err
 	}
 	configuration, err := configurationObject(input.Configuration)
@@ -114,10 +116,10 @@ func parseDestination(input destinationInput) (destinationTarget, error) {
 
 func (s *Server) checkEndpoint(d destination, enabled bool) error {
 	if err := kindOf(d.Type).check(&s.egress, d); err != nil {
-		return httpkit.Invalid("destination", "The destination or its configuration is invalid.")
+		return problem.Invalid("destination", "The destination or its configuration is invalid.")
 	}
 	if enabled && requiresSecret(d.Type) {
-		return httpkit.Invalid("secret", "This destination type requires a credential secret object.")
+		return problem.Invalid("secret", "This destination type requires a credential secret object.")
 	}
 	return nil
 }
@@ -125,10 +127,10 @@ func (s *Server) checkEndpoint(d destination, enabled bool) error {
 func (s *Server) checkBinding(d destination, secret []byte) error {
 	_, err := kindOf(d.Type).open(&s.egress, d, secret)
 	if errors.Is(err, errMalformedCredential) {
-		return httpkit.Invalid("secret", "Use the channel credential object or null.")
+		return problem.Invalid("secret", "Use the channel credential object or null.")
 	}
 	if err != nil {
-		return httpkit.Invalid("destination", "The destination, configuration or secret is invalid.")
+		return problem.Invalid("destination", "The destination, configuration or secret is invalid.")
 	}
 	return nil
 }
@@ -173,7 +175,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ authz.Principa
 			return err
 		}
 		if _, replaced := target.secret.(newSecret); !replaced && current.SecretConfigured && target.URL != current.URL {
-			return httpkit.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
+			return problem.Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
 		}
 		secret, err := s.effectiveSecret(r.Context(), tx, row.id, current, target.secret)
 		if err != nil {
@@ -195,7 +197,7 @@ func patchDestination(current storedDestination, patch map[string]json.RawMessag
 	if err != nil {
 		return destinationTarget{}, err
 	}
-	if err := httpkit.ValidText("name", name, nameLimit); err != nil {
+	if err := textfield.Validate("name", name, nameLimit); err != nil {
 		return destinationTarget{}, err
 	}
 	url, err := patched(patch, "url", current.URL, "Use a valid destination URL.")
@@ -203,7 +205,7 @@ func patchDestination(current storedDestination, patch map[string]json.RawMessag
 		return destinationTarget{}, err
 	}
 	if raw, present := patch["type"]; present && !sameType(raw, current.Type) {
-		return destinationTarget{}, httpkit.Invalid("type", "The destination type cannot be changed.")
+		return destinationTarget{}, problem.Invalid("type", "The destination type cannot be changed.")
 	}
 	configuration, err := patchedConfiguration(patch, current.Configuration)
 	if err != nil {
@@ -232,7 +234,7 @@ func patched[T any](patch map[string]json.RawMessage, field string, stored T, me
 	}
 	var value T
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return stored, httpkit.Invalid(field, message)
+		return stored, problem.Invalid(field, message)
 	}
 	return value, nil
 }

@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -33,7 +33,7 @@ func (g *passwordGate) run(r *http.Request, work func()) error {
 		work()
 		return r.Context().Err()
 	default:
-		return httpkit.Fail(429, "authentication_busy", "Authentication is busy. Try again shortly.")
+		return problem.Fail(429, "authentication_busy", "Authentication is busy. Try again shortly.")
 	}
 }
 

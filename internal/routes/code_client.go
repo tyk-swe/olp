@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/codesessions"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codemode/codeclient"
@@ -30,7 +31,7 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p authz.Principal) (ht
 		return httpkit.Reply{}, err
 	}
 	if len(document) == 0 {
-		return httpkit.Reply{}, httpkit.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
+		return httpkit.Reply{}, problem.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
 	}
 	var route codemode.Route
 	if err = json.Unmarshal(document, &route); err != nil {
@@ -41,7 +42,7 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p authz.Principal) (ht
 		return httpkit.Reply{}, err
 	}
 	if len(offers) == 0 {
-		return httpkit.Reply{}, httpkit.Fail(409, "code_route_unserved", "No eligible target serves this published code route.")
+		return httpkit.Reply{}, problem.Fail(409, "code_route_unserved", "No eligible target serves this published code route.")
 	}
 	query := r.URL.Query()
 	config, err := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: query.Get("gateway_url"), Client: query.Get("client"), Platform: query.Get("platform"), Model: query.Get("model"), PlanModel: query.Get("plan_model"), SmallModel: query.Get("small_model")})

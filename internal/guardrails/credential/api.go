@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -79,7 +80,7 @@ func (a *API) create(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 		return httpkit.Reply{}, err
 	}
 	if guardrails.ValidateCredential(in.Credential) != nil || in.Name == "" || len(in.Name) > 100 {
-		return httpkit.Reply{}, httpkit.Invalid("credential", "Supply a named credential object.")
+		return httpkit.Reply{}, problem.Invalid("credential", "Supply a named credential object.")
 	}
 	ctx := r.Context()
 	return access.Mutate(a.server, r, in, func(tx pgx.Tx, p authz.Principal) (struct{}, error) {
@@ -114,7 +115,7 @@ func (a *API) delete(r *http.Request, _ authz.Principal) (httpkit.Reply, error) 
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if inUse {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "guardrail_credential_in_use", "A retained guardrail revision still references this credential.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "guardrail_credential_in_use", "A retained guardrail revision still references this credential.")
 		}
 		if err := remove(ctx, tx, id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 )
 
@@ -161,7 +162,7 @@ func (s *oidcService) ensureRemainingOIDCSignIn(r *http.Request, tx pgx.Tx, p au
 		}
 	}
 	if len(usable) == 0 && len(samlUsable) == 0 {
-		return httpkit.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
+		return problem.Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 	}
 	return nil
 }
@@ -177,7 +178,7 @@ func (s *oidcService) unlinkOIDCIdentity(r *http.Request, _ authz.Principal) (ht
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if owner != p.ID {
-			return httpkit.Reply{}, access.Event{}, httpkit.Forbidden()
+			return httpkit.Reply{}, access.Event{}, problem.Forbidden()
 		}
 		if err := s.access.ConsumeRecent(r, tx, p, "oidc_unlink", id); err != nil {
 			return httpkit.Reply{}, access.Event{}, err
@@ -214,7 +215,7 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 
 func oidcFailureRedirect(flow oidcFlow, err error) httpkit.Reply {
 	reason := "provider"
-	var problem *httpkit.Problem
+	var problem *problem.Problem
 	if errors.As(err, &problem) {
 		switch problem.Code {
 		case "oidc_authorization_denied":

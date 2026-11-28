@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func usageFilterRange(t *testing.T, start, end string) Filters {
@@ -72,9 +72,9 @@ func TestInternalFailuresKeepTheirCause(t *testing.T) {
 	}
 }
 
-func usageProblem(t *testing.T, err error) *httpkit.Problem {
+func usageProblem(t *testing.T, err error) *problem.Problem {
 	t.Helper()
-	var mapped *httpkit.Problem
+	var mapped *problem.Problem
 	if !errors.As(reportProblem(err), &mapped) {
 		t.Fatalf("error %v is not a management problem", err)
 	}

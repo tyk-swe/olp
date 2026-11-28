@@ -11,6 +11,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
+	"github.com/tyk-swe/olp/internal/domain/textfield"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
@@ -99,14 +101,14 @@ func (s *accountService) createInvitation(r *http.Request, _ authz.Principal) (h
 		return httpkit.Reply{}, err
 	}
 	if !authz.ValidRole(input.Role) {
-		return httpkit.Reply{}, httpkit.Invalid("role", "Use owner, operator, developer, or viewer.")
+		return httpkit.Reply{}, problem.Invalid("role", "Use owner, operator, developer, or viewer.")
 	}
 	hours := 168
 	if input.Hours != nil {
 		hours = *input.Hours
 	}
 	if hours < 1 || hours > 720 {
-		return httpkit.Reply{}, httpkit.Invalid("expires_in_hours", "Use 1–720 hours.")
+		return httpkit.Reply{}, problem.Invalid("expires_in_hours", "Use 1–720 hours.")
 	}
 	return access.Mutate(s.access, r, input, func(tx pgx.Tx, _ authz.Principal) (struct{}, error) {
 		return struct{}{}, s.requireInvitationLogin(r, tx)
@@ -116,7 +118,7 @@ func (s *accountService) createInvitation(r *http.Request, _ authz.Principal) (h
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if exists {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "user_exists", "This email already belongs to a member.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "user_exists", "This email already belongs to a member.")
 		}
 		id, token := ids.New(), secrets.Token()
 		if _, err := tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
@@ -149,7 +151,7 @@ func (s *accountService) retireInvitation(r *http.Request, _ authz.Principal) (h
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if accepted != nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(409, "invitation_accepted", "An accepted invitation cannot be revoked.")
 		}
 		if revoked != nil {
 			record, err := invitation(r, tx, id)
@@ -178,7 +180,7 @@ func (s *accountService) acceptInvitation(r *http.Request) (httpkit.Reply, error
 	if err := password(input.Password); err != nil {
 		return httpkit.Reply{}, err
 	}
-	if err := httpkit.ValidText("display_name", input.DisplayName, 100); err != nil {
+	if err := textfield.Validate("display_name", input.DisplayName, 100); err != nil {
 		return httpkit.Reply{}, err
 	}
 	var hash string
@@ -199,7 +201,7 @@ func (s *accountService) completeInvitationAcceptance(r *http.Request, tx pgx.Tx
 	var id, address, role string
 	err := tx.QueryRow(r.Context(), "SELECT id::text,email,role FROM olp.invitations WHERE digest=$1 AND expires_at>now() AND accepted_at IS NULL AND revoked_at IS NULL", s.access.Auth.Digest(secrets.InvitationDigest, token)).Scan(&id, &address, &role)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return httpkit.Reply{}, httpkit.Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
+		return httpkit.Reply{}, problem.Fail(410, "invitation_invalid", "The invitation is expired, retired, or already used.")
 	}
 	if err != nil {
 		return httpkit.Reply{}, err
@@ -223,7 +225,7 @@ func (s *accountService) requireInvitationLogin(r *http.Request, q database.Quer
 		return err
 	}
 	if !enabled {
-		return httpkit.Fail(409, "invitation_local_login_required", "Password invitations require local sign-in. Ask an owner to configure an OIDC role mapping, then sign in with single sign-on, or enable local sign-in before using this invitation.")
+		return problem.Fail(409, "invitation_local_login_required", "Password invitations require local sign-in. Ask an owner to configure an OIDC role mapping, then sign in with single sign-on, or enable local sign-in before using this invitation.")
 	}
 	return nil
 }

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
@@ -43,7 +43,7 @@ func Parse(document contract.ConfigurationDocument) (Section, error) {
 	}
 	declared, attached := ptr.Value(document.GuardrailPolicies), ptr.Value(document.GuardrailAttachments)
 	if len(declared) > 1000 || len(attached) > 10000 {
-		return Section{}, httpkit.Invalid("guardrail_policies", "Too many policies or attachments.")
+		return Section{}, problem.Invalid("guardrail_policies", "Too many policies or attachments.")
 	}
 	policies, err := parsePolicies(declared, definitions)
 	if err != nil {

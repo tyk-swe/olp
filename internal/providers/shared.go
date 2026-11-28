@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/egress"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
@@ -159,7 +160,7 @@ func unchangedSince(ctx context.Context, read *record, during string) func(pgx.T
 			return nil, err
 		}
 		if current.ETag != read.ETag {
-			return nil, httpkit.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
+			return nil, problem.Fail(412, "etag_mismatch", "The connection changed during "+during+"; reload and retry.")
 		}
 		return current, nil
 	}
@@ -173,7 +174,7 @@ type installedPlugins struct {
 func (p installedPlugins) Profile(ctx context.Context, digest, profileID string) (*connectors.PluginProfile, error) {
 	plugin, err := plugins.Profile(ctx, p.q, p.unconfined, digest, profileID)
 	if refusal, ok := errors.AsType[*plugins.Error](err); ok {
-		return nil, &httpkit.Problem{Status: 422, Code: refusal.Code, Detail: refusal.Message, Field: profileField(refusal.Code)}
+		return nil, &problem.Problem{Status: 422, Code: refusal.Code, Detail: refusal.Message, Field: profileField(refusal.Code)}
 	}
 	return plugin, err
 }
@@ -196,7 +197,7 @@ func validateNetworkReference(ctx context.Context, q database.Queryer, providerI
 	var valid bool
 	err := q.QueryRow(ctx, "SELECT revoked_at IS NULL FROM olp.provider_network_credentials WHERE id=$1 AND provider_id=$2", network.CredentialID, providerID).Scan(&valid)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !valid {
-		return httpkit.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
+		return problem.Invalid("configuration.options.network.credential_id", "Select an unrevoked network credential owned by this provider.")
 	}
 	return err
 }
@@ -314,7 +315,7 @@ func (externalCredential) credentialSource() {}
 func decodeCredential(plain *string, reference *secretstore.Reference) (credentialSource, error) {
 	switch {
 	case plain != nil && reference != nil:
-		return nil, httpkit.Invalid("credential_reference", "Choose a sealed credential or an external reference.")
+		return nil, problem.Invalid("credential_reference", "Choose a sealed credential or an external reference.")
 	case plain != nil:
 		if err := ValidCredential(*plain); err != nil {
 			return nil, err
@@ -322,7 +323,7 @@ func decodeCredential(plain *string, reference *secretstore.Reference) (credenti
 		return pastedCredential(*plain), nil
 	case reference != nil:
 		if reference.Validate() != nil {
-			return nil, httpkit.Invalid("credential_reference", "Use an immutable, version-pinned external credential reference.")
+			return nil, problem.Invalid("credential_reference", "Use an immutable, version-pinned external credential reference.")
 		}
 		return externalCredential(*reference), nil
 	}

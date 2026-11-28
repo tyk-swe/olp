@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/limits/fleet"
 	"github.com/tyk-swe/olp/internal/platform/secretstore"
 	"github.com/tyk-swe/olp/internal/providers/connection"
@@ -53,13 +54,13 @@ func (s *slotService) prepareSlotValidation(ctx context.Context, p authz.Princip
 		var ref *secretstore.Reference
 		if cfg := current.Connection.Document(); cfg.CredentialRequired() {
 			if slot.CredentialID == nil {
-				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_required", "This slot has no credential to validate.")
+				return slotValidationSnapshot{}, problem.Fail(422, "credential_required", "This slot has no credential to validate.")
 			}
 			if slot.CredentialRevoked {
-				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_revoked", "This slot references a revoked credential.")
+				return slotValidationSnapshot{}, problem.Fail(422, "credential_revoked", "This slot references a revoked credential.")
 			}
 			if slot.CredentialLapsed {
-				return slotValidationSnapshot{}, httpkit.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
+				return slotValidationSnapshot{}, problem.Fail(422, "credential_lapsed", "This slot's grant lapsed. Re-enroll its grant.")
 			}
 			if err = slot.credentialFits(cfg); err != nil {
 				return slotValidationSnapshot{}, err
@@ -117,7 +118,7 @@ func (s *slotService) validateSlot(r *http.Request, p authz.Principal) (httpkit.
 		return httpkit.Reply{}, err
 	}
 	if probeErr != nil {
-		return result, httpkit.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
+		return result, problem.Fail(422, "slot_validation_failed", probe.Classify(probeErr).Detail)
 	}
 	clearValidatedCooldowns(r.Context(), s.quota, s.log, id, *slot)
 	return result, nil

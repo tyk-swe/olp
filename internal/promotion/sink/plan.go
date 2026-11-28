@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access/authz"
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/promotion"
@@ -42,7 +42,7 @@ func Planner(desired []Sink, names promotion.Names, bindings promotion.Bindings,
 func acceptCredential(credential promotion.Credential) error {
 	sealed, ok := credential.(promotion.Sealed)
 	if !ok || len(sealed.Secret) < 1 || len(sealed.Secret) > 4096 {
-		return httpkit.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
+		return problem.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
 	}
 	return nil
 }
@@ -218,7 +218,7 @@ func owningProject(owner Owner, projects promotion.Directory, principal authz.Pr
 	}
 	id, present := projects.ID(scoped.Name)
 	if !present {
-		return nil, httpkit.Invalid("sinks.project", "The owning project is not declared or present at the destination.")
+		return nil, problem.Invalid("sinks.project", "The owning project is not declared or present at the destination.")
 	}
 	if err := principal.Project(&id, authz.Change); err != nil {
 		return nil, err

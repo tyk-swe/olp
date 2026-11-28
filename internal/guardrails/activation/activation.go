@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -49,13 +50,13 @@ func Handler(server *access.Server, publish Publisher, lineage Lineage, param, r
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if head.Retired {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "guardrail_retired", "A retired resource cannot be activated.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "guardrail_retired", "A retired resource cannot be activated.")
 			}
 			if err := lineage.Activate(ctx, tx, p.UserID(), id, in.RevisionID); err != nil {
 				return httpkit.Reply{}, access.Event{}, err
 			}
 			if err := publish(ctx, tx, p.UserID()); err != nil {
-				return httpkit.Reply{}, access.Event{}, httpkit.Invalid("revision_id", "This activation is incompatible with a published route or attachment.")
+				return httpkit.Reply{}, access.Event{}, problem.Invalid("revision_id", "This activation is incompatible with a published route or attachment.")
 			}
 			return httpkit.Reply{Status: http.StatusNoContent}, access.Event{Action: "guardrail.activate", Resource: resource, ID: id}, nil
 		})
@@ -63,5 +64,5 @@ func Handler(server *access.Server, publish Publisher, lineage Lineage, param, r
 }
 
 func Refused() error {
-	return httpkit.Invalid("revision_id", "Choose a revision owned by this resource.")
+	return problem.Invalid("revision_id", "Choose a revision owned by this resource.")
 }

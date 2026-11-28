@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 const azureMaxDocument = 16384
@@ -45,15 +45,15 @@ func parseAzureScope(raw json.RawMessage) (azureScope, error) {
 		!validAzurePath(scope.BillingScope, true) || scope.ExportName == "" || !validAzurePath(scope.ExportName, false) ||
 		!azureStorageAccount.MatchString(scope.StorageAccount) || !azureContainer.MatchString(scope.Container) ||
 		strings.Contains(scope.Container, "--") || !validAzurePath(scope.Prefix, true) || len(scope.SubscriptionIDs) > 100 {
-		return azureScope{}, httpkit.Invalid("scope", "Provide a billing scope, export name, storage account, container, and optional prefix and subscription IDs.")
+		return azureScope{}, problem.Invalid("scope", "Provide a billing scope, export name, storage account, container, and optional prefix and subscription IDs.")
 	}
 	if strings.HasPrefix(strings.ToLower(scope.BillingScope), "/subscriptions/") {
 		if !canonicalUUID(strings.Split(scope.BillingScope, "/")[2]) {
-			return azureScope{}, httpkit.Invalid("scope.billing_scope", "The subscription billing scope must contain a valid subscription ID.")
+			return azureScope{}, problem.Invalid("scope.billing_scope", "The subscription billing scope must contain a valid subscription ID.")
 		}
 	}
 	if slices.ContainsFunc(scope.SubscriptionIDs, func(id string) bool { return !canonicalUUID(id) }) {
-		return azureScope{}, httpkit.Invalid("scope.subscription_ids", "Subscription IDs must be UUIDs.")
+		return azureScope{}, problem.Invalid("scope.subscription_ids", "Subscription IDs must be UUIDs.")
 	}
 	return azureScope{
 		BillingScope:   scope.BillingScope,
@@ -120,20 +120,20 @@ func azureCredentialPart(value string, limit int) bool {
 func parseAzureCredential(text string) (azureCredential, error) {
 	var doc azureCredentialDocument
 	if len(text) > azureMaxDocument || decodeStrict(json.RawMessage(text), &doc) != nil {
-		return nil, httpkit.Invalid("credential", "Provide an Azure credential document.")
+		return nil, problem.Invalid("credential", "Provide an Azure credential document.")
 	}
 	switch doc.AuthMode {
 	case "azure_default":
 		if doc.TenantID != "" || doc.ClientID != "" || doc.ClientSecret != "" {
-			return nil, httpkit.Invalid("credential", "azure_default does not accept client credentials.")
+			return nil, problem.Invalid("credential", "azure_default does not accept client credentials.")
 		}
 		return azureDefault{}, nil
 	case "azure_client_secret":
 		if !azureCredentialPart(doc.TenantID, 128) || !azureCredentialPart(doc.ClientID, 128) || !azureCredentialPart(doc.ClientSecret, 1024) {
-			return nil, httpkit.Invalid("credential", "azure_client_secret requires tenant_id, client_id, and client_secret.")
+			return nil, problem.Invalid("credential", "azure_client_secret requires tenant_id, client_id, and client_secret.")
 		}
 		return azureClientSecret{TenantID: doc.TenantID, ClientID: doc.ClientID, ClientSecret: doc.ClientSecret}, nil
 	default:
-		return nil, httpkit.Invalid("credential", "Choose azure_default or azure_client_secret.")
+		return nil, problem.Invalid("credential", "Choose azure_default or azure_client_secret.")
 	}
 }

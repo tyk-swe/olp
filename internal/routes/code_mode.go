@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode/codeadmin"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/providers/connection"
 
@@ -142,7 +143,7 @@ func (s *Server) codeRevisions(r *http.Request, p authz.Principal) (httpkit.Repl
 	if err != nil {
 		return httpkit.Reply{}, err
 	}
-	items, err := httpkit.QueryJSON(r.Context(), s.Access.Pool, `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
+	items, err := database.QueryJSON(r.Context(), s.Access.Pool, `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
 		FROM olp.code_route_revisions WHERE route_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	return httpkit.ListReply(items, page), err
 }
@@ -206,7 +207,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag s
 		return nil, err
 	}
 	if !matches {
-		return nil, httpkit.Fail(404, "not_found", "The pool was not found.")
+		return nil, problem.Fail(404, "not_found", "The pool was not found.")
 	}
 	if out.Tools != nil {
 		if _, err := codesessions.ResearchAccount(ctx, tx, out); err != nil {
@@ -220,14 +221,14 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag s
 			return nil, err
 		}
 		if slug != in.Slug {
-			return nil, httpkit.Invalid("slug", "The route slug is immutable.")
+			return nil, problem.Invalid("slug", "The route slug is immutable.")
 		}
 	}
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.route_drafts WHERE slug=$1)`, in.Slug).Scan(&matches); err != nil {
 		return nil, err
 	}
 	if matches {
-		return nil, httpkit.Invalid("slug", "This slug belongs to an ordinary route.")
+		return nil, problem.Invalid("slug", "This slug belongs to an ordinary route.")
 	}
 	document, _ := json.Marshal(out)
 	_, err := tx.Exec(ctx, `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
@@ -237,34 +238,34 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p authz.Principal, id, etag s
 
 func (in CodeRouteInput) validate() error {
 	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, InitialRecoveryAttempts: in.InitialRecoveryAttempts}).ValidatePaidTargets(); err != nil {
-		return httpkit.Invalid("paid_targets", err.Error())
+		return problem.Invalid("paid_targets", err.Error())
 	}
 	if in.InitialRecoveryAttempts < 0 || in.InitialRecoveryAttempts > 2 {
-		return httpkit.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
+		return problem.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
 	}
 	if !bodylimit.Valid(in.MaxBodyBytes) {
-		return httpkit.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
+		return problem.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
 	if !routeidentity.ValidSlug(in.Slug) {
-		return httpkit.Invalid("slug", "Use a route slug.")
+		return problem.Invalid("slug", "Use a route slug.")
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {
-		return httpkit.Invalid("models", err.Error())
+		return problem.Invalid("models", err.Error())
 	}
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting}).ValidateAliases(); err != nil {
-		return httpkit.Invalid("aliases", err.Error())
+		return problem.Invalid("aliases", err.Error())
 	}
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
-		return httpkit.Invalid("model_pools", err.Error())
+		return problem.Invalid("model_pools", err.Error())
 	}
 	if err := in.Tools.Validate(); err != nil {
-		return httpkit.Invalid("tools", err.Error())
+		return problem.Invalid("tools", err.Error())
 	}
 	return nil
 }
 
 func SaveCodePublication(ctx context.Context, tx pgx.Tx, p authz.Principal, id string, in codemode.Route, frozen map[string]connection.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
-	project, projectError := httpkit.ParseUUID(in.ProjectID)
+	project, projectError := ids.Parse(in.ProjectID)
 	if projectError != nil {
 		return nil, projectError
 	}
@@ -342,26 +343,26 @@ func ValidateCodePaidProviders(route codemode.Route, published map[string]routin
 	for model, target := range route.AllPaidTargets() {
 		provider, exists := published[target.ProviderID]
 		if !exists {
-			return httpkit.Invalid("paid_targets", "Choose a published metered provider in this project.")
+			return problem.Invalid("paid_targets", "Choose a published metered provider in this project.")
 		}
 		if _, ok := codeadapter.ForConnection(provider.Kind, provider.AuthMode, provider.ProfileID); ok {
-			return httpkit.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
+			return problem.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
 		}
 		if _, ok := routing.CodePaidProtocol(provider, model); !ok {
-			return httpkit.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
+			return problem.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
 		}
 		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool {
 			return slot.ID == target.SlotID && slot.Enabled && slot.CredentialID != nil && slot.CredentialVersion != nil
 		})
 		if slot < 0 {
-			return httpkit.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
+			return problem.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
 		}
 	}
 	return nil
 }
 
 func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
-	parsed, err := httpkit.ParseUUIDs([]string{in.ProjectID, in.PoolID})
+	parsed, err := ids.ParseAll([]string{in.ProjectID, in.PoolID})
 	if err != nil {
 		return CodeRouteInput{}, err
 	}
@@ -369,7 +370,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 		if in.Tools == nil {
 			return nil, nil
 		}
-		account, accountError := httpkit.ParseUUID(in.Tools.AccountID)
+		account, accountError := ids.Parse(in.Tools.AccountID)
 		if accountError != nil {
 			return nil, accountError
 		}
@@ -402,7 +403,7 @@ func validatedCodeRouteTargets(input map[string]codemode.PaidTarget) (map[string
 			}
 		}
 	})
-	targets, targetError := httpkit.ParseUUIDs(rawTargets)
+	targets, targetError := ids.ParseAll(rawTargets)
 	if targetError != nil {
 		return nil, targetError
 	}

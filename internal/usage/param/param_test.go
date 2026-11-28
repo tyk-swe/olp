@@ -5,14 +5,14 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 func TestRevisionCursor(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"abc", "0", "-3"} {
 		_, err := RevisionCursor(url.Values{"cursor": {raw}})
-		problem, ok := errors.AsType[*httpkit.Problem](err)
+		problem, ok := errors.AsType[*problem.Problem](err)
 		if !ok || problem.Status != 400 || problem.Code != "invalid_cursor" {
 			t.Fatalf("cursor %q error = %v, want 400 invalid_cursor", raw, err)
 		}

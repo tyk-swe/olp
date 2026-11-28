@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 )
 
@@ -35,10 +36,10 @@ func (a *API) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		return httpkit.Reply{}, err
 	}
 	if (in.RouteID == nil) == (in.ProjectID == nil) {
-		return httpkit.Reply{}, httpkit.Invalid("scope", "Supply exactly one route_id or project_id.")
+		return httpkit.Reply{}, problem.Invalid("scope", "Supply exactly one route_id or project_id.")
 	}
 	if a.store == nil {
-		return httpkit.Reply{}, httpkit.Fail(503, "cache_unavailable", "The response cache is unavailable.")
+		return httpkit.Reply{}, problem.Fail(503, "cache_unavailable", "The response cache is unavailable.")
 	}
 	return access.Transact(a.server, r, access.Unlocked, func(tx pgx.Tx, p authz.Principal, _ struct{}) (httpkit.Reply, access.Event, error) {
 		kind, id := "project", in.ProjectID
@@ -48,7 +49,7 @@ func (a *API) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 		}
 		parsed, err := uuid.Parse(*id)
 		if err != nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid(kind+"_id", "Use a "+kind+" UUID.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid(kind+"_id", "Use a "+kind+" UUID.")
 		}
 		canonical := parsed.String()
 		id = &canonical
@@ -67,7 +68,7 @@ func (a *API) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if err = a.store.Purge(r.Context(), kind, *id); err != nil {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(503, "cache_unavailable", "The response cache is unavailable.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(503, "cache_unavailable", "The response cache is unavailable.")
 		}
 		return httpkit.OK(map[string]bool{"purged": true}), access.Event{Action: "cache.purge", Resource: kind, ID: *id}, nil
 	})
@@ -76,7 +77,7 @@ func (a *API) purge(r *http.Request, _ authz.Principal) (httpkit.Reply, error) {
 func (a *API) statistics(r *http.Request, p authz.Principal) (httpkit.Reply, error) {
 	route := r.URL.Query().Get("route")
 	if route != "" && !routeidentity.ValidSlug(route) {
-		return httpkit.Reply{}, httpkit.Invalid("route", "Use a route slug.")
+		return httpkit.Reply{}, problem.Invalid("route", "Use a route slug.")
 	}
 	var requests, hits, misses, bypasses int64
 	const bounds = ` FROM olp.requests r JOIN olp.api_keys k ON k.id=r.api_key_id WHERE r.started_at>=now()-interval '30 days' AND ($1 OR k.project_id=ANY($2::uuid[])) AND ($3='' OR r.route_slug=$3)`

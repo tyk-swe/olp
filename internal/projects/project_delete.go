@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 )
 
 // Deletion removes an empty project boundary. PostgreSQL foreign keys retain
@@ -34,12 +35,12 @@ func (s *Server) deleteProject(r *http.Request, _ authz.Principal) (httpkit.Repl
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if used {
-			return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
+			return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
 		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.projects WHERE id=$1", id); err != nil {
 			var constraint *pgconn.PgError
 			if errors.As(err, &constraint) && constraint.Code == "23503" {
-				return httpkit.Reply{}, access.Event{}, httpkit.Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
+				return httpkit.Reply{}, access.Event{}, problem.Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
 			}
 			return httpkit.Reply{}, access.Event{}, err
 		}

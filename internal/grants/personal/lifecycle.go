@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/oauth2"
 
-	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
@@ -83,7 +83,7 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 		return Authorization{}, ErrRequired
 	}
 	if item.Flow != "" || item.Outcome != "" {
-		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
+		return Authorization{}, problem.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
 	}
 	if _, bindingErr := liveBinding(ctx, tx, item.Binding); bindingErr != nil {
 		return Authorization{}, bindingErr
@@ -94,10 +94,10 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 	}
 	defer client.client.CloseIdleConnections()
 	if flow != AuthorizationCode && flow != DeviceCode {
-		return Authorization{}, httpkit.Invalid("flow", "Use authorization_code or device_code.")
+		return Authorization{}, problem.Invalid("flow", "Use authorization_code or device_code.")
 	}
 	if flow == DeviceCode && item.Binding.OAuth.DeviceAuthorizationEndpoint == "" {
-		return Authorization{}, httpkit.Invalid("flow", "This server has no declared device authorization endpoint.")
+		return Authorization{}, problem.Invalid("flow", "This server has no declared device authorization endpoint.")
 	}
 	session := flowSession{Verifier: oauth2.GenerateVerifier(), State: id + "." + oauth2.GenerateVerifier(), Redirect: redirect}
 	secretID, sealErr := s.sealFlow(ctx, tx, item, flow, session)
@@ -109,7 +109,7 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 		return Authorization{}, updateErr
 	}
 	if changed.RowsAffected() != 1 {
-		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
+		return Authorization{}, problem.Fail(409, "grant_enrollment_used", "This enrollment already started authorization.")
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
@@ -195,14 +195,14 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 		return Authorization{}, readErr
 	}
 	if item.Flow != AuthorizationCode || item.AttemptID != nil || item.Outcome != "" {
-		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This enrollment cannot exchange another code.")
+		return Authorization{}, problem.Fail(409, "grant_enrollment_used", "This enrollment cannot exchange another code.")
 	}
 	session, sessionErr := s.loadSession(ctx, tx, item)
 	if sessionErr != nil {
 		return Authorization{}, sessionErr
 	}
 	if subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
-		return Authorization{}, httpkit.Invalid("state", "This callback belongs to another authorization.")
+		return Authorization{}, problem.Invalid("state", "This callback belongs to another authorization.")
 	}
 	attempt := ids.New()
 	tag, claimErr := tx.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET exchange_attempt_id=$2 WHERE id=$1 AND exchange_attempt_id IS NULL AND outcome IS NULL`, id, attempt)
@@ -210,7 +210,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 		return Authorization{}, claimErr
 	}
 	if tag.RowsAffected() != 1 {
-		return Authorization{}, httpkit.Fail(409, "grant_enrollment_used", "This authorization code was already exchanged.")
+		return Authorization{}, problem.Fail(409, "grant_enrollment_used", "This authorization code was already exchanged.")
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr

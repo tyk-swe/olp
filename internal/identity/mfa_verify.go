@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/platform/secrets"
 )
 
@@ -155,7 +156,7 @@ func (s *mfaService) recordMFAFailure(r *http.Request, tx pgx.Tx, f mfaFlow) (ht
 	if err := access.Audit(r.Context(), tx, r, authz.UserActor(f.UserID), "mfa.verify", "user", f.UserID, "failure"); err != nil {
 		return httpkit.Reply{}, false, err
 	}
-	return httpkit.Reply{}, true, httpkit.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
+	return httpkit.Reply{}, true, problem.Fail(401, "mfa_verification_failed", "The verification did not succeed. Try another current factor or recovery code.")
 }
 
 func (s *mfaService) mfaVerify(r *http.Request) (httpkit.Reply, error) {
@@ -220,7 +221,7 @@ func (s *mfaService) evaluateMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow, inpu
 	case "enroll_webauthn":
 		return s.verifyWebAuthnEnrollment(r.Context(), tx, f, input)
 	default:
-		return mfaVerification{}, httpkit.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
+		return mfaVerification{}, problem.Fail(401, "mfa_challenge_invalid", "Start authentication again.")
 	}
 }
 
@@ -276,7 +277,7 @@ func (s *mfaService) completeMFALocalSession(r *http.Request, tx pgx.Tx, userID 
 		return httpkit.Reply{}, err
 	}
 	if !local {
-		return httpkit.Reply{}, httpkit.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
+		return httpkit.Reply{}, problem.Fail(401, "local_login_disabled", "Local sign-in is unavailable.")
 	}
 	reply, err := s.sessions.newSession(r, tx, userID, sessionAuth{Method: "local", MFA: true})
 	if err != nil {
@@ -325,7 +326,7 @@ func (s *mfaService) activateMFA(r *http.Request, tx pgx.Tx, f mfaFlow, credenti
 		return nil, err
 	}
 	if count >= 10 {
-		return nil, httpkit.Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
+		return nil, problem.Fail(409, "mfa_factor_limit", "At most ten factors may be enrolled.")
 	}
 	id, kind, credentialID, err := s.storeMFAFactorSecret(r.Context(), tx, f, credential)
 	if err != nil {
@@ -367,7 +368,7 @@ func (s *mfaService) storeMFAFactorSecret(ctx context.Context, tx pgx.Tx, f mfaF
 		return id, "webauthn", credential.ID, nil
 	}
 	if f.SecretID == nil {
-		return "", "", nil, httpkit.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
+		return "", "", nil, problem.Fail(401, "mfa_challenge_invalid", "Start enrollment again.")
 	}
 	if _, err := tx.Exec(ctx, "UPDATE olp.secrets SET expires_at=NULL WHERE id=$1", *f.SecretID); err != nil {
 		return "", "", nil, err

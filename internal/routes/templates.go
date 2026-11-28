@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
 	"github.com/tyk-swe/olp/internal/platform/database"
 	"github.com/tyk-swe/olp/internal/release"
@@ -53,22 +54,22 @@ type TemplateInput struct {
 // shared by the API and configuration promotion.
 func ValidateTemplateInput(in *TemplateInput) error {
 	if !templateName.MatchString(in.Name) {
-		return httpkit.Invalid("name", "Use 1–63 lowercase letters, digits or hyphens, starting with a letter or digit.")
+		return problem.Invalid("name", "Use 1–63 lowercase letters, digits or hyphens, starting with a letter or digit.")
 	}
 	if !routing.ValidSelector(in.ProviderSelector) {
-		return httpkit.Invalid("provider_selector", "Use vendor:<catalog-id> or provider:<uuid>.")
+		return problem.Invalid("provider_selector", "Use vendor:<catalog-id> or provider:<uuid>.")
 	}
 	if in.ModelFilter == "" || len(in.ModelFilter) > 200 || strings.ContainsFunc(in.ModelFilter, func(r rune) bool { return r < ' ' }) {
-		return httpkit.Invalid("model_filter", "Use 1–200 printable characters; * matches any run and ? one character.")
+		return problem.Invalid("model_filter", "Use 1–200 printable characters; * matches any run and ? one character.")
 	}
 	if !validSlugPattern(in.SlugPattern) {
-		return httpkit.Invalid("slug_pattern", "Include {model}, optionally {vendor}, and otherwise only route slug characters.")
+		return problem.Invalid("slug_pattern", "Include {model}, optionally {vendor}, and otherwise only route slug characters.")
 	}
 	if in.OverallTimeoutMS < 1 || in.OverallTimeoutMS > maxTimeoutMS {
-		return httpkit.Invalid("overall_timeout_ms", "Use a timeout from 1 to 3600000 milliseconds.")
+		return problem.Invalid("overall_timeout_ms", "Use a timeout from 1 to 3600000 milliseconds.")
 	}
 	if in.MaxAttempts < 1 || in.MaxAttempts > maxAttempts {
-		return httpkit.Invalid("max_attempts", "Use an attempt budget from 1 to 32767.")
+		return problem.Invalid("max_attempts", "Use an attempt budget from 1 to 32767.")
 	}
 	fidelity, err := normalizedFidelity(in.Fidelity)
 	if err != nil {
@@ -163,7 +164,7 @@ func loadTemplate(ctx context.Context, q database.Queryer, id string, lock bool)
 	}
 	t, err := scanTemplate(q.QueryRow(ctx, query, id))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, httpkit.Fail(404, "not_found", "Route template not found.")
+		return nil, problem.Fail(404, "not_found", "Route template not found.")
 	}
 	return t, err
 }
@@ -316,7 +317,7 @@ func WriteTemplate(ctx context.Context, tx pgx.Tx, id, etag, actor string, in *T
 		return err
 	}
 	if taken {
-		return httpkit.Fail(409, "route_template_name_taken", "Another route template is named "+in.Name+".")
+		return problem.Fail(409, "route_template_name_taken", "Another route template is named "+in.Name+".")
 	}
 	query := "INSERT INTO olp.route_templates(id,name,provider_selector,model_filter,slug_pattern,overall_timeout_ms,max_attempts,fidelity,routing_policy,auto_publish,project_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)"
 	args := []any{id, in.Name, in.ProviderSelector, in.ModelFilter, in.SlugPattern, in.OverallTimeoutMS, in.MaxAttempts, in.Fidelity, policy, in.AutoPublish, in.ProjectID, etag, actor}
@@ -350,7 +351,7 @@ func (s *Server) replaceTemplate(r *http.Request, _ authz.Principal) (httpkit.Re
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The template's project is set at creation and cannot change.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("project_id", "The template's project is set at creation and cannot change.")
 		}
 		if err = ValidateTemplateInput(&input); err != nil {
 			return httpkit.Reply{}, access.Event{}, err

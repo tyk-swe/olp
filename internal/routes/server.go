@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access/httpkit"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/domain/ids"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/ptr"
 	"github.com/tyk-swe/olp/internal/domain/vendors"
@@ -349,7 +350,7 @@ func (s *Server) replaceDraft(r *http.Request, _ authz.Principal) (httpkit.Reply
 			return httpkit.Reply{}, access.Event{}, err
 		}
 		if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
-			return httpkit.Reply{}, access.Event{}, httpkit.Invalid("project_id", "The draft's project is set at creation and cannot change.")
+			return httpkit.Reply{}, access.Event{}, problem.Invalid("project_id", "The draft's project is set at creation and cannot change.")
 		}
 		targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 		if err != nil {

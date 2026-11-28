@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/access/authz"
 	"github.com/tyk-swe/olp/internal/access/httpkit"
+	"github.com/tyk-swe/olp/internal/domain/problem"
 	"github.com/tyk-swe/olp/internal/identity/scim"
 )
 
@@ -103,7 +104,7 @@ func scimFailureFor(err error) (scimFailure, bool) {
 	if e, ok := errors.AsType[*scim.Error](err); ok {
 		return scimFailure{e.Status, e.Type, e.Detail}, true
 	}
-	if e, ok := errors.AsType[*httpkit.Problem](err); ok {
+	if e, ok := errors.AsType[*problem.Problem](err); ok {
 		switch e.Status {
 		case 422:
 			return scimFailure{400, "invalidValue", e.Detail}, true
