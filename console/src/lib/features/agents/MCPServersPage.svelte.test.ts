@@ -462,6 +462,32 @@ it('offers read-only members inspection but no server create or edit controls', 
   expect(target.querySelector('form')).toBeNull();
 });
 
+it('offers projects that loaded before the new server form opened', async () => {
+  serve(
+    (request) =>
+      new URL(request.url).pathname.endsWith('/projects')
+        ? json({ items: [{ id: 'project', name: 'Project' }] })
+        : json({ items: [] }),
+    ['read', 'configure']
+  );
+  const { target, client } = mountWithState(MCPServersPage);
+  await eventually(() => {
+    expect(target.textContent).toContain('No MCP servers yet');
+    expect(client.isFetching()).toBe(0);
+  });
+
+  findButton(target, 'New server')?.click();
+  flushSync();
+
+  await eventually(() =>
+    expect(
+      [...target.querySelectorAll('option')].map((option) =>
+        option.textContent?.trim()
+      )
+    ).toContain('Project')
+  );
+});
+
 it('keeps an edited server draft when the operator declines to discard it', async () => {
   const decline = vi.fn(() => false);
   vi.stubGlobal('confirm', decline);
