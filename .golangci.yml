@@ -85,10 +85,9 @@ linters:
           list-mode: lax
           allow:
             - github.com/tyk-swe/olp/internal/domain
-            - github.com/tyk-swe/olp/internal/catalog$
           deny:
             - pkg: github.com/tyk-swe/olp/internal
-              desc: internal/domain is pure vocabulary and logic. It imports only internal/domain, plus the signed reference catalog.
+              desc: internal/domain is pure vocabulary and logic. It imports only internal/domain. Pass outside facts in as arguments.
             - pkg: net/http
               desc: internal/domain does no I/O. Take the value in as an argument and do the request in the caller.
             - pkg: database/sql

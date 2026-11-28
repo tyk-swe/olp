@@ -44,7 +44,7 @@ while IFS=' ' read -r package imports; do
 done <<<"$gateway_list"
 
 internal_list=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/...)
-edges=$(awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="domain catalog" '
+edges=$(awk -v root=github.com/tyk-swe/olp/internal/ '
   function module(path, rest) {
     if (index(path, root) != 1) return ""
     rest = substr(path, length(root) + 1)
@@ -55,7 +55,7 @@ edges=$(awk -v root=github.com/tyk-swe/olp/internal/ -v allowed="domain catalog"
     from = module($1)
     for (i = 2; i <= NF; i++) {
       to = module($i)
-      if (to != "" && to != from && from " " to != allowed) print from, to
+      if (to != "" && to != from) print from, to
     }
   }' <<<"$internal_list" | sort -u)
 if ! loop=$(tsort <<<"$edges" 2>&1 >/dev/null); then

@@ -19,7 +19,7 @@ func TestLegacyCompletionExposureIncludesEveryGeneratedCandidate(t *testing.T) {
 	if output == nil || *output != 8 || candidates != 8 {
 		t.Fatalf("bounds %v %d", output, candidates)
 	}
-	estimate := Walk(request).Estimate(ForModel("gpt-4o"), nil)
+	estimate := Walk(request).Estimate(ForModel("gpt-4o", nil), nil)
 	if estimate.Input < 1 || estimate.InputExposure() != 4*estimate.Input || estimate.Reply() != 64 || estimate.Tokens() != estimate.InputExposure()+64 {
 		t.Fatalf("exposure %+v", estimate)
 	}
@@ -35,7 +35,7 @@ func TestLegacyCompletionBatchUsesLargestPromptContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		counter := ForModel("gpt-4o")
+		counter := ForModel("gpt-4o", nil)
 		e := Walk(request).Estimate(counter, nil)
 		var largest int64
 		for _, prompt := range prompts {
@@ -57,7 +57,7 @@ func TestLegacyCompletionBatchDoesNotShareDifferentContextBoundaries(t *testing.
 	b := mustParse(t, wire.Completions, `{"model":"route","prompt":[[1,2],[3,4]]}`)
 	first, second := Walk(a), Walk(b)
 	second.Follow(first)
-	left, right := first.Estimate(ForModel("gpt-4o"), nil), second.Estimate(ForModel("gpt-4o"), nil)
+	left, right := first.Estimate(ForModel("gpt-4o", nil), nil), second.Estimate(ForModel("gpt-4o", nil), nil)
 	if left.ContextInput != right.ContextInput+1 {
 		t.Fatalf("batch boundaries shared context counts: %+v %+v", left, right)
 	}
@@ -70,7 +70,7 @@ func TestLegacyCompletionBatchSharesTokenizerBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := Walk(request).Estimate(ForModel("gpt-4o"), nil)
+	e := Walk(request).Estimate(ForModel("gpt-4o", nil), nil)
 	if e.Provenance == ProvenanceTokenizer || e.Provenance == "" {
 		t.Fatalf("batch reopened exact tokenizer budget: %+v", e)
 	}
@@ -83,7 +83,7 @@ func TestLegacyCompletionCandidatesDoNotMultiplyContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		e := Walk(request).Estimate(ForModel("gpt-4o"), nil)
+		e := Walk(request).Estimate(ForModel("gpt-4o", nil), nil)
 		if copies == 1 {
 			input = e.Input
 		}

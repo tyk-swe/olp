@@ -23,7 +23,7 @@ func TestBreakdownReconcilesWithContextInput(t *testing.T) {
 		}`, strings.Repeat("catalog entry ", length), strings.Repeat("query filter ", length)))
 		prompt := WalkWithBreakdown(request)
 		for _, model := range []string{"gpt-5", "claude", "unknown-model"} {
-			counter := ForModel(model)
+			counter := ForModel(model, nil)
 			result := prompt.Estimate(counter, nil)
 			normal := Walk(request).Estimate(counter, nil)
 			if result.ContextInput != normal.ContextInput || result.Input != normal.Input || result.Provenance != normal.Provenance {
@@ -44,7 +44,7 @@ func TestBreakdownReconcilesWithContextInput(t *testing.T) {
 
 func TestCompletionBreakdownShowsLargestPromptNotBatchTotal(t *testing.T) {
 	request := mustParse(t, wire.Completions, `{"model":"fixture","prompt":[[1,2],[3,4,5]],"n":2,"max_tokens":10}`)
-	result := WalkWithBreakdown(request).Estimate(ForModel("fixture"), nil)
+	result := WalkWithBreakdown(request).Estimate(ForModel("fixture", nil), nil)
 	if result.Input != 5 || result.ContextInput != 3 || result.Breakdown == nil || *result.Breakdown != (Breakdown{Conversation: 3}) {
 		t.Fatalf("batch breakdown should match the largest prompt: %+v, breakdown %+v", result, result.Breakdown)
 	}

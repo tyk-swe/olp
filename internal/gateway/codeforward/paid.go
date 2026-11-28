@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/codesessions"
 	"github.com/tyk-swe/olp/internal/connectors/providerconfig"
 	"github.com/tyk-swe/olp/internal/usage/rates"
@@ -111,7 +112,7 @@ func (f *Forwarder) resolvePaidCodeTarget(req codeRequest, operation codemode.Op
 	if !provider.Supports(operation.Model, "generation", family.Surface(), mode) {
 		return paidCodePricing{}, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
-	demand := estimate.Walk(parsed).Estimate(estimate.ForModel(operation.Model), nil)
+	demand := estimate.Walk(parsed).Estimate(catalog.TokenCounter(operation.Model), nil)
 	now := f.now()
 	inputs := f.runtime.RoutingInputs()
 	price := inputs.Price(string(provider.Kind), provider.ID, provider.VendorID, operation.Model, "generation", now)

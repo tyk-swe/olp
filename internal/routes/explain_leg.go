@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contracts/interaction"
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
@@ -127,7 +128,7 @@ func simulatedWorstCost(operation string, mediaRequest *media.Request, counted *
 		return routing.CostBound{Cost: cost}, ok
 	}
 	if counted.prompt != nil {
-		from := counted.prompt.Estimate(estimate.ForModel(target.ProviderModel), nil)
+		from := counted.prompt.Estimate(catalog.TokenCounter(target.ProviderModel), nil)
 		prepared, ok := counted.estimates[target.ID]
 		to := prepared.Estimate
 		if !ok {
