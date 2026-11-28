@@ -182,6 +182,11 @@ type managementClient struct {
 
 func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register func(*http.ServeMux, *access.Server), configure ...func(access.Config) access.Config) *managementClient {
 	t.Helper()
+	return managementHTTP(t, pool, register, configure...).as(t, userID)
+}
+
+func managementHTTP(t *testing.T, pool *pgxpool.Pool, register func(*http.ServeMux, *access.Server), configure ...func(access.Config) access.Config) *managementClient {
+	t.Helper()
 	ctx := t.Context()
 	keys, installation := notificationKeys(t, pool)
 	auth := secrets.NewAuthKey(make([]byte, 32), installation)
@@ -200,8 +205,7 @@ func managementHTTPAs(t *testing.T, pool *pgxpool.Pool, userID string, register 
 	register(mux, accessServer)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	base := &managementClient{pool: pool, access: accessServer, auth: auth, server: server}
-	return base.as(t, userID)
+	return &managementClient{pool: pool, access: accessServer, auth: auth, server: server}
 }
 
 func (c *managementClient) as(t *testing.T, userID string) *managementClient {
