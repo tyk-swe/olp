@@ -22,7 +22,7 @@ func TestManagementWritesDiscardTheSecretsTheyRetire(t *testing.T) {
 	fixture := newUsageFixture(t, pool)
 	client := managementHTTPAs(t, pool, fixture.ownerID, func(mux *http.ServeMux, server *access.Server) {
 		credential.NewAPI(server).Register(mux)
-		(&sinks.Server{Access: server, Egress: &egress.Policy{}}).Register(mux)
+		sinks.NewAPI(server, &egress.Policy{}).Register(mux)
 	})
 	created := func(step, path, body string) (string, string) {
 		t.Helper()
