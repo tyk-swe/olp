@@ -1,11 +1,13 @@
 package release
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -150,6 +152,7 @@ type ManagerConfig struct {
 	Mounted                map[string]MountedProvider
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
 	SyncSharedQuotas       func(ctx context.Context, previous, next *routing.View, skippedGroupIDs ...string) error
+	IdentityClient         *http.Client
 }
 
 type Manager struct {
@@ -208,7 +211,7 @@ type Manager struct {
 func NewManager(config ManagerConfig) *Manager {
 	tasks, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
+		workloadKeys: workload.NewCache(cmp.Or(config.IdentityClient, access.IdentityHTTPClient())),
 		pool:         config.Pool, readPool: config.ReadPool, installation: config.Installation,
 		auth: config.Auth, keys: config.Keys, log: config.Log, region: config.Region,
 		externalSecrets: config.ExternalSecrets, mounted: cloneMounted(config.Mounted),
