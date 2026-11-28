@@ -1,5 +1,7 @@
 <script lang="ts">
+  import type { FieldErrors } from '#lib/editing/validation.js';
   import { formatDate } from '#lib/format.js';
+  import type { PublicationField } from './publicationDraft';
   import { catalogProvenanceLabel } from './pricingSourcePresentation.js';
   import type {
     PricingSourceRefresh,
@@ -14,6 +16,7 @@
     publishId,
     publishEffectiveAt = $bindable(),
     publishOverrides = $bindable(),
+    errors,
     onStartPublish,
     onSubmitPublish,
     onCancelPublish
@@ -25,10 +28,22 @@
     publishId: string;
     publishEffectiveAt: string;
     publishOverrides: string;
+    errors: FieldErrors<PublicationField>;
     onStartPublish: (snapshot: PricingSourceSnapshot) => void;
     onSubmitPublish: (snapshot: PricingSourceSnapshot) => void;
     onCancelPublish: () => void;
   } = $props();
+
+  const id = $props.id();
+
+  function reported(field: PublicationField) {
+    return errors[field]
+      ? {
+          'aria-invalid': 'true' as const,
+          'aria-describedby': `${id}-${field}`
+        }
+      : {};
+  }
 
   function diffKeys(entries: Record<string, string>[]) {
     return entries.map((entry) => Object.values(entry).join('·')).join(', ');
@@ -81,6 +96,12 @@
       </details>{/if}
   </div>
 {/if}
+{#snippet problemAt(field: PublicationField)}
+  {#if errors[field]}<p class="field-error" id="{id}-{field}">
+      {errors[field]}
+    </p>{/if}
+{/snippet}
+
 {#if snapshots.length}
   <div class="snapshot-list">
     {#each snapshots as snapshot (snapshot.id)}
@@ -95,15 +116,25 @@
         {#if canEdit}
           {#if publishId === snapshot.id}
             <div class="publish-form">
-              <input
-                aria-label="Effective at"
-                type="datetime-local"
-                bind:value={publishEffectiveAt}
-              /><input
-                aria-label="Overrides JSON"
-                bind:value={publishOverrides}
-                placeholder="Optional overrides JSON array"
-              /><button
+              <div>
+                <input
+                  aria-label="Effective at"
+                  type="datetime-local"
+                  bind:value={publishEffectiveAt}
+                  {...reported('effective_at')}
+                />
+                {@render problemAt('effective_at')}
+              </div>
+              <div>
+                <input
+                  aria-label="Overrides JSON"
+                  bind:value={publishOverrides}
+                  placeholder="Optional overrides JSON array"
+                  {...reported('overrides')}
+                />
+                {@render problemAt('overrides')}
+              </div>
+              <button
                 class="text-button"
                 type="button"
                 disabled={busy === snapshot.id}

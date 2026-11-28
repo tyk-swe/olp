@@ -1,8 +1,10 @@
 <script lang="ts">
   import ConflictNotice from '#lib/components/ConflictNotice.svelte';
+  import FormField from '#lib/components/FormField.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -16,8 +18,12 @@
     type RetrievalBinding,
     type RetrievalBindingInput
   } from './api';
-  import { buildRetrievalBindingInput } from './lifecycle';
   import { resourceKeys } from './resourceKeys';
+  import {
+    retrievalBindingServerFields,
+    validateRetrievalBinding,
+    type RetrievalBindingField
+  } from './retrievalBindingDraft';
 
   const access = useRole();
   const client = useQueryClient();
@@ -26,7 +32,9 @@
     queryKey,
     queryFn: listRetrievalBindings
   }));
-  const writeAction = useMutation(() => client.invalidateQueries({ queryKey }));
+  const writeAction = useMutation<RetrievalBindingField>(() =>
+    client.invalidateQueries({ queryKey })
+  );
   const readAction = useAction();
   const canManage = $derived(access.can('providers.manage'));
   const busy = $derived(readAction.busy || writeAction.busy);
@@ -48,6 +56,7 @@
   let grants = $state('');
   let revision = $state('');
   let inspected = $state('');
+  let panel = $state<HTMLElement>();
 
   usePrincipalLifetime(() => {
     current = null;
@@ -87,7 +96,7 @@
       populate(null);
       return;
     }
-    if (!writeAction.conflict) writeAction.error = '';
+    if (!writeAction.conflict) writeAction.dismiss();
     await readAction.run(
       () => getRetrievalBinding(id),
       (value) => {
@@ -96,11 +105,15 @@
     );
   }
 
+  async function focusProblem() {
+    if (panel) await focusFormError(panel);
+  }
+
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !canManage || conflict) return;
     readAction.reset();
-    const built = buildRetrievalBindingInput({
+    const checked = validateRetrievalBinding({
       project,
       name,
       route,
@@ -111,21 +124,20 @@
       fields,
       grants
     });
-    if (!built.ok) {
-      writeAction.error = built.message;
-      return;
-    }
+    if (!writeAction.check(checked)) return focusProblem();
     const observed = current;
-    await writeAction.submit(
-      { action: 'save' as const, observed, input: built.value },
+    const accepted = await writeAction.submit(
+      { action: 'save' as const, observed, input: checked.value },
       (submission, requestId) =>
         saveRetrievalBinding(submission.observed, submission.input, requestId),
       async (saved) => {
         populate(saved);
         notify('Binding revision saved.');
         await client.invalidateQueries({ queryKey });
-      }
+      },
+      { serverFields: retrievalBindingServerFields }
     );
+    if (!accepted) await focusProblem();
   }
 
   async function retire() {
@@ -162,7 +174,7 @@
     const binding = current;
     const revisionId = revision.trim();
     if (!binding || !revisionId || busy) return;
-    if (!writeAction.conflict) writeAction.error = '';
+    if (!writeAction.conflict) writeAction.dismiss();
     await readAction.run(
       () => getRetrievalRevision(binding.id, revisionId),
       (value) => {
@@ -175,6 +187,7 @@
 <section
   class="card retrieval-bindings"
   aria-labelledby="retrieval-bindings-title"
+  bind:this={panel}
 >
   <div class="binding-header">
     <div>
@@ -199,51 +212,93 @@
       <h3>{current ? 'Binding revision' : 'New binding'}</h3>
       <fieldset disabled={busy || !canManage}>
         <div class="binding-fields">
-          <label>
-            Name<input bind:value={name} required maxlength="100" />
-          </label>
-          <label>
-            Owning project ID<input
-              bind:value={project}
-              required
-              readonly={!!current}
-            />
-          </label>
-          <label>Route<input bind:value={route} required /></label>
-          <label>Target ID<input bind:value={target} required /></label>
-          <label>
-            Backend<select bind:value={backend}>
-              <option value="bedrock_knowledge_base">
-                Bedrock Knowledge Bases
-              </option><option value="vertex_rag">
-                Vertex RAG Engine
-              </option><option value="azure_ai_search">Azure AI Search</option>
-            </select>
-          </label>
-          <label>
-            Backend resource<input bind:value={resource} required />
-          </label>
+          <FormField label="Name" error={writeAction.fieldErrors.name}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                bind:value={name}
+                required
+                maxlength="100"
+              />
+            {/snippet}
+          </FormField>
+          <FormField
+            label="Owning project ID"
+            error={writeAction.fieldErrors.project}
+          >
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                bind:value={project}
+                required
+                readonly={!!current}
+              />
+            {/snippet}
+          </FormField>
+          <FormField label="Route" error={undefined}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={route} required />
+            {/snippet}
+          </FormField>
+          <FormField label="Target ID" error={writeAction.fieldErrors.target}>
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={target} required />
+            {/snippet}
+          </FormField>
+          <FormField label="Backend" error={undefined}>
+            {#snippet control(attributes)}
+              <select {...attributes} bind:value={backend}>
+                <option value="bedrock_knowledge_base">
+                  Bedrock Knowledge Bases
+                </option><option value="vertex_rag">
+                  Vertex RAG Engine
+                </option><option value="azure_ai_search">
+                  Azure AI Search
+                </option>
+              </select>
+            {/snippet}
+          </FormField>
+          <FormField
+            label="Backend resource"
+            error={writeAction.fieldErrors.resource}
+          >
+            {#snippet control(attributes)}
+              <input {...attributes} bind:value={resource} required />
+            {/snippet}
+          </FormField>
         </div>
         <p class="muted">
           Use the native Knowledge Base ID, full RAG corpus name or search index
           name configured as the route target's model.
         </p>
-        <label>
-          Field mappings (JSON)<textarea
-            bind:value={fields}
-            rows="5"
-            spellcheck="false"></textarea>
-        </label>
+        <FormField
+          label="Field mappings (JSON)"
+          error={writeAction.fieldErrors.fields}
+        >
+          {#snippet control(attributes)}
+            <textarea
+              {...attributes}
+              bind:value={fields}
+              rows="5"
+              spellcheck="false"></textarea>
+          {/snippet}
+        </FormField>
         <p class="muted">
           Map logical filter keys under metadata. Azure also requires text and
           id fields; title, url and search fields are optional.
         </p>
-        <label>
-          API-key grants (UUIDs, one per line)<textarea
-            bind:value={grants}
-            rows="3"
-            spellcheck="false"></textarea>
-        </label>
+        <FormField
+          label="API-key grants (UUIDs, one per line)"
+          error={writeAction.fieldErrors.grants}
+        >
+          {#snippet control(attributes)}
+            <textarea
+              {...attributes}
+              bind:value={grants}
+              rows="3"
+              spellcheck="false"></textarea>
+          {/snippet}
+        </FormField>
         <p class="muted">
           Only active keys in the owning project can receive access. An empty
           list grants no access.
@@ -278,9 +333,11 @@
           disabled={busy}
         />
       {/if}
-      {#if current}<label>
-          Revision ID<input bind:value={revision} disabled={busy} />
-        </label>
+      {#if current}<FormField label="Revision ID" error={undefined}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={revision} disabled={busy} />
+          {/snippet}
+        </FormField>
         <button
           class="button button-secondary"
           type="button"
@@ -295,7 +352,14 @@
     </form>
   {/if}
   {#if busy}<p role="status">Waiting for the binding operation…</p>{/if}
-  {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+  {#if error}<p
+      class="inline-problem"
+      role="alert"
+      tabindex="-1"
+      data-error-summary
+    >
+      {error}
+    </p>{/if}
   {#if inspected}<pre
       aria-label="Retrieval binding revision">{inspected}</pre>{/if}
 </section>
@@ -328,10 +392,6 @@
     border: 0;
     padding: 0;
     margin: 0;
-  }
-  label {
-    display: grid;
-    gap: 0.4rem;
   }
   .check {
     display: flex;

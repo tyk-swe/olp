@@ -1,3 +1,4 @@
+import type { Validation } from '#lib/editing/validation.js';
 import type {
   CreateNotificationDestinationInput,
   NotificationDestination,
@@ -29,6 +30,10 @@ export type DestinationSecretChange =
 type ParsedSecret =
   | { kind: 'valid'; change: DestinationSecretChange }
   | { kind: 'invalid'; message: string };
+export type DestinationField = 'name' | 'url' | 'secret';
+export const destinationRowServerFields: Readonly<
+  Record<string, DestinationField>
+> = { name: 'name', url: 'url', secret: 'secret' };
 
 export function newDestinationDraft(
   type: DestinationType,
@@ -230,4 +235,15 @@ export function updateDestinationInput(
         ? { secret: change.value }
         : {})
   };
+}
+
+export function validateDestinationChange(
+  draft: DestinationDraft,
+  secret: string,
+  clear: boolean
+): Validation<UpdateNotificationDestinationInput, DestinationField> {
+  const parsed = parseDestinationSecret(draft.type, secret, clear);
+  return parsed.kind === 'invalid'
+    ? { ok: false, fieldErrors: { secret: parsed.message } }
+    : { ok: true, value: updateDestinationInput(draft, parsed.change) };
 }

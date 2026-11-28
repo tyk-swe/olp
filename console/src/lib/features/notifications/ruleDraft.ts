@@ -1,3 +1,8 @@
+import {
+  validated,
+  type FieldErrors,
+  type Validation
+} from '#lib/editing/validation.js';
 import type { CreateNotificationRuleInput, NotificationEvent } from './api';
 
 type FieldKey =
@@ -12,6 +17,16 @@ type FieldKey =
   | 'minimum_history_days'
   | 'increase_percent'
   | 'minimum_increase';
+export type RuleField = 'name' | 'subjectId' | 'destinationId' | FieldKey;
+export const ruleRowServerFields: Readonly<Record<string, RuleField>> = {
+  name: 'name',
+  destination_id: 'destinationId'
+};
+export const ruleServerFields: Readonly<Record<string, RuleField>> = {
+  ...ruleRowServerFields,
+  subject_id: 'subjectId',
+  threshold_percent: 'threshold'
+};
 type ConfigurationField = {
   key: FieldKey;
   label: string;
@@ -226,78 +241,83 @@ export function resetRuleDraft(draft: RuleDraft): RuleDraft {
   };
 }
 
-export function createRuleInput(
-  draft: RuleDraft
-):
-  | { kind: 'valid'; input: CreateNotificationRuleInput }
-  | { kind: 'invalid'; message: string } {
-  if (!draft.name.trim() || !draft.destinationId)
-    return {
-      kind: 'invalid',
-      message: 'Enter a name and choose a destination.'
-    };
-  const parsed = parseRuleConfiguration(draft);
-  if (parsed.kind === 'invalid') return parsed;
+function identityErrors(draft: RuleDraft): FieldErrors<RuleField> {
+  return {
+    name: draft.name.trim() ? undefined : 'Enter a rule name.',
+    destinationId: draft.destinationId ? undefined : 'Choose a destination.'
+  };
+}
+
+function subjectErrors(draft: RuleDraft): FieldErrors<RuleField> {
+  if (draft.event === 'key.expiring')
+    return { subjectId: draft.subjectId ? undefined : 'Choose an API key.' };
+  if (draft.event !== 'budget.threshold') return {};
+  const threshold = Number(draft.threshold);
+  return {
+    subjectId: draft.subjectId ? undefined : 'Choose a budget subject.',
+    threshold:
+      Number.isInteger(threshold) && threshold >= 1 && threshold <= 100
+        ? undefined
+        : 'Threshold must be a whole percentage from 1 to 100.'
+  };
+}
+
+function ruleInput(draft: RuleDraft): CreateNotificationRuleInput {
   const base = {
     name: draft.name.trim(),
     event: draft.event,
     destination_id: draft.destinationId
   };
-  if (draft.event === 'budget.threshold') {
-    const threshold = Number(draft.threshold);
-    if (!draft.subjectId)
-      return { kind: 'invalid', message: 'Choose a budget subject.' };
-    if (!Number.isInteger(threshold) || threshold < 1 || threshold > 100)
-      return {
-        kind: 'invalid',
-        message: 'Threshold must be a whole percentage from 1 to 100.'
-      };
+  if (draft.event === 'budget.threshold')
     return {
-      kind: 'valid',
-      input: {
-        ...base,
-        project_id: draft.projectId || null,
-        subject_kind: draft.subjectKind,
-        subject_id: draft.subjectId,
-        window_kind: draft.window,
-        threshold_percent: threshold
-      }
+      ...base,
+      project_id: draft.projectId || null,
+      subject_kind: draft.subjectKind,
+      subject_id: draft.subjectId,
+      window_kind: draft.window,
+      threshold_percent: Number(draft.threshold)
     };
-  }
-  const configuration = Object.keys(parsed.configuration).length
-    ? { configuration: parsed.configuration }
+  const values = configurationValues(draft);
+  const configuration = Object.keys(values).length
+    ? { configuration: values }
     : {};
-  if (draft.event === 'spend.spike' && !draft.projectId)
-    return { kind: 'invalid', message: 'Choose a project.' };
-  if (draft.event === 'key.expiring') {
-    if (!draft.subjectId)
-      return { kind: 'invalid', message: 'Choose an API key.' };
+  if (draft.event === 'key.expiring')
     return {
-      kind: 'valid',
-      input: {
-        ...base,
-        ...configuration,
-        project_id: draft.projectId || null,
-        subject_kind: 'api_key',
-        subject_id: draft.subjectId
-      }
-    };
-  }
-  return {
-    kind: 'valid',
-    input: {
       ...base,
       ...configuration,
-      ...(notificationEvents[draft.event].scope === 'project'
-        ? { project_id: draft.projectId || null }
-        : {})
-    }
+      project_id: draft.projectId || null,
+      subject_kind: 'api_key',
+      subject_id: draft.subjectId
+    };
+  return {
+    ...base,
+    ...configuration,
+    ...(notificationEvents[draft.event].scope === 'project'
+      ? { project_id: draft.projectId || null }
+      : {})
   };
 }
 
-type ParsedConfiguration =
-  | { kind: 'valid'; configuration: Record<string, string | number> }
-  | { kind: 'invalid'; message: string };
+export function createRuleInput(
+  draft: RuleDraft
+): Validation<CreateNotificationRuleInput, RuleField> {
+  const checked = validated<CreateNotificationRuleInput, RuleField>(
+    {
+      ...identityErrors(draft),
+      ...subjectErrors(draft),
+      ...configurationErrors(draft)
+    },
+    () => ruleInput(draft)
+  );
+  if (draft.event !== 'spend.spike' || draft.projectId) return checked;
+  return {
+    ok: false,
+    fieldErrors: checked.ok ? {} : checked.fieldErrors,
+    formError: 'Choose a project.'
+  };
+}
+
+type ParsedConfiguration = Record<string, string | number>;
 
 export function newRuleConfiguration(
   event: NotificationEvent,
@@ -329,41 +349,40 @@ export function newRuleConfiguration(
   return { event, values };
 }
 
-export function parseRuleConfiguration(
+function configurationErrors(
+  draft: RuleConfigurationDraft
+): FieldErrors<FieldKey> {
+  return Object.fromEntries(
+    notificationEvents[draft.event].fields.flatMap((field) => {
+      const value = (draft.values[field.key] ?? '').trim();
+      return value &&
+        field.inputmode === 'numeric' &&
+        (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
+        ? [[field.key, `${field.label} must be a whole number.`]]
+        : [];
+    })
+  );
+}
+
+function configurationValues(
   draft: RuleConfigurationDraft
 ): ParsedConfiguration {
-  const fields = notificationEvents[draft.event].fields;
-  const invalid = fields.find((field) => {
-    const value = (draft.values[field.key] ?? '').trim();
-    return (
-      value &&
-      field.inputmode === 'numeric' &&
-      (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
-    );
-  });
-  if (invalid)
-    return {
-      kind: 'invalid',
-      message: `${invalid.label} must be a whole number.`
-    };
   return {
-    kind: 'valid',
-    configuration: {
-      ...Object.fromEntries(
-        fields.flatMap((field) => {
-          const value = (draft.values[field.key] ?? '').trim();
-          return value
-            ? [
-                [
-                  field.key,
-                  field.inputmode === 'decimal' ? value : Number(value)
-                ]
-              ]
-            : [];
-        })
-      ),
-      ...(draft.event === 'route.latency' ? { metric: draft.metric } : {}),
-      ...(draft.event === 'report.spend' ? { period: draft.period } : {})
-    }
+    ...Object.fromEntries(
+      notificationEvents[draft.event].fields.flatMap((field) => {
+        const value = (draft.values[field.key] ?? '').trim();
+        return value
+          ? [[field.key, field.inputmode === 'decimal' ? value : Number(value)]]
+          : [];
+      })
+    ),
+    ...(draft.event === 'route.latency' ? { metric: draft.metric } : {}),
+    ...(draft.event === 'report.spend' ? { period: draft.period } : {})
   };
+}
+
+export function parseRuleConfiguration(draft: RuleConfigurationDraft) {
+  return validated(configurationErrors(draft), () =>
+    configurationValues(draft)
+  );
 }

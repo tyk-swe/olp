@@ -10,6 +10,7 @@
   import { canChangeNotification } from './presentation';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction, useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import QueryView from '#lib/components/QueryView.svelte';
   import NotificationRuleDialog from './NotificationRuleDialog.svelte';
   import NotificationRuleEditRow from './NotificationRuleEditRow.svelte';
@@ -29,7 +30,10 @@
     type RuleDraft,
     newRuleConfiguration,
     parseRuleConfiguration,
-    type RuleConfigurationDraft
+    ruleRowServerFields,
+    ruleServerFields,
+    type RuleConfigurationDraft,
+    type RuleField
   } from './ruleDraft';
   import { apiKeyQueries } from '#lib/domain/api-keys/queries.js';
   import { budgetGroupQueries } from '#lib/domain/budget-groups/queries.js';
@@ -46,8 +50,8 @@
       installation: installationWide
     });
   let creating = $state(false);
-  const create = useMutation();
-  const edit = useAction();
+  const create = useMutation<RuleField>();
+  const edit = useAction<RuleField>();
   const toggle = useAction();
   const problem = $derived(create.error || edit.error || toggle.error);
   const destinations = createQuery(() => ({
@@ -104,8 +108,11 @@
       draft.destinationId = '';
   });
 
-  async function submitRule(event: SubmitEvent) {
+  async function submitRule(
+    event: SubmitEvent & { currentTarget: HTMLFormElement }
+  ) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (
       !canManage ||
       create.busy ||
@@ -114,13 +121,10 @@
       !draft.destinationId
     )
       return;
-    const parsed = createRuleInput(draft);
-    if (parsed.kind === 'invalid') {
-      create.error = parsed.message;
-      return;
-    }
-    await create.submit(
-      parsed.input,
+    const checked = createRuleInput(draft);
+    if (!create.check(checked)) return focusFormError(form);
+    const created = await create.submit(
+      checked.value,
       (input, requestId) => createNotificationRule(input, requestId),
       async () => {
         draft = resetRuleDraft(draft);
@@ -137,9 +141,11 @@
         failure: (cause, stage) =>
           stage === 'accept'
             ? `Rule created, but refreshing failed. ${errorMessage(cause)}`
-            : errorMessage(cause, 'The rule could not be created.')
+            : errorMessage(cause, 'The rule could not be created.'),
+        serverFields: ruleServerFields
       }
     );
+    if (!created) await focusFormError(form);
   }
 
   let editRuleId = $state('');
@@ -150,6 +156,8 @@
   let editConfiguration = $state<RuleConfigurationDraft>(
     newRuleConfiguration('budget.threshold')
   );
+
+  let table = $state<HTMLTableElement>();
 
   usePrincipalLifetime(() => {
     draft = newRuleDraft(ruleEvent);
@@ -168,7 +176,7 @@
       rule.event,
       rule.configuration ?? {}
     );
-    edit.error = '';
+    edit.reset();
   }
 
   async function saveRule(rule: NotificationRule) {
@@ -181,17 +189,14 @@
       return;
     const current = editingRule;
     if (!current || current.id !== rule.id) return;
-    const parsed = parseRuleConfiguration(editConfiguration);
-    if (parsed.kind === 'invalid') {
-      edit.error = parsed.message;
-      return;
-    }
-    await edit.run(
+    const checked = parseRuleConfiguration(editConfiguration);
+    if (!edit.check(checked)) return focusTable();
+    const saved = await edit.run(
       () =>
         updateNotificationRule(current, {
           name: editRuleName.trim(),
           destination_id: editRuleDestinationId,
-          configuration: parsed.configuration
+          configuration: checked.value
         }),
       async () => {
         editRuleId = '';
@@ -208,9 +213,15 @@
         failure: (cause, stage) =>
           stage === 'accept'
             ? `Rule updated, but refreshing failed. ${errorMessage(cause)}`
-            : errorMessage(cause, 'The rule could not be updated.')
+            : errorMessage(cause, 'The rule could not be updated.'),
+        serverFields: ruleRowServerFields
       }
     );
+    if (!saved) await focusTable();
+  }
+
+  async function focusTable() {
+    if (table) await focusFormError(table);
   }
 
   async function toggleRule(rule: NotificationRule) {
@@ -264,7 +275,7 @@
         class="button button-primary"
         type="button"
         onclick={() => {
-          create.error = '';
+          create.dismiss();
           creating = true;
         }}
       >
@@ -277,6 +288,7 @@
     bind:draft
     busy={create.busy}
     error={problem}
+    errors={create.fieldErrors}
     {installationWide}
     {subjectOptions}
     {destinationOptions}
@@ -297,7 +309,7 @@
     </EmptyState>
   {/snippet}
   <ScrollTable label="Notification rules">
-    <table class="data-table">
+    <table class="data-table" bind:this={table}>
       <thead>
         <tr>
           <th scope="col">Name</th><th scope="col">Event</th><th scope="col">
@@ -323,6 +335,7 @@
               bind:configuration={editConfiguration}
               destinations={destinations.data ?? []}
               busy={edit.busy}
+              errors={edit.fieldErrors}
               {editingRule}
               onSave={() => saveRule(rule)}
               onCancel={() => {

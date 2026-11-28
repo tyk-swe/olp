@@ -253,8 +253,8 @@ describe('notification draft requests', () => {
         minimum_samples: '5'
       }
     });
-    expect(parsed.kind).toBe('valid');
-    if (parsed.kind !== 'valid') return;
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
     serve(async (request) => {
       const body = await request.json();
       expect(body.configuration).toEqual({
@@ -270,7 +270,7 @@ describe('notification draft requests', () => {
         name: 'Error rate',
         event: 'provider.error_rate',
         destination_id: destination.id,
-        configuration: parsed.configuration
+        configuration: parsed.value
       },
       'rate-create'
     );
@@ -278,8 +278,11 @@ describe('notification draft requests', () => {
       parseRuleConfiguration({
         ...newRuleConfiguration('provider.error_rate'),
         values: { window_seconds: '1.5' }
-      }).kind
-    ).toBe('invalid');
+      })
+    ).toEqual({
+      ok: false,
+      fieldErrors: { window_seconds: 'Window seconds must be a whole number.' }
+    });
   });
 });
 
@@ -292,20 +295,20 @@ it('writes only the subject and scope supported by the selected rule event', asy
   expect(key.event).toBe('key.expiring');
   if (key.event !== 'key.expiring') return;
   const selected = createRuleInput({ ...key, subjectId: 'key-id' });
-  expect(selected.kind).toBe('valid');
-  if (selected.kind !== 'valid') return;
+  expect(selected.ok).toBe(true);
+  if (!selected.ok) return;
   const requests: unknown[] = [];
   serve(async (request) => {
     requests.push(await request.json());
     return json(rule);
   });
-  await createNotificationRule(selected.input, 'key-expiry');
+  await createNotificationRule(selected.value, 'key-expiry');
   const installation = createRuleInput(
     newRuleDraft('provider.grant.lapsed', key)
   );
-  expect(installation.kind).toBe('valid');
-  if (installation.kind !== 'valid') return;
-  await createNotificationRule(installation.input, 'provider-grant');
+  expect(installation.ok).toBe(true);
+  if (!installation.ok) return;
+  await createNotificationRule(installation.value, 'provider-grant');
   expect(requests).toEqual([
     {
       name: 'Key expiry',
@@ -330,8 +333,9 @@ it('requires a project and preserves spike thresholds', () => {
     projectId: ''
   });
   expect(createRuleInput(draft)).toEqual({
-    kind: 'invalid',
-    message: 'Choose a project.'
+    ok: false,
+    fieldErrors: {},
+    formError: 'Choose a project.'
   });
   const scoped = createRuleInput({
     ...draft,
@@ -343,9 +347,9 @@ it('requires a project and preserves spike thresholds', () => {
       minimum_increase: '25.00'
     }
   });
-  expect(scoped.kind).toBe('valid');
-  if (scoped.kind !== 'valid') return;
-  expect(scoped.input).toEqual({
+  expect(scoped.ok).toBe(true);
+  if (!scoped.ok) return;
+  expect(scoped.value).toEqual({
     name: 'Spend spike',
     event: 'spend.spike',
     destination_id: destination.id,

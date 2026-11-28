@@ -1,10 +1,12 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
+  import FormField from '#lib/components/FormField.svelte';
+  import type { FieldErrors } from '#lib/editing/validation.js';
   import type { ApiKey } from '#lib/domain/api-keys/api.js';
   import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import { notificationEvents, newRuleDraft } from './ruleDraft';
-  import type { RuleDraft } from './ruleDraft';
+  import type { RuleDraft, RuleField } from './ruleDraft';
   import type { BudgetGroup } from '#lib/domain/budget-groups/api.js';
   import type { NotificationDestination } from './api';
 
@@ -12,6 +14,7 @@
     draft = $bindable(),
     busy,
     error,
+    errors,
     installationWide,
     subjectOptions,
     destinationOptions,
@@ -21,11 +24,12 @@
     draft: RuleDraft;
     busy: boolean;
     error: string;
+    errors: FieldErrors<RuleField>;
     installationWide: boolean;
     subjectOptions: (ApiKey | BudgetGroup)[];
     destinationOptions: NotificationDestination[];
     onClose: () => void;
-    onSubmit: (event: SubmitEvent) => void;
+    onSubmit: (event: SubmitEvent & { currentTarget: HTMLFormElement }) => void;
   } = $props();
 
   const ruleEvent = $derived(draft.event);
@@ -49,13 +53,11 @@
   <form class="create-form" onsubmit={onSubmit}>
     <fieldset class="submission-fields" disabled={busy}>
       <div class="form-grid">
-        <div class="form-field">
-          <label for="rule-name">Rule name</label><input
-            id="rule-name"
-            bind:value={draft.name}
-            required
-          />
-        </div>
+        <FormField label="Rule name" error={errors.name}>
+          {#snippet control(attributes)}
+            <input {...attributes} bind:value={draft.name} required />
+          {/snippet}
+        </FormField>
         <div class="form-field">
           <label for="rule-event">Event</label><select
             id="rule-event"
@@ -83,6 +85,7 @@
           />
         {/if}
         {#if draft.event === 'budget.threshold' || draft.event === 'key.expiring'}
+          {@const watched = draft}
           <div class="form-field">
             <label for="rule-subject-kind">Subject</label><select
               id="rule-subject-kind"
@@ -96,24 +99,24 @@
               </option>
             </select>
           </div>
-          <div class="form-field">
-            <label for="rule-subject">
-              {draft.subjectKind === 'api_key' ? 'API key' : 'Budget group'}
-            </label><select
-              id="rule-subject"
-              bind:value={draft.subjectId}
-              required
-            >
-              <option value="" disabled>
-                Choose a subject
-              </option>{#each subjectOptions as subject (subject.id)}<option
-                  value={subject.id}
-                >
-                  {subject.name}
-                </option>{/each}
-            </select>
-          </div>
+          <FormField
+            label={draft.subjectKind === 'api_key' ? 'API key' : 'Budget group'}
+            error={errors.subjectId}
+          >
+            {#snippet control(attributes)}
+              <select {...attributes} bind:value={watched.subjectId} required>
+                <option value="" disabled>
+                  Choose a subject
+                </option>{#each subjectOptions as subject (subject.id)}<option
+                    value={subject.id}
+                  >
+                    {subject.name}
+                  </option>{/each}
+              </select>
+            {/snippet}
+          </FormField>
           {#if draft.event === 'budget.threshold'}
+            {@const budget = draft}
             <div class="form-field">
               <label for="rule-window">Window</label><select
                 id="rule-window"
@@ -124,30 +127,34 @@
                 </option><option value="month">Budget month</option>
               </select>
             </div>
-            <div class="form-field">
-              <label for="rule-threshold">Threshold %</label><input
-                id="rule-threshold"
-                inputmode="numeric"
-                bind:value={draft.threshold}
-                required
-              />
-            </div>
+            <FormField label="Threshold %" error={errors.threshold}>
+              {#snippet control(attributes)}
+                <input
+                  {...attributes}
+                  inputmode="numeric"
+                  bind:value={budget.threshold}
+                  required
+                />
+              {/snippet}
+            </FormField>
           {/if}
         {/if}
         {#each notificationEvents[ruleEvent].fields as field (field.key)}
-          <div class="form-field">
-            <label for="rule-config-{field.key}">{field.label}</label><input
-              id="rule-config-{field.key}"
-              inputmode={field.inputmode}
-              value={draft.values[field.key] ?? ''}
-              oninput={(e) =>
-                (draft.values = {
-                  ...draft.values,
-                  [field.key]: e.currentTarget.value
-                })}
-              placeholder="Default"
-            />
-          </div>
+          <FormField label={field.label} error={errors[field.key]}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                inputmode={field.inputmode}
+                value={draft.values[field.key] ?? ''}
+                oninput={(e) =>
+                  (draft.values = {
+                    ...draft.values,
+                    [field.key]: e.currentTarget.value
+                  })}
+                placeholder="Default"
+              />
+            {/snippet}
+          </FormField>
         {/each}
         {#if draft.event === 'route.latency'}
           <div class="form-field">
@@ -175,21 +182,19 @@
             </select>
           </div>
         {/if}
-        <div class="form-field">
-          <label for="rule-destination">Destination</label><select
-            id="rule-destination"
-            bind:value={draft.destinationId}
-            required
-          >
-            <option value="" disabled>
-              Choose a destination
-            </option>{#each destinationOptions as destination (destination.id)}<option
-                value={destination.id}
-              >
-                {destination.name}
-              </option>{/each}
-          </select>
-        </div>
+        <FormField label="Destination" error={errors.destinationId}>
+          {#snippet control(attributes)}
+            <select {...attributes} bind:value={draft.destinationId} required>
+              <option value="" disabled>
+                Choose a destination
+              </option>{#each destinationOptions as destination (destination.id)}<option
+                  value={destination.id}
+                >
+                  {destination.name}
+                </option>{/each}
+            </select>
+          {/snippet}
+        </FormField>
       </div>
       <div class="form-actions">
         <button
