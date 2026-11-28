@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/platform/workerhealth"
 	"github.com/tyk-swe/olp/tests/harness"
 )
 
@@ -125,6 +127,42 @@ func TestEachSplitModeAnswersOnlyItsOwnPlaneAndStopsCleanly(t *testing.T) {
 			if got := status(t, s, "/v1/models"); got != want.inference {
 				t.Fatalf("inference answered %d, want %d", got, want.inference)
 			}
+		})
+	}
+}
+
+func TestEveryWorkerTaskTheDeploymentCanServeRecordsASuccess(t *testing.T) {
+	t.Parallel()
+	for name, deployment := range map[string]struct {
+		mode          string
+		withoutValkey bool
+	}{
+		"worker with Valkey": {mode: "worker"},
+		"all without Valkey": {mode: "all", withoutValkey: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			pool, databaseURL := harness.Database(t)
+			env := harness.NewEnvironment(t, databaseURL, "Worker plane test")
+			env.Mode = deployment.mode
+			if deployment.withoutValkey {
+				env.Values["OLP_VALKEY_URL"] = ""
+			}
+			s := harness.StartProcess(t, pool, env)
+			s.Eventually("a success from every worker task", 20*time.Second, func() (bool, string) {
+				rows, err := pool.Query(t.Context(), `SELECT task FROM olp.worker_task_health WHERE successes_total>0`)
+				if err != nil {
+					return false, err.Error()
+				}
+				succeeded, err := pgx.CollectRows(rows, pgx.RowTo[workerhealth.Task])
+				if err != nil {
+					return false, err.Error()
+				}
+				missing := slices.DeleteFunc(slices.Clone(workerhealth.Tasks[:]), func(task workerhealth.Task) bool {
+					return slices.Contains(succeeded, task) || deployment.withoutValkey && task.Regional()
+				})
+				return len(missing) == 0, fmt.Sprintf("none from %v", missing)
+			})
 		})
 	}
 }
