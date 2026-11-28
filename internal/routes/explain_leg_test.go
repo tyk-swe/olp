@@ -16,17 +16,18 @@ import (
 
 func TestExplainKeepsWeightedOrderWhenCallerCostExempt(t *testing.T) {
 	t.Parallel()
-	cheap, dear := uuid.NewString(), uuid.NewString()
+	fixed := func(name string) string { return uuid.NewSHA1(uuid.Nil, []byte(name)).String() }
+	cheap, dear := fixed("cheap"), fixed("dear")
 	explain := func(exempt bool, strategy string) []inspectedDecision {
 		t.Helper()
 		now := time.Now()
 		slots := []routing.Slot{{ID: uuid.NewString(), Name: "caller", Enabled: true, Weight: 1, CredentialID: new(uuid.NewString())}}
 		capabilities := []routing.Capability{{Model: "fixture-model", Operation: "generation", Surface: "openai", Mode: "unary"}}
 		target := func(provider string, weight int64) routing.Target {
-			id := uuid.NewString()
+			id := fixed("target of " + provider)
 			return routing.Target{ID: id, RoutingID: id, ProviderID: provider, ProviderModel: "fixture-model", Weight: weight, Timeout: 1000}
 		}
-		routeID := uuid.NewString()
+		routeID := fixed("route")
 		route := routing.Route{ID: routeID, RoutingID: routeID, Slug: "byok", MaxAttempts: 2, OverallTimeout: 3000, Operations: []string{"generation"},
 			Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Behavior: routing.Behavior{CallerCostExempt: exempt}, Targets: []routing.Target{target(cheap, 1), target(dear, 1000)}}
 		snapshot := &routing.Snapshot{Routes: map[string]routing.Route{route.Slug: route}, Providers: map[string]routing.Provider{
