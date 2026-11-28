@@ -161,7 +161,6 @@
       ...(remoteAgents.length ? { allowed_agents: remoteAgents } : {})
     };
     consent = null;
-    action.error = '';
     await action.run(
       async () => {
         if (verifiedKey !== selected.api_key_id) {
@@ -190,7 +189,6 @@
 
   async function verifyIdentity() {
     if (action.busy || !selectedKey) return;
-    action.error = '';
     await action.run(
       () => beginIdentityReauthentication('agent_delegation', selectedKey.id),
       (url) => {
