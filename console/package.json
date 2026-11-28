@@ -18,7 +18,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint .",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && pnpm lint",
+    "lint": "eslint . && node scripts/check-suppressions.mjs",
     "test": "svelte-kit sync && vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

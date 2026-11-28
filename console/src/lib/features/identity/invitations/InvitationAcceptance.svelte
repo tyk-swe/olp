@@ -30,7 +30,7 @@
   let view = $state<
     'checking' | 'ready' | 'invalid' | 'expired' | 'blocked' | 'unavailable'
   >('checking');
-  let values = $state<InvitationAcceptanceValues>({
+  const values = $state<InvitationAcceptanceValues>({
     displayName: '',
     password: '',
     confirmPassword: ''

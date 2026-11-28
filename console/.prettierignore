@@ -7,3 +7,4 @@ src/lib/management/schema.d.ts
 src/lib/management/requirements.ts
 static/
 pnpm-lock.yaml
+eslint-suppressions.json

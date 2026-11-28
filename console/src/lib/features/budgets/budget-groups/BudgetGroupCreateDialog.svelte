@@ -28,7 +28,7 @@
   let createMonthly = $state('');
   let createWeekly = $state('');
   let createTemplate = $state('');
-  let createRates = $state({
+  const createRates = $state({
     requests_per_minute: '',
     tokens_per_minute: '',
     max_concurrency: ''

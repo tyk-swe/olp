@@ -17,7 +17,7 @@
 
   let { onComplete }: { onComplete: () => void } = $props();
 
-  let values = $state<OwnerFormValues>({
+  const values = $state<OwnerFormValues>({
     displayName: '',
     installationName: '',
     email: '',

@@ -3,6 +3,7 @@ import svelte from 'eslint-plugin-svelte';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import featureBoundary from './eslint/feature-boundary.mjs';
+import featureOrder from './eslint/feature-order.mjs';
 import sideEffectImport from './eslint/side-effect-import.mjs';
 
 const tsFiles = ['**/*.{ts,tsx}'];
@@ -28,6 +29,26 @@ const sharedLayers = [
   'listing',
   'components',
   'shell'
+];
+const orderedFeatures = [
+  'budgets',
+  'identity',
+  'overview',
+  'access',
+  'agents',
+  'providers',
+  'routes',
+  'inference',
+  'usage',
+  'guardrails',
+  'exports',
+  'code-mode',
+  'health',
+  'media',
+  'notifications',
+  'plugins',
+  'resources',
+  'settings'
 ];
 const apiModules = [
   'src/lib/management/**',
@@ -105,10 +126,9 @@ export default [
     rules: {
       ...js.configs.recommended.rules,
       ...typeScriptRecommendedRules,
-      // Runes are declared with `let` even when they are never reassigned:
-      // `$props()`, `$state()`, and `$bindable()` bindings are rewritten by the
-      // compiler, so `prefer-const` would fight the framework in every file.
+      // svelte/prefer-const replaces it so `$props()` and `$derived()` may stay `let`.
       'prefer-const': 'off',
+      'svelte/prefer-const': 'error',
       'svelte/no-navigation-without-resolve': ['error', { ignoreLinks: true }]
     }
   },
@@ -119,12 +139,14 @@ export default [
       console: {
         rules: {
           'feature-boundary': featureBoundary,
+          'feature-order': featureOrder,
           'side-effect-import': sideEffectImport
         }
       }
     },
     rules: {
       'console/feature-boundary': ['error', { layers: sharedLayers }],
+      'console/feature-order': ['error', { order: orderedFeatures }],
       'console/side-effect-import': 'error'
     }
   },
@@ -155,6 +177,27 @@ export default [
       ]
     }
   },
+  {
+    files: tsFiles,
+    ignores: [...testFiles, 'tests/**'],
+    rules: {
+      'max-lines': [
+        'error',
+        { max: 500, skipBlankLines: true, skipComments: true }
+      ]
+    }
+  },
+  {
+    files: [...tsFiles, ...svelteFiles, ...scriptFiles],
+    ignores: [...testFiles, 'tests/**'],
+    rules: {
+      'max-lines-per-function': [
+        'error',
+        { max: 100, skipComments: true, IIFEs: true }
+      ]
+    }
+  },
+  { files: scriptFiles, rules: { 'prefer-const': 'error' } },
   {
     files: sourceFiles,
     ignores: ['src/lib/management/**', ...testFiles],

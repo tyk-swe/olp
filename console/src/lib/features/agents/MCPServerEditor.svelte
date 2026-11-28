@@ -54,7 +54,7 @@
   let delegationIssuer = $state(initial?.delegation?.issuer ?? '');
   let delegationAudience = $state(initial?.delegation?.audience ?? '');
   let privateKey = $state('');
-  let pricing = $state<ServerPricingForm>(
+  const pricing = $state<ServerPricingForm>(
     initial
       ? serverPricingForm(initial)
       : {
