@@ -25,43 +25,18 @@ fi
 "$lint_bin" run --show-stats=false --enable-only errcheck,forcetypeassert --new-from-merge-base "$base" ./...
 
 gateway=github.com/tyk-swe/olp/internal/gateway
-declare -A gateway_imports=(
-  [fault]="" [events]="" [traceingest]="" [guardstream]="" [generationrefs]=""
-  [realtimeresponses]="ingress" [publishedprompt]="fault ingress" [duplexrelay]="fault ingress"
-  [anthropicbeta]="fault" [managedbatch]="fault"
-  [health]="events" [ingress]="fault" [quota]="events fault" [models]="fault ingress"
-  [codeforward]="events fault ingress quota codeforward/coderesearch codeforward/codexwire" [delegation]="fault ingress"
-  [codeforward/coderesearch]="" [codeforward/codexwire]=""
-  [healthprobes]="health kernel quota"
-  [surface/anthropicstate]="fault kernel"
-  [surface/cloudbatches]="fault ingress kernel"
-  [surface/geminiinteractions]="fault kernel"
-  [surface/geministate]="fault kernel"
-  [surface/guardrails]="fault kernel"
-  [surface/playground]="fault kernel publishedprompt"
-  [surface/retrieval]="fault kernel"
-  [surface/media]="events fault kernel quota"
-  [surface/openaistate]="fault generationrefs ingress kernel"
-  [surface/passthrough]="fault ingress kernel"
-  [surface/retained]="fault ingress kernel quota"
-  [surface/bedrock]="fault kernel"
-  [surface/realtime]="duplexrelay fault ingress kernel quota realtimeresponses"
-  [surface/nativeduplex]="duplexrelay fault ingress kernel"
-  [surface/geminilive]="duplexrelay fault ingress kernel quota"
-  [kernel]="anthropicbeta codeforward delegation events fault generationrefs guardstream health ingress managedbatch models publishedprompt quota realtimeresponses traceingest"
-)
 gateway_list=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./internal/gateway/...)
 while IFS=' ' read -r package imports; do
   [[ $package == "$gateway" ]] && continue
-  name=${package#"$gateway/"}
-  if [[ ! -v gateway_imports[$name] ]]; then
-    echo "check-lint: declare which gateway packages $package may import in scripts/check-lint.sh" >&2
+  allowlist="internal/gateway/${package#"$gateway/"}/imports.txt"
+  if [[ ! -f $allowlist ]]; then
+    echo "check-lint: declare which gateway packages $package may import in $allowlist, one per line" >&2
     exit 1
   fi
   read -r -a imported_list <<<"$imports"
   for imported in "${imported_list[@]}"; do
     [[ $imported == "$gateway/"* ]] || continue
-    if [[ " ${gateway_imports[$name]} " != *" ${imported#"$gateway/"} "* ]]; then
+    if ! grep -qxF -- "${imported#"$gateway/"}" "$allowlist"; then
       echo "check-lint: $package must not import $imported" >&2
       exit 1
     fi

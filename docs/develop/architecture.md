@@ -50,9 +50,10 @@ provenance, and the console screen for it lives in the matching feature under
 `internal/gateway/surface/`, work every surface shares belongs in the kernel,
 and a gateway handler that can be built from its own collaborators belongs in
 its own package under `internal/gateway/`. Each declares its allowed imports in
-`scripts/check-lint.sh`. Process wiring belongs in `cmd/olp`, where each plane
-is assembled by one constructor and `Run` owns mode selection, listeners and
-shutdown ordering. A new small package is justified only when it owns behavior
-of its own or breaks an import cycle with stable vocabulary, as
-`internal/domain/routeidentity` and `internal/keyauthority` do. A wrapper whose
-only job is forwarding to another package belongs in that package instead.
+its own [`imports.txt`](gateway-packages.md). Process wiring belongs in
+`cmd/olp`, where each plane is assembled by one constructor and `Run` owns mode
+selection, listeners and shutdown ordering. A new small package is justified
+only when it owns behavior of its own or breaks an import cycle with stable
+vocabulary, as `internal/domain/routeidentity` and `internal/keyauthority` do. A
+wrapper whose only job is forwarding to another package belongs in that package
+instead.

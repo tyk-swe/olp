@@ -46,9 +46,12 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/retained` | Retained provider resources from the `retainedapi` catalog, such as fine-tuning jobs, vector stores, conversations, containers, evals, Anthropic skills, Gemini cached contents and agents, and Vertex tuning jobs, plus `/v1/vector_stores/{id}/search` and `/v1/responses/compact` | `fault`, `ingress`, `kernel`, `quota` |
 | `gateway/surface/playground` | The console playground, which runs a route for a signed-in member through `kernel.MemberGeneration` and exposes `Handle` and `Stream` to the management API | `fault`, `kernel`, `publishedprompt` |
 
-`scripts/check-lint.sh` enforces the last column and fails on any gateway
-package without an entry, so a new gateway package declares its imports when it
-is added. Most surface packages follow `surface/anthropicstate`, exporting one
+Each gateway package below `gateway` lists the gateway packages it may import in
+an `imports.txt` beside its code, one per line, and an empty file allows none.
+`scripts/check-lint.sh` fails on an import the file does not list and on any
+such package without the file, so a new gateway package declares its imports
+when it is added. The last column above describes those files. Most surface
+packages follow `surface/anthropicstate`, exporting one
 `Register(k *kernel.Server, mux *http.ServeMux)`, keeping handlers on an
 unexported `surface` type that holds the kernel, and registering in
 `internal/gateway/gateway.go`. Three surfaces take extra collaborators or wire
