@@ -6,6 +6,7 @@
   import type { useMutation } from '#lib/editing/action.svelte.js';
   import { focusFormError } from '#lib/editing/focusError.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
+  import { costBasisLabels } from '../limitForm.js';
   import type { createBudgetGroup } from './api.js';
   import {
     budgetGroupDraft,
@@ -114,9 +115,9 @@
         <FormField label="Budget basis" error={action.fieldErrors.cost_basis}>
           {#snippet control(attributes)}
             <select {...attributes} bind:value={draft.cost_basis}>
-              <option value="cost">Provider cost</option><option value="charge">
-                Consumer charge
-              </option>
+              {#each Object.entries(costBasisLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           {/snippet}
         </FormField>

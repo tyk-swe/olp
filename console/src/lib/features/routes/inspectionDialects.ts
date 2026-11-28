@@ -41,7 +41,15 @@ export function inspectionDialects(
       item.operation === operation &&
       (item.surface === surface || surface === 'native')
   );
-  if (matches.length) return matches.map((item) => item.id);
+  return matches.length
+    ? matches.map((item) => item.id)
+    : builtinDialects(operation, surface);
+}
+
+function builtinDialects(
+  operation: string,
+  surface: string
+): components['schemas']['SimulationDialect'][] {
   if (operation === 'generation') {
     if (surface === 'openai')
       return ['openai-chat', 'openai-responses', 'openai-completions'];

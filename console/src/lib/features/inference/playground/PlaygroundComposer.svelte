@@ -34,6 +34,9 @@
     { value: 'translation', label: 'Audio translation' },
     { value: 'realtime', label: 'Realtime event trace' }
   ];
+  const surfaceLabels: Partial<
+    Record<PlaygroundState['plan']['inspection']['surface'], string>
+  > = { openai: 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini' };
   const composerModes = [
     { value: 'basic', label: 'Basic' },
     { value: 'advanced', label: 'Advanced' }
@@ -193,9 +196,9 @@
         }
         disabled={surfaceLocked}
       >
-        <option value="openai">OpenAI</option><option value="anthropic">
-          Anthropic
-        </option><option value="gemini">Gemini</option>
+        {#each Object.entries(surfaceLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
         {#if clientSurface === 'native'}<option value="native">
             Native
           </option>{/if}

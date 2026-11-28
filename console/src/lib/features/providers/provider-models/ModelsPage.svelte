@@ -26,6 +26,7 @@
   import { errorMessage } from '#lib/management/http.js';
   import { useAction } from '#lib/editing/action.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
+  import type { components } from '#lib/management/schema.js';
 
   let {
     BulkRoutes
@@ -36,6 +37,14 @@
       outdated: boolean;
     }>;
   } = $props();
+  const surfaceLabels: Partial<
+    Record<components['schemas']['Surface'] | 'all', string>
+  > = {
+    all: 'All surfaces',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    gemini: 'Gemini'
+  };
   const access = useRole();
   const canManage = $derived(access.can('providers.manage'));
   const queryClient = useQueryClient();
@@ -227,13 +236,9 @@
       bind:value={surface}
       onchange={debounce.applyNow}
     >
-      <option value="all">All surfaces</option><option value="openai">
-        OpenAI
-      </option><option value="anthropic">Anthropic</option><option
-        value="gemini"
-      >
-        Gemini
-      </option>
+      {#each Object.entries(surfaceLabels) as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
     </select>
   </label>
   <label class="filter-choice">

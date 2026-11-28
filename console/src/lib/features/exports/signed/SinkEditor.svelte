@@ -12,9 +12,9 @@
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
   import { stateLabel } from '#lib/format.js';
+  import { SIGNED_SINK_STREAMS } from '#lib/management/enums.js';
   import { saveSink, type Sink } from './api';
   import {
-    SINK_STREAMS,
     sinkDraft,
     sinkServerFields,
     validateSink,
@@ -108,7 +108,7 @@
   </FormField>
   <fieldset>
     <legend>Streams, maximum four</legend>
-    {#each SINK_STREAMS as stream (stream)}<label class="check-field">
+    {#each SIGNED_SINK_STREAMS as stream (stream)}<label class="check-field">
         <input
           type="checkbox"
           value={stream}

@@ -25,6 +25,7 @@
   import ScrollTable from '#lib/components/ScrollTable.svelte';
   import StatusBadge from '#lib/components/StatusBadge.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
+  import { SIGNATURE_ALGORITHMS } from '#lib/management/enums.js';
   import { notify } from '#lib/components/toasts.svelte.js';
 
   const access = useRole();
@@ -36,11 +37,6 @@
   }));
   const editable = $derived(access.allows('POST /api/v1/workload-issuers'));
   const id = $props.id();
-  const signatureAlgorithms: IssuerWrite['algorithms'] = [
-    'RS256',
-    'ES256',
-    'EdDSA'
-  ];
   let editing = $state<Issuer>();
   let opened = $state(false);
   let draft = $state(issuerDraft());
@@ -269,7 +265,7 @@
         <fieldset class="algorithms">
           <legend>
             Signature algorithms
-          </legend>{#each signatureAlgorithms as alg (alg)}<label>
+          </legend>{#each SIGNATURE_ALGORITHMS as alg (alg)}<label>
               <input
                 type="checkbox"
                 bind:group={draft.algorithms}

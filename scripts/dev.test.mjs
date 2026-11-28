@@ -33,6 +33,7 @@ esac
   write('scripts/secrets.sh', 'export OLP_BOOTSTRAP_TOKEN_FILE=unused\n');
   write('console/src/lib/management/schema.d.ts', '');
   write('console/src/lib/management/requirements.ts', '');
+  write('console/src/lib/management/enums.ts', '');
   write(
     'console/node_modules/.bin/vite',
     `#!/usr/bin/env bash

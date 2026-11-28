@@ -20,6 +20,14 @@
     initialRun ? [{ kind: 'run', id: initialRun }] : []
   );
   let evidenceKind = $state<InvestigationEvidence['kind']>('run');
+  const evidenceKindLabels: Record<InvestigationEvidence['kind'], string> = {
+    run: 'Run',
+    step: 'Step',
+    approval: 'Approval',
+    span: 'Span',
+    task: 'Task',
+    delegation: 'Delegation'
+  };
   let evidenceID = $state('');
   let evidenceError = $state('');
   let error = $state('');
@@ -172,15 +180,9 @@
       <label class="form-field">
         Evidence kind
         <select bind:value={evidenceKind}>
-          <option value="run">Run</option><option value="step">
-            Step
-          </option><option value="approval">Approval</option><option
-            value="span"
-          >
-            Span
-          </option><option value="task">Task</option><option value="delegation">
-            Delegation
-          </option>
+          {#each Object.entries(evidenceKindLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </label>
       <label class="form-field">

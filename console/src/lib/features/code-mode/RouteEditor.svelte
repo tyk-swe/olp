@@ -5,6 +5,7 @@
     saveCodeRoute,
     type CodeAccount,
     type CodePool,
+    type CodeResearchService,
     type CodeRoute,
     type CodeRouteWrite
   } from '#lib/features/code-mode/api.js';
@@ -18,6 +19,7 @@
   import CodePaidRoutingFields from './CodePaidRoutingFields.svelte';
   import CodePublicationOptIns from './CodePublicationOptIns.svelte';
   import CodeResearchFields from './CodeResearchFields.svelte';
+  import { CODE_RESEARCH_SERVICES } from '#lib/management/enums.js';
   import CodeRewritingFields from './CodeRewritingFields.svelte';
 
   type AliasValidation =
@@ -174,14 +176,18 @@
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
-  let researchServices = $state<('search' | 'reader' | 'zread')[]>(
-    initial?.tools?.services ?? ['search', 'reader', 'zread']
+  let researchServices = $state<CodeResearchService[]>(
+    initial?.tools?.services ?? [...CODE_RESEARCH_SERVICES]
   );
-  const services = [
-    { id: 'search', label: 'Search' },
-    { id: 'reader', label: 'Web reader' },
-    { id: 'zread', label: 'Repository research' }
-  ] as const;
+  const serviceLabels: Record<CodeResearchService, string> = {
+    search: 'Search',
+    reader: 'Web reader',
+    zread: 'Repository research'
+  };
+  const services = Object.entries(serviceLabels).map(([id, label]) => ({
+    id,
+    label
+  }));
   const researchAccounts = $derived(
     accounts.filter(
       (account) =>

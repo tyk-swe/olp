@@ -9,6 +9,7 @@
   import type { RuleDraft, RuleField } from './ruleDraft';
   import type { BudgetGroup } from '#lib/domain/budget-groups/api.js';
   import type { NotificationDestination } from './api';
+  import { ruleSubjectLabels, ruleWindowLabels } from './presentation';
 
   let {
     draft = $bindable(),
@@ -92,11 +93,9 @@
               disabled={watchesKey}
               bind:value={draft.subjectKind}
             >
-              <option value="api_key">API key</option><option
-                value="budget_group"
-              >
-                Budget group
-              </option>
+              {#each Object.entries(ruleSubjectLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </div>
           <FormField
@@ -122,9 +121,9 @@
                 id="rule-window"
                 bind:value={draft.window}
               >
-                <option value="day">Budget day</option><option value="week">
-                  Budget week
-                </option><option value="month">Budget month</option>
+                {#each Object.entries(ruleWindowLabels) as [value, label] (value)}
+                  <option {value}>{label}</option>
+                {/each}
               </select>
             </div>
             <FormField label="Threshold %" error={errors.threshold}>

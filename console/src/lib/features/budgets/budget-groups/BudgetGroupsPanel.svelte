@@ -5,6 +5,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import ConfirmAction from '#lib/components/ConfirmAction.svelte';
   import { currentBudgetLimit } from '../budgetLimit.js';
+  import { costBasisLabels } from '../limitForm.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
@@ -222,11 +223,9 @@
                     bind:value={editDraft.cost_basis}
                     disabled={edit.busy}
                   >
-                    <option value="cost">Provider cost</option><option
-                      value="charge"
-                    >
-                      Consumer charge
-                    </option>
+                    {#each Object.entries(costBasisLabels) as [value, label] (value)}
+                      <option {value}>{label}</option>
+                    {/each}
                   </select>
                 </td><td>
                   {formatInteger(group.budget.unpriced_attempts)}

@@ -28,6 +28,7 @@
     parseSinkCredential,
     type SinkDelivery
   } from './sinkSettings';
+  import type { SinkOutcome } from './presentation';
   const queryClient = useQueryClient();
   let creating = $state(false);
   let error = $state('');
@@ -56,7 +57,7 @@
   let sinkProjectId = $state('');
   let sinkFilterProject = $state('');
   let sinkFilterRoute = $state('');
-  let sinkFilterOutcome = $state<'' | 'success' | 'failure'>('');
+  let sinkFilterOutcome = $state<'' | SinkOutcome>('');
   let sinkCredential = $state('');
   let sinkClearCredential = $state(false);
   let sinkStripeKey = $state('');

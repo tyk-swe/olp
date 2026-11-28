@@ -1,4 +1,5 @@
 import type { ManagementOperation } from '#lib/management/requirements.js';
+import type { components } from '#lib/management/schema.js';
 import type { FixedRole } from '#lib/session/authorization.js';
 
 export type AuthenticatedUser = {
@@ -6,7 +7,7 @@ export type AuthenticatedUser = {
   email: string;
   display_name: string;
   role: FixedRole;
-  access_scope: 'global' | 'assigned';
+  access_scope: components['schemas']['UserResponse']['access_scope'];
   /** The management operations the server grants this member now. */
   operations: readonly ManagementOperation[];
 };

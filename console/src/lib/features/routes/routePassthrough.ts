@@ -1,15 +1,7 @@
 import type { components } from '#lib/management/schema.js';
+import { PASSTHROUGH_METHODS } from '#lib/management/enums.js';
 
 export type PassthroughConfig = components['schemas']['PassthroughConfig'];
-
-export const passthroughMethods = [
-  'GET',
-  'HEAD',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE'
-] as const;
 
 const forbiddenHeaders = new Set([
   'host',
@@ -59,9 +51,7 @@ export function validatePassthroughConfig(
   if (
     !config.methods.length ||
     new Set(config.methods).size !== config.methods.length ||
-    config.methods.some(
-      (method) => !(passthroughMethods as readonly string[]).includes(method)
-    )
+    config.methods.some((method) => !PASSTHROUGH_METHODS.includes(method))
   )
     return 'Choose distinct pass-through methods.';
   if (

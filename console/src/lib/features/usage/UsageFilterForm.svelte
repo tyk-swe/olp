@@ -2,6 +2,7 @@
   import Advanced from '#lib/components/Advanced.svelte';
   import { dateTimeLocalValue } from '#lib/format.js';
   import type { UsageDraft } from '#lib/features/usage/usageState.js';
+  import type { UsageDimension } from '#lib/features/usage/usage.js';
 
   let {
     draft = $bindable(),
@@ -14,6 +15,20 @@
     onApply: (event: SubmitEvent) => void;
     onReset: () => void;
   } = $props();
+
+  const dimensionLabels: Record<UsageDimension, string> = {
+    route: 'Route',
+    provider: 'Provider',
+    end_user: 'End user (digest)',
+    model: 'Model',
+    model_family: 'Model family',
+    estimate_provenance: 'Estimate provenance',
+    api_key: 'API key',
+    operation: 'Operation',
+    attribution: 'Attribution',
+    project: 'Project',
+    session: 'Session'
+  };
 
   const presets = [
     { label: 'Last 24h', hours: 24, granularity: 'hour' as const },
@@ -51,25 +66,9 @@
     </label>
     <label>
       Break down by <select class="filter-control" bind:value={draft.dimension}>
-        <option value="route">Route</option><option value="provider">
-          Provider
-        </option><option value="end_user">End user (digest)</option><option
-          value="model"
-        >
-          Model
-        </option><option value="model_family">Model family</option><option
-          value="estimate_provenance"
-        >
-          Estimate provenance
-        </option><option value="api_key">API key</option><option
-          value="operation"
-        >
-          Operation
-        </option><option value="attribution">Attribution</option><option
-          value="project"
-        >
-          Project
-        </option><option value="session">Session</option>
+        {#each Object.entries(dimensionLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     </label>
     <label>

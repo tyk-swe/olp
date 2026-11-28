@@ -39,6 +39,7 @@ Thumbs.db
 
 /console/src/lib/management/schema.d.ts
 /console/src/lib/management/requirements.ts
+/console/src/lib/management/enums.ts
 /.local/
 
 **/test-results/

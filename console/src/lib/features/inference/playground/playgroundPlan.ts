@@ -1,4 +1,5 @@
 import { inspectionDialects } from '#lib/features/routes/index.js';
+import { SIMULATION_DIALECTS } from '#lib/management/enums.js';
 import type { PlaygroundOperation } from '#lib/requestTemplates.js';
 import type { InspectRoutingInput } from './api';
 import {
@@ -46,51 +47,10 @@ export type PlaygroundPlan = PlaygroundClient & {
   };
 };
 
-const simulationDialects = [
-  'openai-chat',
-  'openai-responses',
-  'anthropic-messages',
-  'gemini-generate-content',
-  'openai-input-tokens',
-  'anthropic-count-tokens',
-  'gemini-count-tokens',
-  'openai-embeddings',
-  'openai-moderation',
-  'rerank',
-  'voyage-embeddings',
-  'tei-embeddings',
-  'tei-sparse-embeddings',
-  'tei-multivector-embeddings',
-  'gemini-embeddings',
-  'gemini-batch-embeddings',
-  'vertex-embeddings',
-  'bedrock-embeddings',
-  'voyage-rerank',
-  'tei-rerank',
-  'tei-classification',
-  'tei-scoring',
-  'bedrock-count-tokens',
-  'tei-tokenize',
-  'openai-completions',
-  'openai-decisions',
-  'systemone',
-  'gemini-decisions',
-  'mistral-ocr',
-  'azure-document-intelligence-ocr',
-  'vertex-document-processing-ocr',
-  'perplexity-search',
-  'tavily-search',
-  'exa-search',
-  'parallel-search',
-  'brave-search',
-  'cohere-embed-v2',
-  'cohere-rerank-v2'
-] as const satisfies readonly SimulationDialect[];
-
 function toSimulationDialect(
   value: string | undefined
 ): SimulationDialect | undefined {
-  return simulationDialects.find((candidate) => candidate === value);
+  return SIMULATION_DIALECTS.find((candidate) => candidate === value);
 }
 
 function nativeOperationFor(

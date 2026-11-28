@@ -7,12 +7,17 @@
   import AttemptTimeline from './AttemptTimeline.svelte';
   let { detail }: { detail: CreateQueryResult<RequestDetail> } = $props();
 
-  const cacheReasonLabels = new Map([
-    ['no_store', 'Caller opted out (no-store)'],
-    ['refresh', 'Caller requested a refresh (no-cache)'],
-    ['multiple_choices', 'More than one response choice'],
-    ['backend_unavailable', 'Cache backend unavailable']
-  ]);
+  const cacheReasonLabels = new Map(
+    Object.entries({
+      no_store: 'Caller opted out (no-store)',
+      refresh: 'Caller requested a refresh (no-cache)',
+      multiple_choices: 'More than one response choice',
+      backend_unavailable: 'Cache backend unavailable'
+    } satisfies Record<
+      NonNullable<RequestDetail['cache_lookup_reason']>,
+      string
+    >)
+  );
 </script>
 
 {#if detail.isPending}

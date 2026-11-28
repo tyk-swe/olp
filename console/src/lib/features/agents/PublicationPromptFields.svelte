@@ -2,6 +2,11 @@
   import type { PublicationForm } from './form.js';
 
   let { form = $bindable() }: { form: PublicationForm } = $props();
+
+  const roleLabels: Record<
+    PublicationForm['messages'][number]['role'],
+    string
+  > = { system: 'System', user: 'User', assistant: 'Assistant' };
 </script>
 
 <label class="form-field">
@@ -21,9 +26,9 @@
       <legend>Message {index + 1}</legend>
       <label class="form-field">
         Role <select bind:value={message.role}>
-          <option value="system">System</option>
-          <option value="user">User</option>
-          <option value="assistant">Assistant</option>
+          {#each Object.entries(roleLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </label>
       <label class="form-field">

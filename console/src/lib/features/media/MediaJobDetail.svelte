@@ -23,6 +23,12 @@
     onRemove: () => void;
   } = $props();
 
+  const variantLabels: Record<MediaContentVariant, string> = {
+    video: 'Video',
+    thumbnail: 'Thumbnail',
+    spritesheet: 'Spritesheet'
+  };
+
   function tone(state: string) {
     if (state === 'succeeded') return 'success';
     if (state === 'failed' || state === 'cancelled') return 'danger';
@@ -145,9 +151,9 @@
         <label class="variant-picker">
           Variant
           <select bind:value={downloadVariant}>
-            <option value="video">Video</option>
-            <option value="thumbnail">Thumbnail</option>
-            <option value="spritesheet">Spritesheet</option>
+            {#each Object.entries(variantLabels) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
           </select>
         </label>
         <button

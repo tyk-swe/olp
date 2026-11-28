@@ -4,6 +4,7 @@
   import { notify } from '#lib/components/toasts.svelte.js';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '#lib/management/http.js';
+  import { CAPTURE_REDACTOR_TYPES } from '#lib/management/enums.js';
   import { observabilityKeys } from './observabilityKeys';
   import CapturePolicyDialog from './CapturePolicyDialog.svelte';
   import CapturePolicyList from './CapturePolicyList.svelte';
@@ -58,17 +59,13 @@
     ...guardrailQueries.definitions(),
     enabled: canManageProjects || canManageInstallation
   }));
+  const redactorTypes: readonly string[] = CAPTURE_REDACTOR_TYPES;
   const eligibleRedactors = $derived(
     (redactorOptions.data ?? []).filter(
       (d) =>
         d.active_revision_id &&
         !d.retired_at &&
-        [
-          'builtin.regex',
-          'builtin.pii',
-          'builtin.secrets',
-          'builtin.keywords'
-        ].includes(d.type) &&
+        redactorTypes.includes(d.type) &&
         (!policyProjectId || d.project_id === policyProjectId)
     )
   );
@@ -78,7 +75,10 @@
   let policyRoute = $state('');
   let policySinkId = $state('');
   let policyRatio = $state('1');
-  let policyInclude = $state<string[]>(['input', 'output']);
+  let policyInclude = $state<string[]>([
+    'input',
+    'output'
+  ] satisfies CapturePolicy['include']);
   let policyRedactors = $state<string[]>([]);
   let redactorName = $state('');
   let refreshRedactors = $state(false);

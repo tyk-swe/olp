@@ -31,6 +31,21 @@
     onRunNow: () => void;
     onRemove: () => void;
   } = $props();
+  const awsAuthModeLabels: Record<
+    BillingImportFormValues['awsAuthMode'],
+    string
+  > = { static: 'Access keys', workload: 'Workload identity' };
+  const azureAuthModeLabels: Record<
+    Exclude<BillingImportFormValues['authMode'], ''>,
+    string
+  > = {
+    azure_default: 'Workload identity',
+    azure_client_secret: 'Client secret'
+  };
+  const googleAuthModeLabels: Record<
+    Exclude<BillingImportFormValues['googleAuthMode'], 'keep'>,
+    string
+  > = { service_account: 'Service account key', adc: 'Workload identity' };
 </script>
 
 <form class="create-form" onsubmit={onSubmit}>
@@ -87,11 +102,9 @@
               id="aws-auth"
               bind:value={form.awsAuthMode}
             >
-              <option value="static">Access keys</option><option
-                value="workload"
-              >
-                Workload identity
-              </option>
+              {#each Object.entries(awsAuthModeLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </div>
           {#if form.awsAuthMode === 'static'}
@@ -172,8 +185,9 @@
               <option value="">
                 {editing ? 'Keep stored credential' : 'Choose a credential'}
               </option>
-              <option value="azure_default">Workload identity</option>
-              <option value="azure_client_secret">Client secret</option>
+              {#each Object.entries(azureAuthModeLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           {/snippet}
         </FormField>
@@ -213,8 +227,9 @@
               {#if editing}<option value="keep">
                   Keep existing credential
                 </option>{/if}
-              <option value="service_account">Service account key</option>
-              <option value="adc">Workload identity</option>
+              {#each Object.entries(googleAuthModeLabels) as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
             </select>
           </div>
         {/if}

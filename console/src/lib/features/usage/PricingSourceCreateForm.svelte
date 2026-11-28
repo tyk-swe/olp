@@ -20,6 +20,10 @@
     catalog: ReferenceCatalog | undefined;
     onSubmit: (event: SubmitEvent) => void;
   } = $props();
+  const formatLabels: Record<PricingSourceFormat, string> = {
+    prices: 'Price list (JSON)',
+    catalog: 'Signed reference catalog'
+  };
 </script>
 
 <form class="card source-form" onsubmit={onSubmit}>
@@ -36,8 +40,9 @@
         id="source-format"
         bind:value={format}
       >
-        <option value="prices">Price list (JSON)</option>
-        <option value="catalog">Signed reference catalog</option>
+        {#each Object.entries(formatLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     </div>
     <div class="form-field full">

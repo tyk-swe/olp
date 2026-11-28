@@ -32,6 +32,11 @@
     reload?: () => void;
     onsaved: (server: MCPServer) => Promise<void>;
   } = $props();
+  const transportLabels: Record<MCPServer['transport'], string> = {
+    streamable_http: 'Streamable HTTP',
+    sse: 'SSE',
+    stdio: 'Local stdio'
+  };
   const initial = untrack(() => current);
   let baseline = $state.raw(initial);
   let draft = $state(serverDraft(initial));
@@ -97,11 +102,9 @@
         disabled={Boolean(current)}
         bind:value={draft.transport}
       >
-        <option value="streamable_http">Streamable HTTP</option><option
-          value="sse"
-        >
-          SSE
-        </option><option value="stdio">Local stdio</option>
+        {#each Object.entries(transportLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     {/snippet}
   </FormField>

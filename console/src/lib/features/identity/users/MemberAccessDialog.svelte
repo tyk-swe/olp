@@ -14,6 +14,7 @@
     onSave: (patch: Pick<User, 'role' | 'access_scope'>) => Promise<boolean>;
     onClose: () => void;
   } = $props();
+  const accessScopes = Object.keys(SCOPE_DETAILS) as User['access_scope'][];
 
   let role = $state(untrack(() => user.role));
   let scope = $state(untrack(() => user.access_scope));
@@ -52,7 +53,7 @@
       </fieldset>
       <fieldset>
         <legend>Where it applies</legend>
-        {#each ['global', 'assigned'] as const as option (option)}
+        {#each accessScopes as option (option)}
           <label class="option">
             <input
               type="radio"

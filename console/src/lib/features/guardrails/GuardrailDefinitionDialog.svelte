@@ -4,6 +4,7 @@
   import CredentialsPanel from './CredentialsPanel.svelte';
   import { notify } from '#lib/components/toasts.svelte.js';
   import { errorMessage } from '#lib/management/http.js';
+  import { GUARDRAIL_TYPES } from '#lib/management/enums.js';
   import { nativeObject, parseManagementJSON } from '#lib/nativeJson.js';
   import type { useAction } from '#lib/editing/action.svelte.js';
   import type { useMutationIntent } from '#lib/editing/mutationIntent.svelte.js';
@@ -56,74 +57,15 @@
     credentialID: string;
     timeout: number;
     egress: boolean;
-    onError: 'fail_closed' | 'fail_open';
+    onError: NonNullable<Definition['on_error']>;
     creatingCredential: boolean;
     onClose: () => void;
   } = $props();
 
-  const guardrailTypes = [
-    'builtin.regex',
-    'builtin.pii',
-    'builtin.secrets',
-    'builtin.keywords',
-    'builtin.schema',
-    'builtin.tools',
-    'builtin.code_execution',
-    'builtin.tool_permission',
-    'webhook',
-    'bedrock',
-    'azure.content_safety',
-    'azure.prompt_shields',
-    'model_armor',
-    'lakera',
-    'presidio',
-    'model',
-    'plugin',
-    'aim',
-    'akto',
-    'alice',
-    'aporia',
-    'cato_networks',
-    'cisco_ai_defense',
-    'compresr',
-    'conduct',
-    'crowdstrike_aidr',
-    'deepkeep',
-    'dynamoai',
-    'enkryptai',
-    'generic_guardrail_api',
-    'grayswan',
-    'guardrails_ai',
-    'headroom',
-    'hiddenlayer',
-    'ibm_guardrails',
-    'javelin',
-    'lakera_v1',
-    'lasso',
-    'microsoft_purview',
-    'noma',
-    'noma_v2',
-    'onyx',
-    'openai_moderation',
-    'ovalix',
-    'pangea',
-    'panw_prisma_airs',
-    'pillar',
-    'prompt_security',
-    'promptguard',
-    'qostodian_nexus',
-    'qualifire',
-    'repelloai',
-    'rubrik',
-    'singulr',
-    'straiker',
-    'vigil_guard',
-    'xecguard',
-    'zscaler_ai_guard',
-    'semantic_guard',
-    'decision_model',
-    'typesafe'
-  ] as const satisfies readonly Definition['type'][];
+  const onErrorLabels: Record<NonNullable<Definition['on_error']>, string> = {
+    fail_closed: 'Block the request',
+    fail_open: 'Continue and record the failure'
+  };
 
   async function saveDefinition(event: SubmitEvent) {
     event.preventDefault();
@@ -224,7 +166,7 @@
     </label>
     <label class="form-field">
       Type<select bind:value={type} disabled={!!selected}>
-        {#each guardrailTypes as value (value)}<option {value}>
+        {#each GUARDRAIL_TYPES as value (value)}<option {value}>
             {value}
           </option>{/each}
       </select>
@@ -273,11 +215,9 @@
     </label>
     <label class="form-field">
       On evaluation error<select bind:value={onError}>
-        <option value="fail_closed">Block the request</option><option
-          value="fail_open"
-        >
-          Continue and record the failure
-        </option>
+        {#each Object.entries(onErrorLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
     </label>
     <button class="button button-primary" disabled={busy} type="submit">

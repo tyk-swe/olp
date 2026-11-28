@@ -109,18 +109,28 @@ export const sinkTypeLabels: Record<string, string> = {
   gcs: 'GCS',
   azure_blob: 'Azure Blob',
   stripe_meter: 'Stripe meter'
+} satisfies Record<ExportSink['type'], string>;
+const sinkStreamLabels: Record<ExportSink['streams'][number], string> = {
+  requests: 'Requests',
+  attempts: 'Attempts',
+  usage_rollups: 'Usage rollups',
+  guardrail_decisions: 'Guardrail decisions',
+  audit: 'Audit',
+  metering: 'Metering',
+  runs: 'Runs (gateway observed)',
+  trace_spans: 'Trace spans (client asserted)',
+  focus: 'FOCUS'
 };
-export const sinkStreamOptions = [
-  { value: 'requests', label: 'Requests' },
-  { value: 'attempts', label: 'Attempts' },
-  { value: 'usage_rollups', label: 'Usage rollups' },
-  { value: 'guardrail_decisions', label: 'Guardrail decisions' },
-  { value: 'audit', label: 'Audit' },
-  { value: 'metering', label: 'Metering' },
-  { value: 'runs', label: 'Runs (gateway observed)' },
-  { value: 'trace_spans', label: 'Trace spans (client asserted)' },
-  { value: 'focus', label: 'FOCUS' }
-] as const;
+export const sinkStreamOptions = (
+  Object.keys(sinkStreamLabels) as ExportSink['streams'][number][]
+).map((value) => ({ value, label: sinkStreamLabels[value] }));
+export type SinkOutcome = NonNullable<
+  NonNullable<ExportSink['filter']>['outcome']
+>;
+export const sinkOutcomeLabels: Record<SinkOutcome, string> = {
+  success: 'Success',
+  failure: 'Failure'
+};
 export const stripeMeterValues = [
   { value: 'charge', label: 'Charge' },
   { value: 'cost', label: 'Cost' },

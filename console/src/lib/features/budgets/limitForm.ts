@@ -11,6 +11,13 @@ export const limitFields = [
 ] as const;
 export type LimitKey = (typeof limitFields)[number]['key'];
 export type LimitForm = Record<LimitKey | 'cost_basis', string>;
+export const costBasisLabels: Record<
+  NonNullable<AdmissionLimits['cost_basis']>,
+  string
+> = {
+  cost: 'Provider cost',
+  charge: 'Consumer charge'
+};
 export function limitForm(limits?: AdmissionLimits): LimitForm {
   return {
     ...Object.fromEntries(

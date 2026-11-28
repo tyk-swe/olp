@@ -8,6 +8,7 @@
     CaptureSinkOption
   } from '#lib/features/exports/api.js';
   import type { components } from '#lib/management/schema.js';
+  import { CAPTURE_PARTS } from '#lib/management/enums.js';
 
   type RedactorOption = components['schemas']['GuardrailResponse'];
 
@@ -136,7 +137,7 @@
         </div>
         <fieldset class="form-field">
           <legend>Include</legend>
-          {#each ['input', 'output', 'tool_calls'] as part (part)}
+          {#each CAPTURE_PARTS as part (part)}
             <label class="inline-check">
               <input
                 type="checkbox"

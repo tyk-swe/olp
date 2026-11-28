@@ -6,6 +6,11 @@
     type FallbackCondition,
     type RetryClass
   } from './routeBehavior';
+  import type { components } from '#lib/management/schema.js';
+  const affinityLabels: Record<
+    components['schemas']['RouteAffinity']['source'],
+    string
+  > = { cache_key: 'Prompt cache key', label: 'Attribution label' };
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const locked = $derived(!editor.canManage || Boolean(editor.busy));
   const selectorProblem = $derived(
@@ -251,8 +256,9 @@
         aria-describedby="affinity-help"
       >
         <option value="">None</option>
-        <option value="cache_key">Prompt cache key</option>
-        <option value="label">Attribution label</option>
+        {#each Object.entries(affinityLabels) as [value, label] (value)}
+          <option {value}>{label}</option>
+        {/each}
       </select>
       <small id="affinity-help">
         Keeps one session on the same target and slot while it stays eligible,

@@ -1,26 +1,34 @@
 import type { components } from '#lib/management/schema.js';
+import type { RETRY_CLASSES } from '#lib/management/enums.js';
 import { isJsonObject } from '#lib/editing/json.js';
 
 export type RouteBehavior = components['schemas']['RouteBehavior'];
 export type RouteSelector = components['schemas']['RouteSelector'];
 export type FallbackCondition = components['schemas']['FallbackCondition'];
-export type RetryClass =
-  'connect' | 'timeout' | 'rate_limit' | 'upstream_server';
+export type RetryClass = (typeof RETRY_CLASSES)[number];
 
-export const fallbackConditions: [FallbackCondition, string][] = [
-  ['exhausted', 'Every attempt failed'],
-  ['context_window', 'Context window exceeded'],
-  ['content_filter', 'Content filter refusal'],
-  ['rate_limit', 'Rate limited'],
-  ['budget', 'Spend cap exhausted']
-];
+const fallbackLabels: Record<FallbackCondition, string> = {
+  exhausted: 'Every attempt failed',
+  context_window: 'Context window exceeded',
+  content_filter: 'Content filter refusal',
+  rate_limit: 'Rate limited',
+  budget: 'Spend cap exhausted'
+};
+export const fallbackConditions = Object.entries(fallbackLabels) as [
+  FallbackCondition,
+  string
+][];
 
-export const retryClasses: [RetryClass, string][] = [
-  ['connect', 'Connection failures'],
-  ['timeout', 'Timeouts'],
-  ['rate_limit', 'Rate limits'],
-  ['upstream_server', 'Upstream server errors']
-];
+const retryLabels: Record<RetryClass, string> = {
+  connect: 'Connection failures',
+  timeout: 'Timeouts',
+  rate_limit: 'Rate limits',
+  upstream_server: 'Upstream server errors'
+};
+export const retryClasses = Object.entries(retryLabels) as [
+  RetryClass,
+  string
+][];
 
 export function emptyBehavior(): RouteBehavior {
   return {

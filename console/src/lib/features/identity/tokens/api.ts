@@ -16,20 +16,6 @@ export type ManagementTokenSecret = Schemas['CreateManagementTokenResponse'];
 
 export type ManagementTokenScope = Schemas['ManagementTokenScope'];
 
-// Every ManagementTokenScope, in the order the token form presents them.
-export const MANAGEMENT_TOKEN_SCOPES = [
-  'read',
-  'access_read',
-  'access',
-  'settings',
-  'configure',
-  'keys',
-  'manage_organization',
-  'manage_projects',
-  'playground',
-  'usage'
-] as const satisfies readonly ManagementTokenScope[];
-
 export async function listManagementTokenPage(
   cursor?: string,
   signal?: AbortSignal

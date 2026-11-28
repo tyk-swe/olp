@@ -1,7 +1,8 @@
 <script lang="ts">
-  import type { CodeAccount } from '#lib/features/code-mode/api.js';
-
-  type ResearchService = 'search' | 'reader' | 'zread';
+  import type {
+    CodeAccount,
+    CodeResearchService
+  } from '#lib/features/code-mode/api.js';
 
   let {
     research = $bindable(),
@@ -12,7 +13,7 @@
   }: {
     research: boolean;
     researchAccount: string;
-    researchServices: ResearchService[];
+    researchServices: CodeResearchService[];
     researchAccounts: CodeAccount[];
     services: readonly { id: string; label: string }[];
   } = $props();

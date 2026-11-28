@@ -1,3 +1,4 @@
+import { ADMISSION_PRIORITIES } from '#lib/management/enums.js';
 import { keyNetworkError } from './keyNetwork';
 
 export type ApiKeyFormValue = {
@@ -18,14 +19,7 @@ export type ApiKeyFormValue = {
   now?: Date;
 };
 
-export const admissionPriorities = [
-  'critical',
-  'high',
-  'normal',
-  'low'
-] as const;
-
-const priorityRank: readonly string[] = admissionPriorities;
+const priorityRank: readonly string[] = ADMISSION_PRIORITIES;
 
 export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
   const errors: Record<string, string> = {};

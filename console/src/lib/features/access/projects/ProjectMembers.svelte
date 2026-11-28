@@ -157,9 +157,9 @@
                 disabled={action.busy}
                 onchange={(event) => changeRole(member, event.currentTarget)}
               >
-                <option value="manager">Manager</option><option value="viewer">
-                  Viewer
-                </option>
+                {#each Object.entries(ROLE_LABELS) as [value, label] (value)}
+                  <option {value}>{label}</option>
+                {/each}
               </select>
             </td>
             <td class="row-actions">
@@ -210,9 +210,9 @@
       bind:value={addRole}
       disabled={action.busy}
     >
-      <option value="viewer">Viewer</option><option value="manager">
-        Manager
-      </option>
+      {#each Object.entries(ROLE_LABELS).toReversed() as [value, label] (value)}
+        <option {value}>{label}</option>
+      {/each}
     </select>
   </div>
   <button

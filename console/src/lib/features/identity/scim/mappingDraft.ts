@@ -4,11 +4,11 @@ import type { Mapping } from './api';
 export type Membership = {
   id: string;
   value: string;
-  role: 'manager' | 'viewer';
+  role: NonNullable<Mapping['projects']>[number]['role'];
 };
 export type MappingDraft = {
   role: NonNullable<Mapping['role']> | '';
-  scope: 'assigned' | 'global';
+  scope: NonNullable<Mapping['accessScope']>;
   memberships: Membership[];
 };
 

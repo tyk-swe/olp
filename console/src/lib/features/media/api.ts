@@ -1,4 +1,4 @@
-import type { components } from '#lib/management/schema.js';
+import type { components, operations } from '#lib/management/schema.js';
 import { apiClient } from '#lib/session/client.js';
 import {
   ApiProblem,
@@ -65,7 +65,8 @@ export async function deleteMediaJob(
   ensureOk({ error, response });
 }
 
-export type MediaContentVariant = 'video' | 'thumbnail' | 'spritesheet';
+export type MediaContentVariant =
+  operations['download_media_job_content']['parameters']['query']['variant'];
 
 export async function downloadMediaJobContent(
   jobId: string,

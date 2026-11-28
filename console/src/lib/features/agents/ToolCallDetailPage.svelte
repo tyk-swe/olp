@@ -8,6 +8,7 @@
   import { useMutation } from '#lib/editing/action.svelte.js';
   import { stateLabel } from '#lib/format.js';
   import { errorMessage } from '#lib/management/http.js';
+  import type { components } from '#lib/management/schema.js';
   import { getToolCall, resolveToolCall } from './api';
   import { agentKeys } from './agentKeys';
   let { callID }: { callID: string } = $props();
@@ -19,7 +20,12 @@
     queryFn: () => getToolCall(callID),
     retry: false
   }));
-  let outcome = $state<'settled' | 'not_accepted'>('settled');
+  type Outcome = components['schemas']['MCPToolCallResolveRequest']['outcome'];
+  const outcomeLabels: Record<Outcome, string> = {
+    settled: 'Settled',
+    not_accepted: 'Not accepted'
+  };
+  let outcome = $state<Outcome>('settled');
   let evidence = $state('');
   let cost = $state('0');
   let charge = $state('0');
@@ -68,9 +74,9 @@
       </p>
       <label class="form-field">
         Outcome<select bind:value={outcome}>
-          <option value="settled">Settled</option><option value="not_accepted">
-            Not accepted
-          </option>
+          {#each Object.entries(outcomeLabels) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
         </select>
       </label>
       <label class="form-field">

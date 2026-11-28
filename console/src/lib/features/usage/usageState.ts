@@ -1,5 +1,6 @@
 import type { ReadonlyURLSearchParams } from '$app/state';
 import { instant } from '#lib/management/query.js';
+import { USAGE_DIMENSIONS } from '#lib/management/enums.js';
 import type {
   UsageDimension,
   UsageFilters
@@ -7,19 +8,6 @@ import type {
 import { dateTimeLocalValue } from '#lib/format.js';
 import { timeOrder, timeValid, UUID } from '#lib/listing/filters.js';
 
-const dimensions = [
-  'route',
-  'provider',
-  'model',
-  'model_family',
-  'estimate_provenance',
-  'api_key',
-  'end_user',
-  'operation',
-  'attribution',
-  'project',
-  'session'
-] as const satisfies readonly UsageDimension[];
 const resources = [
   'route',
   'model',
@@ -34,7 +22,7 @@ const resources = [
 
 export type UsageState = {
   filters: UsageFilters;
-  dimension: (typeof dimensions)[number];
+  dimension: UsageDimension;
   granularity: 'hour' | 'day';
 };
 
@@ -127,7 +115,8 @@ export function readUsageState(
   return {
     filters,
     dimension:
-      dimensions.find((value) => value === search.get('dimension')) ?? 'route',
+      USAGE_DIMENSIONS.find((value) => value === search.get('dimension')) ??
+      'route',
     granularity: search.get('granularity') === 'day' ? 'day' : 'hour'
   };
 }
