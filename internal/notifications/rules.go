@@ -196,26 +196,20 @@ func watched(subject ruleSubject) (watchedSubject, bool) {
 
 func checkReferences(ctx context.Context, tx pgx.Tx, t ruleTarget) error {
 	if subject, ok := watched(t.subject); ok {
-		project, found, err := referenceProject(ctx, tx, subjectProjectSQL[subject.kind], subject.id)
+		found, err := ruleReferenceExists(ctx, tx, subjectReferenceSQL[subject.kind], subject.id, t.projectID)
 		if err != nil {
 			return err
 		}
 		if !found {
-			return httpkit.Invalid("subject_id", "The alert subject does not exist.")
-		}
-		if !sameProject(project, t.projectID) {
-			return httpkit.Invalid("subject_id", "The alert subject must belong to the rule's project.")
+			return httpkit.Invalid("subject_id", "The alert subject does not exist in the rule's scope.")
 		}
 	}
-	project, found, err := referenceProject(ctx, tx, destinationProjectSQL, t.destinationID)
+	found, err := ruleReferenceExists(ctx, tx, destinationReferenceSQL, t.destinationID, t.projectID)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return httpkit.Invalid("destination_id", "The notification destination does not exist.")
-	}
-	if !sameProject(project, t.projectID) {
-		return httpkit.Invalid("destination_id", "The notification destination must belong to the rule's project.")
+		return httpkit.Invalid("destination_id", "The notification destination does not exist in the rule's scope.")
 	}
 	return nil
 }
@@ -326,17 +320,10 @@ func removeRule(ctx context.Context, tx pgx.Tx, id string) error {
 	return err
 }
 
-func referenceProject(ctx context.Context, tx pgx.Tx, query, id string) (*string, bool, error) {
-	var project *string
-	err := tx.QueryRow(ctx, query, id).Scan(&project)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
-	}
-	return project, err == nil, err
-}
-
-func sameProject(a, b *string) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
+func ruleReferenceExists(ctx context.Context, tx pgx.Tx, query, id string, projectID *string) (bool, error) {
+	var found bool
+	err := tx.QueryRow(ctx, query, id, projectID).Scan(&found)
+	return found, err
 }
 
 const ruleDocumentsSQL = `SELECT r.id,r.project_id,r.etag,jsonb_build_object(
@@ -367,9 +354,12 @@ const updateChannelRuleSQL = `UPDATE olp.notification_rules r SET name=$2,subjec
 
 const evaluatedRuleCountSQL = `SELECT count(*) FROM olp.notification_rules WHERE event=ANY($1)`
 
-const destinationProjectSQL = `SELECT project_id::text FROM olp.notification_destinations WHERE id=$1`
+const destinationReferenceSQL = `SELECT EXISTS (
+ SELECT 1 FROM olp.notification_destinations WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid)`
 
-var subjectProjectSQL = map[contract.BudgetSubjectKind]string{
-	contract.BudgetSubjectKindApiKey:      `SELECT project_id::text FROM olp.api_keys WHERE id=$1`,
-	contract.BudgetSubjectKindBudgetGroup: `SELECT project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL`,
+var subjectReferenceSQL = map[contract.BudgetSubjectKind]string{
+	contract.BudgetSubjectKindApiKey: `SELECT EXISTS (
+ SELECT 1 FROM olp.api_keys WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid)`,
+	contract.BudgetSubjectKindBudgetGroup: `SELECT EXISTS (
+ SELECT 1 FROM olp.budget_groups WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid AND retired_at IS NULL)`,
 }

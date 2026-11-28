@@ -751,6 +751,48 @@ func TestNotificationDestinationAndRuleLifecycle(t *testing.T) {
 	expectStatus(t, "get deleted destination", client.call(t, "GET", path, "", ""), http.StatusNotFound)
 }
 
+func TestNotificationRuleReferencesMatchRuleScope(t *testing.T) {
+	t.Parallel()
+	pool, _ := harness.Database(t)
+	f := newUsageFixture(t, pool)
+	client := notificationManagement(t, pool, f)
+	projectDestination, installationDestination := uuid.NewString(), uuid.NewString()
+	installationKey, projectGroup := uuid.NewString(), uuid.NewString()
+	mustExec(t, pool, `INSERT INTO olp.notification_destinations(id,name,url,project_id,etag,created_by)
+ VALUES ($1,'project webhook','https://hooks.example.com/project',$3,$1,$4),
+        ($2,'installation webhook','https://hooks.example.com/installation',NULL,$2,$4)`,
+		projectDestination, installationDestination, f.projectID, f.ownerID)
+	mustExec(t, pool, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag)
+ VALUES ($1::uuid,$1::text,decode(repeat('00',32),'hex'),'Installation key',$2,'{}',$1::uuid)`, installationKey, f.ownerID)
+	mustExec(t, pool, `INSERT INTO olp.budget_groups(id,name,project_id,etag,created_by,daily_cost_limit)
+ VALUES ($1,'Project budget',$2,$1,$3,100)`, projectGroup, f.projectID, f.ownerID)
+
+	const rulesPath = "/api/v1/notifications/rules"
+	projectRule := expectStatus(t, "create rule with project references", client.call(t, http.MethodPost, rulesPath, "",
+		fmt.Sprintf(`{"name":"Project budget","project_id":%q,"event":"budget.threshold","subject_kind":"api_key","subject_id":%q,"window_kind":"day","threshold_percent":75,"destination_id":%q}`,
+			f.projectID, f.keyID, projectDestination)), http.StatusCreated)
+	expectStatus(t, "create rule with installation references", client.call(t, http.MethodPost, rulesPath, "",
+		fmt.Sprintf(`{"name":"Installation key expiry","event":"key.expiring","subject_kind":"api_key","subject_id":%q,"destination_id":%q}`,
+			installationKey, installationDestination)), http.StatusCreated)
+	updated := expectStatus(t, "switch to a budget group in the same project", client.call(t, http.MethodPatch, projectRule.location, projectRule.etag,
+		fmt.Sprintf(`{"subject_kind":"budget_group","subject_id":%q}`, projectGroup)), http.StatusOK)
+
+	for _, ref := range []struct{ field, patch, detail string }{
+		{"subject_id", fmt.Sprintf(`{"subject_kind":"api_key","subject_id":%q}`, installationKey), "The alert subject does not exist in the rule's scope."},
+		{"destination_id", fmt.Sprintf(`{"destination_id":%q}`, installationDestination), "The notification destination does not exist in the rule's scope."},
+	} {
+		result := expectStatus(t, "reject installation reference on a project rule", client.call(t, http.MethodPatch, projectRule.location, updated.etag, ref.patch),
+			http.StatusUnprocessableEntity)
+		var problem struct {
+			Detail string                     `json:"detail"`
+			Errors map[string]json.RawMessage `json:"errors"`
+		}
+		if err := json.Unmarshal(result.body, &problem); err != nil || problem.Detail != ref.detail || len(problem.Errors) != 1 || problem.Errors[ref.field] == nil {
+			t.Errorf("validation for %s = %s (%v), want %q", ref.field, result.body, err, ref.detail)
+		}
+	}
+}
+
 func TestNotificationRetryPreservesBudgetSubject(t *testing.T) {
 	t.Parallel()
 	for _, change := range []string{"subject", "kind", "window", "name"} {
