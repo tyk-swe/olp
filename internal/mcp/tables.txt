@@ -1,0 +1,5 @@
+mcp_call_identities
+mcp_executable_permissions
+mcp_server_revisions
+mcp_servers
+mcp_tool_calls

@@ -1,0 +1,9 @@
+guardrail_attachments
+guardrail_credentials
+guardrail_draft_attachments
+guardrail_policies
+guardrail_policy_revision_activations
+guardrail_policy_revisions
+guardrail_revision_activations
+guardrail_revisions
+guardrails

@@ -1,0 +1,12 @@
+a2a_task_admissions
+a2a_task_callback_accounting
+a2a_task_capabilities
+a2a_tasks
+agent_approvals
+agent_credentials
+agent_publication_revisions
+agent_publications
+agent_runs
+agent_steps
+investigations
+prompt_labels

@@ -1,0 +1,6 @@
+provider_credentials
+provider_models
+provider_network_credentials
+provider_revisions
+provider_slots
+providers

@@ -1,0 +1,8 @@
+pending_resource_recorded_owners
+provider_resource_pending_usage
+provider_resources
+retained_mutations
+retained_settlements
+retained_submissions
+retained_usage_coverage
+retained_usage_evidence

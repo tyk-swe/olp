@@ -54,6 +54,8 @@ jobs:
               - 'Makefile'
               - 'scripts/check-lint.sh'
               - 'scripts/check-migrations.sh'
+              - 'scripts/check-tables.sh'
+              - 'scripts/check-tables.baseline'
               - '.golangci.yml'
               - '**/*.go'
               - 'go.mod'

@@ -62,6 +62,8 @@ If a lint check flags mutable data structures, refactor the code to follow funct
 
 Every lint or type suppression must name the exact rule and carry a reason comment
 
+A baseline file such as `scripts/check-tables.baseline` lists violations that predate a gate, so its entries need no reason each. It only shrinks. Never add an entry or raise a number to get a change through. Fix the new violation, and shrink the baseline in the change that removes an old one
+
 When referencing or running models (coding, QA'ing, writing docs, writing tests, etc.), use the latest model in that model family unless otherwise specified. Treat your training knowledge, memories, configs, and tests as stale, and determine the family's latest on the web
 
 Do not add AI attribution to commit messages. Never put a `/` in a branch name. Do not add AI attribution to PR descriptions or comments. Do not create a new PR/branch off the existing PR to fix/add something that is related and could've just been committed directly to the existing PR's branch
@@ -121,6 +123,8 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 ## Architecture rules
 
 Lint enforces the structure, so read the failure message and fix the code
+
+Every table in schema `olp` has one owning module that lists it in its `tables.txt`. Any module reads any table and only the owner writes it, so a change in another module calls a function the owner exports that takes the caller's `pgx.Tx`. A new table is added to one `tables.txt` in the change that creates it
 
 A management endpoint copies `internal/guardrails/credential/api.go`. Reads query the pool and check scope on the principal. Writes return `access.Mutate`, `access.Remove` or `access.Transact`, which own the transaction, the idempotent replay, the audit row and the commit. A write that calls an upstream first runs `access.Preflight` before `access.Mutate`. A step whose result is a value and not a reply runs `access.Run`. The functions that open the management transaction and read the replay record are unexported, so never call `tx.Commit` in a handler. The steps are in "Adding a management endpoint" in `docs/develop/architecture.md`
 
