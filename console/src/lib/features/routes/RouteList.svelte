@@ -9,7 +9,7 @@
   import { useAction } from '#lib/editing/action.svelte.js';
 
   import { routeKeys } from '#lib/domain/routes/routeKeys.js';
-  import { retiringTargets } from '#lib/features/routes/routeEditor.js';
+  import { retiringTargets } from '#lib/features/routes/routeTargetModel.js';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';

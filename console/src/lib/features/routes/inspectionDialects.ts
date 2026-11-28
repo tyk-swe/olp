@@ -1,7 +1,7 @@
 import type { components } from '#lib/management/schema.js';
 
 export type OperationDialect = components['schemas']['OperationDialect'];
-import { operationOptions, surfacesFor } from './routeEditor';
+import { operationOptions, surfacesFor } from './routeOperations';
 
 export function discoveredOperations(
   dialects: OperationDialect[]

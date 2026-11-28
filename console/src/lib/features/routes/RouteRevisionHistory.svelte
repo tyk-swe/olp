@@ -22,7 +22,7 @@
     type RouteRevisionDiff
   } from '#lib/features/routes/api.js';
   import { useRole } from '#lib/session/useRole.svelte.js';
-  import { fidelityLabel } from '#lib/features/routes/routeEditor.js';
+  import { fidelityLabel } from '#lib/features/routes/routeFidelity.js';
   import { formatDate, formatInteger } from '#lib/format.js';
 
   const restoreIntent = useMutationIntent();
