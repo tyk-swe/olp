@@ -331,12 +331,16 @@ export async function runNativeResourceRequest(
   });
   const bytes = await readBoundedResponseBytes(response);
   const resourceId = response.headers.get('X-OLP-Resource-ID');
+  const { action, metered } = request.endpoint;
   if (!response.ok)
     throw new ResourceRequestError(
       `Resource request failed (HTTP ${response.status}). ${new TextDecoder().decode(bytes.slice(0, 2048))}`,
-      resourceId
+      resourceId,
+      metered &&
+        (action === 'update' || action === 'patch') &&
+        response.headers.get('X-OLP-Mutation-Status') === 'not_accepted'
     );
-  if (request.endpoint.action === 'content')
+  if (action === 'content')
     return {
       text: '',
       resourceId,

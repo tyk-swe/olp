@@ -172,8 +172,10 @@
       key: 'run',
       failure: (cause: unknown) => {
         if (owner.signal.aborted) return '';
-        if (cause instanceof ResourceRequestError)
+        if (cause instanceof ResourceRequestError) {
+          if (cause.definitiveMutationRejection) intent.reset();
           captureId(cause.resourceId, selected.kind);
+        }
         return errorMessage(
           cause,
           'The resource operation could not be completed.'

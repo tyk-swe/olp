@@ -617,8 +617,8 @@ continuation replay, WebSocket upgrades and session-authenticated playground
 calls carry no key attempt metadata. Errors omit both header families except
 key-limit refusal allowances. Configured gateway CORS exposes `X-OLP-Cache`,
 `Age`, `X-OLP-Guardrails`, `X-Request-Id`, `Retry-After`, `X-Should-Retry`,
-`X-OLP-Delivery-Replay`, `X-OLP-Resource-ID`, `X-Goog-Upload-URL`,
-`X-Goog-Upload-Status`, `X-Goog-Upload-Size-Received`, `X-OLP-Attempts`,
+`X-OLP-Delivery-Replay`, `X-OLP-Resource-ID`, `X-OLP-Mutation-Status`,
+`X-Goog-Upload-URL`, `X-Goog-Upload-Status`, `X-Goog-Upload-Size-Received`, `X-OLP-Attempts`,
 `X-OLP-Route-Revision`, `X-OLP-Provider`, `X-OLP-Cost`, the six OpenAI
 `x-ratelimit-*` headers, the six Anthropic `anthropic-ratelimit-*` headers, and
 `Request-Id` on Anthropic responses.

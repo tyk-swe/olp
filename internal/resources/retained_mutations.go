@@ -100,8 +100,14 @@ func (s *Store) saveRetainedResult(ctx context.Context, r *Resource, mutation bo
 func (s *Store) rejectRetained(ctx context.Context, r *Resource, key, operation string, create bool) error {
 	return s.withTx(ctx, func(tx pgx.Tx) error {
 		if !create {
-			_, err := tx.Exec(ctx, `UPDATE olp.retained_mutations SET state='not_accepted',updated_at=clock_timestamp() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, r.UUID, key, operation)
-			return err
+			tag, err := tx.Exec(ctx, `UPDATE olp.retained_mutations SET state='not_accepted',updated_at=clock_timestamp() WHERE resource_id=$1 AND submission_key=$2 AND operation=$3 AND state='dispatched'`, r.UUID, key, operation)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return ErrSubmissionConflict
+			}
+			return nil
 		}
 		tag, err := tx.Exec(ctx, `UPDATE olp.retained_submissions SET state='not_accepted',updated_at=now() WHERE resource_id=$1 AND state='dispatched'`, r.UUID)
 		if err != nil {

@@ -168,6 +168,94 @@ describe('NativeResources', () => {
     });
   });
 
+  it.each([
+    {
+      operation: 'vector_store',
+      surface: 'openai',
+      action: 'update',
+      method: 'POST',
+      root: '/v1/vector_stores',
+      body: '{"expires_after":{"anchor":"last_active_at","days":1}}'
+    },
+    {
+      operation: 'context_cache',
+      surface: 'gemini',
+      action: 'patch',
+      method: 'PATCH',
+      root: '/gemini/v1beta/cachedContents',
+      body: '{"ttl":"3600s"}'
+    }
+  ])(
+    'rotates keys only for a confirmed $operation rejection',
+    async ({ operation, root, body, ...endpoint }) => {
+      const id = `${operation}_${hex32('1')}`;
+      const submissionKeys: (string | null)[] = [];
+      const failures = [
+        new Response('Unconfirmed rejection', { status: 400 }),
+        new Response('Definitive rejection', {
+          status: 400,
+          headers: { 'X-OLP-Mutation-Status': 'not_accepted' }
+        }),
+        new Response('Provider outage', { status: 503 }),
+        new Response('idempotency_conflict', { status: 409 }),
+        new Response('submission_unknown', { status: 409 }),
+        new Response('Gateway timeout', { status: 504 }),
+        new Response('Conflict after timeout', { status: 409 })
+      ];
+      const { target, control } = mountNative((request) => {
+        const path = new URL(request.url).pathname;
+        if (path === '/api/v1/provider-resource-contracts')
+          return json({
+            endpoints: [
+              {
+                ...endpoint,
+                operation,
+                kind: operation,
+                pattern: `${root}/{id}`,
+                ancestors: [],
+                metered: true
+              }
+            ]
+          });
+        if (path === '/api/v1/routes') return json({ items: [] });
+        expect(path).toBe(`${root}/${id}`);
+        expect(request.method).toBe(endpoint.method);
+        const response = failures[submissionKeys.length];
+        submissionKeys.push(request.headers.get('Idempotency-Key'));
+        return response;
+      });
+
+      await eventually(() => expect(control('Request body')).toBeDefined());
+      setValue(control<HTMLInputElement>('Inference API key')!, 'test-key');
+      setValue(
+        control<HTMLInputElement>(`${operation.replaceAll('_', ' ')} ID`)!,
+        id
+      );
+      setValue(control<HTMLTextAreaElement>('Request body')!, body);
+
+      for (const failure of failures) {
+        const text = await failure.clone().text();
+        submitForm(target);
+        await eventually(() =>
+          expect(target.querySelector('[role="alert"]')?.textContent).toContain(
+            text
+          )
+        );
+      }
+      const [first, refused, retried] = submissionKeys;
+      expect(first).toBeTruthy();
+      expect(refused).toBe(first);
+      expect(retried).toBeTruthy();
+      expect(retried).not.toBe(refused);
+      expect(submissionKeys.slice(3)).toEqual([
+        retried,
+        retried,
+        retried,
+        retried
+      ]);
+    }
+  );
+
   it('shows a retryable QueryView error when contracts fail to load', async () => {
     let attempts = 0;
     const { target, button } = mountNative((request) => {
