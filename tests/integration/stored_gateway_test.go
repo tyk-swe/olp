@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/gateway/quota"
 	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
@@ -136,7 +137,7 @@ type storedGateway struct {
 	runtime *listedRuntime
 	mux     *http.ServeMux
 	server  *httptest.Server
-	kernel  *kernel.Server
+	prober  healthprobes.Prober
 	fleet   *fleet.State
 	limiter *admission.Limiter
 
@@ -291,7 +292,7 @@ func newStoredGateway(t *testing.T, fixture usageFixture, plan storedPlan) *stor
 		Uploads:   staging.NewAdmission(spool.CapacityBytes()),
 	}
 	server := kernel.New(dependencies, kernel.Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxMediaBodyBytes: 1 << 20, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096})
-	g.kernel = server
+	g.prober = healthprobes.Prober{Kernel: server, Runtime: g.runtime, Admission: dependencies.Admission}
 	g.mux = http.NewServeMux()
 	gateway.Register(server, g.mux, dependencies, gateway.WithMedia(mediaDeps))
 	g.server = httptest.NewServer(plan.served(g.mux))

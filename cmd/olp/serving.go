@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/gateway/codeforward"
 	"github.com/tyk-swe/olp/internal/gateway/events"
+	"github.com/tyk-swe/olp/internal/gateway/healthprobes"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	surfacemedia "github.com/tyk-swe/olp/internal/gateway/surface/media"
 	"github.com/tyk-swe/olp/internal/grants/personal"
@@ -69,7 +70,7 @@ type agentPlane struct {
 
 type serving struct {
 	gateway    *kernel.Server
-	prober     *kernel.Server
+	prober     *healthprobes.Prober
 	accounting *delivery.Delivery
 	overlaps   *apikeys.OverlapRecorder
 	agents     agentPlane
@@ -127,11 +128,12 @@ func (f foundation) baseGateway(assembly gatewayAssembly, accounting *delivery.D
 	return kernel.New(accounted, assembly.config), accounted
 }
 
-func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *kernel.Server {
+func (f foundation) prober(assembly gatewayAssembly, accounting *delivery.Delivery) *healthprobes.Prober {
 	if assembly.probeDeps.Admission == nil {
 		return nil
 	}
-	return kernel.New(f.accounted(assembly.probeDeps, accounting), assembly.probeConfig)
+	deps := f.accounted(assembly.probeDeps, accounting)
+	return &healthprobes.Prober{Kernel: kernel.New(deps, assembly.probeConfig), Runtime: deps.Runtime, Admission: deps.Admission}
 }
 
 func (f foundation) agentPlane() agentPlane {
