@@ -7,6 +7,9 @@
   import PluginProfileField from './PluginProfileField.svelte';
   import ProjectScopeField from '#lib/domain/projects/ProjectScopeField.svelte';
   import NavIcon from '#lib/components/NavIcon.svelte';
+  import FormField from '#lib/components/FormField.svelte';
+  import type { FieldErrors } from '#lib/editing/validation.js';
+  import type { ConnectionField } from './wizard/connectionValidation';
   import { stateLabel } from '#lib/format.js';
   import type { FieldIssue } from '#lib/management/http.js';
   import { listProviderProfiles } from '#lib/features/providers/providerProfiles.js';
@@ -30,6 +33,7 @@
     selectedSpec,
     busy,
     lockKind = false,
+    errors = {},
     issues = [],
     grantEnrolled = false,
     onSubmit
@@ -40,6 +44,7 @@
     busy: string;
     /** Set once the draft provider exists; its connector kind is immutable. */
     lockKind?: boolean;
+    errors?: FieldErrors<ConnectionField>;
     /** Field issues the server reported for the last submission. */
     issues?: FieldIssue[];
     /** Set while a live grant of the plugin build the form pins backs the
@@ -99,12 +104,14 @@
       idPrefix="provider"
       authEditable
       endpointReadonly={false}
+      {errors}
     />
     {#if plugin}<PluginProfileField
         values={draft}
         idPrefix="provider"
         disabled={Boolean(busy)}
         {issues}
+        error={errors.profileId}
       />{/if}
     {#if draft.kind === 'openai_compatible'}<div class="form-field full">
         <label for="compatible-provider">Compatible provider</label><select
@@ -158,33 +165,48 @@
           </a>.
         </span>
       </div>{/if}
-    <div class="form-field">
-      <label for="initial-model">
-        {seedModelRequired ? probePrompt.label : 'Seed model (optional)'}
-      </label><input
-        id="initial-model"
-        aria-describedby="initial-model-help"
-        autocomplete="off"
-        bind:value={draft.model}
-        placeholder={seedModelRequired ? probePrompt.placeholder : 'gpt-5.4'}
-        required={seedModelRequired}
-      /><small id="initial-model-help">
-        {plugin && seedModelRequired
-          ? 'This plugin profile declares no model discovery: the connection test certifies this declared model.'
-          : seedModelRequired
-            ? 'This provider needs an explicit model to test credentials.'
-            : 'Used for the initial connector probe; upstream discovery follows.'}
-      </small>
-    </div>
-    {#if draft.authMode === 'headers'}<label class="form-field full">
-        Credential header names<input
-          bind:value={draft.credentialHeaders}
-          placeholder="authorization, x-account-id"
-        /><small>
-          Supply a JSON object with these names and their secret values in
-          Credential.
+    <FormField
+      label={seedModelRequired ? probePrompt.label : 'Seed model (optional)'}
+      error={errors.model}
+    >
+      {#snippet control(attributes)}
+        <input
+          {...attributes}
+          aria-describedby={[
+            attributes['aria-describedby'],
+            'initial-model-help'
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          autocomplete="off"
+          bind:value={draft.model}
+          placeholder={seedModelRequired ? probePrompt.placeholder : 'gpt-5.4'}
+          required={seedModelRequired}
+        /><small id="initial-model-help">
+          {plugin && seedModelRequired
+            ? 'This plugin profile declares no model discovery: the connection test certifies this declared model.'
+            : seedModelRequired
+              ? 'This provider needs an explicit model to test credentials.'
+              : 'Used for the initial connector probe; upstream discovery follows.'}
         </small>
-      </label>{/if}
+      {/snippet}
+    </FormField>
+    {#if draft.authMode === 'headers'}<FormField
+        label="Credential header names"
+        error={errors.credentialHeaders}
+        full
+      >
+        {#snippet control(attributes)}
+          <input
+            {...attributes}
+            bind:value={draft.credentialHeaders}
+            placeholder="authorization, x-account-id"
+          /><small>
+            Supply a JSON object with these names and their secret values in
+            Credential.
+          </small>
+        {/snippet}
+      </FormField>{/if}
     {#if grantRequired}<div class="identity-note full">
         <strong>Grant enrollment</strong><span>
           This profile authenticates with a grant instead of a pasted
@@ -202,15 +224,25 @@
         </label>
         {#if draft.useExternalCredential}<ExternalReferenceEditor
             bind:value={draft.externalCredentialReference}
+            error={errors.externalCredentialReference}
           />{:else}
-          <label for="provider-secret">Credential</label><input
-            id="provider-secret"
-            aria-describedby="credential-help"
-            type="password"
-            autocomplete="new-password"
-            bind:value={draft.credential}
-            required
-          />{/if}<small id="credential-help">
+          <FormField label="Credential" error={errors.credential}>
+            {#snippet control(attributes)}
+              <input
+                {...attributes}
+                aria-describedby={[
+                  attributes['aria-describedby'],
+                  'credential-help'
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                type="password"
+                autocomplete="new-password"
+                bind:value={draft.credential}
+                required
+              />
+            {/snippet}
+          </FormField>{/if}<small id="credential-help">
           Sent once to this installation; never saved by the console or returned
           by the API.{#if plugin}
             The plugin's hosting adaptation places it in the headers and query

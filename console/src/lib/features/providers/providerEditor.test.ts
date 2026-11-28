@@ -10,7 +10,7 @@ import {
   selectPluginProfile,
   selectProviderPreset,
   setProviderDraftKind,
-  validateProviderDraft
+  type ProviderDraft
 } from './providerEditor';
 import { requiresProbeModel } from './providerKindSpec';
 import {
@@ -26,6 +26,7 @@ import {
   providerStatusTone,
   type ProviderReadiness
 } from './providerReadiness';
+import { validateConnection } from './wizard/connectionValidation';
 
 const preset: ProviderPreset = {
   id: 'hosted',
@@ -64,12 +65,23 @@ const emptyOptions = {
   shared_token_quotas: []
 };
 
+function connectionErrors(
+  draft: ProviderDraft,
+  kind = spec,
+  credentialAlreadyStored = false
+) {
+  const checked = validateConnection(draft, kind, { credentialAlreadyStored });
+  return checked.ok ? {} : checked.fieldErrors;
+}
+
 describe('provider editing', () => {
   it('requires the name, endpoint, and credential before creating a provider', () => {
     const draft = createProviderDraft(spec);
-    expect(validateProviderDraft(draft, spec)).toBe(
-      'Compatible provider requires name, endpoint, credential.'
-    );
+    expect(connectionErrors(draft)).toEqual({
+      name: 'Enter a provider name.',
+      endpoint: 'Enter the endpoint.',
+      credential: 'Enter the credential.'
+    });
 
     draft.name = '  Service  ';
     draft.endpoint = '  https://example.test/v1  ';
@@ -77,7 +89,7 @@ describe('provider editing', () => {
     draft.model = '  model-id  ';
     draft.credentialHeaders = ' X-Token, X-Tenant\nX-Other ';
 
-    expect(validateProviderDraft(draft, spec)).toBeNull();
+    expect(connectionErrors(draft)).toEqual({});
     expect(buildCreateProviderInput(draft, spec)).toMatchObject({
       name: 'Service',
       project_id: null,
@@ -93,13 +105,35 @@ describe('provider editing', () => {
     });
   });
 
+  it('asks for the values a kind requires and keeps a stored credential', () => {
+    const search: ProviderKindCapability = {
+      ...spec,
+      kind: 'azure_ai_search',
+      fields: [
+        { field: 'cloud_region', label: 'Region', required: true },
+        { field: 'api_version', label: 'API version', required: false },
+        { field: 'model', label: 'Index name', required: true }
+      ],
+      presets: []
+    };
+    const draft = createProviderDraft(search);
+    draft.name = 'Search';
+
+    expect(connectionErrors(draft, search, true)).toEqual({
+      cloudRegion: 'Enter the cloud region.',
+      model: 'Enter the model the connection test uses.'
+    });
+  });
+
   it('sends an external credential reference instead of a pasted secret', () => {
     const draft = createProviderDraft(spec);
     draft.name = 'Service';
     draft.endpoint = 'https://example.test/v1';
     draft.useExternalCredential = true;
     draft.credential = 'secret from an earlier selection';
-    expect(validateProviderDraft(draft, spec)).toContain('credential');
+    expect(connectionErrors(draft)).toHaveProperty(
+      'externalCredentialReference'
+    );
 
     const reference = {
       store: 'vault',
@@ -109,7 +143,7 @@ describe('provider editing', () => {
     };
     draft.externalCredentialReference = JSON.stringify(reference);
 
-    expect(validateProviderDraft(draft, spec)).toBeNull();
+    expect(connectionErrors(draft)).toEqual({});
     expect(buildCreateProviderInput(draft, spec)).toMatchObject({
       credential: undefined,
       credential_reference: reference
@@ -146,7 +180,7 @@ describe('provider editing', () => {
     draft.useExternalCredential = true;
     draft.externalCredentialReference = JSON.stringify(reference);
 
-    expect(validateProviderDraft(draft, spec)).toBeNull();
+    expect(connectionErrors(draft)).toEqual({});
   });
 
   it.each([
@@ -208,7 +242,9 @@ describe('provider editing', () => {
       draft.useExternalCredential = true;
       draft.externalCredentialReference = reference;
 
-      expect(validateProviderDraft(draft, spec)).toBe(issue);
+      expect(connectionErrors(draft)).toEqual({
+        externalCredentialReference: issue
+      });
     }
   );
 

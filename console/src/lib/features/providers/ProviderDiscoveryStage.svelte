@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import FormField from '#lib/components/FormField.svelte';
   import type { ProviderProbe } from '#lib/features/providers/providers.js';
   import type { Provider } from '#lib/domain/providers/api.js';
   import { declaresModels } from '#lib/features/providers/profiles.js';
@@ -11,6 +12,7 @@
     provider,
     probe,
     manualModelNames = $bindable(),
+    error,
     busy,
     onDiscover,
     onDeclareModels
@@ -18,6 +20,7 @@
     provider: Provider | null;
     probe: ProviderProbe | null;
     manualModelNames: string;
+    error?: string;
     busy: string;
     onDiscover: () => void | Promise<void>;
     onDeclareModels: () => void | Promise<void>;
@@ -36,13 +39,14 @@
 </script>
 
 {#snippet declaration()}
-  <div class="form-field">
-    <label for="manual-models-wizard">Upstream model identifiers</label>
-    <textarea
-      id="manual-models-wizard"
-      bind:value={manualModelNames}
-      placeholder="model-a&#10;model-b"></textarea>
-  </div>
+  <FormField label="Upstream model identifiers" {error}>
+    {#snippet control(attributes)}
+      <textarea
+        {...attributes}
+        bind:value={manualModelNames}
+        placeholder="model-a&#10;model-b"></textarea>
+    {/snippet}
+  </FormField>
   <button
     class="button button-secondary"
     type="button"

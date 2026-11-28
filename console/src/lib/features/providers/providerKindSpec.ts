@@ -6,7 +6,7 @@ import type {
 import type { ProviderAuthMode } from './providers';
 import { declaresModels } from './profiles';
 import type { ProviderProfile } from './providerProfiles';
-import type { ProviderDraft } from './providerEditor';
+import type { ProviderDraft, ProviderEditValues } from './providerEditor';
 
 export function authOptionsFor(
   spec: ProviderKindCapability
@@ -109,6 +109,16 @@ export function probeModelPrompt(kind: ProviderKind): {
 
 export function hasCustomEndpoint(spec: ProviderKindCapability): boolean {
   return hasField(spec, 'endpoint');
+}
+
+export function showsEndpoint(
+  values: Pick<ProviderEditValues, 'profileId'>,
+  spec: ProviderKindCapability
+): boolean {
+  return (
+    spec.kind !== 'plugin' &&
+    (hasCustomEndpoint(spec) || Boolean(values.profileId))
+  );
 }
 
 export function hasCloudRegion(spec: ProviderKindCapability): boolean {

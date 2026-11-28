@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
+  import FormField from '#lib/components/FormField.svelte';
   import type { FieldIssue } from '#lib/management/http.js';
   import { shortDigest } from '#lib/format.js';
   import NativeValueField from './NativeValueField.svelte';
@@ -20,6 +21,7 @@
     idPrefix,
     disabled = false,
     issues = [],
+    error,
     onChange
 
     /** Field issues the server reported, shown at the options they name. */
@@ -28,6 +30,7 @@
     idPrefix: string;
     disabled?: boolean;
     issues?: FieldIssue[];
+    error?: string;
     onChange?: () => void;
   } = $props();
 
@@ -78,39 +81,47 @@
   }
 </script>
 
-<div class="form-field full">
-  <label for={`${idPrefix}-plugin-profile`}>Plugin profile</label>
-  <select
-    id={`${idPrefix}-plugin-profile`}
-    aria-describedby={`${idPrefix}-plugin-profile-help`}
-    value={pinned}
-    onchange={(event) => choose(event.currentTarget.value)}
-    disabled={disabled ||
-      !values.document?.fieldsAvailable ||
-      profiles.isPending ||
-      profiles.isError ||
-      (!groups.length && !pinned)}
-    required
-  >
-    <option value="" disabled>Choose a plugin profile</option>
-    {#if pinned && !selected}<option value={pinned}>
-        {values.profileId} · digest {shortDigest(values.profileRevision ?? '')}
-      </option>{/if}
-    {#each groups as group (group.plugin.digest)}<optgroup
-        label={build(group.plugin)}
-      >
-        {#each group.profiles as profile (profile.id)}<option
-            value={`${profile.id}@${profile.revision}`}
-          >
-            {`${profile.label} · ${build(group.plugin)}`}
-          </option>{/each}
-      </optgroup>{/each}
-  </select>
-  <small id={`${idPrefix}-plugin-profile-help`}>
-    The provider pins the plugin build by its digest. Moving to another build of
-    the plugin is a new revision.
-  </small>
-</div>
+<FormField label="Plugin profile" {error} full>
+  {#snippet control(attributes)}
+    <select
+      {...attributes}
+      aria-describedby={[
+        attributes['aria-describedby'],
+        `${idPrefix}-plugin-profile-help`
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      value={pinned}
+      onchange={(event) => choose(event.currentTarget.value)}
+      disabled={disabled ||
+        !values.document?.fieldsAvailable ||
+        profiles.isPending ||
+        profiles.isError ||
+        (!groups.length && !pinned)}
+      required
+    >
+      <option value="" disabled>Choose a plugin profile</option>
+      {#if pinned && !selected}<option value={pinned}>
+          {values.profileId} · digest {shortDigest(
+            values.profileRevision ?? ''
+          )}
+        </option>{/if}
+      {#each groups as group (group.plugin.digest)}<optgroup
+          label={build(group.plugin)}
+        >
+          {#each group.profiles as profile (profile.id)}<option
+              value={`${profile.id}@${profile.revision}`}
+            >
+              {`${profile.label} · ${build(group.plugin)}`}
+            </option>{/each}
+        </optgroup>{/each}
+    </select>
+    <small id={`${idPrefix}-plugin-profile-help`}>
+      The provider pins the plugin build by its digest. Moving to another build
+      of the plugin is a new revision.
+    </small>
+  {/snippet}
+</FormField>
 {#if profiles.isError}<div class="inline-problem full" role="alert">
     The plugin profiles could not be loaded. <button
       class="button button-secondary"

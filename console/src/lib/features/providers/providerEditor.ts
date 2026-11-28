@@ -1,3 +1,4 @@
+import { validated, type Validation } from '#lib/editing/validation.js';
 import {
   ConfigurationDraft,
   type ConfigurationPatch
@@ -7,7 +8,6 @@ import { parseExternalReference } from './externalReference';
 import { nativeObject } from '#lib/nativeJson.js';
 import type {
   Provider,
-  ProviderVendor,
   ProviderKind,
   ProviderKindCapability
 } from '#lib/domain/providers/api.js';
@@ -25,9 +25,7 @@ import {
   hasCloudRegion,
   hasCustomEndpoint,
   hasDeployment,
-  requiresCredential,
-  requiresProbeModel,
-  requiresSeedModel
+  requiresCredential
 } from './providerKindSpec';
 
 export type ProviderEditValues = {
@@ -264,70 +262,6 @@ export function selectPluginProfile(
   if (authentication) values.authMode = authentication as ProviderAuthMode;
 }
 
-export function validateProviderDraft(
-  draft: ProviderDraft,
-  spec: ProviderKindCapability,
-  options: {
-    credentialAlreadyStored?: boolean;
-    /** The profile catalogue, which says whether a plugin profile discovers models. */
-    profiles?: readonly ProviderProfile[];
-    /** The vendor catalogue, which says whether a vendor lists its models. */
-    vendors?: readonly ProviderVendor[];
-  } = {}
-): string | null {
-  const values: Record<string, string> = {
-    endpoint: draft.endpoint,
-    api_version: draft.apiVersion,
-    cloud_region: draft.cloudRegion,
-    cloud_project: draft.cloudProject,
-    deployment: draft.deployment,
-    model: draft.model
-  };
-  if (draft.document?.issue) return draft.document.issue;
-  // Versioned profiles own connection requirements; the server validates their
-  // hosting adapter. Kind fields describe Automatic providers, not profiles.
-  const profiled = Boolean(draft.profileId);
-  const missing = spec.fields
-    .filter(
-      (field) =>
-        field.required &&
-        !(profiled && field.field !== 'model') &&
-        !values[field.field]?.trim()
-    )
-    .map((field) => field.label.toLowerCase());
-  if (draft.kind === 'plugin' && !draft.profileId)
-    missing.unshift('plugin profile');
-  if (!draft.name.trim()) missing.unshift('name');
-  if (
-    requiresProbeModel(draft, spec, options.profiles, options.vendors) &&
-    !requiresSeedModel(spec) &&
-    !draft.model.trim()
-  )
-    missing.push('probe model');
-  if (
-    !options.credentialAlreadyStored &&
-    requiresCredential(spec, draft.authMode) &&
-    !(draft.useExternalCredential
-      ? draft.externalCredentialReference?.trim()
-      : draft.credential.trim())
-  ) {
-    // Re-editing a saved draft keeps the stored write-only credential; only a
-    // provider that has never been created must supply one here.
-    missing.push('credential');
-  }
-  if (missing.length) return `${spec.label} requires ${missing.join(', ')}.`;
-  if (draft.useExternalCredential && requiresCredential(spec, draft.authMode)) {
-    try {
-      parseExternalReference(draft.externalCredentialReference ?? '');
-    } catch (error) {
-      return error instanceof Error
-        ? error.message
-        : 'Enter a valid external credential reference.';
-    }
-  }
-  return null;
-}
-
 function buildConnectionFields(
   values: ProviderEditValues,
   spec: ProviderKindCapability
@@ -425,4 +359,18 @@ export function parseManualModelNames(value: string): string[] {
     .split(/[\n,]/)
     .map((model) => model.trim())
     .filter(Boolean);
+}
+
+export function validateModelNames(
+  value: string
+): Validation<string[], 'manualModelNames'> {
+  const names = parseManualModelNames(value);
+  return validated(
+    {
+      manualModelNames: names.length
+        ? undefined
+        : 'Enter at least one upstream model identifier.'
+    },
+    () => names
+  );
 }
