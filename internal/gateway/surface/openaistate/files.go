@@ -62,7 +62,7 @@ func (s surface) listFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.Kind == resources.KindStrictFile {
 			_, contract, readErr := s.kernel.ReadDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.kernel.AuthorizeDurable(r.Context(), x, authority, row, contract, "batch", kernel.RetainedHousekeeping) != nil {
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", kernel.RetainedHousekeeping) != nil {
 				s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A file in this list is unavailable."))
 				return
 			}

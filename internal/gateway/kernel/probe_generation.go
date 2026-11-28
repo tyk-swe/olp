@@ -5,7 +5,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/release"
@@ -22,17 +21,14 @@ type ProbeAttempt struct {
 }
 
 func (s *Server) ProbeGeneration(ctx context.Context, release *release.Release, route routing.Route, parsed *wire.Request) ProbeAttempt {
-	x := &Call{
-		request:            request{id: ids.New(), minted: true, startedAt: s.Now(), release: release},
-		family:             parsed.Family,
-		historicalSnapshot: release.Snapshot().WithRoute(route),
-		actor:              "system",
-		mode:               "unary",
-		origin:             usage.OriginProbe,
-		priority:           routing.PriorityLow,
-		routeLeg:           routeLeg{Route: &route},
-		generation:         generationCall{parsed: parsed},
-	}
+	x := newCall(s.mintedRequest("", release), parsed.Family, callIdentity{actor: "system"},
+		callLineage{origin: usage.OriginProbe, priority: routing.PriorityLow},
+		callWork{
+			mode:               "unary",
+			historicalSnapshot: release.Snapshot().WithRoute(route),
+			routeLeg:           routeLeg{Route: &route},
+			generation:         generationCall{parsed: parsed},
+		})
 	x.bind(canonicalPlanner, nil, true)
 	defer s.SettleAdmission(ctx, x)
 	if e := s.planCanonical(ctx, x); e != nil {

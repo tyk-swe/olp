@@ -12,7 +12,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contracts/unary"
 	"github.com/tyk-swe/olp/internal/domain/guardrailpolicy"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -40,7 +39,8 @@ func (s *Server) EnterGuardrails(w http.ResponseWriter, r *http.Request) (*Call,
 		s.Gate.Release(r.Context())
 		return nil, false
 	}
-	return &Call{request: req, actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution, family: wire.Chat, operationOverride: "guardrail"}, true
+	caller := callIdentity{actor: "api_key", keyID: authority.ID, authority: authority, budgetGroupID: authority.BudgetGroupID, attribution: authority.Attribution}
+	return newCall(req, wire.Chat, caller, callLineage{}, callWork{operationOverride: "guardrail"}), true
 }
 
 func (s *Server) ApplyGuardrails(ctx context.Context, h http.Header, x *Call, in guardrails.Application) (guardrails.AppliedResult, *fault.Error) {
@@ -59,16 +59,14 @@ func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority keyauthor
 	if s == nil || release == nil || release.Snapshot() == nil {
 		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
 	}
-	parent := &Call{
-		request:       request{id: requestID, minted: true, startedAt: s.Now(), release: release},
+	parent := newCall(request{id: requestID, minted: true, startedAt: s.Now(), release: release}, wire.Chat, callIdentity{
 		actor:         "api_key",
 		keyID:         authority.ID,
 		budgetGroupID: authority.BudgetGroupID,
 		authority:     authority,
 		attribution:   authority.Attribution,
 		endUserDigest: authority.EndUserDigest,
-		family:        wire.Chat,
-	}
+	}, callLineage{}, callWork{})
 	evaluation := guardrails.Evaluation{RequestID: parent.request.accountingID(), Phase: phase, Segments: segments}
 	return s.boundGuardrails(parent, engine).Evaluate(ctx, evaluation, masks)
 }
@@ -108,8 +106,8 @@ func (s *Server) admitGuardrailEvaluation(r *http.Request) error {
 }
 
 func (s *Server) evaluatePinnedGuardrails(r *http.Request, member Member, pinned guardrails.Pinned, in guardrails.Application) (guardrails.Result, error) {
-	x := &Call{request: request{id: ids.New(), minted: true, startedAt: s.Now(), release: s.Deps.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: member.UserID, family: wire.Chat, operationOverride: "guardrail"}
-	x.authorize = member.Admit
+	x := newCall(s.mintedRequest("", s.Deps.Runtime.Release()), wire.Chat, callIdentity{actor: "playground", userID: member.UserID},
+		callLineage{origin: usage.OriginPlayground}, callWork{operationOverride: "guardrail", authorize: member.Admit})
 	result, err := s.evaluateGuardrails(r.Context(), x, in, func(*routing.View) (guardrails.PolicyRevision, *guardrails.Engine, error) {
 		return pinned.Compile()
 	})
@@ -160,7 +158,7 @@ func (s *Server) evaluateGuardrails(ctx context.Context, x *Call, in guardrails.
 }
 
 func (s *Server) modelGuardrail(ctx context.Context, parent *Call, d guardrails.Revision, spec guardrails.ModelSpec, e guardrails.Evaluation) (verdict guardrails.Verdict, err error) {
-	if parent.guard.internal || parent.request.release == nil {
+	if parent.internalModel || parent.request.release == nil {
 		return guardrails.Verdict{}, guardrails.ErrSurface
 	}
 	// Candidate preparation can see identical effective input for several
@@ -218,23 +216,9 @@ func (s *Server) newEvaluatorCall(parent *Call, d guardrails.Revision, route *ro
 	if parent.keyID == "" {
 		origin = usage.OriginPlayground
 	}
-	return &Call{
-		request:              request{id: ids.New(), minted: true, clientIP: parent.request.clientIP, startedAt: s.Now(), release: parent.request.release},
-		actor:                parent.actor,
-		keyID:                parent.keyID,
-		budgetGroupID:        parent.budgetGroupID,
-		authority:            parent.authority,
-		attribution:          parent.attribution,
-		endUserDigest:        parent.endUserDigest,
-		userID:               parent.userID,
-		origin:               origin,
-		parent:               parent.request.accountingID(),
-		priority:             parent.priority,
-		guard:                guardrailCall{internal: true},
-		evaluatorGuardrailID: d.GuardrailID,
-		authorize:            parent.authorize,
-		routeLeg:             routeLeg{Route: route},
-	}
+	return newCall(s.mintedRequest(parent.request.clientIP, parent.request.release), noFamily, parent.callIdentity,
+		callLineage{origin: origin, parent: parent.request.accountingID(), priority: parent.priority, evaluatorGuardrailID: d.GuardrailID, internalModel: true},
+		callWork{authorize: parent.authorize, routeLeg: routeLeg{Route: route}})
 }
 
 func (s *Server) runSemanticGuardrail(ctx context.Context, parent *Call, d guardrails.Revision, route *routing.Route, similarity guardrails.SemanticRule, e guardrails.Evaluation) (guardrails.Verdict, error) {

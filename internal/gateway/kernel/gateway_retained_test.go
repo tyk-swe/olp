@@ -70,7 +70,7 @@ func TestRetainedResponseStreamClassifiesDeadlineAndProtocolFailures(t *testing.
 			target := route.Targets[0]
 			provider := snapshot.Providers[target.ProviderID]
 			p := &Pin{Provider: provider, Target: target, Model: modelA, Slot: provider.Slots[0], attempt: routing.Attempt{ProviderID: provider.ID, UpstreamModel: modelA}}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 			x.Route = &route
 			ctx, cancel := h.gateway.StateDeadline(t.Context(), &route)
 			defer cancel()
@@ -142,7 +142,7 @@ func TestStrictRetainedResponseSettlesAfterNativeValidation(t *testing.T) {
 				t.Fatal("could not claim half-open probe")
 			}
 			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.Responses, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 			x.Route = &routing.Route{Slug: routeSlug, Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
 			res := &resources.Resource{ID: resources.LocalID(resources.KindStrictResponse, uuid.New()), Kind: resources.KindStrictResponse, UpstreamID: "native-response", RouteSlug: routeSlug}
 			recorder := httptest.NewRecorder()
@@ -181,7 +181,7 @@ func TestInterruptedPinnedExchangeSettlesProbeByAttribution(t *testing.T) {
 				t.Fatal("could not claim half-open probe")
 			}
 			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 			response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodGet, p.Provider.Endpoint+"/files/file-native", nil, "")
 			if failure != nil {
 				t.Fatalf("pinned request failed: %+v", failure)
@@ -206,7 +206,7 @@ func TestPinnedAcknowledgementRequiresFlush(t *testing.T) {
 	h.mock.set("a", status(http.StatusNoContent, ""))
 	p := testPinnedTarget(h, 0)
 	route := routing.Route{Fidelity: routing.RouteFidelity{Mode: routing.FidelityStrict}}
-	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiInteractions, actor: "api_key_resource", keyID: h.keyID}
+	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.GeminiInteractions, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 	x.Route = &route
 	response, failure := h.gateway.PinnedDo(t.Context(), x, p, http.MethodDelete, p.Provider.Endpoint+"/interactions/native", nil, "")
 	if failure != nil {
@@ -256,7 +256,7 @@ func TestRetainedDeletionSettlesProviderBeforeLocalWrite(t *testing.T) {
 			}
 			p.Hold = &dispatchHold{provider: p.Provider.ID, probed: probed}
 			p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
-			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+			x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 			id := uuid.New()
 			resource := &resources.Resource{UUID: id, ID: resources.LocalID(tc.family.Kind, id), Kind: tc.family.Kind, UpstreamID: "resource-native"}
 			var parent *resources.Resource
@@ -309,7 +309,7 @@ func TestRetainedResultPersistenceFailureKeepsProviderProbeAvailable(t *testing.
 	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
 	x := &Call{
 		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
-		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		family:  wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID},
 		retainedAdmission: &RetainedAdmissionPlan{attempt: p.attempt, billing: retainedPriced},
 	}
 	id := uuid.New()
@@ -360,7 +360,7 @@ func TestRetainedListBindingFailureDoesNotSettleProviderSuccess(t *testing.T) {
 	p.attempt.Price = rates.NewRoutingPrice(rates.RoutingPrice{Price: rates.Price{PerRequest: new("0.25")}})
 	x := &Call{
 		request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release},
-		family:  wire.File, actor: "api_key_resource", keyID: h.keyID,
+		family:  wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID},
 		retainedAdmission: &RetainedAdmissionPlan{billing: retainedPriced},
 	}
 	id := uuid.New()
@@ -518,7 +518,7 @@ func TestPinnedUnsentReservationRefundsAfterAnotherExchange(t *testing.T) {
 		t.Fatalf("first admission: %+v", first)
 	}
 	sent.Hold = first.hold
-	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, actor: "api_key_resource", keyID: h.keyID}
+	x := &Call{request: request{id: uuid.NewString(), startedAt: time.Now(), release: h.rt.release}, family: wire.File, callIdentity: callIdentity{actor: "api_key_resource", keyID: h.keyID}}
 	response, failure := h.gateway.PinnedDo(t.Context(), x, sent, http.MethodGet, sent.Provider.Endpoint, nil, "")
 	if failure != nil {
 		t.Fatalf("first exchange: %+v", failure)

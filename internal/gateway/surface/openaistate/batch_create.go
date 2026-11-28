@@ -203,13 +203,21 @@ func (s surface) strictBatchAdmission(ctx context.Context, x *kernel.Call, autho
 	if kernel.DurableKind(resources.KindFile, request.localFile) != resources.KindStrictFile || contract == nil || !authority.Policy.AllowProviderState || !s.store.Encrypted() {
 		return fault.InvalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", new("input_file_id"))
 	}
-	if e := s.kernel.AuthorizeDurable(ctx, x, authority, file, contract, "batch", kernel.RetainedNewWork); e != nil {
+	if e := s.authorizeDurable(ctx, x, authority, file, contract, "batch", kernel.RetainedNewWork); e != nil {
 		return e
 	}
 	if contract.Asset == nil || contract.Asset.Endpoint != request.endpoint || contract.Asset.ItemCount < 1 {
 		return fault.InvalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", new("endpoint"))
 	}
 	return nil
+}
+
+func (s surface) authorizeDurable(ctx context.Context, x *kernel.Call, authority keyauthority.Authority, r *resources.Resource, doc *kernel.DurableDocument, operation string, use kernel.RetainedUse) *fault.Error {
+	if doc == nil {
+		return nil
+	}
+	_, _, e := s.kernel.AdmitDurable(ctx, x, authority, r, doc, operation, use)
+	return e
 }
 
 type storedFileManifest struct {

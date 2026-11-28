@@ -8,7 +8,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/contracts/unary"
-	"github.com/tyk-swe/olp/internal/domain/ids"
 	"github.com/tyk-swe/olp/internal/domain/operationregistry"
 	"github.com/tyk-swe/olp/internal/domain/protocols"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
@@ -27,7 +26,10 @@ func (s *Server) cacheEmbedding(ctx context.Context, parent *Call, text string) 
 	// The parent owns the shared caller concurrency slot. The distinct
 	// embeddings route still enforces its own per-route request/concurrency caps.
 	authority.Policy.RouteLimits = parent.authority.Policy.RouteLimits
-	x := &Call{request: request{id: ids.New(), minted: true, startedAt: s.Now(), release: parent.request.release}, family: wire.Embeddings, actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID, origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority, mode: "unary", routeLeg: routeLeg{Route: &route}}
+	caller := callIdentity{actor: parent.actor, keyID: parent.keyID, authority: authority, attribution: parent.attribution, endUserDigest: parent.endUserDigest, budgetGroupID: parent.budgetGroupID}
+	x := newCall(s.mintedRequest("", parent.request.release), wire.Embeddings, caller,
+		callLineage{origin: usage.OriginCacheEmbedding, parent: parent.request.accountingID(), priority: parent.priority},
+		callWork{mode: "unary", routeLeg: routeLeg{Route: &route}})
 	var out *Outcome
 	defer func() {
 		parent.cache.embeddingDispatched = parent.cache.embeddingDispatched || x.dispatched

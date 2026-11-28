@@ -40,14 +40,13 @@ type MemberTrail struct {
 }
 
 func (s *Server) MemberGeneration(r *http.Request, member Member) *MemberGeneration {
-	x := &Call{
-		request:     request{id: ids.New(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
-		preferences: member.Preferences,
-		actor:       "playground",
-		origin:      usage.OriginPlayground,
-		userID:      member.UserID,
-		routeLeg:    routeLeg{affinity: []byte(member.UserID)},
-	}
+	x := newCall(
+		request{id: ids.New(), minted: true, clientIP: consumerauth.ClientIP(r, s.Config.TrustedProxies), startedAt: s.Now(), release: s.Deps.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())},
+		noFamily,
+		callIdentity{actor: "playground", userID: member.UserID},
+		callLineage{origin: usage.OriginPlayground},
+		callWork{preferences: member.Preferences, routeLeg: routeLeg{affinity: []byte(member.UserID)}},
+	)
 	if member.Document != nil {
 		x.request.body = &ingress.MeasuredBody{Decoded: int64(len(member.Document))}
 	}

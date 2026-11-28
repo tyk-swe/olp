@@ -5,6 +5,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
+	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
 	"github.com/tyk-swe/olp/internal/keyauthority"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -47,7 +48,7 @@ type turnEnd struct {
 
 func (s surface) begin(w http.ResponseWriter, r *http.Request, stored bool) (turn, bool) {
 	x, authority, ok := s.kernel.Enter(w, r, wire.GeminiInteractions, stored, func(r *http.Request) (keyauthority.Authority, *fault.Error) {
-		if _, e := kernel.GeminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
+		if _, e := ingress.GeminiClientKey(r, "stream", "last_event_id", "include_input"); e != nil {
 			return keyauthority.Authority{}, e
 		}
 		return s.kernel.Gate.Authenticate(r, "inference")

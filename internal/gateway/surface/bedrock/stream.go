@@ -102,9 +102,9 @@ func validateTitanImage(body []byte) error {
 func bedrockReadFailure(ctx context.Context) (*fault.Error, string) {
 	switch {
 	case errors.Is(ctx.Err(), context.Canceled):
-		return kernel.AttemptClassFault(kernel.ClassCancelled), kernel.ClassCancelled
+		return kernel.ClassFailure(kernel.ClassCancelled), kernel.ClassCancelled
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return kernel.AttemptClassFault(kernel.ClassTimeout), kernel.ClassTimeout
+		return kernel.ClassFailure(kernel.ClassTimeout), kernel.ClassTimeout
 	}
 	return fault.ServerError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated."), kernel.ClassProtocol
 }

@@ -2,7 +2,10 @@ package duplexrelay
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +25,14 @@ type Peer interface {
 
 type FrameSink interface {
 	Write(context.Context, websocket.MessageType, []byte) error
+}
+
+const FrameWriteTimeout = 5 * time.Second
+
+func WriteFrame(ctx context.Context, sink FrameSink, kind websocket.MessageType, payload []byte) error {
+	frameCtx, cancel := context.WithTimeout(ctx, FrameWriteTimeout)
+	defer cancel()
+	return sink.Write(frameCtx, kind, payload)
 }
 
 // BoundedWriter keeps one watchdog per direction so every frame gets a fresh
@@ -240,4 +251,26 @@ func converge(cfg Config, first Result, remaining int, done <-chan Result, cance
 	first.CloseCode = code
 	first.DeliveryFailed = deliveryFailed
 	return first
+}
+
+func RealtimeUpgrade(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	upgrades := false
+	for _, line := range r.Header.Values("Connection") {
+		for token := range strings.SplitSeq(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				upgrades = true
+			}
+		}
+	}
+	if !upgrades || !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Version")) != "13" {
+		return false
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key")))
+	return err == nil && len(key) == 16
 }

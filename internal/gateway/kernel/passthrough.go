@@ -20,7 +20,7 @@ import (
 )
 
 func (s *Server) EnterPassthrough(w http.ResponseWriter, r *http.Request) (*Call, keyauthority.Authority, bool) {
-	x := &Call{request: s.begin(w, r), family: wire.Passthrough, actor: "api_key", mode: "unary"}
+	x := newCall(s.begin(w, r), wire.Passthrough, callIdentity{actor: "api_key"}, callLineage{}, callWork{mode: "unary"})
 	if !s.Gate.Admit(r.Context()) {
 		s.RefuseOn(x, w, fault.Overloaded, "openai")
 		return nil, keyauthority.Authority{}, false

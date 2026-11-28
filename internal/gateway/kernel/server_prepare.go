@@ -273,21 +273,6 @@ func checkAnthropicBeta(x *Call) *fault.Error {
 	return anthropicbeta.Check(false, x.generation.parsed.Family, x.semanticHeaders, targets)
 }
 
-// WriteAdmissionOverload renders the surface's 503 rejection. The public
-// admission middleware calls it before routing, so the request context is the
-// only state available — writeSurfaceError applies the write deadline itself.
-func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
-	fault.WriteSurfaceError(w, fault.Overloaded, fault.RequestSurface(r))
-}
-
-// WriteNotFound renders the surface's 404 for a request nothing routed.
-// Process composition mounts it under reserved inference prefixes the gateway
-// only partially claims, so an unknown endpoint or a method mismatch still
-// answers in the envelope the surface's other errors use.
-func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
-	fault.WriteSurfaceError(w, fault.NotFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
-}
-
 // BindAuthority attaches the authenticated caller's authority to x and pins
 // its consumer rate card when the routing inputs are fresh. Stale inputs leave
 // the request unpinned so accounting resolves the card at fact time.

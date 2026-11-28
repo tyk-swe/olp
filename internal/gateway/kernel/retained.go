@@ -334,16 +334,6 @@ func (s *Server) AdmitDurable(ctx context.Context, x *Call, authority keyauthori
 	return p, route, nil
 }
 
-// AuthorizeDurable checks a key may use a strict retained file or batch; a
-// transformed one (doc is nil) is checked when its pin is resolved.
-func (s *Server) AuthorizeDurable(ctx context.Context, x *Call, authority keyauthority.Authority, r *resources.Resource, doc *DurableDocument, operation string, use RetainedUse) *fault.Error {
-	if doc == nil {
-		return nil
-	}
-	_, _, e := s.AdmitDurable(ctx, x, authority, r, doc, operation, use)
-	return e
-}
-
 // Historical protocol and credential identity do not grant historical authority
 // to start fresh inference. Intersect that contract with the installed release.
 func restrictRetainedWork(current *routing.View, keyID string, provider *routing.Provider, route *routing.Route, slot *routing.Slot, target *routing.Target, operation string) *fault.Error {

@@ -14,7 +14,6 @@ type guardrailCall struct {
 	ctx      context.Context
 	masks    *guardrails.Masking
 	input    []guardrails.Segment
-	internal bool
 	metadata bool
 	models   map[[32]byte]guardrails.Verdict
 	ledger   guardrailLedger

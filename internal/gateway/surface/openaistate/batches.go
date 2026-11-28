@@ -88,7 +88,7 @@ func (s surface) listBatches(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		if row.Kind == resources.KindStrictBatch {
 			_, contract, readErr := s.kernel.ReadDurable(r.Context(), row.Kind, authority.ID, row.ID)
-			if readErr != nil || s.kernel.AuthorizeDurable(r.Context(), x, authority, row, contract, "batch", kernel.RetainedHousekeeping) != nil {
+			if readErr != nil || s.authorizeDurable(r.Context(), x, authority, row, contract, "batch", kernel.RetainedHousekeeping) != nil {
 				s.kernel.Refuse(x, w, fault.ServerError(http.StatusServiceUnavailable, "provider_resource_unavailable", "A batch in this list is unavailable."))
 				return
 			}

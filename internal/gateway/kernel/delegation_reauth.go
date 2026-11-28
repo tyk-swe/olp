@@ -14,7 +14,7 @@ type DelegationReauthenticator interface {
 }
 
 func (s *Server) sessionAuthorityValue(ctx context.Context, x *Call, token, keyID string) (*keyauthority.Authority, bool) {
-	authority, err := s.ReauthenticateSession(ctx, x, token)
+	authority, err := s.reauthenticateSession(ctx, x, token)
 	if err != nil || authority == nil || authority.ID != keyID || !authority.Allows("inference", x.Route.Slug, x.Route.ProjectID, s.Now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 		return nil, false
 	}
@@ -76,7 +76,7 @@ func (s *Server) SessionAuthority(ctx context.Context, x *Call, token, keyID str
 	}
 }
 
-func (s *Server) ReauthenticateSession(ctx context.Context, x *Call, token string) (*keyauthority.Authority, error) {
+func (s *Server) reauthenticateSession(ctx context.Context, x *Call, token string) (*keyauthority.Authority, error) {
 	if x.authority.TaskCapability != nil {
 		auth := s.Deps.TaskCapabilityAuthenticator
 		if auth == nil {

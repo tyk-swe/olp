@@ -10,10 +10,10 @@ packages hold what the kernel uses and never import it back.
 
 | Package | Owns | May import |
 | --- | --- | --- |
-| `gateway/fault` | client-visible error values, per-surface error bodies, rate-limit headers and committed stream writing | none |
+| `gateway/fault` | client-visible error values, per-surface error bodies, the overload and unknown endpoint replies, rate-limit headers and committed stream writing | none |
 | `gateway/events` | the terminal request envelope, attempt facts and the log and accounting sinks | none |
 | `gateway/quota` | limiter admission, typed key, route, target and aggregate reservations, cost reservations and supply | `events`, `fault` |
-| `gateway/ingress` | concurrency slots, API key authentication, attribution, end-user identity and bounded body reading | `fault` |
+| `gateway/ingress` | concurrency slots, API key authentication, Gemini client key parsing, attribution, end-user identity and bounded body reading | `fault` |
 | `gateway/health` | circuit state, credential cooldowns and fleet health | `events` |
 | `gateway/codeforward/coderesearch` | bounding, method filtering and event-ID sealing for the subscription research MCP surface | none |
 | `gateway/codeforward/codexwire` | Codex wire request classification, response observation and passive allowance header parsing without rewriting payloads | none |
@@ -26,7 +26,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/publishedprompt` | replacing a published prompt reference with the rendered messages and defaults in each wire family's form | `fault`, `ingress` |
 | `gateway/generationrefs` | where a generation request names provider resources, and rewriting the ones a result or a stored input item list returns to the caller's identifiers | none |
 | `gateway/anthropicbeta` | validating and forwarding `Anthropic-Beta` headers across compatible route targets | `fault` |
-| `gateway/duplexrelay` | shared bidirectional WebSocket relay loop, bounded upstream writer, delegation reauth and abnormal teardown | `fault`, `ingress` |
+| `gateway/duplexrelay` | shared bidirectional WebSocket relay loop, upgrade request detection, bounded single frame writes, bounded upstream writer, delegation reauth and abnormal teardown | `fault`, `ingress` |
 | `gateway/managedbatch` | managed batch JSONL line translation and line identity digests, manifest metadata and Gemini batch record and result codecs | `fault` |
 | `gateway/kernel` | the `Call`, admission, the attempt loop, pinned exchanges, settlement, native and generation dispatch, and retained steps such as retained dispatch, page admission and result projection | every top-level gateway package above except `duplexrelay` |
 | `gateway/healthprobes` | the health probe worker, which picks opted-in targets, claims each once per interval across the fleet, sends one small request through `kernel.ProbeGeneration`, and shares the result and the fleet circuit | `health`, `kernel`, `quota` |
@@ -39,7 +39,7 @@ packages hold what the kernel uses and never import it back.
 | `gateway/surface/realtime` | OpenAI realtime WebSocket sessions and WebRTC calls under `/v1/realtime` | `duplexrelay`, `fault`, `ingress`, `kernel`, `quota`, `realtimeresponses` |
 | `gateway/surface/retrieval` | Cloud retrieval queries under `/v1/retrieval/{binding_id}/query` | `fault`, `kernel` |
 | `gateway/surface/cloudbatches` | Vertex and Bedrock batch jobs under `/native/{dialect}/batch-jobs` | `fault`, `ingress`, `kernel` |
-| `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `kernel` |
+| `gateway/surface/geminiinteractions` | Gemini Interactions under `/gemini/v1beta/interactions`, whole and streamed | `fault`, `ingress`, `kernel` |
 | `gateway/surface/geministate` | Native Gemini files, resumable uploads and batches, including `:batchGenerateContent` | `fault`, `kernel`, `managedbatch` |
 | `gateway/surface/guardrails` | Standalone guardrail evaluation under `/v1/guardrails/apply` | `fault`, `kernel` |
 | `gateway/surface/passthrough` | Pass-through routes under `/native/{dialect}/routes/{route}/` | `fault`, `ingress`, `kernel` |
@@ -87,6 +87,10 @@ calls one named kernel step per stage, such as `ReserveGeneration`,
 and a surface calls kernel steps without reading or writing the `Call`'s
 admission or settlement fields. When a surface needs a stage the kernel does not
 name yet, add the step to the kernel and call it.
+
+Every `Call` is built by `newCall` in `kernel/call.go`. It takes the request
+identity, the wire family, the caller, the lineage that ties a child call to its
+parent, and the work to run, so a new entry point has to supply each of them.
 
 A step takes what it needs as arguments and returns what it found, so its
 dependencies appear in its signature. The request value is built once and never

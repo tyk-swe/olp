@@ -2,6 +2,8 @@ package ingress
 
 import (
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/consumerauth"
@@ -40,6 +42,45 @@ func PresentedKey(r *http.Request) (string, *fault.Error) {
 		return "", missing
 	}
 	return strings.TrimSpace(key), nil
+}
+
+func GeminiClientKey(r *http.Request, allowedQuery ...string) (string, *fault.Error) {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return "", fault.InvalidRequest("invalid_request", "The Gemini query is malformed.", nil)
+	}
+	for name, values := range query {
+		if !slices.Contains(append([]string{"key"}, allowedQuery...), name) || len(values) != 1 || values[0] == "" {
+			return "", fault.InvalidRequest("invalid_request", "The Gemini query has an unsupported or repeated setting.", nil)
+		}
+	}
+	forms := 0
+	token := ""
+	if values := r.Header.Values("Authorization"); len(values) > 0 {
+		forms++
+		if len(values) != 1 {
+			return "", fault.InvalidRequest("invalid_request", "Provide one Gemini API key.", nil)
+		}
+		token = BearerToken(r)
+	}
+	if values := r.Header.Values("X-Goog-Api-Key"); len(values) > 0 {
+		forms++
+		if len(values) != 1 || values[0] == "" {
+			return "", fault.InvalidRequest("invalid_request", "Provide one Gemini API key.", nil)
+		}
+		token = strings.TrimSpace(values[0])
+	}
+	if values := query["key"]; len(values) > 0 {
+		forms++
+		token = strings.TrimSpace(values[0])
+	}
+	if forms > 1 {
+		return "", fault.InvalidRequest("invalid_request", "Provide the Gemini API key in one location.", nil)
+	}
+	if forms == 0 || token == "" {
+		return "", fault.AuthenticationError("invalid_api_key", "Provide a Gemini API key.")
+	}
+	return token, nil
 }
 
 // bedrockPresentedKey returns the gateway API key of a Bedrock request. AWS

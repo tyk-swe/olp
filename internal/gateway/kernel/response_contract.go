@@ -104,7 +104,7 @@ func (r NativeResponse) Project(p ResponseProjection) (oif.Document, error) {
 	return projected, nil
 }
 
-func (p ResponseProjection) Project(source oif.Document, pointer string) (oif.Document, error) {
+func (p ResponseProjection) project(source oif.Document, pointer string) (oif.Document, error) {
 	native, err := ValidateNativeResponse(source, pointer, p.UpstreamID)
 	if err != nil {
 		return oif.Document{}, err

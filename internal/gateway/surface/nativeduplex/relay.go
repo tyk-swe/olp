@@ -54,8 +54,7 @@ func (s surface) duplexDial(ctx context.Context, x *kernel.Call, p *kernel.Pin, 
 }
 
 const (
-	duplexPing              = 30 * time.Second
-	duplexFrameWriteTimeout = 5 * time.Second
+	duplexPing = 30 * time.Second
 )
 
 type duplexRelay struct {
@@ -76,7 +75,7 @@ func (s surface) relayNativeDuplex(ctx context.Context, x *kernel.Call, p *kerne
 		Client:              client,
 		Upstream:            upstream,
 		PingInterval:        duplexPing,
-		WriteTimeout:        duplexFrameWriteTimeout,
+		WriteTimeout:        duplexrelay.FrameWriteTimeout,
 		OnClientFrame:       st.onClientFrame,
 		OnProviderFrame:     st.onProviderFrame,
 		OnProviderDelivered: func() { st.x.Delivered(st.kernel.Now()) },

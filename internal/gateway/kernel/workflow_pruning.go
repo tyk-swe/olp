@@ -247,17 +247,19 @@ func (s *Server) runPruningDecision(ctx context.Context, parent *Call, route *ro
 		}
 		return nil, guardrailError(err)
 	}
-	x := &Call{
-		request: requestMetadataForPruning(parent, body), family: wire.SystemOne, mode: "unary",
-		actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID,
-		authority: current, attribution: parent.attribution, endUserDigest: parent.endUserDigest,
-		userID: parent.userID, origin: usage.OriginClassifier, parent: parent.request.accountingID(),
-		priority: parent.priority, guard: guardrailCall{internal: true}, authorize: parent.authorize,
-		deadline: parent.deadline, callBudget: callBudget{spent: parent.spent}, facts: slices.Clone(parent.facts),
-		routeLeg: routeLeg{Route: route}, workflow: parent.workflow,
-		generation: generationCall{runLimits: parent.generation.runLimits},
-		unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
-	}
+	x := newCall(requestMetadataForPruning(parent, body), wire.SystemOne,
+		callIdentity{
+			actor: parent.actor, keyID: parent.keyID, budgetGroupID: parent.budgetGroupID,
+			authority: current, attribution: parent.attribution, endUserDigest: parent.endUserDigest, userID: parent.userID,
+		},
+		callLineage{origin: usage.OriginClassifier, parent: parent.request.accountingID(), priority: parent.priority, internalModel: true},
+		callWork{
+			mode: "unary", authorize: parent.authorize,
+			deadline: parent.deadline, callBudget: callBudget{spent: parent.spent}, facts: slices.Clone(parent.facts),
+			routeLeg: routeLeg{Route: route}, workflow: parent.workflow,
+			generation: generationCall{runLimits: parent.generation.runLimits},
+			unary:      &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
+		})
 	if problem := s.prepareUnary(ctx, x); problem != nil {
 		return nil, problem
 	}

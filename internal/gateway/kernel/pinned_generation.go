@@ -19,7 +19,7 @@ func (s *Server) Enter(w http.ResponseWriter, r *http.Request, family wire.Forma
 	if resource {
 		actor = "api_key_resource"
 	}
-	x := &Call{request: s.begin(w, r), family: family, actor: actor, mode: "unary"}
+	x := newCall(s.begin(w, r), family, callIdentity{actor: actor}, callLineage{}, callWork{mode: "unary"})
 	authority, ok := s.EnterCall(w, r, x, authenticate)
 	return x, authority, ok
 }
@@ -72,16 +72,10 @@ func (s *Server) SettleGeneration(ctx context.Context, x *Call, p *Pin) {
 }
 
 func (s *Server) SessionCall(w http.ResponseWriter, r *http.Request, family wire.Format, mode string) *Call {
-	return &Call{request: s.begin(w, r), family: family, actor: "api_key", mode: mode}
+	return newCall(s.begin(w, r), family, callIdentity{actor: "api_key"}, callLineage{}, callWork{mode: mode})
 }
 
 func (x *Call) Priority() string { return x.priority }
-
-func (x *Call) EndUserDigest() string { return x.endUserDigest }
-
-func (x *Call) AttributionValues() map[string]string { return x.attribution }
-
-func (x *Call) ClientIP() string { return x.request.clientIP }
 
 func (x *Call) SessionEstimate() { x.estimate = ResourceEstimate }
 
@@ -147,10 +141,6 @@ func (s *Server) SettleRetrieval(ctx context.Context, x *Call, p *Pin) {
 
 func ClassFailure(class string) *fault.Error {
 	return (&AttemptFailure{class: class}).Fault()
-}
-
-func AttemptFailureFor(class string) *AttemptFailure {
-	return &AttemptFailure{class: class}
 }
 
 func (x *Call) Sensitive() egress.Sensitive { return x.sensitive }

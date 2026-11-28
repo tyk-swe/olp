@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/domain/oif"
 	"github.com/tyk-swe/olp/internal/domain/protocols/wire"
 	"github.com/tyk-swe/olp/internal/domain/routeidentity"
+	"github.com/tyk-swe/olp/internal/gateway/duplexrelay"
 	"github.com/tyk-swe/olp/internal/gateway/fault"
 	"github.com/tyk-swe/olp/internal/gateway/ingress"
 	"github.com/tyk-swe/olp/internal/gateway/kernel"
@@ -134,10 +135,10 @@ func (s surface) admitLiveCaller(x *kernel.Call, r *http.Request) (keyauthority.
 	if !s.kernel.BrowserOriginAllowed(r) {
 		return keyauthority.Authority{}, "", fault.PermissionError("origin_forbidden", "This origin is not allowed to open Live sessions.")
 	}
-	if !kernel.RealtimeUpgrade(r) {
+	if !duplexrelay.RealtimeUpgrade(r) {
 		return keyauthority.Authority{}, "", fault.InvalidRequest("websocket_upgrade_required", "Gemini Live requires a WebSocket upgrade.", nil)
 	}
-	token, e := kernel.GeminiClientKey(r)
+	token, e := ingress.GeminiClientKey(r)
 	if e != nil {
 		return keyauthority.Authority{}, "", e
 	}
@@ -238,7 +239,7 @@ func (t liveTurn) dispatchSetup(ctx context.Context, cancel context.CancelFunc, 
 	// A failed setup write may still have reached the provider. This request
 	// owns one Attempt and never selects another provider after that boundary.
 	t.x.MarkDispatched()
-	if err := kernel.WriteDuplexFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
+	if err := duplexrelay.WriteFrame(ctx, upstream, websocket.MessageText, bound); err != nil {
 		markFactUncertain(t.x, kernel.ClassAmbiguous)
 		return upstream, &closeError{fault: fault.ServerError(http.StatusBadGateway, "upstream_outcome_unknown", "The Live setup outcome is unknown."), code: websocket.StatusInternalError, reason: "setup uncertain"}
 	}
@@ -272,7 +273,7 @@ func (t liveTurn) awaitAck(ctx context.Context, client, upstream *websocket.Conn
 	if _, ok := ackDocument.Root().Lookup("setupComplete"); !ok {
 		return &closeError{fault: fault.ServerError(http.StatusBadGateway, "provider_protocol_error", "The Live provider sent content before setup completion."), code: websocket.StatusProtocolError, reason: "setup acknowledgement required"}
 	}
-	if err := kernel.WriteDuplexFrame(ctx, client, websocket.MessageText, ack); err != nil {
+	if err := duplexrelay.WriteFrame(ctx, client, websocket.MessageText, ack); err != nil {
 		return &closeError{fault: fault.ServerError(http.StatusBadGateway, "client_delivery_failed", "The Live setup acknowledgement could not be delivered."), noClose: true}
 	}
 	t.x.Delivered(t.kernel.Now())
