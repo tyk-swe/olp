@@ -1,10 +1,7 @@
 import path from 'node:path';
+import { featureOf, features, lib, onLocalImport, root } from './imports.mjs';
 
-const root = path.resolve(import.meta.dirname, '..');
-const lib = path.join(root, 'src/lib');
 const routes = path.join(root, 'src/routes');
-const features = path.join(lib, 'features');
-const testSupport = path.join(root, 'tests/unit/support');
 
 /**
  * @param {string} directory
@@ -12,11 +9,6 @@ const testSupport = path.join(root, 'tests/unit/support');
  */
 const outside = (directory, file) =>
   path.relative(directory, file).startsWith('..');
-/** @param {string} file */
-const featureOf = (file) => {
-  const [feature, ...rest] = path.relative(features, file).split(path.sep);
-  return feature === '..' || rest.length === 0 ? null : feature;
-};
 /** @param {string} file */
 const layerOf = (file) => {
   const [layer, ...rest] = path.relative(lib, file).split(path.sep);
@@ -33,22 +25,8 @@ const isTest = (file) => {
     (parts[0] === 'src' && parts.includes('test'))
   );
 };
-/**
- * @param {string} from
- * @param {string} specifier
- */
-const resolve = (from, specifier) => {
-  if (/^[#$]lib\//.test(specifier)) return path.join(lib, specifier.slice(5));
-  if (specifier.startsWith('#test/'))
-    return path.join(testSupport, specifier.slice(6));
-  if (specifier.startsWith('.'))
-    return path.resolve(path.dirname(from), specifier);
-  return null;
-};
 /** @param {string} file */
 const isEntry = (file) => /^index\.(js|ts)$/.test(path.basename(file));
-
-/** @typedef {Parameters<NonNullable<import('eslint').Rule.RuleListener['ImportExpression']>>[0]['source']} Source */
 
 /** @type {import('eslint').Rule.RuleModule} */
 export default {
@@ -119,20 +97,9 @@ export default {
       const direct = path.dirname(target) === path.join(features, feature);
       return direct && isEntry(target) ? null : { messageId: 'entry' };
     };
-    /** @param {{ source?: Source | null }} node */
-    const check = (node) => {
-      if (node.source?.type !== 'Literal') return;
-      if (typeof node.source.value !== 'string') return;
-      const target = resolve(from, node.source.value);
-      const found = target && violation(target);
-      if (found) context.report({ node: node.source, ...found });
-    };
-    return {
-      ImportDeclaration: check,
-      ExportNamedDeclaration: check,
-      ExportAllDeclaration: check,
-      ImportExpression: check,
-      TSImportType: check
-    };
+    return onLocalImport(from, (source, target) => {
+      const found = violation(target);
+      if (found) context.report({ node: source, ...found });
+    });
   }
 };

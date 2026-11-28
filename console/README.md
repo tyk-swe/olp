@@ -107,10 +107,10 @@ so a feature that no other feature imports has none.
 
 ## Boundaries
 
-ESLint enforces eleven structural rules. `eslint.config.mjs` is their source,
-and `eslint/feature-boundary.mjs` resolves alias and relative imports for the
-first five in `import` and `export` statements, dynamic imports and inline
-`import('...')` types.
+ESLint enforces the structural rules below. `eslint.config.mjs` is their source.
+The first five and the feature order resolve alias and relative imports through
+`eslint/imports.mjs` in `import` and `export` statements, dynamic imports and
+inline `import('...')` types, in both `.ts` and `.svelte` files.
 
 - The shared layers (`src/lib/*.ts`, `management/`, `session/`, `editing/`,
   `listing/`, `components/` and `shell/`) never import from
@@ -137,6 +137,44 @@ first five in `import` and `export` statements, dynamic imports and inline
 - Test files outside `tests/unit/support/eventually.ts` must use `eventually`
   from `#test/eventually.js` instead of `vi.waitFor` or `vi.waitUntil`, because
   Vitest's 50 ms polling interval dominates the console unit budget.
+- A feature imports only the features listed before it. See "Feature order"
+  below.
+- A `.ts` file holds at most 500 lines of code. Test files and generated files
+  are exempt.
+- A function holds at most 100 lines, counting blank lines but not comments.
+  Test files and generated files are exempt.
+- A binding that is never reassigned is declared with `const`. In a `.svelte`
+  file `$props()` and `$derived()` may stay `let`.
+
+### Feature order
+
+The `orderedFeatures` list in `eslint.config.mjs` orders the feature folders,
+and `console/feature-order` (`eslint/feature-order.mjs`) lets a feature import
+only the features listed before it, so a new import cannot close a cycle between
+features. Type-only imports count. When the order forbids an import, move the
+shared part into a shared layer or pass it in. A new feature goes into the list
+after every feature it imports, and a feature can move within the list when no
+new violation appears. Test files are exempt. Imports between the subfolders of
+one feature are not checked.
+
+### Suppressed violations
+
+`eslint-suppressions.json` is ESLint's
+[bulk suppressions](https://eslint.org/docs/latest/use/suppressions) file. It
+records how many violations of a rule each file had when that rule arrived, so
+the list can only shrink. `pnpm --dir console lint` fails when a file goes over
+its count, which then reports every violation of that rule in the file. It also
+fails when a count is higher than what the file still has, or when a listed file
+no longer exists. After fixing a violation, or after deleting or renaming a
+listed file, remove the stale entries and commit the result.
+
+```sh
+pnpm --dir console exec eslint . --prune-suppressions
+```
+
+Never add an entry or raise a count to get a change through. Fix the violation,
+also when listed code moves to another file. The counts are per file and rule, so
+they do not stop a listed file or function from growing further.
 
 ### Shared layers
 
