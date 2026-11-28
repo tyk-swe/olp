@@ -13,7 +13,6 @@ internal/release a2a_tasks 1
 internal/release api_keys 1
 internal/release installation 1
 internal/release provider_grants 1
-internal/resources provider_models 1
 internal/routes api_keys 1
 internal/settings installation 1
 internal/usage execution_debit_versions 1
