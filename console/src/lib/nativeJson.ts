@@ -1,84 +1,26 @@
-/** JSON numbers in native documents retain their source spelling. The wrapper
- * is immutable and non-plain, so Svelte and query-cache structural sharing do
- * not turn the platform's raw JSON internal slot into an ordinary object. */
-type SourceJSON = typeof JSON & {
-  rawJSON?: (source: string) => unknown;
-};
-const sourceJSON = JSON as SourceJSON;
-const utf8 = new TextEncoder();
-const numberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-const literalPattern =
-  /true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
-const unpairedSurrogatePattern = /[\uD800-\uDFFF]/u;
-const defaultMaxBytes = 4 * 1024 * 1024;
+import { parseNativeJSON } from './nativeJsonParser.js';
+import {
+  IncompleteJSON,
+  NativeNumber,
+  defineDataProperty,
+  nativeEntries,
+  nativeObject,
+  rememberOrder,
+  type NativeObject,
+  type NativePath,
+  type NativeValue
+} from './nativeJsonValue.js';
 
-export class NativeNumber {
-  readonly source: string;
-  constructor(source: string) {
-    if (!numberPattern.test(source)) throw new Error('Invalid JSON number.');
-    this.source = source;
-    Object.freeze(this);
-  }
-  toJSON(): unknown {
-    if (typeof sourceJSON.rawJSON !== 'function')
-      throw new Error(
-        'NativeNumber cannot be serialized with JSON.stringify in this runtime; use stringifyNativeJSON.'
-      );
-    return sourceJSON.rawJSON(this.source);
-  }
-  toString(): string {
-    return this.source;
-  }
-  valueOf(): never {
-    throw new Error(
-      'Native numbers must be edited as JSON without numeric coercion.'
-    );
-  }
-}
-
-export type NativeValue =
-  | null
-  | boolean
-  | string
-  | number
-  | NativeNumber
-  | IncompleteJSON
-  | NativeValue[]
-  | NativeObject;
-export type NativeObject = { [name: string]: NativeValue };
-export type NativePath = readonly string[];
-
-const memberOrders = new WeakMap<object, readonly string[]>();
-
-function rememberOrder(value: object, keys: readonly string[]): void {
-  memberOrders.set(value, Object.freeze([...keys]));
-}
-
-function defineDataProperty(
-  target: Record<string, unknown>,
-  key: string,
-  value: unknown
-): void {
-  Object.defineProperty(target, key, {
-    value,
-    writable: true,
-    enumerable: true,
-    configurable: true
-  });
-}
-
-export function nativeEntries(value: object): [string, NativeValue][] {
-  const current = Object.keys(value);
-  const remembered = memberOrders.get(value);
-  const rememberedKeys = new Set(remembered);
-  const keys = remembered
-    ? [
-        ...remembered.filter((key) => Object.hasOwn(value, key)),
-        ...current.filter((key) => !rememberedKeys.has(key))
-      ]
-    : current;
-  return keys.map((key) => [key, (value as NativeObject)[key]!]);
-}
+export { parseNativeJSON } from './nativeJsonParser.js';
+export {
+  IncompleteJSON,
+  NativeNumber,
+  nativeEntries,
+  nativeObject,
+  type NativeObject,
+  type NativePath,
+  type NativeValue
+} from './nativeJsonValue.js';
 
 function cloneNativeTree(
   value: unknown,
@@ -157,163 +99,8 @@ export function normalizeNativeJSON(value: unknown): NativeValue {
   }) as NativeValue;
 }
 
-/** Single-pass bounded RFC 8259 parser that preserves exact numeric tokens and
- * object member order while rejecting duplicate decoded member names. */
-export function parseNativeJSON(
-  source: string,
-  maxBytes = defaultMaxBytes
-): NativeValue {
-  if (source.length > maxBytes || utf8.encode(source).byteLength > maxBytes)
-    throw new Error(`Native JSON must fit within ${maxBytes / 1024 ** 2} MiB.`);
-
-  let cursor = 0;
-  let nodes = 0;
-
-  const fail = (message = 'Invalid JSON'): never => {
-    throw new Error(`${message} at character ${cursor + 1}.`);
-  };
-
-  const skipSpace = (): void => {
-    while (cursor < source.length) {
-      const code = source.charCodeAt(cursor);
-      if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) {
-        cursor += 1;
-      } else {
-        break;
-      }
-    }
-  };
-
-  const readString = (): string => {
-    const start = cursor++;
-    let hasEscape = false;
-    while (cursor < source.length) {
-      const code = source.charCodeAt(cursor++);
-      if (code === 0x5c) {
-        hasEscape = true;
-        cursor += 1;
-        if (cursor > source.length) return fail('Unterminated JSON string');
-      } else if (code === 0x22) {
-        let decoded: string;
-        if (hasEscape) {
-          try {
-            decoded = JSON.parse(source.slice(start, cursor)) as string;
-          } catch {
-            return fail('Invalid JSON string');
-          }
-        } else {
-          decoded = source.slice(start + 1, cursor - 1);
-        }
-        if (unpairedSurrogatePattern.test(decoded))
-          fail('Unpaired Unicode surrogate');
-        return decoded;
-      } else if (code < 0x20) {
-        return fail('Invalid JSON string');
-      }
-    }
-    return fail('Unterminated JSON string');
-  };
-
-  const readObject = (depth: number): NativeObject => {
-    cursor += 1;
-    skipSpace();
-    const result: NativeObject = {};
-    const keys: string[] = [];
-    const seen = new Set<string>();
-    if (source.charCodeAt(cursor) === 0x7d) {
-      cursor += 1;
-      rememberOrder(result, keys);
-      return result;
-    }
-    while (cursor < source.length) {
-      if (source.charCodeAt(cursor) !== 0x22)
-        fail('Expected an object member name');
-      const key = readString();
-      if (seen.has(key)) fail('Duplicate object member');
-      seen.add(key);
-      keys.push(key);
-      skipSpace();
-      if (source.charCodeAt(cursor++) !== 0x3a) fail('Expected a colon');
-      const child = readValue(depth + 1);
-      defineDataProperty(result, key, child);
-      skipSpace();
-      const delimiter = source.charCodeAt(cursor);
-      if (delimiter === 0x7d) {
-        cursor += 1;
-        rememberOrder(result, keys);
-        return result;
-      }
-      if (delimiter !== 0x2c) fail('Expected a comma');
-      cursor += 1;
-      skipSpace();
-    }
-    return fail('Unterminated JSON container');
-  };
-
-  const readArray = (depth: number): NativeValue[] => {
-    cursor += 1;
-    skipSpace();
-    const items: NativeValue[] = [];
-    if (source.charCodeAt(cursor) === 0x5d) {
-      cursor += 1;
-      return items;
-    }
-    while (cursor < source.length) {
-      items.push(readValue(depth + 1));
-      skipSpace();
-      const delimiter = source.charCodeAt(cursor);
-      if (delimiter === 0x5d) {
-        cursor += 1;
-        return items;
-      }
-      if (delimiter !== 0x2c) fail('Expected a comma');
-      cursor += 1;
-      skipSpace();
-    }
-    return fail('Unterminated JSON container');
-  };
-
-  const readLiteral = (): NativeValue => {
-    literalPattern.lastIndex = cursor;
-    const match = literalPattern.exec(source);
-    if (!match) return fail();
-    const token = match[0];
-    cursor += token.length;
-    if (token === 'true') return true;
-    if (token === 'false') return false;
-    if (token === 'null') return null;
-    return new NativeNumber(token);
-  };
-
-  const readValue = (depth: number): NativeValue => {
-    skipSpace();
-    if (depth > 128 || ++nodes > 1_000_000)
-      fail('Native JSON exceeds its nesting or value limit');
-    const code = source.charCodeAt(cursor);
-    if (code === 0x22) return readString();
-    if (code === 0x7b) return readObject(depth);
-    if (code === 0x5b) return readArray(depth);
-    return readLiteral();
-  };
-
-  const parsed = readValue(0);
-  skipSpace();
-  if (cursor !== source.length) fail('Expected one JSON document');
-  return parsed;
-}
-
 export function stringifyNativeJSON(value: unknown, indent = 0): string {
   return renderJSON(value, indent, false);
-}
-
-export function nativeObject(value: unknown): value is NativeObject {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    !(value instanceof NativeNumber) &&
-    !(value instanceof IncompleteJSON)
-  );
 }
 
 export function nativeAt(
@@ -426,20 +213,6 @@ export function parseManagementJSON(
     return result;
   };
   return normalize(parseNativeJSON(source, maxBytes), []);
-}
-
-/** An unfinished field edit is part of the one draft tree, never a second
- * unsynchronized form value. It can be rendered but cannot be sent as JSON. */
-export class IncompleteJSON {
-  constructor(
-    readonly source: string,
-    readonly issue: string
-  ) {
-    Object.freeze(this);
-  }
-  toJSON(): never {
-    throw new Error(this.issue);
-  }
 }
 
 export function nativeIssue(value: NativeValue): string | null {

@@ -10,79 +10,14 @@ import {
 } from '#lib/features/access/end-users/policy.js';
 import { groupError } from '#lib/features/access/route-groups/policy.js';
 
+import { emptyBehavior } from './routeBehavior';
 import {
-  buildCreateRouteDraftInput,
-  buildReplaceRouteDraftInput,
-  certifiedCapabilities,
-  emptyBehavior,
-  eligibleTargetTuples,
-  fidelityLabel,
-  missingTargetOperations,
-  modesFor,
-  parseSelectors,
-  routeEligibilityWarnings,
-  storedTargetLabel,
-  surfacesFor,
-  targetUnavailable,
   validateRouteBehavior,
   validateRouteEditor,
   validateTargetRoles,
-  type EditableTarget,
-  type RouteEditorValues,
-  type RouteModelOption
+  type RouteEditorValues
 } from './routeEditor';
-
-describe('modesFor', () => {
-  it('offers webrtc as its own realtime simulation mode', () => {
-    expect(modesFor('realtime')).toEqual(['realtime', 'webrtc']);
-  });
-
-  it('keeps non-realtime operations on their existing modes', () => {
-    expect(modesFor('generation')).toEqual(['unary', 'streaming']);
-    expect(modesFor('embeddings')).toEqual(['unary']);
-  });
-});
-
-describe('route selector input', () => {
-  it('accepts empty input and valid model and plugin constraints', () => {
-    expect(parseSelectors('  ')).toEqual([]);
-    const selectors = [
-      {
-        id: 'large',
-        when: {
-          operations: ['generation'],
-          streaming: true,
-          min_input_tokens: 10,
-          classifier: {
-            route: 'classifier',
-            labels: ['technical'],
-            timeout_ms: 1000,
-            min_score: 0.8
-          }
-        },
-        tags: ['large']
-      },
-      { id: 'plugin', when: { plugin: { digest: 'digest' } }, route: 'other' }
-    ];
-    expect(parseSelectors(JSON.stringify(selectors))).toEqual(selectors);
-  });
-
-  it.each([
-    '{',
-    '{}',
-    '[{"id":"one"}]',
-    '[{"id":"one","when":{"streaming":"yes"}}]',
-    '[{"id":"one","when":{"min_input_tokens":1.5}}]',
-    '[{"id":"one","when":{"operations":[1]}}]',
-    '[{"id":"one","when":{"unknown":true}}]',
-    '[{"id":"one","when":{"plugin":{"digest":"x","other":1}}}]',
-    '[{"id":"one","when":{"classifier":{"route":"x","labels":["ok"],"timeout_ms":1,"extra":true}}}]',
-    '[{"id":"one","when":{},"tags":[1]}]',
-    '[{"id":"one","when":{},"other":true}]'
-  ])('refuses malformed selector input %s', (text) => {
-    expect(parseSelectors(text)).toMatch(/selectors must be/i);
-  });
-});
+import type { EditableTarget } from './routeTargetModel';
 
 describe('route validation and serialization', () => {
   const target: EditableTarget = {
@@ -407,143 +342,9 @@ describe('route validation and serialization', () => {
       })
     ).toBeNull();
   });
-
-  it('preserves route policy and target roles in create and edit requests', () => {
-    const behavior = {
-      ...emptyBehavior(),
-      fallbacks: [{ route: 'backup', on: ['exhausted' as const] }],
-      caller_cost_exempt: false,
-      max_body_bytes: 4096
-    };
-    const values = {
-      ...route,
-      projectId: 'project',
-      behavior,
-      targets: [
-        { ...target, tags: ['primary'] },
-        { ...target, shadowSampleRate: 0.5 }
-      ]
-    };
-    const models: RouteModelOption[] = [
-      {
-        id: 'model',
-        providerId: 'provider',
-        providerName: 'Provider',
-        upstreamModel: 'upstream',
-        label: 'Provider model',
-        capabilities: [],
-        lifecycle: null
-      }
-    ];
-    expect(buildCreateRouteDraftInput(values, models)).toMatchObject({
-      project_id: 'project',
-      fallbacks: behavior.fallbacks,
-      caller_cost_exempt: false,
-      max_body_bytes: 4096,
-      targets: [
-        {
-          provider_id: 'provider',
-          provider_model: 'upstream',
-          tags: ['primary'],
-          shadow: null
-        },
-        { shadow: { sample_rate: 0.5 } }
-      ]
-    });
-    expect(buildReplaceRouteDraftInput(values)).toMatchObject({
-      fallbacks: behavior.fallbacks,
-      targets: [
-        { provider_model_id: 'model', tags: ['primary'] },
-        { shadow: { sample_rate: 0.5 } }
-      ]
-    });
-    expect(() => buildCreateRouteDraftInput(values, [])).toThrow(/inventory/i);
-  });
-});
-
-describe('target and model availability', () => {
-  const target: EditableTarget = {
-    providerModelId: 'model',
-    priority: 1,
-    weight: 1,
-    timeoutMs: 1000
-  };
-  const model: RouteModelOption = {
-    id: 'model',
-    providerId: 'provider',
-    providerName: 'Provider',
-    upstreamModel: 'upstream',
-    label: 'Provider model',
-    lifecycle: null,
-    capabilities: [
-      {
-        operation: 'generation',
-        surface: 'openai',
-        mode: 'unary',
-        source: 'certified'
-      },
-      {
-        operation: 'embeddings',
-        surface: 'openai',
-        mode: 'unary',
-        source: 'declared'
-      }
-    ]
-  };
-
-  it('warns about operations with no certified target', () => {
-    expect(
-      certifiedCapabilities(target, [model], ['generation', 'embeddings'])
-    ).toEqual([model.capabilities[0]]);
-    expect(
-      missingTargetOperations(target, [model], ['generation', 'embeddings'])
-    ).toEqual(['embeddings']);
-    expect(eligibleTargetTuples(target, [model], ['generation'])).toEqual([
-      'generation · openai · unary'
-    ]);
-    expect(
-      routeEligibilityWarnings([target], [model], ['generation', 'embeddings'])
-    ).toEqual(['embeddings']);
-    expect(routeEligibilityWarnings([], [model], ['generation'])).toEqual([
-      'generation'
-    ]);
-  });
-
-  it('retains an unavailable stored target and labels fidelity honestly', () => {
-    const unavailable = {
-      ...target,
-      stored: {
-        providerModelId: 'model',
-        providerName: 'Provider',
-        providerModel: 'upstream',
-        available: false
-      }
-    };
-    expect(storedTargetLabel(unavailable)).toBe('Provider · upstream');
-    expect(targetUnavailable(unavailable)).toBe(true);
-    expect(
-      storedTargetLabel({ ...unavailable, providerModelId: 'other' })
-    ).toBe('Unknown model');
-    expect(
-      targetUnavailable({ ...unavailable, providerModelId: 'other' })
-    ).toBe(false);
-    expect(fidelityLabel()).toBe('Strict');
-    expect(fidelityLabel({ mode: 'transformed' })).toBe('Transformed');
-  });
-});
-
-describe('surfacesFor', () => {
-  it('offers the native surface for duplex realtime simulation', () => {
-    expect(surfacesFor('realtime')).toEqual(['openai', 'native', 'gemini']);
-  });
-
-  it('offers the standard OpenAI surface for embeddings', () => {
-    expect(surfacesFor('embeddings')).toEqual(['openai']);
-  });
 });
 
 describe('gateway tool execution', () => {
-  const toolset = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
   const values: RouteEditorValues = {
     slug: 'workflow',
     operations: ['generation'],
@@ -557,33 +358,9 @@ describe('gateway tool execution', () => {
       ...emptyBehavior(),
       tool_execution: 'gateway',
       responses_mcp_items: true,
-      toolsets: [toolset]
+      toolsets: ['0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607']
     }
   };
-  const models: RouteModelOption[] = [
-    {
-      id: 'model',
-      providerId: 'provider',
-      providerName: 'Provider',
-      upstreamModel: 'model',
-      label: 'Provider model',
-      capabilities: [],
-      lifecycle: null
-    }
-  ];
-
-  it('keeps gateway execution and toolsets when creating or saving a route', () => {
-    expect(buildCreateRouteDraftInput(values, models)).toMatchObject({
-      tool_execution: 'gateway',
-      responses_mcp_items: true,
-      toolsets: [toolset]
-    });
-    expect(buildReplaceRouteDraftInput(values)).toMatchObject({
-      tool_execution: 'gateway',
-      responses_mcp_items: true,
-      toolsets: [toolset]
-    });
-  });
 
   it('requires transformed fidelity for gateway execution', () => {
     expect(

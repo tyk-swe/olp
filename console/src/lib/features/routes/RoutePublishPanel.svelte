@@ -2,7 +2,7 @@
   import { playgroundTemplates } from '#lib/requestTemplates.js';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
-  import { modesFor } from '#lib/features/routes/routeEditor.js';
+  import { modesFor } from '#lib/features/routes/routeOperations.js';
   import type { RouteDraftEditorState } from '#lib/features/routes/routeDraftEditor.svelte.js';
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const examples = $derived(

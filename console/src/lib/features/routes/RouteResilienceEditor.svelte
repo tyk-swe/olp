@@ -5,7 +5,7 @@
     retryClasses,
     type FallbackCondition,
     type RetryClass
-  } from './routeEditor';
+  } from './routeBehavior';
   let { editor }: { editor: RouteDraftEditorState } = $props();
   const locked = $derived(!editor.canManage || Boolean(editor.busy));
   const selectorProblem = $derived(

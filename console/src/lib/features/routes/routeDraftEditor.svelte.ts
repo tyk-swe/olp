@@ -31,24 +31,38 @@ import {
 import { useRole } from '#lib/session/useRole.svelte.js';
 import {
   emptyBehavior,
-  modesFor,
   parseSelectors,
+  type RouteBehavior
+} from '#lib/features/routes/routeBehavior.js';
+import { modesFor } from '#lib/features/routes/routeOperations.js';
+import {
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   routeLifecycleWarnings as findRouteLifecycleWarnings,
   toRouteModelOptions,
-  type EditableTarget,
-  type RouteBehavior
-} from '#lib/features/routes/routeEditor.js';
+  type EditableTarget
+} from '#lib/features/routes/routeTargetModel.js';
 import {
   EditorSession,
   useMutationIntentGroup
 } from '#lib/editing/editorSession.svelte.js';
 import {
-  createRouteDraftActions,
-  hydrateRouteBehavior,
-  hydrateRouteTargets,
-  simulationNotice
+  createDraft,
+  openCreatedDraft,
+  removeDraft,
+  saveDraft,
+  type RouteDraftPort
 } from './routeDraftActions';
+import {
+  hydrateRouteBehavior,
+  hydrateRouteTargets
+} from './routeDraftHydration';
+import {
+  activateDraft,
+  simulateDraft,
+  simulationNotice,
+  validateDraft
+} from './routePublishActions';
+import { validateRouteEditor } from './routeEditor';
 
 export class RouteDraftEditorState {
   private readonly intents = useMutationIntentGroup(['activate', 'create']);
@@ -283,39 +297,67 @@ export class RouteDraftEditorState {
     this.touch();
   };
 
-  private readonly actions = createRouteDraftActions({
+  private readonly port: RouteDraftPort = {
     queryClient: this.queryClient,
-    createIntent: this.intents.create,
-    activateRouteIntent: this.intents.activate,
-    canManage: () => this.canManage,
-    busy: () => this.busy,
-    publicationBlocked: () => this.publicationBlocked,
-    createdDraftId: () => this.createdDraftId,
-    setCreatedDraftId: (id) => {
-      this.createdDraftId = id;
-    },
-    editorValues: () => this.editorValues,
-    modelOptions: () => this.modelOptions,
+    run: this.run,
     sync: () => this.sync,
     setSync: (next) => {
       this.sync = next;
     },
-    editVersion: () => this.editVersion,
-    setError: (message) => {
-      this.errorMessage = message;
-    },
     setNotice: (message) => {
       this.notice = message;
-    },
-    setSimulation: (value) => {
-      this.simulation = value;
-    },
-    setActivation: (value) => {
-      this.activation = value;
-    },
-    invalidateSimulation: this.invalidateSimulation,
-    simulationVersion: () => this.simulationVersion,
-    simulationParams: () => ({
+    }
+  };
+
+  private rejectInvalidDraft() {
+    const issue = validateRouteEditor(this.editorValues);
+    if (issue) this.errorMessage = issue;
+    return Boolean(issue);
+  }
+
+  create = async (event: SubmitEvent) => {
+    event.preventDefault();
+    if (!this.canManage || this.busy) return;
+    if (this.createdDraftId) {
+      await openCreatedDraft(this.port, this.createdDraftId);
+      return;
+    }
+    if (this.rejectInvalidDraft()) return;
+    await createDraft(this.port, {
+      intent: this.createIntent,
+      values: this.editorValues,
+      models: this.modelOptions,
+      onCreated: (id) => {
+        this.createdDraftId = id;
+      },
+      onRefreshFailed: (message) => {
+        this.errorMessage = message;
+      }
+    });
+  };
+
+  save = async (current: RouteDraft) => {
+    if (!this.canManage || this.busy) return;
+    if (!this.sync.dirty) {
+      this.errorMessage = '';
+      this.notice = 'No unsaved changes.';
+      return;
+    }
+    if (this.rejectInvalidDraft()) return;
+    this.invalidateSimulation();
+    await saveDraft(
+      this.port,
+      current,
+      this.editorValues,
+      () => this.editVersion
+    );
+  };
+
+  simulate = async (current: RouteDraft) => {
+    if (!this.canManage || this.publicationBlocked) return;
+    this.invalidateSimulation();
+    const version = this.simulationVersion;
+    const form = {
       operation: this.simulationOperation,
       surface: this.simulationSurface,
       mode: this.simulationMode,
@@ -323,16 +365,39 @@ export class RouteDraftEditorState {
       requestJson: this.simulationRequestJson,
       seed: this.seed,
       preferencesJson: this.routingPreferences
-    }),
-    run: this.run
-  });
+    };
+    await simulateDraft(
+      this.port,
+      current,
+      form,
+      () => version === this.simulationVersion,
+      (simulation) => {
+        this.simulation = simulation;
+      }
+    );
+  };
 
-  create = this.actions.create;
-  save = this.actions.save;
-  simulate = this.actions.simulate;
-  validate = this.actions.validate;
-  activate = this.actions.activate;
-  remove = this.actions.remove;
+  validate = async (current: RouteDraft) => {
+    if (!this.canManage || this.publicationBlocked) return;
+    await validateDraft(this.port, current);
+  };
+
+  activate = async (current: RouteDraft) => {
+    if (!this.canManage || this.publicationBlocked) return;
+    await activateDraft(
+      this.port,
+      current,
+      this.activateRouteIntent,
+      (activation) => {
+        this.activation = activation;
+      }
+    );
+  };
+
+  remove = async (current: RouteDraft) => {
+    if (!this.canManage || this.busy) return;
+    await removeDraft(this.port, current);
+  };
 
   constructor(readRouteId: () => string | undefined) {
     this.readRouteId = readRouteId;

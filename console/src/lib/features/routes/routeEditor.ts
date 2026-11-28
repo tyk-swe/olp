@@ -1,103 +1,8 @@
 import { validRouteSlug } from '#lib/routeIdentity.js';
 import type { components } from '#lib/management/schema.js';
-import type {
-  CreateRouteDraftInput,
-  ReplaceRouteDraftInput
-} from '#lib/features/routes/api.js';
-import { lifecycleNotice } from '#lib/features/providers/index.js';
-import type {
-  ProviderModelInventory,
-  LifecycleNotice
-} from '#lib/features/providers/index.js';
-import { isJsonObject } from '#lib/editing/json.js';
+import type { RouteBehavior } from './routeBehavior';
 import { validatePassthroughConfig } from './routePassthrough';
-
-export type EditableTarget = {
-  providerModelId: string;
-  priority: number;
-  weight: number;
-  timeoutMs: number;
-  /** Tags route selectors narrow the route's targets by. */
-  tags?: string[];
-  /** The share of requests mirrored to the target, or null when it serves. */
-  shadowSampleRate?: number | null;
-  /**
-   * Facts the API reported for a target the draft already stores. A stored
-   * target stays in the draft after its provider is disabled or its model
-   * leaves the provider's activated revision, and then it is no longer in the
-   * enabled-model inventory the picker offers — so the editor keeps its own
-   * copy of the identity to render instead of dropping it. Absent on rows the
-   * operator has just added.
-   */
-  stored?: {
-    providerModelId: string;
-    available: boolean;
-    providerName: string;
-    providerModel: string;
-  };
-};
-
-/** Label for a stored target the enabled-model inventory no longer offers. */
-export function storedTargetLabel(target: EditableTarget): string {
-  if (target.stored?.providerModelId !== target.providerModelId)
-    return 'Unknown model';
-  return `${target.stored.providerName} · ${target.stored.providerModel}`;
-}
-
-/** True when the API flagged the stored target as no longer routable. */
-export function targetUnavailable(target: EditableTarget): boolean {
-  return (
-    target.stored?.providerModelId === target.providerModelId &&
-    target.stored.available === false
-  );
-}
-
-export type RouteModelOption = {
-  id: string;
-  providerId: string;
-  providerName: string;
-  upstreamModel: string;
-  label: string;
-  capabilities: ProviderModelInventory['model']['capabilities'];
-  /** The model's documented deprecation and retirement, or null. */
-  lifecycle: ProviderModelInventory['lifecycle'];
-};
-
-export type RouteBehavior = components['schemas']['RouteBehavior'];
-export type RouteSelector = components['schemas']['RouteSelector'];
-export type FallbackCondition = components['schemas']['FallbackCondition'];
-export type RetryClass =
-  'connect' | 'timeout' | 'rate_limit' | 'upstream_server';
-
-export const fallbackConditions: [FallbackCondition, string][] = [
-  ['exhausted', 'Every attempt failed'],
-  ['context_window', 'Context window exceeded'],
-  ['content_filter', 'Content filter refusal'],
-  ['rate_limit', 'Rate limited'],
-  ['budget', 'Spend cap exhausted']
-];
-
-export const retryClasses: [RetryClass, string][] = [
-  ['connect', 'Connection failures'],
-  ['timeout', 'Timeouts'],
-  ['rate_limit', 'Rate limits'],
-  ['upstream_server', 'Upstream server errors']
-];
-
-export function emptyBehavior(): RouteBehavior {
-  return {
-    fallbacks: [],
-    selectors: [],
-    retry: {},
-    affinity: null,
-    budget: null,
-    passthrough: null,
-    certification: 'certified',
-    tool_execution: '',
-    toolsets: [],
-    responses_mcp_items: false
-  };
-}
+import type { EditableTarget } from './routeTargetModel';
 
 export type RouteEditorValues = {
   slug: string;
@@ -113,255 +18,6 @@ export type RouteEditorValues = {
   /** Why the selectors the operator typed cannot be read, if they cannot. */
   selectorsError?: string | null;
 };
-
-/** Reads selectors typed as JSON, or explains why they cannot be read. */
-export function parseSelectors(text: string): RouteSelector[] | string {
-  if (!text.trim()) return [];
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (Array.isArray(parsed) && parsed.every(isSelector)) return parsed;
-  } catch {
-    // Reported below.
-  }
-  return 'Selectors must be a JSON array of selector objects.';
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === 'string')
-  );
-}
-
-function isSelector(value: unknown): value is RouteSelector {
-  if (
-    !isJsonObject(value) ||
-    typeof value.id !== 'string' ||
-    !isJsonObject(value.when) ||
-    (value.route !== undefined && typeof value.route !== 'string') ||
-    (value.tags !== undefined && !isStringArray(value.tags)) ||
-    Object.keys(value).some(
-      (key) => !['id', 'when', 'route', 'tags'].includes(key)
-    )
-  )
-    return false;
-  return Object.entries(value.when).every(([key, field]) => {
-    switch (key) {
-      case 'operations':
-      case 'modalities':
-      case 'reasoning_effort':
-        return isStringArray(field);
-      case 'min_input_tokens':
-      case 'max_input_tokens':
-      case 'min_output_tokens':
-      case 'max_output_tokens':
-        return field === null || Number.isSafeInteger(field);
-      case 'streaming':
-      case 'tools':
-      case 'structured_output':
-        return field === null || typeof field === 'boolean';
-      case 'classifier':
-        return (
-          field === null ||
-          (isJsonObject(field) &&
-            typeof field.route === 'string' &&
-            isStringArray(field.labels) &&
-            Number.isSafeInteger(field.timeout_ms) &&
-            (field.min_score == null || typeof field.min_score === 'number') &&
-            Object.keys(field).every((name) =>
-              ['route', 'labels', 'timeout_ms', 'min_score'].includes(name)
-            ))
-        );
-      case 'plugin':
-        return (
-          field === null ||
-          (isJsonObject(field) &&
-            typeof field.digest === 'string' &&
-            Object.keys(field).every((name) => name === 'digest'))
-        );
-      default:
-        return false;
-    }
-  });
-}
-
-/** Omitted modes are strict, matching the server's default. */
-export function fidelityLabel(
-  fidelity?: components['schemas']['RouteFidelity'] | null,
-  passthrough?: components['schemas']['PassthroughConfig'] | null
-): 'Strict' | 'Transformed' | 'Pass-through · uncertified' {
-  if (passthrough) return 'Pass-through · uncertified';
-  return fidelity?.mode === 'transformed' ? 'Transformed' : 'Strict';
-}
-
-export const operationOptions = [
-  ['generation', 'Text generation'],
-  ['decision', 'Decisions'],
-  ['classification', 'Classification'],
-  ['scoring', 'Scoring'],
-  ['embeddings', 'Embeddings'],
-  ['rerank', 'Rerank'],
-  ['token_count', 'Token counting'],
-  ['image_generation', 'Image generation'],
-  ['image_edit', 'Image editing'],
-  ['image_variation', 'Image variations'],
-  ['speech', 'Speech'],
-  ['transcription', 'Transcription'],
-  ['translation', 'Audio translation'],
-  ['video_create', 'Create video'],
-  ['video_list', 'List videos'],
-  ['video_get', 'Video status'],
-  ['video_content', 'Video content'],
-  ['video_delete', 'Delete video'],
-  ['ocr', 'OCR'],
-  ['search', 'Web search'],
-  ['moderation', 'Moderation'],
-  ['batch', 'Batches'],
-  ['fine_tuning', 'Fine-tuning'],
-  ['vector_store', 'Vector stores'],
-  ['conversation', 'Conversations'],
-  ['container', 'Containers'],
-  ['eval', 'Evaluations'],
-  ['skill', 'Skills'],
-  ['context_cache', 'Context caches'],
-  ['retrieval', 'Retrieval'],
-  ['agent_resource', 'Managed agents'],
-  ['realtime', 'Realtime sessions'],
-  ['bedrock_invoke', 'Bedrock InvokeModel'],
-  ['passthrough', 'Governed pass-through (uncertified)']
-] as const;
-
-export function toRouteModelOptions(
-  inventory: ProviderModelInventory[]
-): RouteModelOption[] {
-  return inventory.map((entry) => ({
-    id: entry.model.id,
-    providerId: entry.provider_id,
-    providerName: entry.provider_name,
-    upstreamModel: entry.model.upstream_model,
-    label: `${entry.provider_name} · ${entry.model.display_name}`,
-    capabilities: entry.model.capabilities,
-    lifecycle: entry.lifecycle ?? null
-  }));
-}
-
-export function surfacesFor(operation: string): string[] {
-  if (operation === 'passthrough') return ['native'];
-  if (operation === 'agent_resource') return ['gemini'];
-  if (operation === 'bedrock_invoke') return ['bedrock'];
-  if (operation === 'decision') return ['openai', 'gemini'];
-  if (operation === 'generation')
-    return ['openai', 'anthropic', 'gemini', 'bedrock'];
-  if (operation === 'token_count') return ['openai', 'anthropic', 'gemini'];
-  if (operation === 'realtime') return ['openai', 'native', 'gemini'];
-  return ['openai'];
-}
-
-export function modesFor(operation: string): string[] {
-  if (operation === 'video_create') return ['async'];
-  if (operation === 'realtime') return ['realtime', 'webrtc'];
-  if (
-    [
-      'generation',
-      'image_generation',
-      'image_edit',
-      'speech',
-      'transcription',
-      'bedrock_invoke'
-    ].includes(operation)
-  ) {
-    return ['unary', 'streaming'];
-  }
-  return ['unary'];
-}
-
-function providerModel(
-  target: EditableTarget,
-  modelOptions: RouteModelOption[]
-) {
-  return modelOptions.find((option) => option.id === target.providerModelId);
-}
-
-export function certifiedCapabilities(
-  target: EditableTarget,
-  modelOptions: RouteModelOption[],
-  operations: string[]
-) {
-  return (providerModel(target, modelOptions)?.capabilities ?? []).filter(
-    (capability) =>
-      capability.source === 'certified' &&
-      operations.includes(capability.operation)
-  );
-}
-
-export function missingTargetOperations(
-  target: EditableTarget,
-  modelOptions: RouteModelOption[],
-  operations: string[]
-): string[] {
-  const capabilities = certifiedCapabilities(target, modelOptions, operations);
-  return operations.filter(
-    (operation) =>
-      !capabilities.some((capability) => capability.operation === operation)
-  );
-}
-
-export function eligibleTargetTuples(
-  target: EditableTarget,
-  modelOptions: RouteModelOption[],
-  operations: string[]
-): string[] {
-  return certifiedCapabilities(target, modelOptions, operations).map(
-    (capability) =>
-      `${capability.operation} · ${capability.surface} · ${capability.mode}`
-  );
-}
-
-export function routeEligibilityWarnings(
-  targets: EditableTarget[],
-  modelOptions: RouteModelOption[],
-  operations: string[]
-): string[] {
-  return operations.filter(
-    (operation) =>
-      !targets.some((target) =>
-        certifiedCapabilities(target, modelOptions, operations).some(
-          (capability) => capability.operation === operation
-        )
-      )
-  );
-}
-
-/** A target whose model its vendor has deprecated or is retiring. */
-export type TargetLifecycleWarning = {
-  label: string;
-  notice: LifecycleNotice;
-};
-
-/** The selected targets whose models need a lifecycle warning. */
-export function routeLifecycleWarnings(
-  targets: EditableTarget[],
-  modelOptions: RouteModelOption[],
-  today: Date = new Date()
-): TargetLifecycleWarning[] {
-  const warnings: TargetLifecycleWarning[] = [];
-  for (const target of targets) {
-    const option = modelOptions.find(
-      (candidate) => candidate.id === target.providerModelId
-    );
-    const notice = lifecycleNotice(option?.lifecycle, today);
-    if (option && notice) warnings.push({ label: option.label, notice });
-  }
-  return warnings;
-}
-
-/** How many of a route's targets have a model deprecated or retiring soon. */
-export function retiringTargets(
-  targets: { lifecycle?: ProviderModelInventory['lifecycle'] }[],
-  today: Date = new Date()
-): number {
-  return targets.filter((target) => lifecycleNotice(target.lifecycle, today))
-    .length;
-}
 
 export function validateRouteEditor(values: RouteEditorValues): string | null {
   // Matches the server's route slug format.
@@ -431,61 +87,96 @@ export function validateRouteBehavior(
   if (values.selectorsError) return values.selectorsError;
   const behavior = values.behavior;
   if (!behavior) return null;
-  if (
-    behavior.tool_execution === 'gateway' &&
-    values.fidelity.mode !== 'transformed'
-  )
+  return (
+    validateToolExecution(behavior, values.fidelity) ??
+    validatePassthroughRoute(values, behavior) ??
+    validateFallbacks(behavior.fallbacks, values.slug) ??
+    validateSelectors(behavior.selectors, values.targets) ??
+    validateRetry(behavior.retry) ??
+    validateAffinity(behavior.affinity) ??
+    validateCaching(behavior, values.fidelity) ??
+    validateBodyLimit(behavior.max_body_bytes) ??
+    validateSpendCap(behavior.budget)
+  );
+}
+
+function validateToolExecution(
+  behavior: RouteBehavior,
+  fidelity: RouteEditorValues['fidelity']
+): string | null {
+  if (behavior.tool_execution === 'gateway' && fidelity.mode !== 'transformed')
     return 'Gateway tool execution requires a transformed route.';
-  const passthroughProblem = validatePassthroughConfig(behavior.passthrough);
-  if (passthroughProblem) return passthroughProblem;
-  if (behavior.passthrough) {
-    if (
-      values.operations.length !== 1 ||
-      values.operations[0] !== 'passthrough'
-    )
-      return 'A pass-through route serves only the passthrough operation.';
-    if (
-      values.targets.length !== 1 ||
-      values.targets[0]?.shadowSampleRate != null
-    )
-      return 'A pass-through route binds exactly one serving connection without mirroring.';
-    if (values.maxAttempts !== 1)
-      return 'A pass-through route makes exactly one attempt.';
-    if (values.fidelity.mode === 'transformed')
-      return 'A pass-through route cannot declare translation.';
-    if (
-      behavior.fallbacks.length ||
-      behavior.selectors.length ||
-      Object.keys(behavior.retry).length ||
-      behavior.affinity ||
-      behavior.cache ||
-      behavior.prompt_cache
-    )
-      return 'A pass-through route cannot use fallback, selectors, retry, affinity or response caching.';
-  } else if (values.operations.includes('passthrough')) {
-    return 'The passthrough operation requires a pass-through binding.';
-  }
-  if (behavior.fallbacks.length > 4)
-    return 'Declare at most 4 fallback routes.';
-  for (const fallback of behavior.fallbacks) {
-    if (!validRouteSlug(fallback.route) || fallback.route === values.slug)
+  return null;
+}
+
+function validatePassthroughRoute(
+  values: RouteEditorValues,
+  behavior: RouteBehavior
+): string | null {
+  const bindingProblem = validatePassthroughConfig(behavior.passthrough);
+  if (bindingProblem) return bindingProblem;
+  if (!behavior.passthrough)
+    return values.operations.includes('passthrough')
+      ? 'The passthrough operation requires a pass-through binding.'
+      : null;
+  if (values.operations.length !== 1 || values.operations[0] !== 'passthrough')
+    return 'A pass-through route serves only the passthrough operation.';
+  if (
+    values.targets.length !== 1 ||
+    values.targets[0]?.shadowSampleRate != null
+  )
+    return 'A pass-through route binds exactly one serving connection without mirroring.';
+  if (values.maxAttempts !== 1)
+    return 'A pass-through route makes exactly one attempt.';
+  if (values.fidelity.mode === 'transformed')
+    return 'A pass-through route cannot declare translation.';
+  if (
+    behavior.fallbacks.length ||
+    behavior.selectors.length ||
+    Object.keys(behavior.retry).length ||
+    behavior.affinity ||
+    behavior.cache ||
+    behavior.prompt_cache
+  )
+    return 'A pass-through route cannot use fallback, selectors, retry, affinity or response caching.';
+  return null;
+}
+
+function validateFallbacks(
+  fallbacks: RouteBehavior['fallbacks'],
+  slug: string
+): string | null {
+  if (fallbacks.length > 4) return 'Declare at most 4 fallback routes.';
+  for (const fallback of fallbacks) {
+    if (!validRouteSlug(fallback.route) || fallback.route === slug)
       return 'Every fallback names another route by its slug.';
     if (!fallback.on.length)
       return `Fallback “${fallback.route}” needs at least one condition.`;
   }
+  return null;
+}
+
+function validateSelectors(
+  selectors: RouteBehavior['selectors'],
+  targets: EditableTarget[]
+): string | null {
   const serving = new Set(
-    values.targets
+    targets
       .filter((target) => target.shadowSampleRate == null)
       .flatMap((target) => target.tags ?? [])
   );
-  for (const selector of behavior.selectors) {
+  for (const selector of selectors) {
     if (!selector.route && !selector.tags?.length)
       return `Selector “${selector.id}” needs target tags or a route to delegate to.`;
     const missing = selector.tags?.find((tag) => !serving.has(tag));
     if (missing)
       return `Selector “${selector.id}” names tag “${missing}”, which no serving target carries.`;
   }
-  for (const [kind, rule] of Object.entries(behavior.retry)) {
+  return null;
+}
+
+function validateRetry(retry: RouteBehavior['retry']): string | null {
+  for (const [kind, rule] of Object.entries(retry)) {
     if (
       !rule ||
       rule.max_retries < 0 ||
@@ -496,123 +187,52 @@ export function validateRouteBehavior(
     )
       return `The ${kind} retry rule needs 0–10 retries and a backoff no longer than 60000 ms.`;
   }
+  return null;
+}
+
+function validateAffinity(affinity: RouteBehavior['affinity']): string | null {
   if (
-    behavior.affinity?.source === 'label' &&
-    !attributionLabel.test(behavior.affinity.label ?? '')
+    affinity?.source === 'label' &&
+    !attributionLabel.test(affinity.label ?? '')
   )
     return 'Session affinity by label names an attribution label.';
+  return null;
+}
+
+function validateCaching(
+  { cache, prompt_cache }: RouteBehavior,
+  fidelity: RouteEditorValues['fidelity']
+): string | null {
   if (
-    values.fidelity.mode === 'strict' &&
-    (behavior.cache?.mode === 'semantic' || behavior.prompt_cache)
+    fidelity.mode === 'strict' &&
+    (cache?.mode === 'semantic' || prompt_cache)
   )
     return 'Semantic caching and prompt-cache insertion require a transformed route.';
   if (
-    behavior.cache?.mode === 'semantic' &&
-    (!behavior.cache.embedding_route || !behavior.cache.allow_unsealed_vectors)
+    cache?.mode === 'semantic' &&
+    (!cache.embedding_route || !cache.allow_unsealed_vectors)
   )
     return 'Semantic caching requires an embedding route and the unencrypted-vector acknowledgement.';
-  const cap = behavior.max_body_bytes;
+  return null;
+}
+
+function validateBodyLimit(
+  cap: RouteBehavior['max_body_bytes']
+): string | null {
   if (
     cap != null &&
     (!Number.isSafeInteger(cap) || cap < 1 || cap > 1073741824)
   )
     return 'Use a body limit from 1 to 1073741824 bytes, or leave it empty.';
-  const budget = behavior.budget;
-  if (budget) {
-    const limits = [budget.daily_cost_limit, budget.monthly_cost_limit];
-    if (limits.every((limit) => !limit))
-      return 'A route spend cap declares a daily or monthly limit.';
-    if (limits.some((limit) => limit && !costLimit.test(limit)))
-      return 'Spend caps are decimal amounts with up to 12 decimal places.';
-  }
   return null;
 }
 
-/** The behavior fields a draft write carries. */
-function behaviorFields(behavior: RouteBehavior | undefined) {
-  const value = behavior ?? emptyBehavior();
-  return {
-    fallbacks: value.fallbacks,
-    selectors: value.selectors,
-    retry: value.retry,
-    affinity: value.affinity,
-    budget: value.budget,
-    cache: value.cache,
-    prompt_cache: value.prompt_cache,
-    tool_execution: value.tool_execution,
-    toolsets: value.toolsets,
-    responses_mcp_items: value.responses_mcp_items,
-    run_limits: value.run_limits,
-    passthrough: value.passthrough ?? null,
-    ...(value.caller_cost_exempt !== undefined
-      ? { caller_cost_exempt: value.caller_cost_exempt }
-      : {}),
-    ...(value.provider_fetched_documents !== undefined
-      ? { provider_fetched_documents: value.provider_fetched_documents }
-      : {}),
-    ...(value.max_body_bytes !== undefined
-      ? { max_body_bytes: value.max_body_bytes }
-      : {})
-  };
-}
-
-/** The tag and shadow fields one target write carries. */
-function roleFields(target: EditableTarget) {
-  return {
-    tags: target.tags ?? [],
-    shadow:
-      target.shadowSampleRate == null
-        ? null
-        : { sample_rate: target.shadowSampleRate }
-  };
-}
-
-export function buildCreateRouteDraftInput(
-  values: RouteEditorValues,
-  modelOptions: RouteModelOption[]
-): CreateRouteDraftInput {
-  return {
-    slug: values.slug,
-    project_id: values.projectId || null,
-    operations: values.operations,
-    overall_timeout_ms: values.overallTimeoutMs,
-    max_attempts: values.maxAttempts,
-    fidelity: values.fidelity,
-    ...behaviorFields(values.behavior),
-    targets: values.targets.map((target) => {
-      const model = providerModel(target, modelOptions);
-      if (!model)
-        throw new Error(
-          `Route target ${target.providerModelId} is not in the provider model inventory.`
-        );
-      return {
-        provider_id: model.providerId,
-        provider_model: model.upstreamModel,
-        priority: target.priority,
-        weight: target.weight,
-        timeout_ms: target.timeoutMs,
-        ...roleFields(target)
-      };
-    })
-  };
-}
-
-export function buildReplaceRouteDraftInput(
-  values: RouteEditorValues
-): ReplaceRouteDraftInput {
-  return {
-    slug: values.slug,
-    operations: values.operations,
-    overall_timeout_ms: values.overallTimeoutMs,
-    max_attempts: values.maxAttempts,
-    fidelity: values.fidelity,
-    ...behaviorFields(values.behavior),
-    targets: values.targets.map((target) => ({
-      provider_model_id: target.providerModelId,
-      priority: target.priority,
-      weight: target.weight,
-      timeout_ms: target.timeoutMs,
-      ...roleFields(target)
-    }))
-  };
+function validateSpendCap(budget: RouteBehavior['budget']): string | null {
+  if (!budget) return null;
+  const limits = [budget.daily_cost_limit, budget.monthly_cost_limit];
+  if (limits.every((limit) => !limit))
+    return 'A route spend cap declares a daily or monthly limit.';
+  if (limits.some((limit) => limit && !costLimit.test(limit)))
+    return 'Spend caps are decimal amounts with up to 12 decimal places.';
+  return null;
 }

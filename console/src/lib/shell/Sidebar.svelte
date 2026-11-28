@@ -8,15 +8,17 @@
   import { productName, useBranding } from '#lib/shell/branding/branding.js';
   import NavIcon from '#lib/components/NavIcon.svelte';
   import {
-    OVERVIEW,
-    PLAYGROUND,
-    PROFILE,
-    SETTINGS,
     owningItem,
     visibleItem,
     visibleSections,
     type VisibleItem
   } from '#lib/shell/navigation.js';
+  import {
+    OVERVIEW,
+    PLAYGROUND,
+    PROFILE,
+    SETTINGS
+  } from '#lib/shell/navigationTree/pinned.js';
 
   let {
     user,

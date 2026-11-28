@@ -28,7 +28,7 @@
 
   $effect(() => {
     if (visible && !current && page.url.pathname === item?.href)
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- navigation tree hrefs are built with resolve() in navigation.ts.
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- navigation tree hrefs are built with resolve() in navigationTree/.
       void goto(visible.href, { replaceState: true });
   });
 </script>

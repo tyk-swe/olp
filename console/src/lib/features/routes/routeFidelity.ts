@@ -13,3 +13,11 @@ export const fidelityOptions: ReadonlyArray<{
     label: 'Transformed · translate or redact deliberately'
   }
 ];
+
+export function fidelityLabel(
+  fidelity?: components['schemas']['RouteFidelity'] | null,
+  passthrough?: components['schemas']['PassthroughConfig'] | null
+): 'Strict' | 'Transformed' | 'Pass-through · uncertified' {
+  if (passthrough) return 'Pass-through · uncertified';
+  return fidelity?.mode === 'transformed' ? 'Transformed' : 'Strict';
+}

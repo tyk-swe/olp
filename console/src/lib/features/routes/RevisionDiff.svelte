@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fidelityLabel } from '#lib/features/routes/routeEditor.js';
+  import { fidelityLabel } from '#lib/features/routes/routeFidelity.js';
   import type { RouteRevisionDiff } from './api.js';
 
   const { diff }: { diff: RouteRevisionDiff } = $props();

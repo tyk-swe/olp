@@ -40,7 +40,7 @@
   function choose(entry: PaletteEntry | undefined) {
     if (!entry) return;
     dialog.close();
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- navigation tree hrefs are built with resolve() in navigation.ts.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- navigation tree hrefs are built with resolve() in navigationTree/.
     void goto(entry.href);
   }
 

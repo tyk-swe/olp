@@ -10,10 +10,9 @@ import {
   NAVIGATION_SECTIONS,
   owningItem,
   paletteEntries,
-  PROFILE,
-  SETTINGS,
   visibleSections
 } from '#lib/shell/navigation.js';
+import { PROFILE, SETTINGS } from '#lib/shell/navigationTree/pinned.js';
 
 const everyOperation = [
   ...new Set(
