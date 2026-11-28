@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
 import { routeKeys } from '#lib/domain/routes/routeKeys.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
 import {
   findButton,
   mountWithState,
+  reportedError,
   setFieldValue as setValue
 } from '#test/mount.js';
 import AgentResources from './AgentResources.svelte';
@@ -33,6 +33,7 @@ function mountAgents(
   );
 
   const { target, client } = mountWithState(AgentResources, undefined, {
+    attach: true,
     configureClient: (queryClient) =>
       queryClient.setQueryDefaults(routeKeys.all(), { retry: false })
   });
@@ -161,12 +162,13 @@ describe('AgentResources', () => {
       'gemini-agents',
       'change'
     );
-    setValue(inputByLabel<HTMLTextAreaElement>('Agent definition')!, '{broken');
+    const definition = inputByLabel<HTMLTextAreaElement>('Agent definition')!;
+    setValue(definition, '{broken');
 
     button('Create agent')?.click();
-    flushSync();
 
-    expect(target.querySelector('[role="alert"]')?.textContent).toBeTruthy();
+    await eventually(() => expect(document.activeElement).toBe(definition));
+    expect(reportedError(definition)).toBeTruthy();
     expect(gateway).not.toHaveBeenCalled();
   });
 

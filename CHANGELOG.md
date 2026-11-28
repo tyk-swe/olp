@@ -106,6 +106,11 @@ semantic versioning and take their source from root `package.json`. The
   followed by `0002_drop_plpgsql_pricing.sql` (which removes legacy PL/pgSQL
   pricing functions). `olp migrate` and startup refuse a database migrated by
   an earlier build, so start a fresh installation in a new empty database.
+- The identity, provider billing and credential, provider resource, route
+  template and guardrail credential forms show each error under the input that
+  caused it. The management token dialog and the workload issuer editor show
+  their errors inside themselves, and after you confirm your password to link a
+  single sign-on identity the dialog closes while the browser redirects.
 
 ### Fixed
 

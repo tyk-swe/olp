@@ -4,7 +4,12 @@ import { toasts } from '#lib/components/toasts.svelte.js';
 import type { ManagementOperation } from '#lib/management/requirements.js';
 import { json, serve } from '#lib/session/test/transport.js';
 import { eventually } from '#test/eventually.js';
-import { findButton, mountWithState } from '#test/mount.js';
+import {
+  findButton,
+  mountWithState,
+  reportedError,
+  submitForm
+} from '#test/mount.js';
 import type { ProviderResource } from './api';
 import RetainedResourceControls from './RetainedResourceControls.svelte';
 
@@ -39,15 +44,16 @@ function mountControls(
 ) {
   serve(handler, operations);
   const changed = vi.fn();
-  const { target } = mountWithState(RetainedResourceControls, {
-    resource,
-    changed
-  });
+  const { target } = mountWithState(
+    RetainedResourceControls,
+    { resource, changed },
+    { attach: true }
+  );
   const button = (label: string) => findButton(target, label);
   return { target, changed, button };
 }
 
-it('reports malformed usage evidence without calling the management API', () => {
+it('reports malformed usage evidence without calling the management API', async () => {
   const requests = vi.fn();
   const { target, changed, button } = mountControls(
     (request) => {
@@ -67,15 +73,14 @@ it('reports malformed usage evidence without calling the management API', () => 
     ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   flushSync();
 
+  await eventually(() => expect(document.activeElement).toBe(textarea));
+  expect(reportedError(textarea)).toBe('Enter one usage evidence object.');
   expect(requests).not.toHaveBeenCalled();
   expect(changed).not.toHaveBeenCalled();
-  expect(target.querySelector('[role="alert"]')?.textContent).toContain(
-    'Enter one usage evidence object.'
-  );
 
   button('Prepare usage evidence')?.click();
   flushSync();
-  expect(target.querySelector('[role="alert"]')).toBeNull();
+  expect(reportedError(textarea)).toBeUndefined();
 });
 
 it('drafts evidence and submits int64 quantities verbatim with a toast notification', async () => {
@@ -170,4 +175,40 @@ it('hides settlement controls when the caller lacks required operations', () => 
   expect(button('Reconcile')).toBeUndefined();
   expect(button('Prepare usage evidence')).toBeUndefined();
   expect(target.querySelector('form')).toBeNull();
+});
+
+it('reports refused usage evidence and a refused hint at their inputs', async () => {
+  const { target, button } = mountControls(
+    (request) => {
+      const field = new URL(request.url).pathname.endsWith('/usage-evidence')
+        ? 'quantities'
+        : 'upstream_id';
+      return json(
+        {
+          title: 'Validation failed',
+          status: 422,
+          errors: {
+            [field]: [{ code: 'invalid', message: `Refused ${field}.` }]
+          }
+        },
+        422
+      );
+    },
+    ['read', 'settings', 'configure']
+  );
+  const hint = target.querySelector<HTMLInputElement>('input')!;
+  const textarea = target.querySelector('textarea')!;
+
+  button('Prepare usage evidence')?.click();
+  flushSync();
+  submitForm(target);
+  await eventually(() => expect(document.activeElement).toBe(textarea));
+  expect(reportedError(textarea)).toBe('Refused quantities.');
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+
+  button('Reconcile')?.click();
+  await eventually(() => expect(document.activeElement).toBe(hint));
+  expect(reportedError(hint)).toBe('Refused upstream_id.');
+  expect(reportedError(textarea)).toBeUndefined();
+  expect(target.querySelector('[role="alert"]')).toBeNull();
 });

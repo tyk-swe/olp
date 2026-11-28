@@ -11,5 +11,5 @@ it('accepts an email address without a dotted domain', () => {
       confirmPassword: 'a-valid-password',
       setupToken: 'token'
     })
-  ).not.toHaveProperty('email');
+  ).toMatchObject({ ok: true });
 });

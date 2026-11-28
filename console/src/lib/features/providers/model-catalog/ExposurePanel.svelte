@@ -27,7 +27,7 @@
     if (result.data) {
       exposed = result.data.expose_upstream_models;
       etag = result.data.etag;
-      action.error = '';
+      action.reset();
     }
   }
   async function save(event: SubmitEvent) {

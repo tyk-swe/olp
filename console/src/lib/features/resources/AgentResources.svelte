@@ -1,21 +1,23 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import FormField from '#lib/components/FormField.svelte';
   import QueryView from '#lib/components/QueryView.svelte';
   import { confirmAction } from '#lib/components/confirm.js';
   import { useMutation } from '#lib/editing/action.svelte.js';
+  import { focusFormError } from '#lib/editing/focusError.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
-  import { captureResult } from '#lib/editing/result.js';
   import { selectActiveRoutes } from '#lib/domain/routes/activeRoutes.js';
   import { routeQueries } from '#lib/domain/routes/queries.js';
   import { errorMessage } from '#lib/management/http.js';
+  import { validateAgentDefinition } from './agentDraft';
   import {
     ResourceRequestError,
-    agentSubmissionFingerprint,
     runAgentRequest,
     type AgentAction
   } from './lifecycle';
 
-  const mutation = useMutation();
+  const mutation = useMutation<'definition'>();
+  let section = $state<HTMLElement>();
   const routes = createQuery(() => ({
     ...routeQueries.all(),
     select: selectActiveRoutes
@@ -54,14 +56,9 @@
   async function run(action: AgentAction, pageToken?: string) {
     if (mutation.busy || (action === 'create' && !canCreate)) return;
     const fingerprint =
-      action === 'create'
-        ? captureResult(() => agentSubmissionFingerprint(route, definition))
-        : null;
-    if (fingerprint && !fingerprint.ok) {
-      mutation.error = errorMessage(
-        fingerprint.error,
-        'The resource request could not be completed.'
-      );
+      action === 'create' ? validateAgentDefinition(route, definition) : null;
+    if (fingerprint && !mutation.check(fingerprint)) {
+      if (section) await focusFormError(section);
       return;
     }
     const owner = new AbortController();
@@ -119,21 +116,28 @@
   };
 </script>
 
-<section class="card agent-resources" aria-labelledby="agent-resources-title">
+<section
+  bind:this={section}
+  class="card agent-resources"
+  aria-labelledby="agent-resources-title"
+>
   <h2 id="agent-resources-title">Managed agents</h2>
   <p>
     Create and manage Gemini agent definitions with an inference API key. The
     key stays in this page until you leave.
   </p>
   <div class="resource-fields">
-    <label>
-      Inference API key<input
-        type="password"
-        autocomplete="off"
-        bind:value={apiKey}
-        disabled={mutation.busy}
-      />
-    </label>
+    <FormField label="Inference API key" error={undefined}>
+      {#snippet control(attributes)}
+        <input
+          {...attributes}
+          type="password"
+          autocomplete="off"
+          bind:value={apiKey}
+          disabled={mutation.busy}
+        />
+      {/snippet}
+    </FormField>
     <QueryView
       query={routes}
       loading="Loading published routes…"
@@ -145,23 +149,31 @@
           Publish a strict Gemini managed-agent route to enable creation.
         </p>
       {/snippet}
-      <label>
-        Published route<select bind:value={route} disabled={mutation.busy}>
-          <option value="">Choose a route</option>
-          {#each eligible as item (item.slug)}<option value={item.slug}>
-              {item.slug}
-            </option>{/each}
-        </select>
-      </label>
+      <FormField label="Published route" error={undefined}>
+        {#snippet control(attributes)}
+          <select {...attributes} bind:value={route} disabled={mutation.busy}>
+            <option value="">Choose a route</option>
+            {#each eligible as item (item.slug)}<option value={item.slug}>
+                {item.slug}
+              </option>{/each}
+          </select>
+        {/snippet}
+      </FormField>
     </QueryView>
   </div>
-  <label>
-    Agent definition (JSON)<textarea
-      rows="7"
-      bind:value={definition}
-      disabled={mutation.busy}
-      spellcheck="false"></textarea>
-  </label>
+  <FormField
+    label="Agent definition (JSON)"
+    error={mutation.fieldErrors.definition}
+  >
+    {#snippet control(attributes)}
+      <textarea
+        {...attributes}
+        rows="7"
+        bind:value={definition}
+        disabled={mutation.busy}
+        spellcheck="false"></textarea>
+    {/snippet}
+  </FormField>
   <div class="resource-actions">
     <button
       class="button button-primary"
@@ -180,13 +192,16 @@
       List my agents
     </button>
   </div>
-  <label>
-    Agent resource ID<input
-      bind:value={id}
-      disabled={mutation.busy}
-      placeholder="agent_resource_…"
-    />
-  </label>
+  <FormField label="Agent resource ID" error={undefined}>
+    {#snippet control(attributes)}
+      <input
+        {...attributes}
+        bind:value={id}
+        disabled={mutation.busy}
+        placeholder="agent_resource_…"
+      />
+    {/snippet}
+  </FormField>
   <div class="resource-actions">
     <button
       class="button button-secondary"
@@ -239,10 +254,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
     gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.4rem;
   }
   .resource-actions {
     display: flex;

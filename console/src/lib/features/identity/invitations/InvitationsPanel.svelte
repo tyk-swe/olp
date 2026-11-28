@@ -8,9 +8,14 @@
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { readResult } from '#lib/editing/result.js';
   import QueryView from '#lib/components/QueryView.svelte';
   import InvitationForm from './InvitationForm.svelte';
+  import {
+    invitationServerFields,
+    validateInvitation,
+    type InvitationDraft,
+    type InvitationField
+  } from './invitationValidation';
   import { useServiceCapabilities } from '#lib/session/serviceCapabilities.svelte.js';
   import { invitationKeys } from '#lib/features/identity/invitations/invitationKeys.js';
 
@@ -34,7 +39,7 @@
   import SecretDialog from '#lib/components/SecretDialog.svelte';
   import { formatDate } from '#lib/format.js';
 
-  const write = useAction();
+  const write = useAction<InvitationField>();
   const intents = useMutationIntents();
 
   /** The id is the fallback for an operator whose account no longer exists. */
@@ -61,48 +66,37 @@
     copyError = '';
   });
 
-  function invite(input: {
-    email: string;
-    role: string;
-    expiresInHours: number;
-  }) {
-    if (!canManage || !capabilities.localLoginEnabled)
-      return Promise.resolve(false);
-    if (!input.email.trim() || !input.email.includes('@')) {
-      write.error = 'Enter a valid email address.';
-      return Promise.resolve(false);
-    }
-    return write.run(
+  async function invite(draft: InvitationDraft) {
+    if (!canManage || !capabilities.localLoginEnabled) return false;
+    const checked = validateInvitation(draft);
+    if (!write.check(checked)) return false;
+    const created = await write.run(
       () =>
-        intents.submit(
-          'create',
-          {
-            email: input.email.trim(),
-            role: input.role,
-            expiresInHours: input.expiresInHours
-          },
-          (submission, requestId) =>
-            createInvitation(
-              submission.email,
-              submission.role,
-              submission.expiresInHours,
-              requestId
-            )
+        intents.submit('create', checked.value, (submission, requestId) =>
+          createInvitation(
+            submission.email,
+            submission.role,
+            submission.expiresInHours,
+            requestId
+          )
         ),
-      async (result, current) => {
+      (result) => {
         invitationSecret = result;
         notify('Invitation created.');
-        const observation = await readResult(() => invitations.refetch());
-        const failed = observation.ok
-          ? observation.value?.isError
-            ? observation.value.error
-            : null
-          : observation.error;
-        if (failed !== null && current())
-          write.error = `Invitation created, but refreshing failed. ${errorMessage(failed)}`;
       },
-      { key: 'invite' }
+      { key: 'invite', serverFields: invitationServerFields }
     );
+    if (created)
+      await write.run(
+        () => invitations.refetch({ throwOnError: true }),
+        undefined,
+        {
+          key: 'invite',
+          failure: (cause) =>
+            `Invitation created, but refreshing failed. ${errorMessage(cause)}`
+        }
+      );
+    return created;
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
@@ -206,6 +200,7 @@
   loginEnabled={capabilities.localLoginEnabled}
   onRetry={() => capabilities.retry()}
   creating={write.key === 'invite'}
+  errors={write.fieldErrors}
   onSubmit={invite}
 />
 

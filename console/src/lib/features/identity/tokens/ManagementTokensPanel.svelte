@@ -10,11 +10,14 @@
     usePrincipalLifetime
   } from '#lib/editing/mutationIntent.svelte.js';
   import { useAction } from '#lib/editing/action.svelte.js';
-  import { readResult } from '#lib/editing/result.js';
   import QueryView from '#lib/components/QueryView.svelte';
-  import ManagementTokenForm, {
-    type TokenFormInput
-  } from './ManagementTokenForm.svelte';
+  import ManagementTokenForm from './ManagementTokenForm.svelte';
+  import {
+    tokenServerFields,
+    validateToken,
+    type TokenDraft,
+    type TokenField
+  } from './tokenDraft';
   import { createQuery } from '@tanstack/svelte-query';
   import { managementTokenKeys } from '#lib/features/identity/tokens/tokenKeys.js';
   import {
@@ -37,7 +40,7 @@
   import SecretDialog from '#lib/components/SecretDialog.svelte';
   import { formatDate } from '#lib/format.js';
 
-  const write = useAction();
+  const write = useAction<TokenField>();
   const createIntent = useMutationIntent();
   const revokeIntent = useMutationIntent();
 
@@ -83,36 +86,19 @@
     return names || 'No projects';
   }
 
-  function create(input: TokenFormInput) {
-    if (!isOwner) return Promise.resolve(false);
-    if (!input.name.trim()) {
-      write.error = 'Enter a token name.';
-      return Promise.resolve(false);
-    }
-    if (!input.scopes.length) {
-      write.error = 'Select at least one scope.';
-      return Promise.resolve(false);
-    }
-    if (!input.allProjects && !input.projectIds.length) {
-      write.error = 'Select at least one project, or choose all projects.';
-      return Promise.resolve(false);
-    }
-    return write.run(
+  async function create(draft: TokenDraft) {
+    if (!isOwner) return false;
+    const checked = validateToken(draft);
+    if (!write.check(checked)) return false;
+    const created = await write.run(
       () =>
         createIntent.submitBuilt(
-          {
-            name: input.name.trim(),
-            scopes: input.scopes,
-            expiresInDays: input.expiresInDays,
-            projectIds: input.allProjects ? undefined : input.projectIds
-          },
+          checked.value,
           () => ({
-            name: input.name.trim(),
-            scopes: input.scopes,
+            ...checked.value,
             expiresAt: new Date(
-              Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000
-            ).toISOString(),
-            projectIds: input.allProjects ? undefined : input.projectIds
+              Date.now() + checked.value.expiresInDays * 24 * 60 * 60 * 1000
+            ).toISOString()
           }),
           (submission, requestId) =>
             createManagementToken(
@@ -123,20 +109,19 @@
               requestId
             )
         ),
-      async (result, current) => {
+      (result) => {
         tokenSecret = result;
         creating = false;
-        const observation = await readResult(() => tokens.refetch());
-        const failed = observation.ok
-          ? observation.value?.isError
-            ? observation.value.error
-            : null
-          : observation.error;
-        if (failed !== null && current())
-          write.error = `Management token created, but refreshing failed. ${errorMessage(failed)}`;
       },
-      { key: 'create' }
+      { key: 'create', serverFields: tokenServerFields }
     );
+    if (created)
+      await write.run(() => tokens.refetch({ throwOnError: true }), undefined, {
+        key: 'create',
+        failure: (cause) =>
+          `Management token created, but refreshing failed. ${errorMessage(cause)}`
+      });
+    return created;
   }
 
   async function revoke(token: ManagementToken) {
@@ -218,7 +203,9 @@
   </SecretDialog>
 {/if}
 
-{#if write.error}<Callout tone="danger">{write.error}</Callout>{/if}
+{#if write.error && !creating}<Callout tone="danger">
+    {write.error}
+  </Callout>{/if}
 
 {#if !isOwner}
   <ReadOnlyNote>Only owners can manage management tokens.</ReadOnlyNote>
@@ -232,7 +219,10 @@
       <button
         class="button button-primary"
         type="button"
-        onclick={() => (creating = true)}
+        onclick={() => {
+          write.reset();
+          creating = true;
+        }}
       >
         New token
       </button>
@@ -247,6 +237,8 @@
   >
     <ManagementTokenForm
       submitting={write.key === 'create'}
+      error={write.error}
+      errors={write.fieldErrors}
       {projects}
       onSubmit={create}
     />

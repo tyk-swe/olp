@@ -1,12 +1,13 @@
 <script lang="ts">
+  import FormField from '#lib/components/FormField.svelte';
+  import { focusFormError } from '#lib/editing/focusError.js';
+  import type { FieldErrors } from '#lib/editing/validation.js';
   import { usePrincipalLifetime } from '#lib/editing/mutationIntent.svelte.js';
   import { FIXED_ROLES } from '#lib/session/authorization.js';
-
-  type InviteInput = {
-    email: string;
-    role: string;
-    expiresInHours: number;
-  };
+  import type {
+    InvitationDraft,
+    InvitationField
+  } from './invitationValidation';
 
   let {
     canManage,
@@ -15,6 +16,7 @@
     loginEnabled,
     onRetry,
     creating,
+    errors,
     onSubmit
   }: {
     canManage: boolean;
@@ -23,7 +25,8 @@
     loginEnabled: boolean;
     onRetry: () => void;
     creating: boolean;
-    onSubmit: (input: InviteInput) => Promise<boolean>;
+    errors: FieldErrors<InvitationField>;
+    onSubmit: (draft: InvitationDraft) => Promise<boolean>;
   } = $props();
 
   // The API defaults to seven days and rejects anything over thirty.
@@ -36,19 +39,25 @@
     { hours: 30 * 24, label: '30 days' }
   ];
 
-  let email = $state('');
-  let role = $state('developer');
-  let expiresInHours = $state(DEFAULT_EXPIRY_HOURS);
+  function newDraft(): InvitationDraft {
+    return {
+      email: '',
+      role: 'developer',
+      expiresInHours: DEFAULT_EXPIRY_HOURS
+    };
+  }
+
+  let draft = $state(newDraft());
 
   usePrincipalLifetime(() => {
-    email = '';
-    role = 'developer';
-    expiresInHours = DEFAULT_EXPIRY_HOURS;
+    draft = newDraft();
   });
 
   async function invite(event: SubmitEvent) {
     event.preventDefault();
-    if (await onSubmit({ email, role, expiresInHours })) email = '';
+    const form = event.currentTarget as HTMLFormElement;
+    if (await onSubmit(draft)) draft.email = '';
+    else await focusFormError(form);
   }
 </script>
 
@@ -72,37 +81,46 @@
     </p>
   {/if}
   <form onsubmit={invite} novalidate>
-    <label>
-      <span>Email address</span><input
-        type="email"
-        autocomplete="email"
-        bind:value={email}
-        placeholder="person@example.com"
-        disabled={!canManage || !loginEnabled}
-      />
-    </label>
-    <label>
-      <span>Role</span><select
-        bind:value={role}
-        disabled={!canManage || !loginEnabled}
-      >
-        {#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}>
-            {fixedRole}
-          </option>{/each}
-      </select>
-    </label>
-    <label>
-      <span>Expires in</span><select
-        bind:value={expiresInHours}
-        disabled={!canManage || !loginEnabled}
-      >
-        {#each expiryChoices as choice (choice.hours)}<option
-            value={choice.hours}
-          >
-            {choice.label}
-          </option>{/each}
-      </select>
-    </label>
+    <FormField label="Email address" error={errors.email}>
+      {#snippet control(attributes)}
+        <input
+          {...attributes}
+          type="email"
+          autocomplete="email"
+          bind:value={draft.email}
+          placeholder="person@example.com"
+          disabled={!canManage || !loginEnabled}
+        />
+      {/snippet}
+    </FormField>
+    <FormField label="Role" error={errors.role}>
+      {#snippet control(attributes)}
+        <select
+          {...attributes}
+          bind:value={draft.role}
+          disabled={!canManage || !loginEnabled}
+        >
+          {#each FIXED_ROLES as fixedRole (fixedRole)}<option value={fixedRole}>
+              {fixedRole}
+            </option>{/each}
+        </select>
+      {/snippet}
+    </FormField>
+    <FormField label="Expires in" error={errors.expiresInHours}>
+      {#snippet control(attributes)}
+        <select
+          {...attributes}
+          bind:value={draft.expiresInHours}
+          disabled={!canManage || !loginEnabled}
+        >
+          {#each expiryChoices as choice (choice.hours)}<option
+              value={choice.hours}
+            >
+              {choice.label}
+            </option>{/each}
+        </select>
+      {/snippet}
+    </FormField>
     <button
       class="button button-primary"
       type="submit"
@@ -134,31 +152,16 @@
   }
   .invite-panel form {
     display: flex;
-    align-items: end;
+    align-items: start;
     gap: 0.65rem;
   }
-  .invite-panel label {
-    display: grid;
-    gap: 0.4rem;
-    font-weight: 500;
+  .invite-panel form > :global(.form-field) {
+    min-width: 7.75rem;
   }
-  .invite-panel input,
-  .invite-panel select {
-    min-height: 2.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--foreground);
-    font-weight: 400;
-    transition: border-color var(--motion);
-  }
-  .invite-panel input:hover,
-  .invite-panel select:hover {
-    border-color: var(--border-strong);
-  }
-  .invite-panel input::placeholder {
-    color: var(--foreground-muted);
+  .invite-panel form button {
+    margin-top: calc(1lh + 0.4rem);
+    padding-block: 0;
+    line-height: inherit;
   }
   @media (max-width: 64rem) {
     .invite-panel {
@@ -168,6 +171,9 @@
   @media (max-width: 42rem) {
     .invite-panel form {
       display: grid;
+    }
+    .invite-panel form button {
+      margin-top: 0;
     }
   }
 </style>

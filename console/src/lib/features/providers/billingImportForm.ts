@@ -1,3 +1,5 @@
+import { parseJsonObject } from '#lib/editing/json.js';
+import { validated, type FieldErrors } from '#lib/editing/validation.js';
 import type { BillingImport, PutBillingImportInput } from './billing.js';
 
 export type BillingImportFormValues = {
@@ -29,6 +31,8 @@ export type BillingImportFormValues = {
   googleAuthMode: 'keep' | 'service_account' | 'adc';
   enabled: boolean;
 };
+
+export type BillingField = keyof BillingImportFormValues;
 
 export function newBillingImportForm(): BillingImportFormValues {
   return {
@@ -125,15 +129,19 @@ export function errorPhrase(code: string): string {
   }
 }
 
+function lines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 export function scopeBody(
   form: BillingImportFormValues,
   kind: string
 ): NonNullable<PutBillingImportInput['scope']> {
   if (kind === 'bedrock') {
-    const ids = form.linkedAccounts
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
+    const ids = lines(form.linkedAccounts);
     return {
       payer_account_id: form.payerAccount.trim(),
       bucket: form.bucket.trim(),
@@ -142,10 +150,7 @@ export function scopeBody(
       ...(ids.length ? { linked_account_ids: ids } : {})
     };
   }
-  const ids = form.scopeText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const ids = lines(form.scopeText);
   if (kind === 'azure_openai') {
     return {
       billing_scope: form.billingScope.trim(),
@@ -169,85 +174,208 @@ export function scopeBody(
   return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
 }
 
-export function validateForm(
+const unless = (met: unknown, message: string) => (met ? undefined : message);
+
+function bedrockProblems(
+  form: BillingImportFormValues,
+  editing: boolean
+): FieldErrors<BillingField> {
+  const linked = lines(form.linkedAccounts);
+  const keys =
+    (!editing || form.replaceCredential) && form.awsAuthMode === 'static';
+  return {
+    payerAccount: unless(
+      /^\d{12}$/.test(form.payerAccount.trim()),
+      'Enter the 12-digit payer account ID'
+    ),
+    bucket: unless(form.bucket.trim(), 'Enter the bucket'),
+    reportPrefix: unless(form.reportPrefix.trim(), 'Enter the report prefix'),
+    region: unless(form.region.trim(), 'Enter the region'),
+    linkedAccounts: unless(
+      linked.length <= 100 && linked.every((id) => /^\d{12}$/.test(id)),
+      'Enter at most 100 12-digit linked account IDs'
+    ),
+    accessKeyId: unless(
+      !keys || form.accessKeyId.trim(),
+      'Enter an access key ID'
+    ),
+    secretAccessKey: unless(
+      !keys || form.secretAccessKey.trim(),
+      'Enter a secret access key'
+    )
+  };
+}
+
+function azureProblems(
+  form: BillingImportFormValues,
+  editing: boolean
+): FieldErrors<BillingField> {
+  const ids = lines(form.scopeText);
+  const secret = form.authMode === 'azure_client_secret';
+  return {
+    billingScope: unless(
+      form.billingScope.trim(),
+      'Enter the billing scope resource ID.'
+    ),
+    exportName: unless(form.exportName.trim(), 'Enter the export name.'),
+    storageAccount: unless(
+      form.storageAccount.trim(),
+      'Enter the storage account.'
+    ),
+    container: unless(form.container.trim(), 'Enter the container.'),
+    scopeText:
+      ids.length > 100
+        ? 'At most 100 scope IDs can be listed.'
+        : unless(
+            ids.every((id) =>
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                id
+              )
+            ),
+            'Subscription IDs must be UUIDs.'
+          ),
+    authMode: unless(
+      editing || form.authMode,
+      'Choose an Azure credential mode.'
+    ),
+    tenantId: unless(!secret || form.tenantId.trim(), 'Enter the tenant ID.'),
+    clientId: unless(!secret || form.clientId.trim(), 'Enter the client ID.'),
+    clientSecret: unless(
+      !secret || form.clientSecret,
+      'Enter the client secret.'
+    )
+  };
+}
+
+function projectProblems(
   form: BillingImportFormValues,
   kind: string,
   editing: boolean,
   scopePattern: RegExp,
-  serviceAccountKey: Record<string, unknown> | undefined
-): string {
-  if (kind === 'bedrock') {
-    if (!/^\d{12}$/.test(form.payerAccount.trim()))
-      return 'Enter the 12-digit payer account ID';
-    if (!form.bucket.trim() || !form.reportPrefix.trim() || !form.region.trim())
-      return 'Enter the bucket, report prefix, and region';
-
-    const ids = form.linkedAccounts
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    if (ids.length > 100 || ids.some((id) => !/^\d{12}$/.test(id)))
-      return 'Enter at most 100 12-digit linked account IDs';
-    if (
-      (!editing || form.replaceCredential) &&
-      form.awsAuthMode === 'static' &&
-      (!form.accessKeyId.trim() || !form.secretAccessKey.trim())
-    )
-      return 'Enter an access key ID and secret access key';
-
-    return '';
-  }
-  const ids = form.scopeText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (ids.length > 100) return 'At most 100 scope IDs can be listed.';
-  if (kind === 'azure_openai') {
-    if (
-      !form.billingScope.trim() ||
-      !form.exportName.trim() ||
-      !form.storageAccount.trim() ||
-      !form.container.trim()
-    )
-      return 'Billing scope, export name, storage account, and container are required.';
-    if (
-      ids.some(
-        (id) =>
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            id
-          )
+  serviceAccount: Record<string, unknown> | undefined
+): FieldErrors<BillingField> {
+  const ids = lines(form.scopeText);
+  const rejected = ids.find(
+    (id) =>
+      !(kind === 'anthropic' && id === 'default') && !scopePattern.test(id)
+  );
+  const scopeText =
+    ids.length > 100
+      ? 'At most 100 scope IDs can be listed.'
+      : rejected &&
+        `${rejected} is not a valid ${kind === 'anthropic' ? 'workspace' : 'project'} ID.`;
+  if (kind !== 'vertex_ai')
+    return {
+      scopeText,
+      adminKey: unless(
+        editing || form.adminKey.trim(),
+        'An admin key is required to create the import.'
       )
-    )
-      return 'Subscription IDs must be UUIDs.';
-    if (!editing && !form.authMode) return 'Choose an Azure credential mode.';
-    if (
-      form.authMode === 'azure_client_secret' &&
-      (!form.tenantId.trim() || !form.clientId.trim() || !form.clientSecret)
-    )
-      return 'Tenant ID, client ID, and client secret are required.';
-    return '';
+    };
+  const usesKey = form.googleAuthMode === 'service_account';
+  return {
+    scopeText,
+    billingAccountID: unless(
+      form.billingAccountID.trim(),
+      'Enter the billing account ID.'
+    ),
+    bigQueryProjectID: unless(
+      form.bigQueryProjectID.trim(),
+      'Enter the BigQuery project ID.'
+    ),
+    datasetID: unless(form.datasetID.trim(), 'Enter the dataset ID.'),
+    tableID: unless(form.tableID.trim(), 'Enter the detailed export table ID.'),
+    adminKey: !usesKey
+      ? undefined
+      : !form.adminKey.trim()
+        ? 'A service account key is required.'
+        : unless(
+            serviceAccount,
+            'The service account key must be a JSON object.'
+          )
+  };
+}
+
+function credentialInput(
+  form: BillingImportFormValues,
+  kind: string,
+  editing: boolean,
+  serviceAccount: Record<string, unknown> | undefined
+): PutBillingImportInput['credential'] {
+  if (kind === 'bedrock') {
+    if (editing && !form.replaceCredential) return undefined;
+    if (form.awsAuthMode === 'workload') return { auth_mode: 'workload' };
+    return {
+      auth_mode: 'static',
+      access_key_id: form.accessKeyId.trim(),
+      secret_access_key: form.secretAccessKey.trim(),
+      ...(form.sessionToken.trim()
+        ? { session_token: form.sessionToken.trim() }
+        : {})
+    };
   }
-  for (const id of ids) {
-    if (kind === 'anthropic' && id === 'default') continue;
-    if (!scopePattern.test(id))
-      return `${id} is not a valid ${kind === 'anthropic' ? 'workspace' : 'project'} ID.`;
+  if (kind === 'azure_openai') {
+    if (!form.authMode) return undefined;
+    if (form.authMode === 'azure_default') return { auth_mode: form.authMode };
+    return {
+      auth_mode: form.authMode,
+      tenant_id: form.tenantId.trim(),
+      client_id: form.clientId.trim(),
+      client_secret: form.clientSecret
+    };
   }
   if (kind === 'vertex_ai') {
-    if (
-      !form.billingAccountID.trim() ||
-      !form.bigQueryProjectID.trim() ||
-      !form.datasetID.trim() ||
-      !form.tableID.trim()
-    )
-      return 'A billing account, BigQuery project, dataset and table are required.';
-    if (form.googleAuthMode === 'service_account' && !form.adminKey.trim())
-      return 'A service account key is required.';
-    if (form.googleAuthMode === 'service_account' && !serviceAccountKey)
-      return 'The service account key must be a JSON object.';
-  } else if (!editing && !form.adminKey.trim())
-    return 'An admin key is required to create the import.';
-  return '';
+    if (form.googleAuthMode === 'keep') return undefined;
+    return form.googleAuthMode === 'adc'
+      ? { auth_mode: 'adc' }
+      : { auth_mode: 'service_account', service_account: serviceAccount };
+  }
+  return form.adminKey.trim() || undefined;
+}
+
+export function validateBillingImport(
+  form: BillingImportFormValues,
+  kind: string,
+  editing: boolean,
+  scopePattern: RegExp
+) {
+  const serviceAccount = parseJsonObject(form.adminKey) ?? undefined;
+  const problems =
+    kind === 'bedrock'
+      ? bedrockProblems(form, editing)
+      : kind === 'azure_openai'
+        ? azureProblems(form, editing)
+        : projectProblems(form, kind, editing, scopePattern, serviceAccount);
+  return validated<PutBillingImportInput, BillingField>(problems, () => {
+    const credential = credentialInput(form, kind, editing, serviceAccount);
+    return {
+      enabled: form.enabled,
+      scope: scopeBody(form, kind),
+      ...(credential === undefined ? {} : { credential })
+    };
+  });
+}
+
+export function billingImportServerFields(
+  form: BillingImportFormValues,
+  kind: string
+): Readonly<Record<string, BillingField>> {
+  const showsAdminKey =
+    kind !== 'bedrock' &&
+    kind !== 'azure_openai' &&
+    (kind !== 'vertex_ai' || form.googleAuthMode === 'service_account');
+  return {
+    'scope.payer_account_id': 'payerAccount',
+    'scope.bucket': 'bucket',
+    'scope.report_prefix': 'reportPrefix',
+    'scope.region': 'region',
+    'scope.linked_account_ids': 'linkedAccounts',
+    'scope.billing_scope': 'billingScope',
+    'scope.subscription_ids': 'scopeText',
+    'scope.project_ids': 'scopeText',
+    'scope.workspace_ids': 'scopeText',
+    ...(showsAdminKey ? { credential: 'adminKey' as const } : {})
+  };
 }
 
 export function hydrateBillingImport(
