@@ -100,6 +100,9 @@ semantic versioning and take their source from root `package.json`. The
 
 ### Fixed
 
+- The signed export and alert silence forms show validation and API errors under
+  the field that caused them. Choosing a project no longer leaves a checked audit
+  stream locked on a signed export.
 - Reviewing a bulk provider action reads the published routes again and holds
   Apply until the read returns.
 - Creating or renaming an organization updates the organization pickers right
