@@ -26,10 +26,5 @@
     "max-lines-per-function": {
       "count": 1
     }
-  },
-  "src/lib/nativeJson.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
   }
 }
